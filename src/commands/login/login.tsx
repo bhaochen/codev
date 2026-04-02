@@ -23,6 +23,7 @@ import { Dialog } from '../../components/design-system/Dialog.js';
 // TODO
 import { OpenAILoginFlow } from '../../components/OpenAILoginFlow.js'
 import { OpenRouterLoginFlow } from '../../components/OpenRouterLoginFlow.js'
+import { LocalLoginFlow } from '../../components/LocalLoginFlow.js'
 
 import { useMainLoopModel } from '../../hooks/useMainLoopModel.js';
 
@@ -46,7 +47,7 @@ import {
 import { resetUserCache } from '../../utils/user.js';
 
 // TODO
-type AuthProviderChoice = 'anthropic' | 'openai' | 'openrouter'
+type AuthProviderChoice = 'anthropic' | 'openai' | 'openrouter' | 'local'
 
 /* 第一层: 入口函数 call()
  * CLI 执行 /login 真正被调用的函数
@@ -171,6 +172,18 @@ export function Login(props: {
         ),
         value: 'openrouter',
       },
+      {
+        label: (
+          <Text>
+            Local{' '}
+            <Text dimColor={true}>
+              Local model server (Ollama, LM Studio, vLLM, etc.)
+            </Text>
+            {'\n'}
+          </Text>
+        ),
+        value: 'local',
+      },
     ],
     [],
   )
@@ -208,6 +221,11 @@ export function Login(props: {
       <OpenRouterLoginFlow
         onDone={onFlowDone}
         startingMessage="Better-Clawd can use OpenRouter with your OpenRouter API key."
+      />
+    ) : selectedProvider === 'local' ? (
+      <LocalLoginFlow
+        onDone={onFlowDone}
+        startingMessage="Configure local model server (Ollama, LM Studio, vLLM, etc.)."
       />
     ) : (
       <ConsoleOAuthFlow

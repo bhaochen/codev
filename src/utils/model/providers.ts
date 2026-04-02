@@ -6,6 +6,7 @@ export type APIProvider =
   | 'firstParty'
   | 'openrouter'
   | 'openai'
+  | 'local'
   | 'bedrock'
   | 'vertex'
   | 'foundry'
@@ -24,10 +25,12 @@ function getStoredProviderPreference(): APIProvider | null {
     const { readFileSync } = require('fs') as typeof import('fs')
     const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
     const config = JSON.parse(raw) as {
-      authProvider?: 'anthropic' | 'openrouter' | 'openai'
+      authProvider?: 'anthropic' | 'openrouter' | 'openai' | 'local'
       openRouterApiKey?: string
       openAiApiKey?: string
       openAiAccessToken?: string
+      localBaseUrl?: string
+      localModelName?: string
     }
 
     let result: APIProvider | null
@@ -40,6 +43,9 @@ function getStoredProviderPreference(): APIProvider | null {
           config.openAiApiKey || config.openAiAccessToken
             ? 'openai'
             : null
+        break
+      case 'local':
+        result = config.localBaseUrl ? 'local' : null
         break
       case 'anthropic':
         result = 'firstParty'

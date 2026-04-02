@@ -393,6 +393,30 @@ export async function saveOpenRouterApiKey(apiKey: string): Promise<void> {
   clearOpenRouterModelsCache()
 }
 
+export async function saveLocalModelConfig(baseUrl: string, modelName: string): Promise<void> {
+  if (!baseUrl.trim()) {
+    throw new Error('Base URL cannot be empty')
+  }
+  
+  try {
+    // 验证 URL 格式
+    new URL(baseUrl)
+  } catch {
+    throw new Error('Invalid URL format')
+  }
+  
+  saveGlobalConfig(current => ({
+    ...current,
+    authProvider: 'local',
+    localBaseUrl: baseUrl,
+    localModelName: modelName,
+  }))
+  
+  // Clear provider cache so it will be re-read on next access
+  const { clearStoredProviderCache } = await import('./model/providers.js')
+  clearStoredProviderCache()
+}
+
 function getCodexHomeDir(): string {
   return process.env.CODEX_HOME || join(homedir(), '.codex')
 }
