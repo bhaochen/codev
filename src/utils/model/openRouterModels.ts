@@ -67,10 +67,6 @@ export async function fetchOpenRouterModels(
 
     // Convert to ModelOption format
     const options: ModelOption[] = models.map(model => {
-      const promptPrice = formatPrice(model.pricing.prompt)
-      const completionPrice = formatPrice(model.pricing.completion)
-      const pricingText = `${promptPrice}/${completionPrice}`
-
       // Truncate description if too long
       let description = model.description || model.id
       if (description.length > 100) {
@@ -80,7 +76,7 @@ export async function fetchOpenRouterModels(
       return {
         value: model.id,
         label: model.name,
-        description: `${description} · ${pricingText}`,
+        description: description,
       }
     })
 

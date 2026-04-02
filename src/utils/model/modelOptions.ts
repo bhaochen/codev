@@ -439,7 +439,7 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
     if (cachedModels.length > 0) {
       return [
         getDefaultOptionForUser(fastMode),
-        ...cachedModels.slice(0, 20), // Show top 20 models to avoid overwhelming UI
+        ...cachedModels.slice(0, 100), // Show top 100 models
       ]
     }
 
