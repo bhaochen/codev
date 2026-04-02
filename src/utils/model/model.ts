@@ -7,6 +7,7 @@
  */
 import { getMainLoopModelOverride } from '../../bootstrap/state.js'
 import {
+  getLocalModelName,
   getSubscriptionType,
   isClaudeAISubscriber,
   isMaxSubscriber,
@@ -170,12 +171,23 @@ export function getRuntimeMainLoopModel(params: {
  * Get the default main loop model setting.
  *
  * This handles the built-in default:
+ * - Local model name if configured as Local provider
  * - Opus for Max and Team Premium users
  * - Sonnet 4.6 for all other users (including Team Standard, Pro, Enterprise)
  *
  * @returns The default model setting to use
  */
 export function getDefaultMainLoopModelSetting(): ModelName | ModelAlias {
+  // Check if using Local provider
+  if (getAPIProvider() === 'local') {
+    const localModelName = getLocalModelName()
+    if (localModelName) {
+      return localModelName
+    }
+    // Fallback to 'default' if no local model name is configured
+    return 'default'
+  }
+
   // Ants default to defaultModel from flag config, or Opus 1M if not configured
   if (process.env.USER_TYPE === 'ant') {
     return (

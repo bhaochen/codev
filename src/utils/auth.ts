@@ -49,6 +49,7 @@ import {
   saveGlobalConfig,
 } from './config.js'
 import { logAntError, logForDebugging } from './debug.js'
+import { getGlobalClaudeFile } from './env.js'
 import {
   getClaudeConfigHomeDir,
   isBareMode,
@@ -295,16 +296,46 @@ export function getOpenRouterApiKeyWithSource(): {
     : { key: null, source: 'none' }
 }
 
-export function getConfiguredAuthProvider():
-  | 'anthropic'
-  | 'openrouter'
-  | 'openai' {
+export function getConfiguredAuthProvider(): 'anthropic' | 'openrouter' | 'openai' | 'local' {
+  // First try to get from cache for performance
   const storedProvider = getGlobalConfig().authProvider
   if (storedProvider) {
     return storedProvider
   }
 
   const provider = getAPIProvider()
+  switch (provider) {
+    case 'openrouter':
+      return 'openrouter'
+    case 'openai':
+      return 'openai'
+    default:
+      return 'anthropic'
+  }
+}
+
+// Read authProvider directly from file to bypass cache
+export function getConfiguredAuthProviderFromFile(): 'anthropic' | 'openrouter' | 'openai' | 'local' {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { readFileSync } = require('fs') as typeof import('fs')
+    const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
+    const config = JSON.parse(raw) as {
+      authProvider?: 'anthropic' | 'openrouter' | 'openai' | 'local'
+    }
+    console.log('[getConfiguredAuthProviderFromFile] Config from file:', config.authProvider)
+
+    if (config.authProvider) {
+      return config.authProvider
+    }
+  } catch (error) {
+    console.log('[getConfiguredAuthProviderFromFile] Error reading file:', error)
+    // Ignore errors, fall through to default
+  }
+
+  // Fallback to API provider
+  const provider = getAPIProvider()
+  console.log('[getConfiguredAuthProviderFromFile] Fallback to API provider:', provider)
   switch (provider) {
     case 'openrouter':
       return 'openrouter'
@@ -394,6 +425,7 @@ export async function saveOpenRouterApiKey(apiKey: string): Promise<void> {
 }
 
 export async function saveLocalModelConfig(baseUrl: string, modelName: string): Promise<void> {
+  console.log('[saveLocalModelConfig] Saving local model config:', baseUrl, modelName)
   if (!baseUrl.trim()) {
     throw new Error('Base URL cannot be empty')
   }
@@ -405,16 +437,63 @@ export async function saveLocalModelConfig(baseUrl: string, modelName: string): 
     throw new Error('Invalid URL format')
   }
   
-  saveGlobalConfig(current => ({
-    ...current,
-    authProvider: 'local',
-    localBaseUrl: baseUrl,
-    localModelName: modelName,
-  }))
+  saveGlobalConfig(current => {
+    const newConfig = {
+      ...current,
+      authProvider: 'local',
+      localBaseUrl: baseUrl,
+      localModelName: modelName,
+    }
+    console.log('[saveLocalModelConfig] New config to save:', newConfig)
+    return newConfig
+  })
   
   // Clear provider cache so it will be re-read on next access
   const { clearStoredProviderCache } = await import('./model/providers.js')
   clearStoredProviderCache()
+  console.log('[saveLocalModelConfig] Config saved successfully')
+}
+
+export function getLocalModelName(): string | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { readFileSync } = require('fs') as typeof import('fs')
+    const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
+    const config = JSON.parse(raw) as {
+      authProvider?: string
+      localModelName?: string
+    }
+    console.log('[getLocalModelName] Config from file:', config.authProvider, config.localModelName)
+
+    if (config.authProvider === 'local' && config.localModelName) {
+      return config.localModelName
+    }
+    return null
+  } catch (error) {
+    console.log('[getLocalModelName] Error reading file:', error)
+    return null
+  }
+}
+
+export function getLocalBaseUrl(): string | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { readFileSync } = require('fs') as typeof import('fs')
+    const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
+    const config = JSON.parse(raw) as {
+      authProvider?: string
+      localBaseUrl?: string
+    }
+    console.log('[getLocalBaseUrl] Config from file:', config.authProvider, config.localBaseUrl)
+
+    if (config.authProvider === 'local' && config.localBaseUrl) {
+      return config.localBaseUrl
+    }
+    return null
+  } catch (error) {
+    console.log('[getLocalBaseUrl] Error reading file:', error)
+    return null
+  }
 }
 
 function getCodexHomeDir(): string {

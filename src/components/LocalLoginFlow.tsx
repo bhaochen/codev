@@ -1,14 +1,11 @@
 import * as React from 'react'
 import { useState } from 'react'
-import type { LocalJSXCommandOnDone } from '../../types/command.js'
 import { saveLocalModelConfig } from '../utils/auth.js'
 import { Box, Text } from '../ink.js'
 import TextInput from './TextInput.js'
-import { ConsoleOAuthFlow } from './ConsoleOAuthFlow.js'
-import Dialog from './design-system/Dialog.js'
 
 interface Props {
-  onDone: LocalJSXCommandOnDone
+  onDone: () => void
   startingMessage?: string
 }
 
@@ -47,15 +44,15 @@ export function LocalLoginFlow({ onDone, startingMessage }: Props) {
     try {
       // 保存本地模型配置
       await saveLocalModelConfig(finalUrl, finalModel)
-      onDone(true)
+      onDone()
     } catch (error) {
       console.error('Failed to save local model config:', error)
-      onDone(false)
+      onDone()
     }
   }
 
   const handleCancel = () => {
-    onDone(false)
+    onDone()
   }
 
   return (

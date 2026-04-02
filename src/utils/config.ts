@@ -185,6 +185,21 @@ export type GlobalConfig = {
    * @deprecated Use settings.apiKeyHelper instead.
    */
   apiKeyHelper?: string
+  
+  // Authentication provider configuration
+  authProvider?: 'anthropic' | 'openai' | 'openrouter' | 'local'
+  
+  // OpenRouter API key
+  openRouterApiKey?: string
+  
+  // OpenAI API configuration
+  openAiApiKey?: string
+  openAiAccessToken?: string
+  
+  // Local model configuration
+  localBaseUrl?: string
+  localModelName?: string
+  
   projects?: Record<string, ProjectConfig>
   numStartups: number
   installMethod?: InstallMethod
@@ -626,6 +641,12 @@ export const DEFAULT_GLOBAL_CONFIG: GlobalConfig = createDefaultGlobalConfig()
 
 export const GLOBAL_CONFIG_KEYS = [
   'apiKeyHelper',
+  'authProvider',
+  'openRouterApiKey',
+  'openAiApiKey',
+  'openAiAccessToken',
+  'localBaseUrl',
+  'localModelName',
   'installMethod',
   'autoUpdates',
   'autoUpdatesProtectedForNative',

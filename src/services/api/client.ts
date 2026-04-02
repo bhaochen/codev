@@ -11,6 +11,7 @@ import {
   refreshGcpCredentialsIfNeeded,
   getOpenRouterApiKey,
   getOpenAIApiKey,
+  getLocalBaseUrl,
 } from 'src/utils/auth.js'
 import { getUserAgent } from 'src/utils/http.js'
 import { getSmallFastModel } from 'src/utils/model/model.js'
@@ -335,6 +336,15 @@ export async function getAnthropicClient({
     }
   }
 
+  // Handle Local
+  if (provider === 'local') {
+    const localBaseUrl = await getLocalBaseUrl()
+    if (localBaseUrl) {
+      clientConfig.baseURL = localBaseUrl
+      clientConfig.apiKey = 'local-model' // Use a dummy API key for local models
+    }
+  }
+
   return new Anthropic(clientConfig)
 }
 
@@ -344,8 +354,8 @@ async function configureApiKeyHeaders(
 ): Promise<void> {
   const provider = getAPIProvider()
   
-  // Skip for OpenRouter and OpenAI - they use apiKey parameter instead
-  if (provider === 'openrouter' || provider === 'openai') {
+  // Skip for OpenRouter, OpenAI, and Local - they use apiKey parameter instead
+  if (provider === 'openrouter' || provider === 'openai' || provider === 'local') {
     return
   }
 
