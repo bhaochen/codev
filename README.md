@@ -16,6 +16,30 @@ curl -fsSL https://raw.githubusercontent.com/paoloanzn/free-code/main/install.sh
 
 ---
 
+
+
+## Local model
+
+```bash
+nvim ~/.bashrc
+
+
+ export ANTHROPIC_BASE_URL="http://localhost:11434/v1"
+   export ANTHROPIC_API_KEY="ollama"
+   export ANTHROPIC_MODEL="qwen2.5-coder:7b"
+
+
+export ANTHROPIC_BETALOG_MAX_TOKENS=98304
+
+claude() {
+  ANTHROPIC_BASE_URL="http://127.0.0.1:8001" \
+    ANTHROPIC_API_KEY="dummy" \
+    CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1 \
+    cli-dev --bare --model "Qwen3.5-9B.Q4_K_M.gguf"
+}
+```
+
+
 ## What is this
 
 This is a clean, buildable fork of Anthropic's [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI -- the terminal-native AI coding agent. The upstream source became publicly available on March 31, 2026 through a source map exposure in the npm distribution.
