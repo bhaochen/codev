@@ -178,14 +178,9 @@ export function SearchableModelPicker({
     onSelect(option.value, selectedEffort)
   }, [effort, hasToggledEffort, onSelect, setAppState, skipSettingsWrite])
 
-  // Render model item
+  // Render model item - only show label (description shown in preview)
   const renderItem = useCallback((option: { value: string | null; label: string; description: string }, isFocused: boolean) => {
-    return (
-      <Box flexDirection="column">
-        <Text bold={isFocused}>{option.label}</Text>
-        <Text dimColor>{option.description}</Text>
-      </Box>
-    )
+    return <Text bold={isFocused}>{option.label}</Text>
   }, [])
 
   // Render preview with effort
@@ -196,21 +191,20 @@ export function SearchableModelPicker({
     const defaultEffort = getDefaultEffortLevelForOption(option.value ?? undefined)
     const displayEffort = effort === 'max' && !supportsMax ? 'high' : effort
 
-    if (!supportsEffort) {
-      return (
-        <Box flexDirection="column" gap={1}>
-          <Text dimColor>Effort not supported</Text>
-        </Box>
-      )
-    }
-
     return (
       <Box flexDirection="column" gap={1}>
-        <Text dimColor>
-          {capitalize(displayEffort)} effort
-          {displayEffort === defaultEffort ? ' (default)' : ''}
-        </Text>
-        <Text color="subtle">← → to adjust</Text>
+        <Text dimColor>{option.description}</Text>
+        {!supportsEffort ? (
+          <Text dimColor>Effort not supported</Text>
+        ) : (
+          <>
+            <Text dimColor>
+              {capitalize(displayEffort)} effort
+              {displayEffort === defaultEffort ? ' (default)' : ''}
+            </Text>
+            <Text color="subtle">← → to adjust</Text>
+          </>
+        )}
       </Box>
     )
   }, [effort])
