@@ -65,8 +65,45 @@ export async function fetchOpenRouterModels(
     const data = await response.json()
     const models: OpenRouterModel[] = data.data || []
 
+    // Filter out non-model items (routers, aggregators, etc.)
+    const validModels = models.filter(model => {
+      const id = model.id.toLowerCase()
+      const name = model.name.toLowerCase()
+
+      // Skip items that are routers, aggregators, or services
+      const skipPatterns = [
+        'router',
+        'aggregator',
+        'aggregation',
+        'free.*router',
+        'routing',
+        'service',
+        'platform',
+        'hub',
+      ]
+
+      // Skip if ID or name matches any skip pattern
+      for (const pattern of skipPatterns) {
+        if (new RegExp(pattern).test(id) || new RegExp(pattern).test(name)) {
+          return false
+        }
+      }
+
+      // Skip items without proper model ID format (should contain provider/model)
+      if (!id.includes('/') || id.startsWith('router') || id.startsWith('free')) {
+        return false
+      }
+
+      // Skip items without pricing information
+      if (!model.pricing || !model.pricing.prompt || !model.pricing.completion) {
+        return false
+      }
+
+      return true
+    })
+
     // Convert to ModelOption format
-    const options: ModelOption[] = models.map(model => {
+    const options: ModelOption[] = validModels.map(model => {
       // Truncate description if too long
       let description = model.description || model.id
       if (description.length > 100) {
