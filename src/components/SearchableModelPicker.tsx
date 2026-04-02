@@ -273,24 +273,9 @@ export function SearchableModelPicker({
       emptyMessage="No models match your search"
       matchLabel={matchLabel}
       selectAction="select"
-      extraHints={
-        isStandaloneCommand && (
-          <>
-            {fastModeNotice && (
-              <>
-                <Text dimColor> · </Text>
-                {fastModeNotice}
-              </>
-            )}
-          </>
-        )
-      }
+      extraHints={fastModeNotice}
     />
   )
 
-  if (!isStandaloneCommand) {
-    return content
-  }
-
-  return <Pane color="permission">{content}</Pane>
+  return content
 }
