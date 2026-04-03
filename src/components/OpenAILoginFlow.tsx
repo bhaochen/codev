@@ -115,7 +115,11 @@ export function OpenAILoginFlow({
     }
   }
 
-  async function handleSubmit(value: string): Promise<void> {
+  async function handleSubmit(value?: string): Promise<void> {
+    if (!value) {
+      return
+    }
+    
     const trimmed = value.trim()
     if (!trimmed) {
       return
@@ -180,6 +184,7 @@ export function OpenAILoginFlow({
             onChangeCursorOffset={setCursorOffset}
             columns={72}
             mask="*"
+            focus={true}
           />
         </Box>
         {status ? <Text color="error">{status}</Text> : null}

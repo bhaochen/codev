@@ -164,7 +164,7 @@ export function getOpenAIBaseUrl(): string {
   return process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1'
 }
 
-export function getAPIProvider(): APIProvider {
+export function getAPIProvider(): APIProvider | null {
   const explicitProvider = getExplicitProviderOverride()
   if (explicitProvider) {
     return explicitProvider
@@ -180,7 +180,7 @@ export function getAPIProvider(): APIProvider {
           ? 'openai'
           : isOpenRouterConfigured()
             ? 'openrouter'
-            : getStoredProviderPreference() ?? 'firstParty'
+            : getStoredProviderPreference()
 }
 
 export function getAPIProviderForStatsig(): AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS {

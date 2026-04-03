@@ -67,7 +67,40 @@ export function getDefaultOptionForUser(fastMode = false): ModelOption {
   // PAYG
   const provider = getAPIProvider()
   const isOpenAI = provider === 'openai'
+  const isLocal = provider === 'local'
   const is3P = provider !== 'firstParty'
+  
+  // Check if we should use local model
+  let localModelName: string | null = null
+  if (isLocal || provider === null) {
+    // Try to get local model name from file
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { readFileSync } = require('fs') as typeof import('fs')
+      const { getGlobalClaudeFile } = require('../env.js') as typeof import('../env.js')
+      const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
+      const config = JSON.parse(raw) as {
+        authProvider?: string
+        localBaseUrl?: string
+        localModelName?: string
+      }
+      if (config.authProvider === 'local' && config.localBaseUrl && config.localModelName) {
+        localModelName = config.localModelName
+      }
+    } catch {
+      // Ignore errors
+    }
+  }
+  
+  if (localModelName) {
+    return {
+      value: null,
+      label: 'Default (recommended)',
+      description: `Use the default local model (currently ${localModelName})`,
+      descriptionForModel: `Default local model (currently ${localModelName})`,
+    }
+  }
+  
   return {
     value: null,
     label: 'Default (recommended)',
@@ -333,6 +366,13 @@ function getOpusPlanOption(): ModelOption {
 // @[MODEL LAUNCH]: Update the model picker lists below to include/reorder options for the new model.
 // Each user tier (ant, Max/Team Premium, Pro/Team Standard/Enterprise, PAYG 1P, PAYG 3P) has its own list.
 function getModelOptionsBase(fastMode = false): ModelOption[] {
+  const provider = getAPIProvider()
+  
+  // If no provider is configured, only return Default option
+  if (!provider) {
+    return [getDefaultOptionForUser(fastMode)]
+  }
+
   if (process.env.USER_TYPE === 'ant') {
     // Build options from antModels config
     const antModelOptions: ModelOption[] = getAntModels().map(m => ({

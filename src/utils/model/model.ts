@@ -179,7 +179,29 @@ export function getRuntimeMainLoopModel(params: {
  */
 export function getDefaultMainLoopModelSetting(): ModelName | ModelAlias {
   // Check if using Local provider
-  if (getAPIProvider() === 'local') {
+  // Need to check both getAPIProvider() and direct file read because
+  // getAPIProvider() might return null if cache was cleared
+  const apiProvider = getAPIProvider()
+  let isLocalProvider = apiProvider === 'local'
+  
+  // If getAPIProvider() returns null, check the config file directly
+  if (!isLocalProvider && apiProvider === null) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { readFileSync } = require('fs') as typeof import('fs')
+      const { getGlobalClaudeFile } = require('./env.js') as typeof import('./env.js')
+      const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
+      const config = JSON.parse(raw) as {
+        authProvider?: string
+        localBaseUrl?: string
+      }
+      isLocalProvider = config.authProvider === 'local' && !!config.localBaseUrl
+    } catch {
+      // Ignore errors, fall through to default behavior
+    }
+  }
+  
+  if (isLocalProvider) {
     const localModelName = getLocalModelName()
     if (localModelName) {
       return localModelName

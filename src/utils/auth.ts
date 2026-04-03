@@ -388,11 +388,18 @@ export async function saveOpenAIApiKey(apiKey: string): Promise<void> {
 }
 
 export async function saveOpenRouterApiKey(apiKey: string): Promise<void> {
+  if (!apiKey || typeof apiKey !== 'string') {
+    throw new Error(
+      'Invalid API key: API key must be a non-empty string.',
+    )
+  }
+  
   if (!isValidApiKey(apiKey)) {
     throw new Error(
       'Invalid API key format. API key must contain only alphanumeric characters, dashes, and underscores.',
     )
   }
+  
   saveGlobalConfig(current => ({
     ...current,
     authProvider: 'openrouter',
@@ -402,12 +409,16 @@ export async function saveOpenRouterApiKey(apiKey: string): Promise<void> {
   const { clearStoredProviderCache } = await import('./model/providers.js')
   clearStoredProviderCache()
   // Clear OpenRouter models cache so it will be refetched with new API key
-  const { clearOpenRouterModelsCache } = await import('./model/openRouterModels.js')
-  clearOpenRouterModelsCache()
+  try {
+    const { clearOpenRouterModelsCache } = await import('./model/openRouterModels.js')
+    clearOpenRouterModelsCache()
+  } catch (error) {
+    // Ignore errors from clearing cache
+    console.error('Error clearing OpenRouter models cache:', error)
+  }
 }
 
 export async function saveLocalModelConfig(baseUrl: string, modelName: string): Promise<void> {
-  console.log('[saveLocalModelConfig] Saving local model config:', baseUrl, modelName)
   if (!baseUrl.trim()) {
     throw new Error('Base URL cannot be empty')
   }
@@ -426,14 +437,20 @@ export async function saveLocalModelConfig(baseUrl: string, modelName: string): 
       localBaseUrl: baseUrl,
       localModelName: modelName,
     }
-    console.log('[saveLocalModelConfig] New config to save:', newConfig)
     return newConfig
   })
   
   // Clear provider cache so it will be re-read on next access
   const { clearStoredProviderCache } = await import('./model/providers.js')
   clearStoredProviderCache()
-  console.log('[saveLocalModelConfig] Config saved successfully')
+  
+  // Clear OpenRouter models cache so it will be refetched with new API key
+  try {
+    const { clearOpenRouterModelsCache } = await import('./model/openRouterModels.js')
+    clearOpenRouterModelsCache()
+  } catch (error) {
+    // Ignore errors from clearing cache
+  }
 }
 
 export function getLocalModelName(): string | null {
