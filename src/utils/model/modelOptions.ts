@@ -474,23 +474,34 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const openRouterModelsModule = require('./openRouterModels.js') as {
         getCachedOpenRouterModels: () => ModelOption[]
+        getFirstFreeModel: () => ModelOption | null
       }
       cachedModels = openRouterModelsModule.getCachedOpenRouterModels()
+
+      // Find the first free model
+      const firstFreeModel = openRouterModelsModule.getFirstFreeModel()
+
+      // If we have cached models, show them
+      if (cachedModels.length > 0) {
+        let modelsToShow = cachedModels.slice(0, 100) // Show top 100 models
+
+        // If there's a free model, put it at the front
+        if (firstFreeModel) {
+          // Remove the free model from its current position
+          modelsToShow = modelsToShow.filter(m => m.value !== firstFreeModel.value)
+          // Add it to the front
+          modelsToShow = [firstFreeModel, ...modelsToShow]
+        }
+
+        return modelsToShow
+      }
     } catch {
       // Module not yet loaded - will be populated by background fetch
     }
 
-    // If we have cached models, use them
-    if (cachedModels.length > 0) {
-      return [
-        getDefaultOptionForUser(fastMode),
-        ...cachedModels.slice(0, 100), // Show top 100 models
-      ]
-    }
-
-    // No cached models yet, just show Default option
+    // No cached models yet, return empty array
     // The background fetch will populate the cache for next time
-    return [getDefaultOptionForUser(fastMode)]
+    return []
   }
 
   // PAYG 3P: Default (Sonnet 4.5) + Sonnet (3P custom) or Sonnet 4.6/1M + Opus (3P custom) or Opus 4.1/Opus 4.6/Opus1M + Haiku + Opus 4.1

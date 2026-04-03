@@ -138,6 +138,19 @@ export function hasOpenRouterModelsCache(): boolean {
   return openRouterModelsCache !== null
 }
 
+export function getFirstFreeModel(): ModelOption | null {
+  if (!openRouterModelsCache || openRouterModelsCache.length === 0) {
+    return null
+  }
+  
+  return openRouterModelsCache.find(model => {
+    // Check if this model is free by looking at the model name
+    // Models with "(free)" in the name are free
+    const label = model.label || ''
+    return label.toLowerCase().includes('(free)')
+  }) || null
+}
+
 export function clearOpenRouterModelsCache(): void {
   openRouterModelsCache = null
   cacheTimestamp = 0
