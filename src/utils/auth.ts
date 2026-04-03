@@ -445,14 +445,12 @@ export function getLocalModelName(): string | null {
       authProvider?: string
       localModelName?: string
     }
-    console.log('[getLocalModelName] Config from file:', config.authProvider, config.localModelName)
 
     if (config.authProvider === 'local' && config.localModelName) {
       return config.localModelName
     }
     return null
   } catch (error) {
-    console.log('[getLocalModelName] Error reading file:', error)
     return null
   }
 }
@@ -466,14 +464,12 @@ export function getLocalBaseUrl(): string | null {
       authProvider?: string
       localBaseUrl?: string
     }
-    console.log('[getLocalBaseUrl] Config from file:', config.authProvider, config.localBaseUrl)
 
     if (config.authProvider === 'local' && config.localBaseUrl) {
       return config.localBaseUrl
     }
     return null
   } catch (error) {
-    console.log('[getLocalBaseUrl] Error reading file:', error)
     return null
   }
 }
