@@ -1,6 +1,6 @@
 import * as React from 'react'
-import { useState } from 'react'
-import { saveLocalModelConfig } from '../utils/auth.js'
+import { useState, useEffect } from 'react'
+import { saveLocalModelConfig, getLocalBaseUrl, getLocalModelName } from '../utils/auth.js'
 import { Box, Text } from '../ink.js'
 import TextInput from './TextInput.js'
 
@@ -14,7 +14,22 @@ export function LocalLoginFlow({ onDone, startingMessage }: Props) {
   const [modelName, setModelName] = useState<string>('')
   const [cursorOffset, setCursorOffset] = useState(0)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [existingBaseUrl, setExistingBaseUrl] = useState<string | null>(null)
+  const [existingModelName, setExistingModelName] = useState<string | null>(null)
   const defaultUrl = 'http://127.0.0.1:8001'
+
+  useEffect(() => {
+    const baseUrl = getLocalBaseUrl()
+    const model = getLocalModelName()
+    if (baseUrl) {
+      setExistingBaseUrl(baseUrl)
+      setUrl(baseUrl)
+    }
+    if (model) {
+      setExistingModelName(model)
+      setModelName(model)
+    }
+  }, [])
 
   // 分析 URL 提取模型名
   const analyzeUrl = (inputUrl: string) => {
@@ -71,15 +86,18 @@ export function LocalLoginFlow({ onDone, startingMessage }: Props) {
           cursorOffset={cursorOffset}
           onChangeCursorOffset={setCursorOffset}
           columns={72}
-          placeholder={defaultUrl}
+          placeholder={existingBaseUrl || defaultUrl}
           focus={true}
         />
       </Box>
 
-      {modelName && (
+      {(modelName || existingModelName) && (
         <Box flexDirection="column" gap={1}>
           <Text dimColor={true}>
-            Detected model: <Text bold={true}>{modelName}</Text>
+            {modelName ? 
+              `Detected model: <Text bold={true}>{modelName}</Text>` : 
+              `Current model: <Text bold={true}>{existingModelName}</Text>`
+            }
           </Text>
         </Box>
       )}

@@ -1,11 +1,12 @@
 import * as React from 'react'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Box, Text } from '../ink.js'
 import {
   importOpenAIAuthFromCodexCache,
   runCodexLogin,
   saveOpenAIApiKey,
   saveOpenAIAuthTokens,
+  getOpenAIApiKey,
 } from '../utils/auth.js'
 import { Select } from './CustomSelect/select.js'
 import TextInput from './TextInput.js'
@@ -27,6 +28,14 @@ export function OpenAILoginFlow({
   const [status, setStatus] = useState<string | null>(null)
   const [inputValue, setInputValue] = useState('')
   const [cursorOffset, setCursorOffset] = useState(0)
+  const [existingApiKey, setExistingApiKey] = useState<string | null>(null)
+
+  useEffect(() => {
+    const key = getOpenAIApiKey()
+    if (key) {
+      setExistingApiKey(key)
+    }
+  }, [])
 
   const menuOptions = [
     {
@@ -116,12 +125,14 @@ export function OpenAILoginFlow({
   }
 
   async function handleSubmit(value?: string): Promise<void> {
-    if (!value) {
+    if (!value && mode === 'api_key' && !existingApiKey) {
       return
     }
     
-    const trimmed = value.trim()
-    if (!trimmed) {
+    const trimmed = value?.trim() || ''
+    const keyToSave = mode === 'api_key' ? (trimmed || existingApiKey) : trimmed
+    
+    if (!keyToSave) {
       return
     }
 
@@ -129,9 +140,9 @@ export function OpenAILoginFlow({
     setStatus(null)
     try {
       if (mode === 'api_key') {
-        await saveOpenAIApiKey(trimmed)
+        await saveOpenAIApiKey(keyToSave)
       } else {
-        saveOpenAIAuthTokens({ accessToken: trimmed })
+        saveOpenAIAuthTokens({ accessToken: keyToSave })
       }
       onDone()
     } catch (error) {
@@ -185,6 +196,7 @@ export function OpenAILoginFlow({
             columns={72}
             mask="*"
             focus={true}
+            placeholder={mode === 'api_key' ? existingApiKey || undefined : undefined}
           />
         </Box>
         {status ? <Text color="error">{status}</Text> : null}

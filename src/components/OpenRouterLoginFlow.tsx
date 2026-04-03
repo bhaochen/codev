@@ -1,7 +1,7 @@
 import * as React from 'react'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Box, Text } from '../ink.js'
-import { saveOpenRouterApiKey } from '../utils/auth.js'
+import { saveOpenRouterApiKey, getOpenRouterApiKey } from '../utils/auth.js'
 import { Spinner } from './Spinner.js'
 import TextInput from './TextInput.js'
 
@@ -18,21 +18,31 @@ export function OpenRouterLoginFlow({
   const [status, setStatus] = useState<string | null>(null)
   const [inputValue, setInputValue] = useState('')
   const [cursorOffset, setCursorOffset] = useState(0)
+  const [existingKey, setExistingKey] = useState<string | null>(null)
+
+  useEffect(() => {
+    const key = getOpenRouterApiKey()
+    if (key) {
+      setExistingKey(key)
+    }
+  }, [])
 
   async function handleSubmit(value?: string): Promise<void> {
-    if (!value) {
+    if (!value && !existingKey) {
       return
     }
     
-    const trimmed = value.trim()
-    if (!trimmed) {
+    const trimmed = value?.trim() || ''
+    const keyToSave = trimmed || existingKey
+    
+    if (!keyToSave) {
       return
     }
 
     setIsBusy(true)
     setStatus(null)
     try {
-      await saveOpenRouterApiKey(trimmed)
+      await saveOpenRouterApiKey(keyToSave)
       onDone()
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
@@ -81,6 +91,7 @@ export function OpenRouterLoginFlow({
           columns={72}
           mask="*"
           focus={true}
+          placeholder={existingKey || undefined}
         />
       </Box>
       {status ? <Text color="error">{status}</Text> : null}
