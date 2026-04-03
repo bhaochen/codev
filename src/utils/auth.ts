@@ -283,7 +283,18 @@ export function getOpenRouterApiKeyWithSource(): {
   if (process.env.OPENROUTER_API_KEY) {
     return { key: process.env.OPENROUTER_API_KEY, source: 'OPENROUTER_API_KEY' }
   }
-  if (process.env.ANTHROPIC_AUTH_TOKEN && getAPIProvider() === 'openrouter') {
+  
+  // Check if current provider is OpenRouter (both from cache and file)
+  const apiProvider = getAPIProvider()
+  let isAuthProviderOpenRouter = apiProvider === 'openrouter'
+  
+  // If getAPIProvider() returns null, check the config file directly
+  if (!isAuthProviderOpenRouter && apiProvider === null) {
+    const authProvider = getConfiguredAuthProviderFromFile()
+    isAuthProviderOpenRouter = authProvider === 'openrouter'
+  }
+  
+  if (process.env.ANTHROPIC_AUTH_TOKEN && isAuthProviderOpenRouter) {
     return {
       key: process.env.ANTHROPIC_AUTH_TOKEN,
       source: 'ANTHROPIC_AUTH_TOKEN',
@@ -414,7 +425,6 @@ export async function saveOpenRouterApiKey(apiKey: string): Promise<void> {
     clearOpenRouterModelsCache()
   } catch (error) {
     // Ignore errors from clearing cache
-    console.error('Error clearing OpenRouter models cache:', error)
   }
 }
 
