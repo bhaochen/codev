@@ -419,13 +419,6 @@ export async function saveOpenRouterApiKey(apiKey: string): Promise<void> {
   // Clear provider cache so it will be re-read on next access
   const { clearStoredProviderCache } = await import('./model/providers.js')
   clearStoredProviderCache()
-  // Clear OpenRouter models cache so it will be refetched with new API key
-  try {
-    const { clearOpenRouterModelsCache } = await import('./model/openRouterModels.js')
-    clearOpenRouterModelsCache()
-  } catch (error) {
-    // Ignore errors from clearing cache
-  }
 }
 
 export async function saveLocalModelConfig(baseUrl: string, modelName: string): Promise<void> {
