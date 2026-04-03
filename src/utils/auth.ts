@@ -296,26 +296,19 @@ export function getOpenRouterApiKeyWithSource(): {
     : { key: null, source: 'none' }
 }
 
-export function getConfiguredAuthProvider(): 'anthropic' | 'openrouter' | 'openai' | 'local' {
+export function getConfiguredAuthProvider(): 'anthropic' | 'openrouter' | 'openai' | 'local' | null {
   // First try to get from cache for performance
   const storedProvider = getGlobalConfig().authProvider
   if (storedProvider) {
     return storedProvider
   }
 
-  const provider = getAPIProvider()
-  switch (provider) {
-    case 'openrouter':
-      return 'openrouter'
-    case 'openai':
-      return 'openai'
-    default:
-      return 'anthropic'
-  }
+  // No explicit authProvider configured, return null
+  return null
 }
 
 // Read authProvider directly from file to bypass cache
-export function getConfiguredAuthProviderFromFile(): 'anthropic' | 'openrouter' | 'openai' | 'local' {
+export function getConfiguredAuthProviderFromFile(): 'anthropic' | 'openrouter' | 'openai' | 'local' | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { readFileSync } = require('fs') as typeof import('fs')
@@ -323,27 +316,16 @@ export function getConfiguredAuthProviderFromFile(): 'anthropic' | 'openrouter' 
     const config = JSON.parse(raw) as {
       authProvider?: 'anthropic' | 'openrouter' | 'openai' | 'local'
     }
-    console.log('[getConfiguredAuthProviderFromFile] Config from file:', config.authProvider)
 
     if (config.authProvider) {
       return config.authProvider
     }
   } catch (error) {
-    console.log('[getConfiguredAuthProviderFromFile] Error reading file:', error)
-    // Ignore errors, fall through to default
+    // Ignore errors
   }
 
-  // Fallback to API provider
-  const provider = getAPIProvider()
-  console.log('[getConfiguredAuthProviderFromFile] Fallback to API provider:', provider)
-  switch (provider) {
-    case 'openrouter':
-      return 'openrouter'
-    case 'openai':
-      return 'openai'
-    default:
-      return 'anthropic'
-  }
+  // No explicit authProvider configured, return null
+  return null
 }
 
 export type OpenAIAuthTokens = {
