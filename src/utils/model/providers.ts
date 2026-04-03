@@ -80,6 +80,8 @@ function getExplicitProviderOverride(): APIProvider | null {
       return 'openrouter'
     case 'openai':
       return 'openai'
+    case 'local':
+      return 'local'
     case 'bedrock':
       return 'bedrock'
     case 'vertex':

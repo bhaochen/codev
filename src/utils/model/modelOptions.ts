@@ -414,6 +414,11 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
     return openAIOptions
   }
 
+  // Local API: Show only Default option
+  if (getAPIProvider() === 'local') {
+    return [getDefaultOptionForUser(fastMode)]
+  }
+
   // OpenRouter API: Show all available models from OpenRouter
   if (getAPIProvider() === 'openrouter') {
     // Trigger background fetch of OpenRouter models (non-blocking)
