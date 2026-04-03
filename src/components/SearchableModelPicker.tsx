@@ -47,6 +47,7 @@ export function SearchableModelPicker({
   const [focusedModel, setFocusedModel] = useState<string | undefined>(initialValue)
 
   const isFastMode = useAppState(s => isFastModeEnabled() ? s.fastMode : false)
+  const authVersion = useAppState(s => s.authVersion)
   const [hasToggledEffort, setHasToggledEffort] = useState(false)
   const effortValue = useAppState(s => s.effortValue)
   const [effort, setEffort] = useState<EffortLevel | undefined>(
@@ -62,7 +63,7 @@ export function SearchableModelPicker({
     console.error('Error getting model options:', error)
     return []
   }
-}, [isFastMode])
+}, [isFastMode, authVersion])
 
   // Filter options based on search query
   const filteredOptions = React.useMemo(() => {

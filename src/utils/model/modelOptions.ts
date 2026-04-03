@@ -488,46 +488,9 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
       ]
     }
 
-    // Fallback: show some popular OpenRouter models
-    const fallbackModels = [
-      {
-        value: 'anthropic/claude-sonnet-4.6',
-        label: 'Anthropic: Claude Sonnet 4.6',
-        description: 'Best for everyday tasks',
-      },
-      {
-        value: 'anthropic/claude-opus-4.6',
-        label: 'Anthropic: Claude Opus 4.6',
-        description: 'Most capable for complex work',
-      },
-      {
-        value: 'anthropic/claude-haiku-4.5',
-        label: 'Anthropic: Claude Haiku 4.5',
-        description: 'Fastest for quick answers',
-      },
-      {
-        value: 'openai/gpt-5.4',
-        label: 'OpenAI: GPT-5.4',
-        description: 'Most capable OpenAI model',
-      },
-      {
-        value: 'openai/gpt-5.4-mini',
-        label: 'OpenAI: GPT-5.4 Mini',
-        description: 'Faster, more efficient option',
-      },
-      {
-        value: 'google/gemini-2.5-pro',
-        label: 'Google: Gemini 2.5 Pro',
-        description: 'Advanced reasoning and coding',
-      },
-      {
-        value: 'meta-llama/llama-4-400b',
-        label: 'Meta: Llama 4 400B',
-        description: 'Open-source flagship model',
-      },
-    ]
-
-    return [getDefaultOptionForUser(fastMode), ...fallbackModels]
+    // No cached models yet, just show Default option
+    // The background fetch will populate the cache for next time
+    return [getDefaultOptionForUser(fastMode)]
   }
 
   // PAYG 3P: Default (Sonnet 4.5) + Sonnet (3P custom) or Sonnet 4.6/1M + Opus (3P custom) or Opus 4.1/Opus 4.6/Opus1M + Haiku + Opus 4.1
