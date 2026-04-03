@@ -28,6 +28,7 @@ import { applyConfigEnvironmentVariables } from './utils/managedEnv.js';
 import type { PermissionMode } from './utils/permissions/PermissionMode.js';
 import { getBaseRenderOptions } from './utils/renderOptions.js';
 import { getSettingsWithAllErrors } from './utils/settings/allErrors.js';
+import { getConfiguredAuthProvider } from './utils/auth.js';
 import { hasAutoModeOptIn, hasSkipDangerousModePermissionPrompt } from './utils/settings/settings.js';
 export function completeOnboarding(): void {
   saveGlobalConfig(current => ({
@@ -108,7 +109,34 @@ export async function showSetupScreens(root: Root, permissionMode: PermissionMod
   }
   const config = getGlobalConfig();
   let onboardingShown = false;
-  if (!config.theme || !config.hasCompletedOnboarding // always show onboarding at least once
+  
+  // Check if user is logged in
+  const authProvider = getConfiguredAuthProvider();
+  
+  // Write debug info to file
+  try {
+    const fs = require('fs');
+    const debugInfo = {
+      hasCompletedOnboarding: config.hasCompletedOnboarding,
+      authProvider: authProvider,
+      hasTheme: !!config.theme,
+      timestamp: new Date().toISOString()
+    };
+    fs.writeFileSync('/tmp/cli-debug.json', JSON.stringify(debugInfo, null, 2));
+  } catch (e) {
+    // Ignore errors
+  }
+  
+  // If user has completed onboarding but is not logged in, show theme picker then login
+  if (config.hasCompletedOnboarding && !authProvider) {
+    onboardingShown = true;
+    const { LoginOnboarding } = await import('./components/LoginOnboarding.js');
+    await showSetupDialog(root, done => <LoginOnboarding onDone={() => {
+      void done();
+    }} />, {
+      onChangeAppState
+    });
+  } else if (!config.theme || !config.hasCompletedOnboarding // always show onboarding at least once
   ) {
     onboardingShown = true;
     const {
