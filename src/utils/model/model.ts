@@ -178,12 +178,50 @@ export function getRuntimeMainLoopModel(params: {
  * @returns The default model setting to use
  */
 export function getDefaultMainLoopModelSetting(): ModelName | ModelAlias {
+  // Check if using OpenRouter provider
+  const apiProvider = getAPIProvider()
+  let isOpenRouterProvider = apiProvider === 'openrouter'
+
+  // If getAPIProvider() returns null, check the config file directly
+  if (!isOpenRouterProvider && apiProvider === null) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { readFileSync } = require('fs') as typeof import('fs')
+      const { getGlobalClaudeFile } = require('./env.js') as typeof import('./env.js')
+      const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
+      const config = JSON.parse(raw) as {
+        authProvider?: string
+        openRouterApiKey?: string
+      }
+      isOpenRouterProvider = config.authProvider === 'openrouter' && !!config.openRouterApiKey
+    } catch {
+      // Ignore errors, fall through to default behavior
+    }
+  }
+
+  if (isOpenRouterProvider) {
+    // Try to get the first free model from OpenRouter
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const openRouterModelsModule = require('./openRouterModels.js') as {
+        getFirstFreeModel: () => { value: string } | null
+      }
+      const firstFreeModel = openRouterModelsModule.getFirstFreeModel()
+      if (firstFreeModel) {
+        return firstFreeModel.value as ModelName
+      }
+    } catch {
+      // Module not yet loaded or error, fall through to default behavior
+    }
+    // Fallback to 'default' if no free model found
+    return 'default'
+  }
+
   // Check if using Local provider
   // Need to check both getAPIProvider() and direct file read because
   // getAPIProvider() might return null if cache was cleared
-  const apiProvider = getAPIProvider()
   let isLocalProvider = apiProvider === 'local'
-  
+
   // If getAPIProvider() returns null, check the config file directly
   if (!isLocalProvider && apiProvider === null) {
     try {
@@ -200,7 +238,7 @@ export function getDefaultMainLoopModelSetting(): ModelName | ModelAlias {
       // Ignore errors, fall through to default behavior
     }
   }
-  
+
   if (isLocalProvider) {
     const localModelName = getLocalModelName()
     if (localModelName) {

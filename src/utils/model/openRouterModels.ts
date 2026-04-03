@@ -142,12 +142,13 @@ export function getFirstFreeModel(): ModelOption | null {
   if (!openRouterModelsCache || openRouterModelsCache.length === 0) {
     return null
   }
-  
+
   return openRouterModelsCache.find(model => {
     // Check if this model is free by looking at the model name
-    // Models with "(free)" in the name are free
-    const label = model.label || ''
-    return label.toLowerCase().includes('(free)')
+    // Models with ":free" or "(free)" in the name are free
+    const label = (model.label || '').toLowerCase()
+    const value = (model.value || '').toLowerCase()
+    return label.includes(':free') || label.includes('(free)') || value.includes(':free') || value.includes('(free)')
   }) || null
 }
 

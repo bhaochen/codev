@@ -109,7 +109,9 @@ export async function call(
           // Increment authVersion to trigger re-fetching of auth-dependent data in hooks (e.g., MCP servers)
           context.setAppState(prev => ({
             ...prev,
-            authVersion: prev.authVersion + 1 // 触发全局更新, 用 version 触发所有 hook 重新 fetch
+            authVersion: prev.authVersion + 1, // 触发全局更新, 用 version 触发所有 hook 重新 fetch
+            mainLoopModel: null, // 重置为 null，使用新 provider 的默认模型
+            mainLoopModelForSession: null, // 重置 session 模型
           }));
         }
 

@@ -404,17 +404,26 @@ export async function saveOpenRouterApiKey(apiKey: string): Promise<void> {
       'Invalid API key: API key must be a non-empty string.',
     )
   }
-  
-  if (!isValidApiKey(apiKey)) {
+
+  // Trim the API key to remove any leading/trailing whitespace
+  const trimmedKey = apiKey.trim()
+
+  if (!trimmedKey) {
+    throw new Error(
+      'Invalid API key: API key cannot be empty or whitespace only.',
+    )
+  }
+
+  if (!isValidApiKey(trimmedKey)) {
     throw new Error(
       'Invalid API key format. API key must contain only alphanumeric characters, dashes, and underscores.',
     )
   }
-  
+
   saveGlobalConfig(current => ({
     ...current,
     authProvider: 'openrouter',
-    openRouterApiKey: apiKey,
+    openRouterApiKey: trimmedKey,
   }))
   // Clear provider cache so it will be re-read on next access
   const { clearStoredProviderCache } = await import('./model/providers.js')

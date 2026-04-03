@@ -104,9 +104,9 @@ export function SearchableModelPicker({
     return filteredOptions
   }, [filteredOptions, initial])
 
-  const initialFocusValue = Array.isArray(optionsWithInitial) && optionsWithInitial.some(opt => opt.value === initialValue)
+  const initialFocusValue = Array.isArray(filteredOptions) && filteredOptions.some(opt => opt.value === initialValue)
     ? initialValue
-    : (Array.isArray(optionsWithInitial) && optionsWithInitial[0]?.value) ?? undefined
+    : (Array.isArray(filteredOptions) && filteredOptions[0]?.value) ?? undefined
 
   // Helper functions
   function resolveOptionModel(value?: string): string | undefined {

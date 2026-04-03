@@ -29,13 +29,15 @@ export function OpenRouterLoginFlow({
 
   async function handleSubmit(value?: string): Promise<void> {
     if (!value && !existingKey) {
+      setStatus('Please enter an API key or press Esc to cancel')
       return
     }
-    
+
     const trimmed = value?.trim() || ''
-    const keyToSave = trimmed || existingKey
-    
+    const keyToSave = trimmed || existingKey || ''
+
     if (!keyToSave) {
+      setStatus('Please enter an API key or press Esc to cancel')
       return
     }
 
