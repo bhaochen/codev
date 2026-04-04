@@ -673,14 +673,15 @@ export async function handleTelegramCallback(
             ...current,
             authProvider: 'openrouter',
             openRouterApiKey: existingApiKey,
+            additionalModelOptionsCache: [], // 清除之前的模型缓存
           }))
           
           // 清除 provider 缓存和模型缓存
-          const { clearStoredProviderCache, clearOpenRouterModelsCache } = await import('../../utils/model/providers.js')
+          const { clearStoredProviderCache } = await import('../../utils/model/providers.js')
           clearStoredProviderCache()
           
           try {
-            // 尝试清除 OpenRouter 模型缓存
+            // 清除 OpenRouter 模型缓存
             const openRouterModule = await import('../../utils/model/openRouterModels.js')
             openRouterModule.clearOpenRouterModelsCache()
           } catch (error) {
@@ -689,7 +690,6 @@ export async function handleTelegramCallback(
           }
 
           // 更新应用状态，触发 UI 刷新
-          // 注意：不要设置具体的模型值，让它自动使用正确的默认模型
           store.setState(prev => ({
             ...prev,
             mainLoopModel: 'default', // 使用 'default' 让系统自动选择正确的默认模型
@@ -730,6 +730,7 @@ export async function handleTelegramCallback(
             authProvider: 'local',
             localBaseUrl: localBaseUrl,
             localModelName: localModelName,
+            additionalModelOptionsCache: [], // 清除之前的模型缓存
           }))
           
           // 清除 provider 缓存
@@ -737,7 +738,6 @@ export async function handleTelegramCallback(
           clearStoredProviderCache()
 
           // 更新应用状态，触发 UI 刷新
-          // 注意：不要设置具体的模型值，让它自动使用正确的默认模型
           store.setState(prev => ({
             ...prev,
             mainLoopModel: 'default', // 使用 'default' 让系统自动选择正确的默认模型
