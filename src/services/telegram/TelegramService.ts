@@ -235,19 +235,20 @@ class TelegramService {
       throw new Error('Telegram service is not running')
     }
 
-    const numericChatId = Number(chatId)
-    logTelegramDebug(`[telegram] sendMessage called: chatId=${chatId} (type: ${typeof chatId}), numericChatId=${numericChatId} (type: ${typeof numericChatId}), text length=${text.length}`)
+    // Telegram API 支持 chat_id 为字符串格式（特别是对于超出安全整数范围的 ID）
+    // 直接使用字符串格式，避免整数溢出问题
+    logTelegramDebug(`[telegram] sendMessage called: chatId=${chatId} (type: ${typeof chatId}), text length=${text.length}`)
     logTelegramDebug(`[telegram] allowedUserIds: ${JSON.stringify(this.config.allowedUserIds)}`)
 
     let lastMessageId: number | undefined
 
     for (const chunk of chunkTelegramMessage(text)) {
-      logTelegramDebug(`[telegram] sending chunk to chat_id: ${numericChatId}`)
+      logTelegramDebug(`[telegram] sending chunk to chat_id: ${chatId}`)
       const response = await this.callTelegram<TelegramSendMessageResponse>(
         this.config,
         'sendMessage',
         {
-          chat_id: numericChatId,
+          chat_id: chatId,
           text: chunk,
           ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
         },
@@ -268,11 +269,13 @@ class TelegramService {
       throw new Error('Telegram service is not running')
     }
 
+    // Telegram API 支持 chat_id 为字符串格式（特别是对于超出安全整数范围的 ID）
+    // 直接使用字符串格式，避免整数溢出问题
     await this.callTelegram<TelegramEditMessageResponse>(
       this.config,
       'editMessageText',
       {
-        chat_id: Number(chatId),
+        chat_id: chatId,
         message_id: messageId,
         text,
         ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
@@ -513,6 +516,9 @@ class TelegramService {
       : timeoutController.signal
 
     try {
+      const body = JSON.stringify(payload)
+      logTelegramDebug(`[telegram] API request body: ${body}`)
+
       const response = await fetch(
         `${TELEGRAM_API_BASE}/bot${config.botToken}/${method}`,
         {
@@ -520,7 +526,7 @@ class TelegramService {
           headers: {
             'content-type': 'application/json',
           },
-          body: JSON.stringify(payload),
+          body,
           signal: combinedSignal,
         },
       )
