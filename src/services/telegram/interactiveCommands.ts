@@ -29,7 +29,11 @@ import type {
   TelegramInlineKeyboardButton,
   TelegramInlineKeyboardMarkup,
 } from './telegramTypes.js'
-import { getOpenRouterApiKey } from '../../utils/auth.js'
+
+// 辅助函数：记录 Telegram 相关日志
+function logTelegramDebug(message: string, level: 'debug' | 'error' | 'info' = 'debug'): void {
+  logForDebugging(`[telegram] ${message}`, { level })
+}
 
 const COPILOT_CLIENT_ID = 'Ov23li8tweQw6odWQebz'
 const COPILOT_DEVICE_CODE_URL = 'https://github.com/login/device/code'
@@ -657,7 +661,11 @@ export async function handleTelegramCallback(
 
     if (providerId === 'openrouter') {
       // 检查是否已有 OpenRouter API Key
-      const existingApiKey = getOpenRouterApiKey()
+      const config = getGlobalConfig()
+      const existingApiKey = config.openRouterApiKey || process.env.OPENROUTER_API_KEY
+      
+      logTelegramDebug(`[telegram] checking openrouter config: hasApiKeyInConfig=${!!config.openRouterApiKey}, hasApiKeyInEnv=${!!process.env.OPENROUTER_API_KEY}`)
+      
       if (existingApiKey) {
         try {
           // 保存配置并切换到 OpenRouter
@@ -688,11 +696,50 @@ export async function handleTelegramCallback(
       }
     }
 
+    if (providerId === 'local') {
+      // 检查是否已有本地模型配置
+      const config = getGlobalConfig()
+      const localBaseUrl = config.localBaseUrl
+      const localModelName = config.localModelName
+      
+      logTelegramDebug(`[telegram] checking local config: baseUrl=${localBaseUrl}, modelName=${localModelName}, fullConfig=${JSON.stringify(config)}`)
+      
+      if (localBaseUrl && localModelName) {
+        try {
+          // 保存配置并切换到本地模型
+          saveGlobalConfig(current => ({
+            ...current,
+            authProvider: 'local',
+            localBaseUrl: localBaseUrl,
+            localModelName: localModelName,
+          }))
+          
+          // 清除 provider 缓存
+          const { clearStoredProviderCache } = await import('../../utils/model/providers.js')
+          clearStoredProviderCache()
+
+          await telegramService.editMessage(
+            event.chatId,
+            event.messageId,
+            `✅ 已切换到本地模型\n\nBase URL: ${localBaseUrl}\n模型名称: ${localModelName}`,
+          )
+          return true
+        } catch (error) {
+          await telegramService.editMessage(
+            event.chatId,
+            event.messageId,
+            `❌ 切换到本地模型失败: ${error instanceof Error ? error.message : String(error)}`,
+          )
+          return true
+        }
+      }
+    }
+
     const providerMessages: Record<string, string> = {
       'anthropic': 'Anthropic 登录需要在本地终端执行 /login 命令，Telegram 暂不支持浏览器 OAuth 流程。',
       'openai': 'OpenAI 登录需要在本地终端执行 /login 命令，Telegram 暂不支持交互式登录。',
       'openrouter': 'OpenRouter 登录需要在本地终端执行 /login 命令或配置环境变量 OPENROUTER_API_KEY，Telegram 暂不支持 API Key 输入。',
-      'local': '本地模型配置需要在本地终端执行 /login 命令。',
+      'local': '本地模型配置需要在本地终端执行 /login 命令，配置 Base URL 和模型名称。',
     }
 
     await telegramService.editMessage(
