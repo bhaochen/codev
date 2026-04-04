@@ -387,9 +387,7 @@ export async function setup(
     const { hasReleaseNotes } = await checkForReleaseNotes(
       getGlobalConfig().lastReleaseNotesSeen,
     )
-    if (hasReleaseNotes) {
-      await getRecentActivity()
-    }
+    await getRecentActivity()
   }
 
   // Start background fetch of OpenRouter models if configured
