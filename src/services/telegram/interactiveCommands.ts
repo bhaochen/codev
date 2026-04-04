@@ -1,5 +1,5 @@
 import type { AppStateStore } from '../../state/AppState.js'
-import { saveGlobalConfig } from '../../utils/config.js'
+import { saveGlobalConfig, getGlobalConfig } from '../../utils/config.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { isBilledAsExtraUsage } from '../../utils/extraUsage.js'
 import {
@@ -29,6 +29,7 @@ import type {
   TelegramInlineKeyboardButton,
   TelegramInlineKeyboardMarkup,
 } from './telegramTypes.js'
+import { getOpenRouterApiKey } from '../../utils/auth.js'
 
 const COPILOT_CLIENT_ID = 'Ov23li8tweQw6odWQebz'
 const COPILOT_DEVICE_CODE_URL = 'https://github.com/login/device/code'
@@ -654,10 +655,43 @@ export async function handleTelegramCallback(
     const providerId = event.data.split(':').at(-1)
     await telegramService.answerCallbackQuery(event.callbackQueryId)
 
+    if (providerId === 'openrouter') {
+      // 检查是否已有 OpenRouter API Key
+      const existingApiKey = getOpenRouterApiKey()
+      if (existingApiKey) {
+        try {
+          // 保存配置并切换到 OpenRouter
+          saveGlobalConfig(current => ({
+            ...current,
+            authProvider: 'openrouter',
+            openRouterApiKey: existingApiKey,
+          }))
+          
+          // 清除 provider 缓存
+          const { clearStoredProviderCache } = await import('../../utils/model/providers.js')
+          clearStoredProviderCache()
+
+          await telegramService.editMessage(
+            event.chatId,
+            event.messageId,
+            `✅ 已切换到 OpenRouter (使用已配置的 API Key)\n\n当前状态：已登录 OpenRouter`,
+          )
+          return true
+        } catch (error) {
+          await telegramService.editMessage(
+            event.chatId,
+            event.messageId,
+            `❌ 切换到 OpenRouter 失败: ${error instanceof Error ? error.message : String(error)}`,
+          )
+          return true
+        }
+      }
+    }
+
     const providerMessages: Record<string, string> = {
       'anthropic': 'Anthropic 登录需要在本地终端执行 /login 命令，Telegram 暂不支持浏览器 OAuth 流程。',
       'openai': 'OpenAI 登录需要在本地终端执行 /login 命令，Telegram 暂不支持交互式登录。',
-      'openrouter': 'OpenRouter 登录需要在本地终端执行 /login 命令，Telegram 暂不支持 API Key 输入。',
+      'openrouter': 'OpenRouter 登录需要在本地终端执行 /login 命令或配置环境变量 OPENROUTER_API_KEY，Telegram 暂不支持 API Key 输入。',
       'local': '本地模型配置需要在本地终端执行 /login 命令。',
     }
 
