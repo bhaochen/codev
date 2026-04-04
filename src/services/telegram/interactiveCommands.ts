@@ -675,9 +675,27 @@ export async function handleTelegramCallback(
             openRouterApiKey: existingApiKey,
           }))
           
-          // 清除 provider 缓存
-          const { clearStoredProviderCache } = await import('../../utils/model/providers.js')
+          // 清除 provider 缓存和模型缓存
+          const { clearStoredProviderCache, clearOpenRouterModelsCache } = await import('../../utils/model/providers.js')
           clearStoredProviderCache()
+          
+          try {
+            // 尝试清除 OpenRouter 模型缓存
+            const openRouterModule = await import('../../utils/model/openRouterModels.js')
+            openRouterModule.clearOpenRouterModelsCache()
+          } catch (error) {
+            // 忽略错误，可能模块不可用
+            logTelegramDebug(`[telegram] failed to clear openrouter cache: ${error instanceof Error ? error.message : String(error)}`, 'error')
+          }
+
+          // 更新应用状态，触发 UI 刷新
+          // 注意：不要设置具体的模型值，让它自动使用正确的默认模型
+          store.setState(prev => ({
+            ...prev,
+            mainLoopModel: 'default', // 使用 'default' 让系统自动选择正确的默认模型
+            mainLoopModelForSession: null,
+            authVersion: prev.authVersion + 1, // 触发全局更新
+          }))
 
           await telegramService.editMessage(
             event.chatId,
@@ -717,6 +735,15 @@ export async function handleTelegramCallback(
           // 清除 provider 缓存
           const { clearStoredProviderCache } = await import('../../utils/model/providers.js')
           clearStoredProviderCache()
+
+          // 更新应用状态，触发 UI 刷新
+          // 注意：不要设置具体的模型值，让它自动使用正确的默认模型
+          store.setState(prev => ({
+            ...prev,
+            mainLoopModel: 'default', // 使用 'default' 让系统自动选择正确的默认模型
+            mainLoopModelForSession: null,
+            authVersion: prev.authVersion + 1, // 触发全局更新
+          }))
 
           await telegramService.editMessage(
             event.chatId,
