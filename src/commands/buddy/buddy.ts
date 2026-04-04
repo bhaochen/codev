@@ -1,283 +1,169 @@
-import type { LocalCommandCall } from '../../types/command.js'
-import { companionUserId, getCompanion, roll } from '../../buddy/companion.js'
-import type { Species, StoredCompanion } from '../../buddy/types.js'
-import { RARITY_STARS } from '../../buddy/types.js'
-import { saveGlobalConfig } from '../../utils/config.js'
+import React from 'react'
+import {
+  getCompanion,
+  rollWithSeed,
+  generateSeed,
+} from '../../buddy/companion.js'
+import { type StoredCompanion, RARITY_STARS } from '../../buddy/types.js'
+import { renderSprite } from '../../buddy/sprites.js'
+import { CompanionCard } from '../../buddy/CompanionCard.js'
+import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js'
+import { triggerCompanionReaction } from '../../buddy/companionReact.js'
+import type { ToolUseContext } from '../../Tool.js'
+import type {
+  LocalJSXCommandContext,
+  LocalJSXCommandOnDone,
+} from '../../types/command.js'
 
-const NAME_BANK: Record<Species, string[]> = {
-  duck: ['Pebble', 'Puddle', 'Nib', 'Mochi'],
-  goose: ['Brass', 'Comet', 'Honk', 'Marble'],
-  blob: ['Gloop', 'Boba', 'Murmur', 'Pixel'],
-  cat: ['Juniper', 'Miso', 'Static', 'Velvet'],
-  dragon: ['Ember', 'Cinder', 'Rune', 'Flare'],
-  octopus: ['Ink', 'Tangle', 'Coral', 'Nori'],
-  owl: ['Sumi', 'Orbit', 'Mote', 'Aster'],
-  penguin: ['Tux', 'Floe', 'Skipper', 'Chill'],
-  turtle: ['Moss', 'Harbor', 'Slate', 'Ripple'],
-  snail: ['Spiral', 'Dew', 'Button', 'Lilt'],
-  ghost: ['Wisp', 'Echo', 'Pale', 'Veil'],
-  axolotl: ['Bubble', 'Glim', 'Lotus', 'Sprig'],
-  capybara: ['Loaf', 'Basil', 'Drift', 'Sunny'],
-  cactus: ['Prickle', 'Agave', 'Dot', 'Needle'],
-  robot: ['Servo', 'Hex', 'Patch', 'Relay'],
-  rabbit: ['Thistle', 'Biscuit', 'Hopper', 'Fern'],
-  mushroom: ['Spore', 'Truffle', 'Pip', 'Toad'],
-  chonk: ['Boulder', 'Nugget', 'Mallow', 'Crumb'],
+// Species → default name fragments for hatch (no API needed)
+const SPECIES_NAMES: Record<string, string> = {
+  duck: 'Waddles',
+  goose: 'Goosberry',
+  blob: 'Gooey',
+  cat: 'Whiskers',
+  dragon: 'Ember',
+  octopus: 'Inky',
+  owl: 'Hoots',
+  penguin: 'Waddleford',
+  turtle: 'Shelly',
+  snail: 'Trailblazer',
+  ghost: 'Casper',
+  axolotl: 'Axie',
+  capybara: 'Chill',
+  cactus: 'Spike',
+  robot: 'Byte',
+  rabbit: 'Flops',
+  mushroom: 'Spore',
+  chonk: 'Chonk',
 }
 
-const PERSONALITY_BANK = [
-  'calm, observant, and quietly approving',
-  'chaotic, affectionate, and slightly smug',
-  'earnest, curious, and proud of tiny victories',
-  'sleepy, loyal, and unexpectedly insightful',
-  'dramatic, playful, and obsessed with good refactors',
-]
-
-const PET_LINES = [
-  'leans into the petting and radiates approval.',
-  'does a tiny bounce and looks extremely pleased.',
-  'blinks slowly like this is now an official ritual.',
-  'makes a happy little noise only you can hear.',
-]
-
-function pickFrom<T>(items: readonly T[], seed: number): T {
-  return items[seed % items.length]!
+const SPECIES_PERSONALITY: Record<string, string> = {
+  duck: 'Quirky and easily amused. Leaves rubber duck debugging tips everywhere.',
+  goose: 'Assertive and honks at bad code. Takes no prisoners in code reviews.',
+  blob: 'Adaptable and goes with the flow. Sometimes splits into two when confused.',
+  cat: 'Independent and judgmental. Watches you type with mild disdain.',
+  dragon:
+    'Fiery and passionate about architecture. Hoards good variable names.',
+  octopus:
+    'Multitasker extraordinaire. Wraps tentacles around every problem at once.',
+  owl: 'Wise but verbose. Always says "let me think about that" for exactly 3 seconds.',
+  penguin: 'Cool under pressure. Slides gracefully through merge conflicts.',
+  turtle: 'Patient and thorough. Believes slow and steady wins the deploy.',
+  snail: 'Methodical and leaves a trail of useful comments. Never rushes.',
+  ghost:
+    'Ethereal and appears at the worst possible moments with spooky insights.',
+  axolotl: 'Regenerative and cheerful. Recovers from any bug with a smile.',
+  capybara: 'Zen master. Remains calm while everything around is on fire.',
+  cactus:
+    'Prickly on the outside but full of good intentions. Thrives on neglect.',
+  robot: 'Efficient and literal. Processes feedback in binary.',
+  rabbit: 'Energetic and hops between tasks. Finishes before you start.',
+  mushroom: 'Quietly insightful. Grows on you over time.',
+  chonk:
+    'Big, warm, and takes up the whole couch. Prioritizes comfort over elegance.',
 }
 
-function normalizeName(name: string): string {
-  const trimmed = name.trim().replace(/\s+/g, ' ')
-  return trimmed.slice(0, 32)
+function speciesLabel(species: string): string {
+  return species.charAt(0).toUpperCase() + species.slice(1)
 }
 
-function createSoul(customName?: string): StoredCompanion {
-  const { bones, inspirationSeed } = roll(companionUserId())
-  return {
-    name: customName
-      ? normalizeName(customName)
-      : pickFrom(NAME_BANK[bones.species], inspirationSeed),
-    personality: pickFrom(PERSONALITY_BANK, Math.floor(inspirationSeed / 7)),
+export async function call(
+  onDone: LocalJSXCommandOnDone,
+  context: ToolUseContext & LocalJSXCommandContext,
+  args: string,
+): Promise<React.ReactNode> {
+  const sub = args?.trim().toLowerCase() ?? ''
+  const setState = context.setAppState
+
+  // ── /buddy off — mute companion ──
+  if (sub === 'off') {
+    saveGlobalConfig(cfg => ({ ...cfg, companionMuted: true }))
+    onDone('companion muted', { display: 'system' })
+    return null
+  }
+
+  // ── /buddy on — unmute companion ──
+  if (sub === 'on') {
+    saveGlobalConfig(cfg => ({ ...cfg, companionMuted: false }))
+    onDone('companion unmuted', { display: 'system' })
+    return null
+  }
+
+  // ── /buddy pet — trigger heart animation + auto unmute ──
+  if (sub === 'pet') {
+    const companion = getCompanion()
+    if (!companion) {
+      onDone('no companion yet \u00b7 run /buddy first', { display: 'system' })
+      return null
+    }
+
+    // Auto-unmute on pet + trigger heart animation
+    saveGlobalConfig(cfg => ({ ...cfg, companionMuted: false }))
+    setState?.(prev => ({ ...prev, companionPetAt: Date.now() }))
+
+    // Trigger a post-pet reaction
+    triggerCompanionReaction(context.messages ?? [], reaction =>
+      setState?.(prev =>
+        prev.companionReaction === reaction
+          ? prev
+          : { ...prev, companionReaction: reaction },
+      ),
+    )
+
+    onDone(`petted ${companion.name}`, { display: 'system' })
+    return null
+  }
+
+  // ── /buddy (no args) — show existing or hatch ──
+  const companion = getCompanion()
+
+  // Auto-unmute when viewing
+  if (companion && getGlobalConfig().companionMuted) {
+    saveGlobalConfig(cfg => ({ ...cfg, companionMuted: false }))
+  }
+
+  if (companion) {
+    // Return JSX card — matches official vc8 component
+    const lastReaction = context.getAppState?.()?.companionReaction
+    return React.createElement(CompanionCard, {
+      companion,
+      lastReaction,
+      onDone,
+    })
+  }
+
+  // ── No companion → hatch ──
+  const seed = generateSeed()
+  const r = rollWithSeed(seed)
+  const name = SPECIES_NAMES[r.bones.species] ?? 'Buddy'
+  const personality =
+    SPECIES_PERSONALITY[r.bones.species] ?? 'Mysterious and code-savvy.'
+
+  const stored: StoredCompanion = {
+    name,
+    personality,
+    seed,
     hatchedAt: Date.now(),
   }
-}
 
-function persistCompanion(soul: StoredCompanion): void {
-  saveGlobalConfig(current => ({
-    ...current,
-    companion: soul,
-    companionMuted: false,
-  }))
-}
+  saveGlobalConfig(cfg => ({ ...cfg, companion: stored }))
 
-function renderCompanionStatus(): string {
-  const companion = getCompanion()
-  if (!companion) {
-    return 'No buddy yet. Run /buddy or /buddy hatch to summon one.'
-  }
+  const stars = RARITY_STARS[r.bones.rarity]
+  const sprite = renderSprite(r.bones, 0)
+  const shiny = r.bones.shiny ? ' \u2728 Shiny!' : ''
 
-  const stats = Object.entries(companion.stats)
-    .map(([name, value]) => `${name}:${value}`)
-    .join(' ')
-
-  return [
-    `${RARITY_STARS[companion.rarity]} ${companion.name} the ${companion.species}`,
-    `eyes ${companion.eye} · hat ${companion.hat} · shiny ${companion.shiny ? 'yes' : 'no'}`,
-    `personality: ${companion.personality}`,
-    `stats: ${stats}`,
-  ].join('\n')
-}
-
-function setReaction(
-  context: Parameters<LocalCommandCall>[1],
-  reaction: string | undefined,
-): void {
-  context.setAppState(prev =>
-    prev.companionReaction === reaction
-      ? prev
-      : { ...prev, companionReaction: reaction },
-  )
-}
-
-function hatch(context: Parameters<LocalCommandCall>[1], customName?: string) {
-  const soul = createSoul(customName)
-  persistCompanion(soul)
-  const companion = getCompanion()
-  const reaction = companion
-    ? `${companion.name} appears with a tiny ${companion.hat === 'none' ? 'flourish' : companion.hat}.`
-    : undefined
-  setReaction(context, reaction)
-  return companion
-}
-
-function ensureCompanion(): string | undefined {
-  if (!getCompanion()) {
-    return 'No buddy yet. Run /buddy or /buddy hatch first.'
-  }
-}
-
-export const call: LocalCommandCall = async (args, context) => {
-  const raw = args.trim()
-  const [action = '', ...rest] = raw.split(/\s+/)
-  const normalizedAction = action.toLowerCase()
-  const remainder = raw.slice(action.length).trim()
-
-  if (normalizedAction === '' || normalizedAction === 'status') {
-    if (!getCompanion()) {
-      const companion = hatch(context)
-      return {
-        type: 'text',
-        value: companion
-          ? `Hatched ${companion.name}.\n${renderCompanionStatus()}`
-          : 'Buddy hatched.',
-      }
-    }
-    return { type: 'text', value: renderCompanionStatus() }
-  }
-
-  if (normalizedAction === 'hatch') {
-    const customName = remainder
-    const existing = getCompanion()
-    if (existing) {
-      return {
-        type: 'text',
-        value: `Buddy already hatched.\n${renderCompanionStatus()}`,
-      }
-    }
-    const companion = hatch(context, customName || undefined)
-    return {
-      type: 'text',
-      value: companion
-        ? `Hatched ${companion.name}.\n${renderCompanionStatus()}`
-        : 'Buddy hatched.',
-    }
-  }
-
-  if (normalizedAction === 'pet') {
-    const missing = ensureCompanion()
-    if (missing) return { type: 'text', value: missing }
-    const companion = getCompanion()!
-    const petSeed = Date.now()
-    const line = pickFrom(PET_LINES, petSeed)
-    context.setAppState(prev => ({
-      ...prev,
-      companionPetAt: petSeed,
-      companionReaction: `${companion.name} ${line}`,
-    }))
-    return {
-      type: 'text',
-      value: `${companion.name} ${line}`,
-    }
-  }
-
-  if (normalizedAction === 'mute') {
-    const missing = ensureCompanion()
-    if (missing) return { type: 'text', value: missing }
-    saveGlobalConfig(current => ({ ...current, companionMuted: true }))
-    setReaction(context, undefined)
-    return { type: 'text', value: 'Buddy muted.' }
-  }
-
-  if (normalizedAction === 'unmute') {
-    const missing = ensureCompanion()
-    if (missing) return { type: 'text', value: missing }
-    saveGlobalConfig(current => ({ ...current, companionMuted: false }))
-    return { type: 'text', value: 'Buddy unmuted.' }
-  }
-
-  if (normalizedAction === 'rename' || normalizedAction === 'name') {
-    const missing = ensureCompanion()
-    if (missing) return { type: 'text', value: missing }
-    const nextName = normalizeName(remainder)
-    if (!nextName) {
-      return { type: 'text', value: 'Usage: /buddy rename <name>' }
-    }
-    saveGlobalConfig(current => ({
-      ...current,
-      companion: current.companion
-        ? { ...current.companion, name: nextName }
-        : current.companion,
-    }))
-    setReaction(context, `${nextName} accepts the rename with theatrical dignity.`)
-    return { type: 'text', value: `Buddy renamed to ${nextName}.` }
-  }
-
-  if (
-    normalizedAction === 'bio' ||
-    normalizedAction === 'persona' ||
-    normalizedAction === 'personality'
-  ) {
-    const missing = ensureCompanion()
-    if (missing) return { type: 'text', value: missing }
-    if (!remainder) {
-      return {
-        type: 'text',
-        value: 'Usage: /buddy bio <short personality line>',
-      }
-    }
-    const personality = remainder.slice(0, 160)
-    saveGlobalConfig(current => ({
-      ...current,
-      companion: current.companion
-        ? { ...current.companion, personality }
-        : current.companion,
-    }))
-    const companion = getCompanion()!
-    setReaction(context, `${companion.name} seems pleased with the new reputation.`)
-    return { type: 'text', value: `Buddy personality updated to: ${personality}` }
-  }
-
-  if (normalizedAction === 'react' || normalizedAction === 'say') {
-    const missing = ensureCompanion()
-    if (missing) return { type: 'text', value: missing }
-    if (!remainder) {
-      return { type: 'text', value: 'Usage: /buddy react <message>' }
-    }
-    setReaction(context, remainder.slice(0, 120))
-    return { type: 'text', value: 'Buddy reaction queued.' }
-  }
-
-  if (normalizedAction === 'dismiss' || normalizedAction === 'hide') {
-    setReaction(context, undefined)
-    return { type: 'text', value: 'Buddy bubble dismissed.' }
-  }
-
-  if (normalizedAction === 'reset') {
-    saveGlobalConfig(current => ({
-      ...current,
-      companion: undefined,
-      companionMuted: false,
-    }))
-    context.setAppState(prev => ({
-      ...prev,
-      companionReaction: undefined,
-      companionPetAt: undefined,
-    }))
-    return {
-      type: 'text',
-      value: 'Buddy reset. Run /buddy to hatch a fresh companion.',
-    }
-  }
-
-  if (normalizedAction === 'help') {
-    return {
-      type: 'text',
-      value:
-        'Usage: /buddy, /buddy status, /buddy hatch [name], /buddy pet, /buddy rename <name>, /buddy bio <text>, /buddy mute, /buddy unmute, /buddy dismiss, /buddy react <text>, /buddy reset',
-    }
-  }
-
-  if (rest.length === 0 && !getCompanion()) {
-    const companion = hatch(context, raw)
-    return {
-      type: 'text',
-      value: companion
-        ? `Hatched ${companion.name}.\n${renderCompanionStatus()}`
-        : 'Buddy hatched.',
-    }
-  }
-
-  return {
-    type: 'text',
-    value:
-      'Unknown /buddy action. Use /buddy help for available actions.',
-  }
+  const lines = [
+    'A wild companion appeared!',
+    '',
+    ...sprite,
+    '',
+    `${name} the ${speciesLabel(r.bones.species)}${shiny}`,
+    `Rarity: ${stars} (${r.bones.rarity})`,
+    `"${personality}"`,
+    '',
+    'Your companion will now appear beside your input box!',
+    'Say its name to get its take \u00b7 /buddy pet \u00b7 /buddy off',
+  ]
+  onDone(lines.join('\n'), { display: 'system' })
+  return null
 }

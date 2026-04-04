@@ -276,7 +276,7 @@ const launchUltraplan: typeof import('../commands/ultraplan.js').launchUltraplan
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { IssueFlagBanner } from '../components/PromptInput/IssueFlagBanner.js';
 import { useIssueFlagBanner } from '../hooks/useIssueFlagBanner.js';
-import { fireCompanionObserver } from '../buddy/observer.js';
+import { triggerCompanionReaction } from '../buddy/companionReact.js';
 import { CompanionSprite, CompanionFloatingBubble, MIN_COLS_FOR_FULL_SPRITE } from '../buddy/CompanionSprite.js';
 import { DevBar } from '../components/DevBar.js';
 // Session manager removed - using AppState now
@@ -2806,7 +2806,7 @@ export function REPL({
       onQueryEvent(event);
     }
     if (feature('BUDDY')) {
-      void fireCompanionObserver(messagesRef.current, reaction => setAppState(prev => prev.companionReaction === reaction ? prev : {
+      void triggerCompanionReaction(messagesRef.current, reaction => setAppState(prev => prev.companionReaction === reaction ? prev : {
         ...prev,
         companionReaction: reaction
       }));
