@@ -4047,6 +4047,11 @@ export function REPL({
     onSubmitMessage: handleIncomingPrompt
   });
 
+  useTelegramBridge({
+    messages,
+    isLoading
+  });
+
   // Scheduled tasks from .claude/scheduled_tasks.json (CronCreate/Delete/List)
   if (feature('AGENT_TRIGGERS')) {
     // Assistant mode bypasses the isLoading gate (the proactive tick →
