@@ -1,22 +1,44 @@
-import { logForDebugging } from '../../utils/debug.js'
 import { getTelegramRuntimeConfig } from './telegramConfig.js'
 import type {
+  TelegramAnswerCallbackQueryResponse,
+  TelegramBotCommand,
+  TelegramCallbackEvent,
+  TelegramEditMessageResponse,
   TelegramGetMeResponse,
   TelegramGetUpdatesResponse,
   TelegramInboundEvent,
+  TelegramInlineKeyboardMarkup,
   TelegramRuntimeConfig,
   TelegramSendMessageResponse,
+  TelegramSetMyCommandsResponse,
   TelegramServiceState,
   TelegramUpdate,
 } from './telegramTypes.js'
 
+// 日志函数 - 只写入文件
+function logTelegramDebug(message: string, level: 'debug' | 'error' | 'info' = 'debug'): void {
+  try {
+    const fs = require('node:fs')
+    const path = require('node:path')
+    const LOG_FILE_PATH = path.join(process.cwd(), 'log.md')
+    const timestamp = new Date().toISOString()
+    const logEntry = `[${timestamp}] [${level.toUpperCase()}] ${message}\n`
+    fs.appendFileSync(LOG_FILE_PATH, logEntry, 'utf-8')
+  } catch (error) {
+    // 忽略文件写入错误
+  }
+}
+
 type Listener = () => void
 type InboundListener = (event: TelegramInboundEvent) => void
+type CallbackListener = (event: TelegramCallbackEvent) => void
 
 const TELEGRAM_API_BASE = 'https://api.telegram.org'
 const MAX_TELEGRAM_MESSAGE_LENGTH = 4000
 const POLL_TIMEOUT_SECONDS = 25
 const RETRY_DELAY_MS = 3000
+const MAX_TELEGRAM_MENU_COMMANDS = 100
+const TELEGRAM_COMMAND_NAME_RE = /^[a-z0-9_]{1,32}$/
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -49,9 +71,39 @@ function hasSameConfig(
   )
 }
 
+function normalizeCommandDescription(description: string): string {
+  return description.replace(/\s+/g, ' ').trim().slice(0, 256)
+}
+
+async function getTelegramMenuCommands(): Promise<TelegramBotCommand[]> {
+  const { getCommands, getCommandName } = await import('../../commands.js')
+  const commands = await getCommands(process.cwd())
+  const results: TelegramBotCommand[] = []
+  const seen = new Set<string>()
+
+  for (const command of commands) {
+    const candidates = [getCommandName(command), ...(command.aliases ?? [])]
+    const name = candidates.find(candidate => TELEGRAM_COMMAND_NAME_RE.test(candidate))
+    if (!name || seen.has(name)) continue
+
+    results.push({
+      command: name,
+      description: normalizeCommandDescription(command.description),
+    })
+    seen.add(name)
+
+    if (results.length >= MAX_TELEGRAM_MENU_COMMANDS) {
+      break
+    }
+  }
+
+  return results
+}
+
 class TelegramService {
   private listeners = new Set<Listener>()
   private inboundListeners = new Set<InboundListener>()
+  private callbackListeners = new Set<CallbackListener>()
   private state: TelegramServiceState = { status: 'stopped' }
   private config?: TelegramRuntimeConfig
   private abortController: AbortController | null = null
@@ -69,6 +121,13 @@ class TelegramService {
     this.inboundListeners.add(listener)
     return () => {
       this.inboundListeners.delete(listener)
+    }
+  }
+
+  subscribeToCallbacks = (listener: CallbackListener): (() => void) => {
+    this.callbackListeners.add(listener)
+    return () => {
+      this.callbackListeners.delete(listener)
     }
   }
 
@@ -107,6 +166,18 @@ class TelegramService {
 
       if (runId !== this.runId || abortController.signal.aborted) return
 
+      try {
+        await this.refreshTelegramMenu(config, abortController.signal)
+      } catch (error) {
+        if (!abortController.signal.aborted && runId === this.runId) {
+          const message = normalizeTelegramError(error)
+          logTelegramDebug(`[telegram] failed to refresh menu: ${message}`, 'error')
+          this.patchState({ lastError: message })
+        }
+      }
+
+      if (runId !== this.runId || abortController.signal.aborted) return
+
       this.setState({
         status: 'running',
         botUsername: response.result?.username,
@@ -115,7 +186,7 @@ class TelegramService {
         lastError: undefined,
       })
 
-      logForDebugging(
+      logTelegramDebug(
         `[telegram] connected as @${response.result?.username ?? 'unknown'}`,
       )
 
@@ -155,22 +226,78 @@ class TelegramService {
     }
   }
 
-  async sendMessage(chatId: string, text: string): Promise<void> {
+  async sendMessage(
+    chatId: string,
+    text: string,
+    replyMarkup?: TelegramInlineKeyboardMarkup,
+  ): Promise<number | undefined> {
     if (!this.config) {
       throw new Error('Telegram service is not running')
     }
 
+    const numericChatId = Number(chatId)
+    logTelegramDebug(`[telegram] sendMessage called: chatId=${chatId} (type: ${typeof chatId}), numericChatId=${numericChatId} (type: ${typeof numericChatId}), text length=${text.length}`)
+    logTelegramDebug(`[telegram] allowedUserIds: ${JSON.stringify(this.config.allowedUserIds)}`)
+
+    let lastMessageId: number | undefined
+
     for (const chunk of chunkTelegramMessage(text)) {
-      await this.callTelegram<TelegramSendMessageResponse>(
+      logTelegramDebug(`[telegram] sending chunk to chat_id: ${numericChatId}`)
+      const response = await this.callTelegram<TelegramSendMessageResponse>(
         this.config,
         'sendMessage',
         {
-          chat_id: Number(chatId),
+          chat_id: numericChatId,
           text: chunk,
+          ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
         },
       )
+      lastMessageId = response.result?.message_id
+      logTelegramDebug(`[telegram] sendMessage succeeded: messageId=${lastMessageId}`)
     }
+    return lastMessageId
   }
+
+  async editMessage(
+    chatId: string,
+    messageId: number,
+    text: string,
+    replyMarkup?: TelegramInlineKeyboardMarkup,
+  ): Promise<void> {
+    if (!this.config) {
+      throw new Error('Telegram service is not running')
+    }
+
+    await this.callTelegram<TelegramEditMessageResponse>(
+      this.config,
+      'editMessageText',
+      {
+        chat_id: Number(chatId),
+        message_id: messageId,
+        text,
+        ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+      },
+    )
+  }
+
+  async answerCallbackQuery(
+    callbackQueryId: string,
+    text?: string,
+  ): Promise<void> {
+    if (!this.config) {
+      throw new Error('Telegram service is not running')
+    }
+
+    await this.callTelegram<TelegramAnswerCallbackQueryResponse>(
+      this.config,
+      'answerCallbackQuery',
+      {
+        callback_query_id: callbackQueryId,
+        ...(text ? { text } : {}),
+      },
+    )
+  }
+
 
   private setState(nextState: TelegramServiceState): void {
     this.state = nextState
@@ -191,6 +318,12 @@ class TelegramService {
       listener(event)
     }
   }
+  
+  private emitCallback(event: TelegramCallbackEvent): void {
+    for (const listener of this.callbackListeners) {
+      listener(event)
+    }
+  }
 
   private async pollLoop(
     runId: number,
@@ -205,7 +338,7 @@ class TelegramService {
           {
             offset: this.nextUpdateOffset,
             timeout: POLL_TIMEOUT_SECONDS,
-            allowed_updates: ['message'],
+            allowed_updates: ['message', 'callback_query'],
           },
           signal,
         )
@@ -216,38 +349,102 @@ class TelegramService {
           this.patchState({ lastError: undefined })
         }
 
-        for (const update of response.result ?? []) {
+        const updates = response.result ?? []
+        logTelegramDebug(`[telegram] received ${updates.length} updates from Telegram`)
+
+        for (const update of updates) {
+          logTelegramDebug(`[telegram] processing update: update_id=${update.update_id}`)
           this.handleUpdate(update, config)
         }
       } catch (error) {
         if (signal.aborted || runId !== this.runId) return
 
         const message = normalizeTelegramError(error)
-        logForDebugging(`[telegram] polling failed: ${message}`, {
-          level: 'error',
-        })
+        logTelegramDebug(`[telegram] polling failed: ${message}`, 'error')
         this.patchState({ lastError: message })
         await sleep(RETRY_DELAY_MS)
       }
     }
   }
 
+  private async refreshTelegramMenu(
+    config: TelegramRuntimeConfig,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const commands = await getTelegramMenuCommands()
+
+    await this.callTelegram<TelegramSetMyCommandsResponse>(
+      config,
+      'setMyCommands',
+      {
+        commands,
+      },
+      signal,
+    )
+
+    logTelegramDebug(`[telegram] refreshed menu commands: ${commands.length}`)
+  }
+
   private handleUpdate(
     update: TelegramUpdate,
     config: TelegramRuntimeConfig,
   ): void {
-    this.nextUpdateOffset = update.update_id + 1
+    try {
+      logTelegramDebug(`[telegram] handleUpdate called, update_id: ${update.update_id}`)
+      this.nextUpdateOffset = update.update_id + 1
 
-    const message = update.message
+      const message = update.message
+      const callbackQuery = update.callback_query
+
+      logTelegramDebug(`[telegram] update structure: has_message=${!!message}, has_callback=${!!callbackQuery}`)
+
+      if (callbackQuery?.data) {
+      const chatId = callbackQuery.message?.chat?.id
+      const userId = callbackQuery.from?.id
+      const messageId = callbackQuery.message?.message_id
+      if (
+        chatId !== undefined &&
+        userId !== undefined &&
+        messageId !== undefined &&
+        !callbackQuery.from?.is_bot
+      ) {
+        if (!config.allowedUserIds.includes(String(userId))) {
+          return
+        }
+        this.emitCallback({
+          kind: 'callback-query',
+          callbackQueryId: callbackQuery.id,
+          chatId: String(chatId),
+          userId: String(userId),
+          messageId,
+          data: callbackQuery.data,
+        })
+      }
+      return
+    }
+
     const chatId = message?.chat?.id
     const userId = message?.from?.id
 
-    if (!message || chatId === undefined || userId === undefined) return
-    if (message.from?.is_bot) return
-    if (message.chat?.type !== 'private') return
+    logTelegramDebug(`[telegram] message details: chatId=${chatId}, userId=${userId}, is_bot=${message?.from?.is_bot}, chat_type=${message?.chat?.type}`)
+
+    if (!message || chatId === undefined || userId === undefined) {
+      logTelegramDebug(`[telegram] message rejected: missing required fields`)
+      return
+    }
+    if (message.from?.is_bot) {
+      logTelegramDebug(`[telegram] message rejected: from bot`)
+      return
+    }
+    if (message.chat?.type !== 'private') {
+      logTelegramDebug(`[telegram] message rejected: not private chat`)
+      return
+    }
 
     const normalizedChatId = String(chatId)
     const normalizedUserId = String(userId)
+
+    logTelegramDebug(`[telegram] user validation: normalizedUserId=${normalizedUserId}, allowedUserIds=${JSON.stringify(config.allowedUserIds)}`)
 
     if (!config.allowedUserIds.includes(normalizedUserId)) {
       void this.sendMessage(
@@ -263,6 +460,8 @@ class TelegramService {
     })
 
     const text = message.text?.trim()
+
+    logTelegramDebug(`[telegram] inbound message from chatId: ${normalizedChatId}, userId: ${normalizedUserId}, text: ${text?.slice(0, 50)}`)
 
     if (!text) {
       void this.sendMessage(
@@ -280,6 +479,7 @@ class TelegramService {
       return
     }
 
+    logTelegramDebug(`[telegram] emitting inbound event with chatId: ${normalizedChatId}`)
     this.emitInbound({
       kind: 'inbound-message',
       chatId: normalizedChatId,
@@ -288,6 +488,9 @@ class TelegramService {
       messageId: message.message_id,
       updateId: update.update_id,
     })
+    } catch (error) {
+      logTelegramDebug(`[telegram] handleUpdate error: ${error instanceof Error ? error.message : String(error)}`, 'error')
+    }
   }
 
   private async callTelegram<T>(
@@ -296,34 +499,68 @@ class TelegramService {
     payload: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<T> {
-    const response = await fetch(
-      `${TELEGRAM_API_BASE}/bot${config.botToken}/${method}`,
-      {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
+    logTelegramDebug(`[telegram] calling API: ${method}`)
+
+    // 创建超时信号（30秒超时）
+    const timeoutController = new AbortController()
+    const timeoutId = setTimeout(() => {
+      timeoutController.abort()
+    }, 30000)
+
+    // 合并外部信号和超时信号
+    const combinedSignal = signal
+      ? AbortSignal.any([signal, timeoutController.signal])
+      : timeoutController.signal
+
+    try {
+      const response = await fetch(
+        `${TELEGRAM_API_BASE}/bot${config.botToken}/${method}`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+          signal: combinedSignal,
         },
-        body: JSON.stringify(payload),
-        signal,
-      },
-    )
-
-    if (!response.ok) {
-      throw new Error(`Telegram API ${method} failed with HTTP ${response.status}`)
-    }
-
-    const json = await response.json() as {
-      ok?: boolean
-      description?: string
-    }
-
-    if (!json.ok) {
-      throw new Error(
-        `Telegram API ${method} failed: ${json.description ?? 'unknown error'}`,
       )
-    }
 
-    return json as T
+      clearTimeout(timeoutId)
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => 'unknown error')
+        logTelegramDebug(`[telegram] API error: ${method} failed with HTTP ${response.status}: ${errorText}`, 'error')
+        throw new Error(`Telegram API ${method} failed with HTTP ${response.status}: ${errorText}`)
+      }
+
+      const json = await response.json() as {
+        ok?: boolean
+        description?: string
+      }
+
+      if (!json.ok) {
+        logTelegramDebug(`[telegram] API error: ${method} failed: ${json.description ?? 'unknown error'}`, 'error')
+        throw new Error(
+          `Telegram API ${method} failed: ${json.description ?? 'unknown error'}`,
+        )
+      }
+
+      return json as T
+    } catch (error) {
+      clearTimeout(timeoutId)
+
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          logTelegramDebug(`[telegram] API error: ${method} timed out or was aborted`, 'error')
+          throw new Error(`Telegram API ${method} timed out`)
+        }
+        logTelegramDebug(`[telegram] API error: ${method} failed: ${error.message}`, 'error')
+        throw new Error(`Telegram API ${method} failed: ${error.message}`)
+      }
+
+      logTelegramDebug(`[telegram] API error: ${method} failed with unknown error`, 'error')
+      throw new Error(`Telegram API ${method} failed with unknown error`)
+    }
   }
 }
 
