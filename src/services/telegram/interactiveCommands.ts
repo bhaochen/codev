@@ -37,6 +37,7 @@ const OAUTH_POLLING_SAFETY_MARGIN_MS = 3000
 
 const MODEL_PREFIX = 'tg:model'
 const CONNECT_PREFIX = 'tg:connect'
+const LOGIN_PREFIX = 'tg:login'
 
 type ConnectPendingState =
   | { kind: 'openrouter-api-key' }
@@ -91,6 +92,19 @@ function buildConnectKeyboard(): TelegramInlineKeyboardMarkup {
     [
       { text: 'Custom OpenAI', callback_data: `${CONNECT_PREFIX}:provider:custom-openai` },
       { text: 'Custom Anthropic', callback_data: `${CONNECT_PREFIX}:provider:custom-anthropic` },
+    ],
+  ])
+}
+
+function buildLoginKeyboard(): TelegramInlineKeyboardMarkup {
+  return createKeyboard([
+    [
+      { text: 'Anthropic', callback_data: `${LOGIN_PREFIX}:provider:anthropic` },
+      { text: 'OpenAI', callback_data: `${LOGIN_PREFIX}:provider:openai` },
+    ],
+    [
+      { text: 'OpenRouter', callback_data: `${LOGIN_PREFIX}:provider:openrouter` },
+      { text: 'Local', callback_data: `${LOGIN_PREFIX}:provider:local` },
     ],
   ])
 }
@@ -456,6 +470,15 @@ export async function maybeHandleTelegramInteractiveInput(
     return true
   }
 
+  if (text === '/login') {
+    await telegramService.sendMessage(
+      event.chatId,
+      '请选择登录方式：\n\nAnthropic - Anthropic 账户登录\nOpenAI - OpenAI / Codex 登录\nOpenRouter - OpenRouter API Key\nLocal - 本地模型服务器',
+      buildLoginKeyboard(),
+    )
+    return true
+  }
+
   return false
 }
 
@@ -623,6 +646,25 @@ export async function handleTelegramCallback(
       event.chatId,
       event.messageId,
       `${providerId === 'custom-openai' ? 'Custom OpenAI' : 'Custom Anthropic'} 已连接成功，默认模型为 ${model}。`,
+    )
+    return true
+  }
+
+  if (event.data.startsWith(`${LOGIN_PREFIX}:provider:`)) {
+    const providerId = event.data.split(':').at(-1)
+    await telegramService.answerCallbackQuery(event.callbackQueryId)
+
+    const providerMessages: Record<string, string> = {
+      'anthropic': 'Anthropic 登录需要在本地终端执行 /login 命令，Telegram 暂不支持浏览器 OAuth 流程。',
+      'openai': 'OpenAI 登录需要在本地终端执行 /login 命令，Telegram 暂不支持交互式登录。',
+      'openrouter': 'OpenRouter 登录需要在本地终端执行 /login 命令，Telegram 暂不支持 API Key 输入。',
+      'local': '本地模型配置需要在本地终端执行 /login 命令。',
+    }
+
+    await telegramService.editMessage(
+      event.chatId,
+      event.messageId,
+      providerMessages[providerId] || '暂不支持此登录方式。',
     )
     return true
   }
