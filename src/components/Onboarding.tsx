@@ -15,6 +15,7 @@ import type { ThemeSetting } from '../utils/theme.js';
 import { ApproveApiKey } from './ApproveApiKey.js';
 import { ConsoleOAuthFlow } from './ConsoleOAuthFlow.js';
 import { Select } from './CustomSelect/select.js';
+import { Login } from '../commands/login/login.js';
 import { WelcomeV2 } from './LogoV2/WelcomeV2.js';
 import { PressEnterToContinue } from './PressEnterToContinue.js';
 import { ThemePicker } from './ThemePicker.js';
@@ -71,9 +72,9 @@ export function Onboarding({
          */}
         <OrderedList>
           <OrderedList.Item>
-            <Text>Claude can make mistakes</Text>
+            <Text>VersperClaw can make mistakes</Text>
             <Text dimColor wrap="wrap">
-              You should always review Claude&apos;s responses, especially when
+              You should always review VersperClaw&apos;s responses, especially when
               <Newline />
               running code.
               <Newline />
@@ -86,7 +87,7 @@ export function Onboarding({
             <Text dimColor wrap="wrap">
               For more details see:
               <Newline />
-              <Link url="https://code.claude.com/docs/en/security" />
+              <Link url="https://github.com/versperai/VersperClaw" />
             </Text>
           </OrderedList.Item>
         </OrderedList>
@@ -134,7 +135,7 @@ export function Onboarding({
     steps.push({
       id: 'oauth',
       component: <SkippableStep skip={skipOAuth} onSkip={goToNextStep}>
-          <ConsoleOAuthFlow onDone={goToNextStep} />
+          <Login onDone={() => goToNextStep()} />
         </SkippableStep>
     });
   }
