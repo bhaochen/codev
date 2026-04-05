@@ -65,6 +65,60 @@ export function SearchableModelPicker({
   }
 }, [isFastMode, authVersion])
 
+  // Poll for OpenRouter models when cache is empty
+  React.useEffect(() => {
+    let mounted = true
+    let pollTimer: NodeJS.Timeout | null = null
+
+    async function checkOpenRouterCache() {
+      try {
+        const { getAPIProvider } = await import('../utils/model/providers.js')
+        const provider = getAPIProvider()
+
+        if (provider === 'openrouter' && modelOptions.length === 0) {
+          // Check cache every 500ms
+          pollTimer = setInterval(async () => {
+            if (!mounted) {
+              if (pollTimer) clearInterval(pollTimer)
+              return
+            }
+
+            try {
+              const { hasOpenRouterModelsCache } = await import('../utils/model/openRouterModels.js')
+              if (hasOpenRouterModelsCache()) {
+                // Cache is now populated, trigger re-render
+                if (mounted) {
+                  setAppState(prev => ({ ...prev, authVersion: prev.authVersion + 1 }))
+                }
+                if (pollTimer) clearInterval(pollTimer)
+              }
+            } catch (error) {
+              console.error('Error checking OpenRouter cache:', error)
+              if (pollTimer) clearInterval(pollTimer)
+            }
+          }, 500)
+
+          // Stop polling after 10 seconds
+          setTimeout(() => {
+            if (pollTimer && mounted) {
+              clearInterval(pollTimer)
+              pollTimer = null
+            }
+          }, 10000)
+        }
+      } catch (error) {
+        console.error('Error checking API provider:', error)
+      }
+    }
+
+    checkOpenRouterCache()
+
+    return () => {
+      mounted = false
+      if (pollTimer) clearInterval(pollTimer)
+    }
+  }, [modelOptions.length, setAppState])
+
   // Filter options based on search query
   const filteredOptions = React.useMemo(() => {
     if (!Array.isArray(modelOptions)) {
