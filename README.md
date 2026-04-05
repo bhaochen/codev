@@ -1,4 +1,4 @@
-# free-code
+# versperclaw
 
 **The free build of Claude Code.**
 
@@ -8,10 +8,10 @@ All telemetry stripped. All injected security-prompt guardrails removed. All exp
 curl -fsSL https://raw.githubusercontent.com/paoloanzn/free-code/main/install.sh | bash
 ```
 
-> Checks your system, installs Bun if needed, clones, builds with all features enabled, and puts `free-code` on your PATH. Then just `export ANTHROPIC_API_KEY="sk-ant-..."` and run `free-code`.
+> Checks your system, installs Bun if needed, clones, builds with all features enabled, and puts `versperclaw` on your PATH. Then just `export ANTHROPIC_API_KEY="sk-ant-..."` and run `versperclaw`.
 
 <p align="center">
-  <img src="assets/screenshot.png" alt="free-code screenshot" width="800" />
+  <img src="assets/screenshot.png" alt="versperclaw screenshot" width="800" />
 </p>
 
 ---
@@ -42,7 +42,7 @@ claude() {
 
 ## What is this
 
-This is a clean, buildable fork of Anthropic's [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI -- the terminal-native AI coding agent. The upstream source became publicly available on March 31, 2026 through a source map exposure in the npm distribution.
+This is a clean, buildable fork of Anthropic's [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI -- the terminal-native AI coding agent, now called VersperClaw. The upstream source became publicly available on March 31, 2026 through a source map exposure in the npm distribution.
 
 This fork applies three categories of changes on top of that snapshot:
 
@@ -70,7 +70,7 @@ Claude Code ships with dozens of feature flags gated behind `bun:bundle` compile
 
 | Feature | What it does |
 |---|---|
-| `ULTRAPLAN` | Remote multi-agent planning on Claude Code web (Opus-class) |
+| `ULTRAPLAN` | Remote multi-agent planning on VersperClaw web (Opus-class) |
 | `ULTRATHINK` | Deep thinking mode -- type "ultrathink" to boost reasoning effort |
 | `VOICE_MODE` | Push-to-talk voice input and dictation |
 | `AGENT_TRIGGERS` | Local cron/trigger tools for background automation |
@@ -97,12 +97,12 @@ See [FEATURES.md](FEATURES.md) for the full audit of all 88 flags and their stat
 curl -fsSL https://raw.githubusercontent.com/paoloanzn/free-code/main/install.sh | bash
 ```
 
-This will check your system, install Bun if needed, clone the repo, build the binary with all experimental features enabled, and symlink it as `free-code` on your PATH.
+This will check your system, install Bun if needed, clone the repo, build the binary with all experimental features enabled, and symlink it as `versperclaw` on your PATH.
 
 After install, just run:
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
-free-code
+versperclaw
 ```
 
 ---

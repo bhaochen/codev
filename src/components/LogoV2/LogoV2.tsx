@@ -303,8 +303,8 @@ export function LogoV2() {
   }
   const layoutMode = getLayoutMode(columns);
   const userTheme = resolveThemeSetting(getGlobalConfig().theme);
-  const borderTitle = ` ${color("startupAccent", userTheme)("Free Code")} ${color("inactive", userTheme)(`v${version}`)} `;
-  const compactBorderTitle = color("startupAccent", userTheme)(" Free Code ");
+  const borderTitle = ` ${color("startupAccent", userTheme)("VersperClaw")} ${color("inactive", userTheme)(`v${version}`)} `;
+  const compactBorderTitle = color("startupAccent", userTheme)(" VersperClaw ");
   if (layoutMode === "compact") {
     let welcomeMessage = formatWelcomeMessage(username);
     if (stringWidth(welcomeMessage) > columns - 4) {

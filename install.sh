@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# free-code installer
+# versperclaw installer
 # Usage: curl -fsSL https://raw.githubusercontent.com/paoloanzn/free-code/main/install.sh | bash
 
 RED='\033[0;31m'
@@ -13,7 +13,7 @@ DIM='\033[2m'
 RESET='\033[0m'
 
 REPO="https://github.com/paoloanzn/free-code.git"
-INSTALL_DIR="$HOME/free-code"
+INSTALL_DIR="$HOME/versperclaw"
 BUN_MIN_VERSION="1.3.11"
 
 info() { printf "${CYAN}[*]${RESET} %s\n" "$*"; }
@@ -133,8 +133,8 @@ link_binary() {
   local link_dir="$HOME/.local/bin"
   mkdir -p "$link_dir"
 
-  ln -sf "$INSTALL_DIR/cli-dev" "$link_dir/free-code"
-  ok "Symlinked: $link_dir/free-code"
+  ln -sf "$INSTALL_DIR/cli-dev" "$link_dir/versperclaw"
+  ok "Symlinked: $link_dir/versperclaw"
 
   if ! echo "$PATH" | tr ':' '\n' | grep -qx "$link_dir"; then
     warn "$link_dir is not on your PATH"
@@ -167,16 +167,16 @@ echo ""
 printf "${GREEN}${BOLD}  Installation complete!${RESET}\n"
 echo ""
 printf "  ${BOLD}Run it:${RESET}\n"
-printf "    ${CYAN}free-code${RESET}                          # interactive REPL\n"
-printf "    ${CYAN}free-code -p \"your prompt\"${RESET}          # one-shot mode\n"
+printf "    ${CYAN}versperclaw${RESET}                          # interactive REPL\n"
+printf "    ${CYAN}versperclaw -p \"your prompt\"${RESET}          # one-shot mode\n"
 echo ""
 printf "  ${BOLD}Set your API key:${RESET}\n"
 printf "    ${CYAN}export ANTHROPIC_API_KEY=\"sk-ant-...\"${RESET}\n"
 echo ""
 printf "  ${BOLD}Or log in with Claude.ai:${RESET}\n"
-printf "    ${CYAN}free-code /login${RESET}\n"
+printf "    ${CYAN}versperclaw /login${RESET}\n"
 echo ""
 printf "  ${DIM}Source: $INSTALL_DIR${RESET}\n"
 printf "  ${DIM}Binary: $INSTALL_DIR/cli-dev${RESET}\n"
-printf "  ${DIM}Link:   ~/.local/bin/free-code${RESET}\n"
+printf "  ${DIM}Link:   ~/.local/bin/versperclaw${RESET}\n"
 echo ""
