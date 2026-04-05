@@ -39,7 +39,7 @@ import { SandboxManager } from 'src/utils/sandbox/sandbox-adapter.js';
 import { useShowGuestPassesUpsell, incrementGuestPassesSeenCount } from './GuestPassesUpsell.js';
 import { useShowOverageCreditUpsell, incrementOverageCreditUpsellSeenCount, createOverageCreditFeed } from './OverageCreditUpsell.js';
 import { plural } from '../../utils/stringUtils.js';
-import { useAppState } from '../../state/AppState.js';
+import { useAppState, useSetAppState } from '../../state/AppState.js';
 import { getEffortSuffix } from '../../utils/effort.js';
 import { useMainLoopModel } from '../../hooks/useMainLoopModel.js';
 import { renderModelSetting } from '../../utils/model/model.js';
@@ -158,6 +158,61 @@ export function LogoV2() {
   useEffect(t7, t8);
   const model = useMainLoopModel();
   const fullModelDisplayName = renderModelSetting(model);
+  const setAppState = useSetAppState();
+
+  // Poll for OpenRouter models when using 'default' model
+  useEffect(() => {
+    let mounted = true
+    let pollTimer: NodeJS.Timeout | null = null
+
+    async function checkOpenRouterCache() {
+      try {
+        const { getAPIProvider } = await import('../../utils/model/providers.js')
+        const provider = getAPIProvider()
+
+        if (provider === 'openrouter' && model === 'default') {
+          // Check cache every 500ms
+          pollTimer = setInterval(async () => {
+            if (!mounted) {
+              if (pollTimer) clearInterval(pollTimer)
+              return
+            }
+
+            try {
+              const { hasOpenRouterModelsCache } = await import('../../utils/model/openRouterModels.js')
+              if (hasOpenRouterModelsCache()) {
+                // Cache is now populated, trigger re-render
+                if (mounted) {
+                  setAppState(prev => ({ ...prev, authVersion: prev.authVersion + 1 }))
+                }
+                if (pollTimer) clearInterval(pollTimer)
+              }
+            } catch (error) {
+              console.error('Error checking OpenRouter cache:', error)
+              if (pollTimer) clearInterval(pollTimer)
+            }
+          }, 500)
+
+          // Stop polling after 10 seconds
+          setTimeout(() => {
+            if (pollTimer && mounted) {
+              clearInterval(pollTimer)
+              pollTimer = null
+            }
+          }, 10000)
+        }
+      } catch (error) {
+        console.error('Error checking API provider:', error)
+      }
+    }
+
+    checkOpenRouterCache()
+
+    return () => {
+      mounted = false
+      if (pollTimer) clearInterval(pollTimer)
+    }
+  }, [model, setAppState])
   const {
     version,
     cwd,
