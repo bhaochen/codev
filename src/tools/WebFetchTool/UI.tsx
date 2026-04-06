@@ -1,46 +1,69 @@
+/* TUI/CLI 中渲染 Web 工具调用过程的 UI 组件集合, 基于 React(类似于Ink的终端 React 框架)
+ * 显示
+ * 「工具调用参数」
+ * 「工具执行中」状态
+ * 「工具返回结果」
+ * 本质
+ * 「Tool UI Renderer」工具可视化层
+  */
 import React from 'react';
-import { MessageResponse } from '../../components/MessageResponse.js';
-import { TOOL_SUMMARY_MAX_LENGTH } from '../../constants/toolLimits.js';
-import { Box, Text } from '../../ink.js';
-import type { ToolProgressData } from '../../Tool.js';
-import type { ProgressMessage } from '../../types/message.js';
-import { formatFileSize, truncate } from '../../utils/format.js';
-import type { Output } from './WebFetchTool.js';
+import { MessageResponse } from '../../components/MessageResponse.js'; // UI 组件: 用来包裹一条“消息" (类似聊天气泡)
+import { TOOL_SUMMARY_MAX_LENGTH } from '../../constants/toolLimits.js'; // 常量: 工具摘要最大长度
+import { Box, Text } from '../../ink.js'; // Box: 布局(类似 div), Text: 文本, 来自 Ink (终端版React)
+import type { ToolProgressData } from '../../Tool.js'; // 工具执行过程中的数据结构, TypeScript 类型 (仅类型, 不参与运行)
+import type { ProgressMessage } from '../../types/message.js'; // 类型: 进度消息 
+import { formatFileSize, truncate } from '../../utils/format.js'; // 工具函数: 字节 -> 可读大小 (KB/MB), truncate 截断字符串
+import type { Output } from './WebFetchTool.js'; // Web 工具返回结果的类型
+
+// 工具调用的时候 - 渲染工具使用的消息
 export function renderToolUseMessage({
-  url,
-  prompt
-}: Partial<{
+  url, // 要访问的 网址
+  prompt // 附带提示词
+}: Partial<{ // 意味着这两个字段可以没有
   url: string;
   prompt: string;
 }>, {
-  verbose
+  verbose // 是否详细模式
 }: {
-  theme?: string;
+  theme?: string; // 没有用到
   verbose: boolean;
-}): React.ReactNode {
+}): React.ReactNode { // 返回值 是 React 节点(可以是字符串/JSX)
   if (!url) {
-    return null;
+    return null; // 如果没有 url 不渲染任何内容
   }
-  if (verbose) {
+  if (verbose) { // 如果是详细模式 返回字符串
+    // `url: "${url}"` 一定有
+    /* verbose && prompt ? `, prompt: "${prompt}"` : ''
+     * 如果 verbose = True, 且 prompt 存在, 就追加 , prompt: ""
+      */
     return `url: "${url}"${verbose && prompt ? `, prompt: "${prompt}"` : ''}`;
   }
+  // 非 verbose 模式只返回 url
   return url;
 }
-export function renderToolUseProgressMessage(): React.ReactNode {
+
+// 工具执行中的时候 - 渲染工具使用过程中的消息
+export function renderToolUseProgressMessage(
+  // 无参数函数
+): React.ReactNode {
   return <MessageResponse height={1}>
-      <Text dimColor>Fetching…</Text>
-    </MessageResponse>;
+            <Text dimColor>Fetching…</Text>
+         </MessageResponse>; // 渲染一个消息容器, 高度 1 行, 显示灰色文本, 最后结束组件
 }
+
+// 渲染工具结果的消息
 export function renderToolResultMessage({
-  bytes,
-  code,
-  codeText,
-  result
-}: Output, _progressMessagesForMessage: ProgressMessage<ToolProgressData>[], {
+  bytes, // 数据大小
+  code, // HTTP 状态码 eg: 200
+  codeText, // 状态描述 eg: OK
+  result // 内容
+}: Output,
+  _progressMessagesForMessage: ProgressMessage<ToolProgressData>[], // 进度消息列表, 变量名前有 _, 表示没用到的占位符 
+{
   verbose
 }: {
-  verbose: boolean;
-}): React.ReactNode {
+  verbose: boolean; // 是否详细模式
+}): React.ReactNode { // 返回 React 节点
   const formattedSize = formatFileSize(bytes);
   if (verbose) {
     return <Box flexDirection="column">
