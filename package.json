@@ -69,6 +69,7 @@
     "cli-highlight": "^2.1.11",
     "code-excerpt": "^4.0.0",
     "diff": "^8.0.4",
+    "duck-duck-scrape": "^2.2.7",
     "emoji-regex": "^10.6.0",
     "env-paths": "^4.0.0",
     "execa": "^9.6.1",
