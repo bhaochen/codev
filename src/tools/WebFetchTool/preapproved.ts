@@ -11,6 +11,8 @@
 // See test/utils/sandbox/webfetch-preapproved-separation.test.ts for verification
 // that sandbox network restrictions require explicit user permission rules.
 
+
+// 允许访问的白名单
 export const PREAPPROVED_HOSTS = new Set([
   // Anthropic
   'platform.claude.com',

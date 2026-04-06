@@ -1,106 +1,112 @@
-import { z } from 'zod/v4'
-import { buildTool, type ToolDef } from '../../Tool.js'
-import type { PermissionUpdate } from '../../types/permissions.js'
-import { formatFileSize } from '../../utils/format.js'
-import { lazySchema } from '../../utils/lazySchema.js'
-import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js'
-import { getRuleByContentsForTool } from '../../utils/permissions/permissions.js'
-import { isPreapprovedHost } from './preapproved.js'
-import { DESCRIPTION, WEB_FETCH_TOOL_NAME } from './prompt.js'
+import { z } from 'zod/v4' // 引入 Zod: 定义 & 检验输入输出结构
+import { buildTool, type ToolDef } from '../../Tool.js' // 构建工具对象, 工具类型约束
+import type { PermissionUpdate } from '../../types/permissions.js' // 权限系统, 用于"添加规则" 的类型
+import { formatFileSize } from '../../utils/format.js' // 字节 -> 可读格式(KB/MB)
+import { lazySchema } from '../../utils/lazySchema.js' // 延迟初始化 schema (避免循环依赖)
+import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js' // 权限检查返回结构
+import { getRuleByContentsForTool } from '../../utils/permissions/permissions.js' // 根据规则内容查权限 (allow / deny / ask)
+import { isPreapprovedHost } from './preapproved.js' // 判断域名是否白名单 
+import { DESCRIPTION, WEB_FETCH_TOOL_NAME } from './prompt.js' // 工具描述 & 名字
 import {
   getToolUseSummary,
   renderToolResultMessage,
   renderToolUseMessage,
   renderToolUseProgressMessage,
-} from './UI.js'
+} from './UI.js' // UI 渲染函数
 import {
   applyPromptToMarkdown,
   type FetchedContent,
   getURLMarkdownContent,
   isPreapprovedUrl,
   MAX_MARKDOWN_LENGTH,
-} from './utils.js'
+} from './utils.js' // 抓网页, 处理 markdown, 判断 url 是否可信
 
 const inputSchema = lazySchema(() =>
-  z.strictObject({
-    url: z.string().url().describe('The URL to fetch content from'),
-    prompt: z.string().describe('The prompt to run on the fetched content'),
-  }),
+  z.strictObject({ // 严格对象 不允许多字段
+    url: z.string().url().describe('The URL to fetch content from'), // url: string, 必须是合法 url
+    prompt: z.string().describe('The prompt to run on the fetched content'), // 对网页内容执行的任务 总结/提取
+  }), // 延迟创建 schema
 )
-type InputSchema = ReturnType<typeof inputSchema>
+
+type InputSchema = ReturnType<typeof inputSchema> // 推导类型
 
 const outputSchema = lazySchema(() =>
   z.object({
-    bytes: z.number().describe('Size of the fetched content in bytes'),
-    code: z.number().describe('HTTP response code'),
-    codeText: z.string().describe('HTTP response code text'),
+    bytes: z.number().describe('Size of the fetched content in bytes'), // 返回数据大小
+    code: z.number().describe('HTTP response code'), // HTTP 状态码
+    codeText: z.string().describe('HTTP response code text'), // 状态描述
     result: z
-      .string()
+      .string() // 最终结果
       .describe('Processed result from applying the prompt to the content'),
     durationMs: z
-      .number()
+      .number() // 执行耗时
       .describe('Time taken to fetch and process the content'),
-    url: z.string().describe('The URL that was fetched'),
+    url: z.string().describe('The URL that was fetched'), // url
   }),
 )
 type OutputSchema = ReturnType<typeof outputSchema>
 
-export type Output = z.infer<OutputSchema>
+export type Output = z.infer<OutputSchema> // 输出类型推导
 
-function webFetchToolInputToPermissionRuleContent(input: {
+function webFetchToolInputToPermissionRuleContent(input: { // 权限规则生成 input -> 权限规则key
   [k: string]: unknown
 }): string {
   try {
-    const parsedInput = WebFetchTool.inputSchema.safeParse(input)
-    if (!parsedInput.success) {
-      return `input:${input.toString()}`
+    const parsedInput = WebFetchTool.inputSchema.safeParse(input) // 安全解析
+    if (!parsedInput.success) { // 解析失败
+      return `input:${input.toString()}` // fallback
     }
     const { url } = parsedInput.data
-    const hostname = new URL(url).hostname
-    return `domain:${hostname}`
+    const hostname = new URL(url).hostname // 提取域名
+    return `domain:${hostname}` // 生成规则
   } catch {
     return `input:${input.toString()}`
   }
 }
 
+// Tool 定义开始
 export const WebFetchTool = buildTool({
-  name: WEB_FETCH_TOOL_NAME,
-  searchHint: 'fetch and extract content from a URL',
+  name: WEB_FETCH_TOOL_NAME, // 工具名
+  searchHint: 'fetch and extract content from a URL', // 给 llm 的提示
   // 100K chars - tool result persistence threshold
   maxResultSizeChars: 100_000,
   shouldDefer: true,
   async description(input) {
-    const { url } = input as { url: string }
+    const { url } = input as { url: string } // 类型断言
     try {
       const hostname = new URL(url).hostname
-      return `Claude wants to fetch content from ${hostname}`
+      return `VersperClaw wants to fetch content from ${hostname}` // 用户提示
     } catch {
-      return `Claude wants to fetch content from this URL`
+      return `VersperClaw wants to fetch content from this URL`
     }
   },
   userFacingName() {
-    return 'Fetch'
+    return 'Fetch' // UI 名称
   },
+  // 摘要 & 活动描述
   getToolUseSummary,
   getActivityDescription(input) {
     const summary = getToolUseSummary(input)
     return summary ? `Fetching ${summary}` : 'Fetching web page'
   },
+  // schema getter
   get inputSchema(): InputSchema {
     return inputSchema()
   },
   get outputSchema(): OutputSchema {
     return outputSchema()
   },
+  // 工具属性
   isConcurrencySafe() {
-    return true
+    return true // 支持并发
   },
   isReadOnly() {
-    return true
+    return true // 不修改系统
   },
   toAutoClassifierInput(input) {
     return input.prompt ? `${input.url}: ${input.prompt}` : input.url
   },
+  // 权限检查
   async checkPermissions(input, context): Promise<PermissionDecision> {
     const appState = context.getAppState()
     const permissionContext = appState.toolPermissionContext
@@ -109,7 +115,7 @@ export const WebFetchTool = buildTool({
     try {
       const { url } = input as { url: string }
       const parsedUrl = new URL(url)
-      if (isPreapprovedHost(parsedUrl.hostname, parsedUrl.pathname)) {
+      if (isPreapprovedHost(parsedUrl.hostname, parsedUrl.pathname)) { // 白名单
         return {
           behavior: 'allow',
           updatedInput: input,
@@ -147,7 +153,7 @@ export const WebFetchTool = buildTool({
     if (askRule) {
       return {
         behavior: 'ask',
-        message: `Claude requested permissions to use ${WebFetchTool.name}, but you haven't granted it yet.`,
+        message: `VersperClaw requested permissions to use ${WebFetchTool.name}, but you haven't granted it yet.`,
         decisionReason: {
           type: 'rule',
           rule: askRule,
@@ -174,7 +180,7 @@ export const WebFetchTool = buildTool({
 
     return {
       behavior: 'ask',
-      message: `Claude requested permissions to use ${WebFetchTool.name}, but you haven't granted it yet.`,
+      message: `VersperClaw requested permissions to use ${WebFetchTool.name}, but you haven't granted it yet.`,
       suggestions: buildSuggestions(ruleContent),
     }
   },
