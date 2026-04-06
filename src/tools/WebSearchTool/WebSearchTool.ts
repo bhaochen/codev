@@ -1,4 +1,3 @@
-import { search } from 'duck-duck-scrape'
 import type { PermissionResult } from 'src/utils/permissions/PermissionResult.js'
 import { z } from 'zod/v4'
 import { buildTool, type ToolDef } from '../../Tool.js'
@@ -63,6 +62,64 @@ export type Output = z.infer<OutputSchema>
 export type { WebSearchProgress } from '../../types/tools.js'
 
 import type { WebSearchProgress } from '../../types/tools.js'
+
+/**
+ * Search DuckDuckGo and return results
+ */
+async function searchDuckDuckGo(query: string): Promise<Array<{ title: string; url: string }>> {
+  const url = new URL('https://duckduckgo.com/html/')
+  url.searchParams.set('q', query)
+
+  const response = await fetch(url.toString(), {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    },
+  })
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+  }
+
+  const html = await response.text()
+
+  // Parse HTML to extract search results
+  const results: Array<{ title: string; url: string }> = []
+
+  // DuckDuckGo search results are in <a class="result__a"> tags
+  // with title as text content and href as URL
+  const resultRegex = /<a[^>]*class="result__a"[^>]*>(.*?)<\/a>/gi
+  let match: RegExpExecArray | null
+
+  while ((match = resultRegex.exec(html)) !== null && results.length < 10) {
+    const title = match[1]
+      .replace(/<[^>]*>/g, '')  // Remove HTML tags
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .trim()
+
+    // Extract URL from href attribute
+    const hrefMatch = match[0].match(/href="([^"]*)"/)
+    if (hrefMatch) {
+      let url = hrefMatch[1]
+      
+      // DuckDuckGo URLs are often redirects
+      if (url.startsWith('/l/?uddg=')) {
+        const urlMatch = url.match(/uddg=([^&]+)/)
+        if (urlMatch) {
+          url = decodeURIComponent(urlMatch[1])
+        }
+      }
+
+      if (title && url) {
+        results.push({ title, url })
+      }
+    }
+  }
+
+  return results
+}
 
 /**
  * Filter search results by domain
@@ -183,15 +240,13 @@ export const WebSearchTool = buildTool<InputSchema, Output, WebSearchTool>({
 
     try {
       // Call DuckDuckGo search
-      const response = await search(query, {
-        safeSearch: 'moderate',
-      })
+      const results = await searchDuckDuckGo(query)
 
       // Filter results by domain if specified
-      let filteredResults = response.results
+      let filteredResults = results
       if (allowed_domains || blocked_domains) {
         filteredResults = filterDomains(
-          response.results,
+          results,
           allowed_domains,
           blocked_domains
         )
@@ -210,12 +265,12 @@ export const WebSearchTool = buildTool<InputSchema, Output, WebSearchTool>({
       }
 
       // Convert to output format
-      const results: (SearchResult | string)[] = []
+      const searchResults: (SearchResult | string)[] = []
       
       if (filteredResults.length === 0) {
-        results.push(`No results for: ${query}`)
+        searchResults.push(`No results for: ${query}`)
       } else {
-        results.push({
+        searchResults.push({
           tool_use_id: 'search-1',
           content: filteredResults.map(r => ({
             title: r.title,
@@ -229,7 +284,7 @@ export const WebSearchTool = buildTool<InputSchema, Output, WebSearchTool>({
 
       return {
         query,
-        results,
+        results: searchResults,
         durationSeconds,
       }
     } catch (error) {
