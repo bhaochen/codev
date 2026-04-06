@@ -1,4 +1,4 @@
-import type { PermissionResult } from 'src/utils/permissions/PermissionResult.js'
+import type { PermissionResult } from '../../utils/permissions/PermissionResult.js'
 import { z } from 'zod/v4'
 import { buildTool, type ToolDef } from '../../Tool.js'
 import { lazySchema } from '../../utils/lazySchema.js'
@@ -33,6 +33,7 @@ const searchResultSchema = lazySchema(() => {
   const searchHitSchema = z.object({
     title: z.string().describe('The title of the search result'),
     url: z.string().describe('The URL of the search result'),
+    snippet: z.string().optional().describe('The snippet/description of the search result'),
   })
 
   return z.object({
@@ -64,61 +65,136 @@ export type { WebSearchProgress } from '../../types/tools.js'
 import type { WebSearchProgress } from '../../types/tools.js'
 
 /**
- * Search DuckDuckGo and return results
+ * Search using DuckDuckGo Instant Answer API
  */
-async function searchDuckDuckGo(query: string): Promise<Array<{ title: string; url: string }>> {
-  const url = new URL('https://duckduckgo.com/html/')
+async function searchDuckDuckGoAPI(query: string): Promise<Array<{ title: string; url: string; snippet?: string }>> {
+  const url = new URL('https://api.duckduckgo.com/')
   url.searchParams.set('q', query)
+  url.searchParams.set('format', 'json')
+  url.searchParams.set('no_html', '1')
+  url.searchParams.set('skip_disambig', '0')
 
-  const response = await fetch(url.toString(), {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    },
-  })
+  const response = await fetch(url.toString())
 
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}: ${response.statusText}`)
   }
 
-  const html = await response.text()
+  const data = await response.json()
+  const results: Array<{ title: string; url: string; snippet?: string }> = []
 
-  // Parse HTML to extract search results
-  const results: Array<{ title: string; url: string }> = []
+  // Add abstract if available
+  if (data.Abstract && data.AbstractURL) {
+    results.push({
+      title: data.Heading || query,
+      url: data.AbstractURL,
+      snippet: data.Abstract,
+    })
+  }
 
-  // DuckDuckGo search results are in <a class="result__a"> tags
-  // with title as text content and href as URL
-  const resultRegex = /<a[^>]*class="result__a"[^>]*>(.*?)<\/a>/gi
-  let match: RegExpExecArray | null
-
-  while ((match = resultRegex.exec(html)) !== null && results.length < 10) {
-    const title = match[1]
-      .replace(/<[^>]*>/g, '')  // Remove HTML tags
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .trim()
-
-    // Extract URL from href attribute
-    const hrefMatch = match[0].match(/href="([^"]*)"/)
-    if (hrefMatch) {
-      let url = hrefMatch[1]
-      
-      // DuckDuckGo URLs are often redirects
-      if (url.startsWith('/l/?uddg=')) {
-        const urlMatch = url.match(/uddg=([^&]+)/)
-        if (urlMatch) {
-          url = decodeURIComponent(urlMatch[1])
-        }
+  // Add related topics
+  if (data.RelatedTopics && Array.isArray(data.RelatedTopics)) {
+    for (const topic of data.RelatedTopics) {
+      if (topic.Text && topic.FirstURL) {
+        results.push({
+          title: topic.Text.split(' - ')[0] || 'Related',
+          url: topic.FirstURL,
+          snippet: topic.Text,
+        })
       }
-
-      if (title && url) {
-        results.push({ title, url })
+      // Handle nested topics
+      if (topic.Topics && Array.isArray(topic.Topics)) {
+        for (const subTopic of topic.Topics) {
+          if (subTopic.Text && subTopic.FirstURL) {
+            results.push({
+              title: subTopic.Text.split(' - ')[0] || 'Related',
+              url: subTopic.FirstURL,
+              snippet: subTopic.Text,
+            })
+          }
+        }
       }
     }
   }
 
+  // Add results from Infobox if available
+  if (data.Infobox?.content && Array.isArray(data.Infobox.content)) {
+    for (const item of data.Infobox.content) {
+      if (item.label && item.value && item.url) {
+        results.push({
+          title: item.label,
+          url: item.url,
+          snippet: `${item.label}: ${item.value}`,
+        })
+      }
+    }
+  }
+
+  return results.slice(0, 10)
+}
+
+/**
+ * Search Wikipedia API
+ */
+async function searchWikipedia(query: string): Promise<Array<{ title: string; url: string; snippet?: string }>> {
+  const url = new URL('https://en.wikipedia.org/w/api.php')
+  url.searchParams.set('action', 'query')
+  url.searchParams.set('list', 'search')
+  url.searchParams.set('srsearch', query)
+  url.searchParams.set('format', 'json')
+  url.searchParams.set('srlimit', '10')
+  url.searchParams.set('srprop', 'snippet')
+
+  const response = await fetch(url.toString())
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+  }
+
+  const data = await response.json()
+  const results: Array<{ title: string; url: string; snippet?: string }> = []
+
+  if (data.query?.search) {
+    for (const item of data.query.search) {
+      results.push({
+        title: item.title,
+        url: `https://en.wikipedia.org/wiki/${encodeURIComponent(item.title.replace(/ /g, '_'))}`,
+        snippet: item.snippet?.replace(/<\/?span[^>]*>/g, ''),
+      })
+    }
+  }
+
   return results
+}
+
+/**
+ * Combined search using multiple sources
+ */
+async function searchBrave(query: string): Promise<Array<{ title: string; url: string; snippet?: string }>> {
+  const results: Array<{ title: string; url: string; snippet?: string }> = []
+
+  // Try DuckDuckGo Instant Answer API first
+  try {
+    const ddgResults = await searchDuckDuckGoAPI(query)
+    results.push(...ddgResults)
+  } catch (e) {
+    // Continue to next source
+  }
+
+  // Add Wikipedia results
+  try {
+    const wikiResults = await searchWikipedia(query)
+    for (const result of wikiResults) {
+      // Avoid duplicates
+      if (!results.some(r => r.url === result.url)) {
+        results.push(result)
+      }
+    }
+  } catch (e) {
+    // Continue
+  }
+
+  return results.slice(0, 10)
 }
 
 /**
@@ -154,7 +230,7 @@ function filterDomains(
   })
 }
 
-export const WebSearchTool = buildTool<InputSchema, Output, WebSearchTool>({
+export const WebSearchTool = buildTool<InputSchema, Output, WebSearchProgress>({
   name: WEB_SEARCH_TOOL_NAME,
   description: 'Search the web and return search results with titles, URLs, and snippets.',
   getToolUseSummary,
@@ -179,9 +255,9 @@ export const WebSearchTool = buildTool<InputSchema, Output, WebSearchTool>({
     return true
   },
   toAutoClassifierInput(input) {
-    return input.query
+    return input?.query ?? ''
   },
-  async checkPermissions(_input): Promise<PermissionResult> {
+  async checkPermissions(_input, _context): Promise<PermissionResult> {
     return {
       behavior: 'passthrough',
       message: 'WebSearchTool requires permission.',
@@ -207,9 +283,16 @@ export const WebSearchTool = buildTool<InputSchema, Output, WebSearchTool>({
     // string entries in results[] (phantom match). Nothing to search.
     return ''
   },
-  async validateInput(input) {
+  async validateInput(input, _context) {
+    if (!input) {
+      return {
+        result: false,
+        message: 'Error: Missing input',
+        errorCode: 1,
+      }
+    }
     const { query, allowed_domains, blocked_domains } = input
-    if (!query.length) {
+    if (!query?.length) {
       return {
         result: false,
         message: 'Error: Missing query',
@@ -228,6 +311,16 @@ export const WebSearchTool = buildTool<InputSchema, Output, WebSearchTool>({
   },
   async call(input, context, _canUseTool, _parentMessage, onProgress) {
     const startTime = performance.now()
+    
+    if (!input?.query) {
+      const endTime = performance.now()
+      return {
+        query: '',
+        results: ['Error: Missing query'],
+        durationSeconds: (endTime - startTime) / 1000,
+      }
+    }
+    
     const { query, allowed_domains, blocked_domains } = input
 
     // Progress update: starting search
@@ -239,8 +332,8 @@ export const WebSearchTool = buildTool<InputSchema, Output, WebSearchTool>({
     }
 
     try {
-      // Call DuckDuckGo search
-      const results = await searchDuckDuckGo(query)
+      // Call Brave Search
+      const results = await searchBrave(query)
 
       // Filter results by domain if specified
       let filteredResults = results
@@ -275,6 +368,7 @@ export const WebSearchTool = buildTool<InputSchema, Output, WebSearchTool>({
           content: filteredResults.map(r => ({
             title: r.title,
             url: r.url,
+            snippet: r.snippet,
           }))
         })
       }
@@ -301,9 +395,18 @@ export const WebSearchTool = buildTool<InputSchema, Output, WebSearchTool>({
     }
   },
   mapToolResultToToolResultBlockParam(output, toolUseID) {
+    if (!output) {
+      return {
+        tool_use_id: toolUseID,
+        type: 'tool_result',
+        content: 'Error: Missing output',
+      }
+    }
     const { query, results } = output
 
-    let formattedOutput = `Web search results for query: "${query}"\n\n`
+    let formattedOutput = query 
+      ? `Web search results for query: "${query}"\n\n`
+      : 'Web search results:\n\n'
 
     // Process the results array - it can contain both string summaries and search result objects.
     // Guard against null/undefined entries that can appear after JSON round-tripping
