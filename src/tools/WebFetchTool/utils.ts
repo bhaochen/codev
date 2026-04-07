@@ -138,109 +138,84 @@ async function retryWithBackoff<T>(
 }
 
 /**
- * Fetch URL content using Jina Reader API
- * Reference: nanobot's Jina Reader implementation
+ * Fetch URL content using Python webtools script
+ * Reference: nanobot's web.py implementation
  * Returns markdown formatted content with metadata
- * Returns null if rate limited or should fall back to direct fetch
+ * Returns null if should fall back to direct fetch
  */
-async function fetchWithJinaReader(url: string): Promise<{
+async function fetchWithPythonWebtools(url: string): Promise<{
   content: string
   contentType: string
   title?: string
   finalUrl?: string
 } | null> {
-  const jinaUrl = `https://r.jina.ai/${url}`
-  const headers: HeadersInit = {
-    'Accept': 'application/json',
-    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_2) AppleWebKit/537.36',
-  }
+  console.log(`[WebFetch] Fetching via Python webtools: ${url}`)
 
-  // Add API key if available
-  const apiKey = process.env.JINA_API_KEY
-  if (apiKey) {
-    headers['Authorization'] = `Bearer ${apiKey}`
-  }
-
-  console.log(`[WebFetch] Fetching via Jina Reader: ${url}`)
-
-  let response: Response
   try {
-    response = await fetchWithTimeout(jinaUrl, {
-      timeout: FETCH_TIMEOUT_MS,
-      headers,
+    const { spawn } = await import('child_process')
+    
+    return new Promise((resolve, reject) => {
+      const pythonScript = process.cwd() + '/scripts/python_webtools.py'
+      const maxChars = 50000
+      
+      const child = spawn('.venv/bin/python', [pythonScript, 'web_fetch', url, String(50000)], {
+        cwd: process.cwd(),
+      })
+
+      let stdout = ''
+      let stderr = ''
+
+      child.stdout.on('data', (data) => {
+        stdout += data.toString()
+      })
+
+      child.stderr.on('data', (data) => {
+        stderr += data.toString()
+      })
+
+      child.on('close', (code) => {
+        if (code !== 0) {
+          console.error('[WebFetch] Python script failed:', stderr)
+          resolve(null) // Return null to trigger fallback
+          return
+        }
+
+        try {
+          const result = JSON.parse(stdout)
+          
+          if (!result.success) {
+            console.error('[WebFetch] Python fetch failed:', result.error)
+            resolve(null) // Return null to trigger fallback
+            return
+          }
+
+          console.log(`[WebFetch] Python returned ${result.length} bytes`)
+          
+          resolve({
+            content: result.text,
+            contentType: 'text/markdown',
+            title: undefined, // Python already includes title in text
+            finalUrl: result.finalUrl || url,
+          })
+        } catch (error) {
+          console.error('[WebFetch] Failed to parse Python output:', error)
+          resolve(null) // Return null to trigger fallback
+        }
+      })
+
+      child.on('error', (error) => {
+        console.error('[WebFetch] Failed to start Python process:', error)
+        resolve(null) // Return null to trigger fallback
+      })
     })
-    console.log(`[WebFetch] Jina Reader response status: ${response.status}`)
   } catch (error) {
-    console.error('[WebFetch] Failed to connect to Jina Reader:', error)
-    logError('WebFetch: Failed to connect to Jina Reader', error)
+    console.error('[WebFetch] Failed to call Python webtools:', error)
+    logError('WebFetch: Failed to call Python webtools', error)
     return null // Return null to trigger fallback
-  }
-
-  // Check for rate limiting (429) - reference: nanobot
-  if (response.status === 429) {
-    console.warn('[WebFetch] Jina Reader rate limited, falling back to direct fetch')
-    logError('Jina Reader rate limited')
-    return null
-  }
-
-  if (!response.ok) {
-    console.warn(`[WebFetch] Jina Reader returned HTTP ${response.status}, falling back to direct fetch`)
-    logError(`Jina Reader HTTP ${response.status}: ${response.statusText}`)
-    return null // Return null to trigger fallback
-  }
-
-  // Try to parse as JSON first, fallback to text
-  const contentType = response.headers.get('content-type') || ''
-
-  if (contentType.includes('application/json')) {
-    try {
-      const data = await response.json()
-      let content = data.data?.content || ''
-
-      // Add title if available
-      const title = data.data?.title
-      if (title) {
-        content = `# ${title}\n\n${content}`
-      }
-
-      // Validate content
-      if (!content || content.length < 10) {
-        console.warn('[WebFetch] Jina Reader returned empty or very short content')
-        return null
-      }
-
-      console.log(`[WebFetch] Successfully fetched ${content.length} characters from Jina Reader`)
-      return {
-        content,
-        contentType: 'text/markdown',
-        title,
-        finalUrl: data.data?.url || url,
-      }
-    } catch (error) {
-      console.error('[WebFetch] Failed to parse Jina Reader JSON response:', error)
-      logError('WebFetch: Failed to parse Jina Reader JSON', error)
-      return null
-    }
-  } else {
-    // Fallback to text response
-    try {
-      const content = await response.text()
-      if (!content || content.length < 10) {
-        console.warn('[WebFetch] Jina Reader returned empty or very short text response')
-        return null
-      }
-      console.log(`[WebFetch] Successfully fetched ${content.length} characters (text response)`)
-      return {
-        content,
-        contentType: 'text/markdown',
-      }
-    } catch (error) {
-      console.error('[WebFetch] Failed to read Jina Reader text response:', error)
-      logError('WebFetch: Failed to read Jina Reader text', error)
-      return null
-    }
   }
 }
+
+      
 
 // Cache for storing fetched URL content
 type CacheEntry = {
@@ -531,10 +506,10 @@ export async function getURLMarkdownContent(
     logError(e)
   }
 
-  // Use Jina Reader API to fetch content (with retry)
+  // Use Python webtools to fetch content (with retry)
   try {
-    const jinaResult = await retryWithBackoff(
-      () => fetchWithJinaReader(upgradedUrl),
+    const pythonResult = await retryWithBackoff(
+      () => fetchWithPythonWebtools(upgradedUrl),
       {
         maxRetries: 2,
         initialDelay: 1000,
@@ -542,9 +517,9 @@ export async function getURLMarkdownContent(
       }
     )
 
-    // If Jina Reader succeeded, use its results
-    if (jinaResult) {
-      const { content, contentType, title } = jinaResult
+    // If Python webtools succeeded, use its results
+    if (pythonResult) {
+      const { content, contentType, title } = pythonResult
       const bytes = Buffer.byteLength(content)
 
       // Store the fetched content in cache
@@ -559,12 +534,12 @@ export async function getURLMarkdownContent(
       return entry
     }
 
-    // If Jina Reader returned null (rate limited or failed), fall back to direct fetch
-    console.log('[WebFetch] Jina Reader returned null, falling back to direct fetch')
+    // If Python webtools returned null (failed), fall back to direct fetch
+    console.log('[WebFetch] Python webtools returned null, falling back to direct fetch')
   } catch (error) {
-    // If Jina Reader threw an error, fall back to direct fetch
-    console.warn('[WebFetch] Jina Reader failed with error, falling back to direct fetch:', error)
-    logError('Jina Reader failed, falling back to direct fetch', error)
+    // If Python webtools threw an error, fall back to direct fetch
+    console.warn('[WebFetch] Python webtools failed with error, falling back to direct fetch:', error)
+    logError('Python webtools failed, falling back to direct fetch', error)
   }
 
   // Fallback: direct fetch with retry

@@ -11,7 +11,6 @@ import {
   renderToolUseMessage,
   renderToolUseProgressMessage,
 } from './UI.js'
-import { TLSFetch } from '@yukiakai/tls-fetch'
 
 const inputSchema = lazySchema(() =>
   z.strictObject({
@@ -66,8 +65,8 @@ export type { WebSearchProgress } from '../../types/tools.js'
 import type { WebSearchProgress } from '../../types/tools.js'
 
 /**
- * Search using DuckDuckGo HTML results page
- * Uses TLSFetch to bypass CAPTCHA and improved HTML parsing
+ * Search using DuckDuckGo via Python webtools script
+ * Uses subprocess to call Python script with nanobot implementation
  */
 async function searchDuckDuckGoAPI(
   query: string,
@@ -77,134 +76,74 @@ async function searchDuckDuckGoAPI(
     page?: number
   } = {}
 ): Promise<Array<{ title: string; url: string; snippet?: string }>> {
-  const { region = 'us-en', timelimit, page = 1 } = options
+  const { page = 1 } = options
 
-  console.log(`[WebSearch] Searching DuckDuckGo for: "${query}" (region=${region}, page=${page})`)
+  console.log(`[WebSearch] Searching DuckDuckGo for: "${query}" (via Python webtools)`)
 
-  // Build POST parameters
-  const formData = new URLSearchParams()
-  formData.append('q', query)
-  formData.append('b', '') // Start offset (empty for first page)
-  formData.append('l', region) // Locale/region
-
-  // Add offset for pagination
-  if (page > 1) {
-    const offset = 10 + (page - 2) * 15
-    formData.set('b', String(offset))
-  }
-
-  // Add time limit filter
-  if (timelimit) {
-    formData.append('df', timelimit)
-  }
-
-  let response
   try {
-    // Use TLSFetch to bypass CAPTCHA
-    response = await TLSFetch.post('https://html.duckduckgo.com/html/', {
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Connection': 'keep-alive',
-      },
-      body: Buffer.from(formData.toString()),
-    })
-    console.log(`[WebSearch] DuckDuckGo response status: ${response.statusCode}`)
-  } catch (error) {
-    console.error('[WebSearch] Failed to connect to DuckDuckGo:', error)
-    logError('WebSearch: Failed to connect to DuckDuckGo', error)
-    throw new Error(`Unable to connect to DuckDuckGo: ${error instanceof Error ? error.message : String(error)}`)
-  }
+    const { spawn } = await import('child_process')
+    
+    return new Promise((resolve, reject) => {
+      const pythonScript = process.cwd() + '/scripts/python_webtools.py'
+      const maxResults = 10
+      
+      const child = spawn('.venv/bin/python', [pythonScript, 'web_search', query, String(maxResults)], {
+        cwd: process.cwd(),
+      })
 
-  if (response.statusCode !== 200) {
-    console.error(`[WebSearch] DuckDuckGo returned HTTP ${response.statusCode}`)
-    throw new Error(`HTTP ${response.statusCode}`)
-  }
+      let stdout = ''
+      let stderr = ''
 
-  const html = response.text()
-  console.log(`[WebSearch] Received ${html.length} bytes from DuckDuckGo`)
+      child.stdout.on('data', (data) => {
+        stdout += data.toString()
+      })
 
-  const results: Array<{ title: string; url: string; snippet?: string }> = []
+      child.stderr.on('data', (data) => {
+        stderr += data.toString()
+      })
 
-  // Check for CAPTCHA challenge
-  const captchaPatterns = [
-    'Unfortunately, bots use DuckDuckGo too',
-    'Select all squares containing a duck',
-    'CAPTCHA',
-    'challenge-platform',
-    'human verification',
-    'Please verify you are a human',
-    'Checking your browser before accessing',
-  ]
-  const isCaptcha = captchaPatterns.some(pattern => html.includes(pattern))
-  if (isCaptcha) {
-    console.warn('[WebSearch] DuckDuckGo returned CAPTCHA challenge')
-    logError('DuckDuckGo returned CAPTCHA challenge, skipping search')
-    return []
-  }
-
-  // Check if HTML is too short
-  if (html.length < 1000) {
-    console.warn(`[WebSearch] DuckDuckGo response too short (${html.length} bytes)`)
-    return []
-  }
-
-  // Parse results using the correct pattern
-  // Pattern: <div class="result results_links results_links_deep web-result">
-  const resultBlocks = html.match(/<div[^>]*class="[^"]*\bweb-result\b[^"]*"[^>]*>[\s\S]*?<\/div>/gi) || []
-
-  console.log(`[WebSearch] Found ${resultBlocks.length} result blocks`)
-
-  for (const block of resultBlocks.slice(0, 10)) {
-    try {
-      // Extract title and URL from the link
-      const titleUrlMatch = block.match(/<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/i)
-      if (!titleUrlMatch) continue
-
-      const rawUrl = titleUrlMatch[1]
-      const title = normalizeText(stripTags(titleUrlMatch[2]))
-
-      // Decode URL
-      let decodedUrl = rawUrl
-      try {
-        if (rawUrl.includes('/l/?uddg=')) {
-          const uddgMatch = rawUrl.match(/uddg=([^&]+)/)
-          if (uddgMatch) {
-            decodedUrl = decodeURIComponent(uddgMatch[1])
-          }
-        } else if (rawUrl.startsWith('//')) {
-          decodedUrl = 'https:' + rawUrl
-        } else if (!rawUrl.startsWith('http')) {
-          decodedUrl = 'https://' + rawUrl
+      child.on('close', (code) => {
+        if (code !== 0) {
+          console.error('[WebSearch] Python script failed:', stderr)
+          reject(new Error(`Python script failed: ${stderr}`))
+          return
         }
-      } catch {
-        decodedUrl = rawUrl
-      }
 
-      // Extract snippet from result__snippet class
-      const snippetMatch = block.match(/class="result__snippet"[^>]*>([\s\S]*?)<\/a>/i)
-      const snippet = snippetMatch
-        ? normalizeText(stripTags(snippetMatch[1]))
-        : ''
+        try {
+          const result = JSON.parse(stdout)
+          
+          if (!result.success) {
+            console.error('[WebSearch] Python search failed:', result.error)
+            reject(new Error(result.error))
+            return
+          }
 
-      // Filter out DuckDuckGo's internal links
-      if (title && decodedUrl && !decodedUrl.includes('duckduckgo.com') && !decodedUrl.includes('/y.js?')) {
-        results.push({
-          title,
-          url: decodedUrl,
-          snippet: snippet || undefined,
-        })
-      }
-    } catch (error) {
-      console.debug('[WebSearch] Failed to parse a result block:', error)
-      continue
-    }
+          console.log(`[WebSearch] Python returned ${result.count} results`)
+          
+          // Convert Python results to our format
+          const results: Array<{ title: string; url: string; snippet?: string }> = result.results.map((r: any) => ({
+            title: r.title,
+            url: r.url,
+            snippet: r.content || undefined,
+          }))
+          
+          resolve(results)
+        } catch (error) {
+          console.error('[WebSearch] Failed to parse Python output:', error)
+          reject(new Error(`Failed to parse Python output: ${error}`))
+        }
+      })
+
+      child.on('error', (error) => {
+        console.error('[WebSearch] Failed to start Python process:', error)
+        reject(error)
+      })
+    })
+  } catch (error) {
+    console.error('[WebSearch] Failed to search:', error)
+    logError('WebSearch failed', error)
+    throw new Error(`Unable to search: ${error instanceof Error ? error.message : String(error)}`)
   }
-
-  console.log(`[WebSearch] Successfully parsed ${results.length} results`)
-  return results
 }
 
 /**
@@ -321,10 +260,15 @@ export const WebSearchTool = buildTool<InputSchema, Output, WebSearchProgress>({
   },
   async checkPermissions(_input, _context): Promise<PermissionResult> {
     // 权限全开，允许所有 WebSearch 请求
+    // 同时自动过滤掉 AI 模型自动添加的域名限制参数
+    const cleanedInput = { ..._input }
+    delete cleanedInput.allowed_domains
+    delete cleanedInput.blocked_domains
+    
     return {
       behavior: 'allow',
-      updatedInput: _input,
-      decisionReason: { type: 'other', reason: 'All web searches allowed' },
+      updatedInput: cleanedInput,
+      decisionReason: { type: 'other', reason: 'All web searches allowed - domain filters removed' },
     }
   },
   async prompt() {
@@ -347,7 +291,7 @@ export const WebSearchTool = buildTool<InputSchema, Output, WebSearchProgress>({
         errorCode: 1,
       }
     }
-    const { query, allowed_domains, blocked_domains } = input
+    const { query } = input
     if (!query?.length) {
       return {
         result: false,
@@ -355,14 +299,7 @@ export const WebSearchTool = buildTool<InputSchema, Output, WebSearchProgress>({
         errorCode: 1,
       }
     }
-    if (allowed_domains?.length && blocked_domains?.length) {
-      return {
-        result: false,
-        message:
-          'Error: Cannot specify both allowed_domains and blocked_domains in the same request',
-        errorCode: 2,
-      }
-    }
+    // 移除域名限制检查，因为会在 checkPermissions 中自动清理
     return { result: true }
   },
   async call(input, context, _canUseTool, _parentMessage, onProgress) {
@@ -388,6 +325,15 @@ export const WebSearchTool = buildTool<InputSchema, Output, WebSearchProgress>({
     }
 
     try {
+      // Add a small delay before making the request to avoid triggering anti-scraping
+      if (onProgress) {
+        onProgress({
+          toolUseID: 'search-delay',
+          data: { type: 'delay_start' },
+        })
+      }
+      await new Promise(resolve => setTimeout(resolve, 1000))
+
       // Call DuckDuckGo Search
       const results = await searchDuckDuckGoAPI(query)
 
@@ -481,9 +427,16 @@ export const WebSearchTool = buildTool<InputSchema, Output, WebSearchProgress>({
         // Text summary
         formattedOutput += result + '\n\n'
       } else {
-        // Search result with links
+        // Search result with links - format as readable text
         if (result.content?.length > 0) {
-          formattedOutput += `Links: ${jsonStringify(result.content)}\n\n`
+          result.content.forEach((item: any, index: number) => {
+            formattedOutput += `${index + 1}. **${item.title || 'Untitled'}**\n`
+            formattedOutput += `   URL: ${item.url}\n`
+            if (item.snippet) {
+              formattedOutput += `   ${item.snippet}\n`
+            }
+            formattedOutput += '\n'
+          })
         } else {
           formattedOutput += 'No links found.\n\n'
         }
