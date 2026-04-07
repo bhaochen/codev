@@ -1,11 +1,8 @@
 import { z } from 'zod/v4' // 引入 Zod: 定义 & 检验输入输出结构
 import { buildTool, type ToolDef } from '../../Tool.js' // 构建工具对象, 工具类型约束
-import type { PermissionUpdate } from '../../types/permissions.js' // 权限系统, 用于"添加规则" 的类型
 import { formatFileSize } from '../../utils/format.js' // 字节 -> 可读格式(KB/MB)
 import { lazySchema } from '../../utils/lazySchema.js' // 延迟初始化 schema (避免循环依赖)
 import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js' // 权限检查返回结构
-import { getRuleByContentsForTool } from '../../utils/permissions/permissions.js' // 根据规则内容查权限 (allow / deny / ask)
-import { isPreapprovedHost } from './preapproved.js' // 判断域名是否白名单 
 import { DESCRIPTION, WEB_FETCH_TOOL_NAME } from './prompt.js' // 工具描述 & 名字
 import {
   getToolUseSummary,
@@ -19,6 +16,7 @@ import {
   getURLMarkdownContent,
   isPreapprovedUrl,
   MAX_MARKDOWN_LENGTH,
+  UNTRUSTED_BANNER,
 } from './utils.js' // 抓网页, 处理 markdown, 判断 url 是否可信
 
 const inputSchema = lazySchema(() =>
@@ -47,22 +45,6 @@ const outputSchema = lazySchema(() =>
 type OutputSchema = ReturnType<typeof outputSchema>
 
 export type Output = z.infer<OutputSchema> // 输出类型推导
-
-function webFetchToolInputToPermissionRuleContent(input: { // 权限规则生成 input -> 权限规则key
-  [k: string]: unknown
-}): string {
-  try {
-    const parsedInput = WebFetchTool.inputSchema.safeParse(input) // 安全解析
-    if (!parsedInput.success) { // 解析失败
-      return `input:${input.toString()}` // fallback
-    }
-    const { url } = parsedInput.data
-    const hostname = new URL(url).hostname // 提取域名
-    return `domain:${hostname}` // 生成规则
-  } catch {
-    return `input:${input.toString()}`
-  }
-}
 
 // Tool 定义开始
 export const WebFetchTool = buildTool({
@@ -106,82 +88,12 @@ export const WebFetchTool = buildTool({
   toAutoClassifierInput(input) {
     return input.prompt ? `${input.url}: ${input.prompt}` : input.url
   },
-  // 权限检查
-  async checkPermissions(input, context): Promise<PermissionDecision> {
-    const appState = context.getAppState()
-    const permissionContext = appState.toolPermissionContext
-
-    // Check if the hostname is in the preapproved list
-    try {
-      const { url } = input as { url: string }
-      const parsedUrl = new URL(url)
-      if (isPreapprovedHost(parsedUrl.hostname, parsedUrl.pathname)) { // 白名单
-        return {
-          behavior: 'allow',
-          updatedInput: input,
-          decisionReason: { type: 'other', reason: 'Preapproved host' },
-        }
-      }
-    } catch {
-      // If URL parsing fails, continue with normal permission checks
-    }
-
-    // Check for a rule specific to the tool input (matching hostname)
-    const ruleContent = webFetchToolInputToPermissionRuleContent(input)
-
-    const denyRule = getRuleByContentsForTool(
-      permissionContext,
-      WebFetchTool,
-      'deny',
-    ).get(ruleContent)
-    if (denyRule) {
-      return {
-        behavior: 'deny',
-        message: `${WebFetchTool.name} denied access to ${ruleContent}.`,
-        decisionReason: {
-          type: 'rule',
-          rule: denyRule,
-        },
-      }
-    }
-
-    const askRule = getRuleByContentsForTool(
-      permissionContext,
-      WebFetchTool,
-      'ask',
-    ).get(ruleContent)
-    if (askRule) {
-      return {
-        behavior: 'ask',
-        message: `VersperClaw requested permissions to use ${WebFetchTool.name}, but you haven't granted it yet.`,
-        decisionReason: {
-          type: 'rule',
-          rule: askRule,
-        },
-        suggestions: buildSuggestions(ruleContent),
-      }
-    }
-
-    const allowRule = getRuleByContentsForTool(
-      permissionContext,
-      WebFetchTool,
-      'allow',
-    ).get(ruleContent)
-    if (allowRule) {
-      return {
-        behavior: 'allow',
-        updatedInput: input,
-        decisionReason: {
-          type: 'rule',
-          rule: allowRule,
-        },
-      }
-    }
-
+  // 权限检查 - 完全开放，允许所有 WebFetch 请求
+  async checkPermissions(_input, _context): Promise<PermissionDecision> {
     return {
-      behavior: 'ask',
-      message: `VersperClaw requested permissions to use ${WebFetchTool.name}, but you haven't granted it yet.`,
-      suggestions: buildSuggestions(ruleContent),
+      behavior: 'allow',
+      updatedInput: _input,
+      decisionReason: { type: 'other', reason: 'All web fetches allowed' },
     }
   },
   async prompt(_options) {
@@ -217,6 +129,9 @@ ${DESCRIPTION}`
   ) {
     const start = Date.now()
 
+    // Provide a default prompt if not provided
+    const effectivePrompt = prompt?.trim() || 'Summarize the main content of this page'
+
     const response = await getURLMarkdownContent(url, abortController)
 
     // Check if we got a redirect to a different host
@@ -238,7 +153,7 @@ Status: ${response.statusCode} ${statusText}
 
 To complete your request, I need to fetch content from the redirected URL. Please use WebFetch again with these parameters:
 - url: "${response.redirectUrl}"
-- prompt: "${prompt}"`
+- prompt: "${effectivePrompt}"`
 
       const output: Output = {
         bytes: Buffer.byteLength(message),
@@ -275,12 +190,17 @@ To complete your request, I need to fetch content from the redirected URL. Pleas
       result = content
     } else {
       result = await applyPromptToMarkdown(
-        prompt,
+        effectivePrompt,
         content,
         abortController.signal,
         isNonInteractiveSession,
         isPreapproved,
       )
+    }
+
+    // Add untrusted banner for non-preapproved content
+    if (!isPreapproved) {
+      result = `${UNTRUSTED_BANNER}\n\n${result}`
     }
 
     // Binary content (PDFs, etc.) was additionally saved to disk with a
@@ -311,14 +231,3 @@ To complete your request, I need to fetch content from the redirected URL. Pleas
     }
   },
 } satisfies ToolDef<InputSchema, Output>)
-
-function buildSuggestions(ruleContent: string): PermissionUpdate[] {
-  return [
-    {
-      type: 'addRules',
-      destination: 'localSettings',
-      rules: [{ toolName: WEB_FETCH_TOOL_NAME, ruleContent }],
-      behavior: 'allow',
-    },
-  ]
-}

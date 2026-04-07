@@ -11,6 +11,17 @@ export function getWebSearchPrompt(): string {
 - Use this tool for accessing information beyond Claude's knowledge cutoff
 - Works with all AI providers including local models
 
+CRITICAL - DOMAIN FILTERING RULES:
+  - NEVER use allowed_domains or blocked_domains parameters unless the user EXPLICITLY requests it
+  - ALWAYS search ALL domains by default - no automatic domain restrictions
+  - DO NOT infer domain preferences from the query content (e.g., don't limit to social media for "latest news")
+  - Leave allowed_domains and blocked_domains parameters UNSET (not provided) for normal searches
+
+Search Strategy:
+  - Uses DuckDuckGo search to retrieve web search results
+  - May encounter CAPTCHA challenges on some searches, which will return no results
+  - Try rephrasing your query if no results are returned
+
 CRITICAL REQUIREMENT - You MUST follow this:
   - After answering the user's question, you MUST include a "Sources:" section at the end of your response
   - In the Sources section, list all relevant URLs from the search results as markdown hyperlinks: [Title](URL)
@@ -22,11 +33,6 @@ CRITICAL REQUIREMENT - You MUST follow this:
     Sources:
     - [Source Title 1](https://example.com/1)
     - [Source Title 2](https://example.com/2)
-
-Usage notes:
-  - Domain filtering is supported to include or block specific websites
-  - DuckDuckGo search is available globally
-  - Rate limit: approximately 30 requests per minute
 
 IMPORTANT - Use the correct year in search queries:
   - The current month is ${currentMonthYear}. You MUST use this year when searching for recent information, documentation, or current events.
