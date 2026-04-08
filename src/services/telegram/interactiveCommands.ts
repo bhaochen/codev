@@ -30,9 +30,11 @@ import type {
   TelegramInlineKeyboardMarkup,
 } from './telegramTypes.js'
 
-// 辅助函数：记录 Telegram 相关日志
+// 辅助函数：记录 Telegram 相关日志（已禁用）
 function logTelegramDebug(message: string, level: 'debug' | 'error' | 'info' = 'debug'): void {
-  logForDebugging(`[telegram] ${message}`, { level })
+  // Telegram 功能已完成，禁用日志输出
+  // 如需调试，可以临时取消注释下面的代码
+  // logForDebugging(`[telegram] ${message}`, { level })
 }
 
 const COPILOT_CLIENT_ID = 'Ov23li8tweQw6odWQebz'

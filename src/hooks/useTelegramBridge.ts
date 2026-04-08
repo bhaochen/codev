@@ -15,8 +15,11 @@ import type { Message } from '../types/message.js'
 import { enqueue } from '../utils/messageQueueManager.js'
 import { getContentText } from '../utils/messages.js'
 
-// 日志函数 - 只写入文件
+// 日志函数 - 已禁用，不再写入文件
 function logTelegramDebug(message: string, level: 'debug' | 'error' | 'info' = 'debug'): void {
+  // Telegram 功能已完成，禁用日志输出到 log.md
+  // 如需调试，可以临时取消注释下面的代码
+  /*
   try {
     const fs = require('node:fs')
     const path = require('node:path')
@@ -27,6 +30,7 @@ function logTelegramDebug(message: string, level: 'debug' | 'error' | 'info' = '
   } catch (error) {
     // 忽略文件写入错误
   }
+  */
 }
 
 type Props = {
