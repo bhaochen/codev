@@ -3,7 +3,6 @@ import { z } from 'zod/v4'
 import { buildTool, type ToolDef } from '../../Tool.js'
 import { lazySchema } from '../../utils/lazySchema.js'
 import { logError } from '../../utils/log.js'
-import { jsonStringify } from '../../utils/slowOperations.js'
 import { getWebSearchPrompt, WEB_SEARCH_TOOL_NAME } from './prompt.js'
 import {
   getToolUseSummary,
@@ -15,30 +14,21 @@ import {
 const inputSchema = lazySchema(() =>
   z.strictObject({
     query: z.string().min(2).describe('The search query to use'),
-    allowed_domains: z
-      .array(z.string())
-      .optional()
-      .describe('Only include search results from these domains'),
-    blocked_domains: z
-      .array(z.string())
-      .optional()
-      .describe('Never include search results from these domains'),
   }),
 )
-type InputSchema = ReturnType<typeof inputSchema>
 
-type Input = z.infer<InputSchema>
+type Input = z.infer<ReturnType<typeof inputSchema>>
 
 const searchResultSchema = lazySchema(() => {
   const searchHitSchema = z.object({
-    title: z.string().describe('The title of the search result'),
-    url: z.string().describe('The URL of the search result'),
-    snippet: z.string().optional().describe('The snippet/description of the search result'),
+    title: z.string(),
+    url: z.string(),
+    snippet: z.string().optional(),
   })
 
   return z.object({
-    tool_use_id: z.string().describe('ID of the tool use'),
-    content: z.array(searchHitSchema).describe('Array of search hits'),
+    tool_use_id: z.string(),
+    content: z.array(searchHitSchema),
   })
 })
 
@@ -46,426 +36,228 @@ export type SearchResult = z.infer<ReturnType<typeof searchResultSchema>>
 
 const outputSchema = lazySchema(() =>
   z.object({
-    query: z.string().describe('The search query that was executed'),
-    results: z
-      .array(z.union([searchResultSchema(), z.string()]))
-      .describe('Search results and/or text commentary from the model'),
-    durationSeconds: z
-      .number()
-      .describe('Time taken to complete the search operation'),
+    query: z.string(),
+    results: z.array(z.union([searchResultSchema(), z.string()])),
+    durationSeconds: z.number(),
   }),
 )
-type OutputSchema = ReturnType<typeof outputSchema>
 
-export type Output = z.infer<OutputSchema>
+export type Output = z.infer<ReturnType<typeof outputSchema>>
 
-// Re-export WebSearchProgress from centralized types to break import cycles
 export type { WebSearchProgress } from '../../types/tools.js'
-
 import type { WebSearchProgress } from '../../types/tools.js'
 
 /**
- * Search using DuckDuckGo via Python webtools script
- * This is the primary and only search method
+ * ✅ 使用 SearXNG 本地搜索
  */
-async function searchDuckDuckGoAPI(
-  query: string,
-  options: {
-    region?: string
-    timelimit?: string
-    page?: number
-  } = {}
+async function searchSearXNG(
+  query: string
 ): Promise<Array<{ title: string; url: string; snippet?: string }>> {
-  const { page = 1 } = options
-
-  console.log(`[WebSearch] Searching DuckDuckGo for: "${query}" (via Python webtools)`)
+  console.log(`[WebSearch] Searching SearXNG for: "${query}"`)
 
   try {
-    const { spawn } = await import('child_process')
-    
-    return new Promise((resolve, reject) => {
-      const pythonScript = process.cwd() + '/scripts/python_webtools.py'
-      const maxResults = 10
-      
-      const child = spawn('.venv/bin/python', [pythonScript, 'web_search', query, String(maxResults)], {
-        cwd: process.cwd(),
-      })
+    const url = new URL('http://localhost:8080/search')
+    url.searchParams.set('q', query)
+    url.searchParams.set('format', 'json')
 
-      let stdout = ''
-      let stderr = ''
-      let timedOut = false
-      
-      // Set timeout to prevent hanging
-      const timeout = setTimeout(() => {
-        timedOut = true
-        console.error('[WebSearch] Python process timed out after 30 seconds')
-        child.kill('SIGKILL')
-        reject(new Error('Search timeout: Python process took too long to respond'))
-      }, 30000) // 30 seconds timeout
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 10000)
 
-      child.stdout.on('data', (data) => {
-        stdout += data.toString()
-      })
-
-      child.stderr.on('data', (data) => {
-        stderr += data.toString()
-      })
-
-      child.on('close', (code) => {
-        clearTimeout(timeout)
-        
-        if (timedOut) {
-          return // Already handled by timeout
-        }
-
-        if (code !== 0) {
-          console.error('[WebSearch] Python script failed:', stderr)
-          reject(new Error(`Python script failed: ${stderr}`))
-          return
-        }
-
-        try {
-          const result = JSON.parse(stdout)
-          
-          if (!result.success) {
-            console.error('[WebSearch] Python search failed:', result.error)
-            reject(new Error(result.error))
-            return
-          }
-
-          console.log(`[WebSearch] Python returned ${result.count} results`)
-          
-          // Convert Python results to our format
-          const results: Array<{ title: string; url: string; snippet?: string }> = result.results.map((r: any) => ({
-            title: r.title,
-            url: r.url,
-            snippet: r.content || undefined,
-          }))
-          
-          resolve(results)
-        } catch (error) {
-          console.error('[WebSearch] Failed to parse Python output:', error)
-          reject(new Error(`Failed to parse Python output: ${error}`))
-        }
-      })
-
-      child.on('error', (error) => {
-        clearTimeout(timeout)
-        console.error('[WebSearch] Failed to start Python process:', error)
-        reject(error)
-      })
+    const res = await fetch(url.toString(), {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; WebSearchTool/1.0)',
+        'Accept': 'application/json',
+      },
     })
+
+    clearTimeout(timeout)
+
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`)
+    }
+
+    const data = await res.json()
+
+    return (data.results || [])
+      .slice(0, 10)
+      .map((r: any) => ({
+        title: r.title,
+        url: r.url,
+        snippet: r.content,
+      }))
   } catch (error) {
-    console.error('[WebSearch] Failed to search:', error)
-    logError('WebSearch failed', error)
-    throw new Error(`Unable to search: ${error instanceof Error ? error.message : String(error)}`)
+    console.error('[WebSearch] SearXNG failed:', error)
+    logError('SearXNG search failed', error)
+    throw new Error(
+      `SearXNG search failed: ${error instanceof Error ? error.message : String(error)}`
+    )
   }
 }
 
 /**
- * Filter search results by domain
- */
-function filterDomains(
-  results: Array<{ url: string }>,
-  allowedDomains?: string[],
-  blockedDomains?: string[]
-): Array<{ url: string }> {
-  return results.filter(result => {
-    try {
-      const url = new URL(result.url)
-      const domain = url.hostname
-
-      if (allowedDomains?.length > 0) {
-        return allowedDomains.some(allowed =>
-          domain === allowed || domain.endsWith(`.${allowed}`)
-        )
-      }
-
-      if (blockedDomains?.length > 0) {
-        return !blockedDomains.some(blocked =>
-          domain === blocked || domain.endsWith(`.${blocked}`)
-        )
-      }
-
-      return true
-    } catch {
-      // Invalid URL, filter it out
-      return false
-    }
-  })
-}
-
-/**
- * Remove HTML tags and decode HTML entities
+ * 文本清洗
  */
 function stripTags(text: string): string {
-  // Remove script and style tags with their content
-  text = text.replace(/<script[\s\S]*?<\/script>/gi, '')
-  text = text.replace(/<style[\s\S]*?<\/style>/gi, '')
-  
-  // Remove all remaining HTML tags
-  text = text.replace(/<[^>]+>/g, '')
-  
-  // Decode basic HTML entities
-  text = text.replace(/&amp;/g, '&')
-  text = text.replace(/&lt;/g, '<')
-  text = text.replace(/&gt;/g, '>')
-  text = text.replace(/&quot;/g, '"')
-  text = text.replace(/&#39;/g, "'")
-  text = text.replace(/&nbsp;/g, ' ')
-  
-  return text.trim()
+  return text
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .trim()
 }
 
-/**
- * Normalize whitespace in text
- */
 function normalizeText(text: string): string {
-  // Collapse multiple spaces and tabs into single space
-  text = text.replace(/[ \t]+/g, ' ')
-  
-  // Collapse 3 or more consecutive newlines into 2 newlines
-  text = text.replace(/\n{3,}/g, '\n\n')
-  
-  return text.trim()
+  return text.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim()
 }
 
-/**
- * Clean and normalize search result fields
- */
-function cleanSearchResult(result: { title?: string; snippet?: string }): { title?: string; snippet?: string } {
-  const cleaned: { title?: string; snippet?: string } = {}
-  
-  if (result.title !== undefined) {
-    cleaned.title = normalizeText(stripTags(result.title))
+function cleanSearchResult(result: any) {
+  return {
+    title: result.title ? normalizeText(stripTags(result.title)) : undefined,
+    snippet: result.snippet ? normalizeText(stripTags(result.snippet)) : undefined,
   }
-  
-  if (result.snippet !== undefined) {
-    cleaned.snippet = normalizeText(stripTags(result.snippet))
-  }
-  
-  return cleaned
 }
 
-export const WebSearchTool = buildTool<InputSchema, Output, WebSearchProgress>({
+export const WebSearchTool = buildTool({
   name: WEB_SEARCH_TOOL_NAME,
-  description: 'Search the web and return search results with titles, URLs, and snippets.',
+  description: 'Search the web using local SearXNG',
+
   getToolUseSummary,
   getActivityDescription(input) {
-    const summary = getToolUseSummary(input)
-    return summary ? `Searching for ${summary}` : 'Searching the web'
+    return input?.query ? `Searching for "${input.query}"` : 'Searching the web'
   },
+
   isEnabled() {
-    // Jina Search works with all providers, including local models
     return true
   },
-  get inputSchema(): InputSchema {
+
+  get inputSchema() {
     return inputSchema()
   },
-  get outputSchema(): OutputSchema {
+
+  get outputSchema() {
     return outputSchema()
   },
+
   isConcurrencySafe() {
     return true
   },
+
   isReadOnly() {
     return true
   },
+
   toAutoClassifierInput(input) {
     return input?.query ?? ''
   },
-  async checkPermissions(_input, _context): Promise<PermissionResult> {
-    // 权限全开，允许所有 WebSearch 请求
-    // 同时自动过滤掉 AI 模型自动添加的域名限制参数
-    const cleanedInput = { ..._input }
-    delete cleanedInput.allowed_domains
-    delete cleanedInput.blocked_domains
-    
+
+  async checkPermissions(): Promise<PermissionResult> {
     return {
       behavior: 'allow',
-      updatedInput: cleanedInput,
-      decisionReason: { type: 'other', reason: 'All web searches allowed - domain filters removed' },
     }
   },
+
   async prompt() {
     return getWebSearchPrompt()
   },
+
   renderToolUseMessage,
   renderToolUseProgressMessage,
   renderToolResultMessage,
+
   extractSearchText() {
-    // renderToolResultMessage shows only "Did N searches in Xs" chrome —
-    // the results[] content never appears on screen. Heuristic would index
-    // string entries in results[] (phantom match). Nothing to search.
     return ''
   },
-  async validateInput(input, _context) {
-    if (!input) {
-      return {
-        result: false,
-        message: 'Error: Missing input',
-        errorCode: 1,
-      }
+
+  async validateInput(input) {
+    if (!input?.query) {
+      return { result: false, message: 'Missing query', errorCode: 1 }
     }
-    const { query } = input
-    if (!query?.length) {
-      return {
-        result: false,
-        message: 'Error: Missing query',
-        errorCode: 1,
-      }
-    }
-    // 移除域名限制检查，因为会在 checkPermissions 中自动清理
     return { result: true }
   },
-  async call(input, context, _canUseTool, _parentMessage, onProgress) {
-    const startTime = performance.now()
-    
-    if (!input?.query) {
-      const endTime = performance.now()
-      return {
-        query: '',
-        results: ['Error: Missing query'],
-        durationSeconds: (endTime - startTime) / 1000,
-      }
-    }
-    
-    const { query, allowed_domains, blocked_domains } = input
 
-    // Progress update: starting search
-    if (onProgress) {
-      onProgress({
-        toolUseID: 'search-progress-1',
-        data: { type: 'query_update', query },
-      })
-    }
+  async call(input, _context, _canUseTool, _parentMessage, onProgress) {
+    const start = performance.now()
 
     try {
-      // Add a small delay before making the request to avoid triggering anti-scraping
+      if (!input?.query || input.query.trim() === '') {
+        return {
+          query: input?.query || '',
+          results: ['Error: Missing query'],
+          durationSeconds: (performance.now() - start) / 1000,
+        }
+      }
+
       if (onProgress) {
         onProgress({
-          toolUseID: 'search-delay',
-          data: { type: 'delay_start' },
+          toolUseID: 'search-start',
+          data: { type: 'query_update', query: input.query },
         })
       }
-      await new Promise(resolve => setTimeout(resolve, 1000))
 
-      // Use DuckDuckGo Search only
-      const results = await searchDuckDuckGoAPI(query)
+      const results = await searchSearXNG(input.query)
 
-      // Filter results by domain if specified
-      let filteredResults = results
-      if (allowed_domains || blocked_domains) {
-        filteredResults = filterDomains(
-          results,
-          allowed_domains,
-          blocked_domains
-        )
-      }
-
-      // Clean and normalize search results
-      const cleanedResults = filteredResults.map(r => ({
+      const cleaned = results.map(r => ({
         ...r,
         ...cleanSearchResult(r),
       }))
 
-      // Progress update: results received
-      if (onProgress) {
-        onProgress({
-          toolUseID: 'search-progress-2',
-          data: {
-            type: 'search_results_received',
-            resultCount: cleanedResults.length,
-            query,
-          },
-        })
-      }
-
-      // Convert to output format
-      const searchResults: (SearchResult | string)[] = []
-      
-      if (cleanedResults.length === 0) {
-        searchResults.push(`No results for: ${query}`)
-      } else {
-        searchResults.push({
-          tool_use_id: 'search-1',
-          content: cleanedResults.map(r => ({
-            title: r.title,
-            url: r.url,
-            snippet: r.snippet,
-          }))
-        })
-      }
-
-      const endTime = performance.now()
-      const durationSeconds = (endTime - startTime) / 1000
+      const output =
+        cleaned.length === 0
+          ? [`No results for: ${input.query}`]
+          : [
+              {
+                tool_use_id: 'search-1',
+                content: cleaned,
+              },
+            ]
 
       return {
-        query,
-        results: searchResults,
-        durationSeconds,
+        query: input.query,
+        results: output,
+        durationSeconds: (performance.now() - start) / 1000,
       }
     } catch (error) {
       logError(error)
-      
-      const endTime = performance.now()
-      const durationSeconds = (endTime - startTime) / 1000
 
       return {
-        query,
+        query: input.query,
         results: [`Error: ${error instanceof Error ? error.message : String(error)}`],
-        durationSeconds,
+        durationSeconds: (performance.now() - start) / 1000,
       }
     }
   },
+
   mapToolResultToToolResultBlockParam(output, toolUseID) {
     if (!output) {
       return {
         tool_use_id: toolUseID,
         type: 'tool_result',
-        content: 'Error: Missing output',
+        content: 'Error',
       }
     }
-    const { query, results } = output
 
-    let formattedOutput = query 
-      ? `Web search results for query: "${query}"\n\n`
-      : 'Web search results:\n\n'
+    let text = `Results for "${output.query}"\n\n`
 
-    // Process the results array - it can contain both string summaries and search result objects.
-    // Guard against null/undefined entries that can appear after JSON round-tripping
-    // (e.g., from compaction or transcript deserialization).
-    ;(results ?? []).forEach(result => {
-      if (result == null) {
-        return
-      }
-      if (typeof result === 'string') {
-        // Text summary
-        formattedOutput += result + '\n\n'
+    for (const r of output.results) {
+      if (typeof r === 'string') {
+        text += r + '\n\n'
       } else {
-        // Search result with links - format as readable text
-        if (result.content?.length > 0) {
-          result.content.forEach((item: any, index: number) => {
-            formattedOutput += `${index + 1}. **${item.title || 'Untitled'}**\n`
-            formattedOutput += `   URL: ${item.url}\n`
-            if (item.snippet) {
-              formattedOutput += `   ${item.snippet}\n`
-            }
-            formattedOutput += '\n'
-          })
-        } else {
-          formattedOutput += 'No links found.\n\n'
-        }
+        r.content.forEach((item: any, i: number) => {
+          text += `${i + 1}. ${item.title}\n${item.url}\n${item.snippet || ''}\n\n`
+        })
       }
-    })
-
-    formattedOutput +=
-      '\nREMINDER: You MUST include the sources above in your response to the user using markdown hyperlinks.'
+    }
 
     return {
       tool_use_id: toolUseID,
       type: 'tool_result',
-      content: formattedOutput.trim(),
+      content: text,
     }
   },
-}) satisfies ToolDef<InputSchema, Output, WebSearchProgress>
+}) satisfies ToolDef<any, Output, WebSearchProgress>
