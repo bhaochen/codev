@@ -74,9 +74,9 @@ describe('WebSearchTool', () => {
       )
 
       expect(result).toBeDefined()
-      expect(result.query).toBe('typescript programming')
-      expect(Array.isArray(result.results)).toBe(true)
-      expect(result.durationSeconds).toBeGreaterThan(0)
+      expect(result.data.query).toBe('typescript programming')
+      expect(Array.isArray(result.data.results)).toBe(true)
+      expect(result.data.durationSeconds).toBeGreaterThan(0)
     }, 60000)
 
     test('should return structured results', async () => {
@@ -87,9 +87,9 @@ describe('WebSearchTool', () => {
         null
       )
 
-      expect(result.results.length).toBeGreaterThanOrEqual(0)
+      expect(result.data.results.length).toBeGreaterThanOrEqual(0)
 
-      const first = result.results[0]
+      const first = result.data.results[0]
       if (first && typeof first !== 'string') {
         expect(first).toHaveProperty('tool_use_id')
         expect(Array.isArray(first.content)).toBe(true)
@@ -106,7 +106,7 @@ describe('WebSearchTool', () => {
         null
       )
 
-      expect(result.results.some(r => typeof r === 'string' && r.includes('Error'))).toBe(true)
+      expect(result.data.results.some(r => typeof r === 'string' && r.includes('Error'))).toBe(true)
     })
 
     test('should not crash on failure', async () => {
@@ -219,9 +219,9 @@ describe('WebSearchTool', () => {
       )
 
       expect(result).toBeDefined()
-      expect(result.query).toBe('milet 的最新动态')
-      expect(Array.isArray(result.results)).toBe(true)
-      expect(result.durationSeconds).toBeGreaterThan(0)
+      expect(result.data.query).toBe('milet 的最新动态')
+      expect(Array.isArray(result.data.results)).toBe(true)
+      expect(result.data.durationSeconds).toBeGreaterThan(0)
     }, 60000)
   })
 })

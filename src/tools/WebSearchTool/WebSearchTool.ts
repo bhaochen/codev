@@ -286,10 +286,9 @@ export const WebSearchTool = buildTool({
   },
 
   async checkPermissions(): Promise<PermissionResult> {
-    logToMarkdown('DEBUG', 'checkPermissions() 被调用')
-    const result = { behavior: 'allow' as const }
-    logToMarkdown('DEBUG', '权限检查结果', result)
-    return result
+    return {
+      behavior: 'allow',
+    }
   },
 
   async prompt() {
@@ -322,7 +321,6 @@ export const WebSearchTool = buildTool({
 
     logToMarkdown('INFO', 'WebSearchTool.call() 被调用')
     logToMarkdown('DEBUG', '输入参数', input)
-    logToMarkdown('DEBUG', '上下文信息', { hasContext: !!_context, hasCanUseTool: !!_canUseTool, hasParentMessage: !!_parentMessage, hasOnProgress: !!onProgress })
 
     // 断言：input 必须存在
     console.assert(
@@ -335,9 +333,11 @@ export const WebSearchTool = buildTool({
       if (!input?.query || input.query.trim() === '') {
         logToMarkdown('WARN', '查询参数为空，返回错误')
         return {
-          query: input?.query || '',
-          results: ['Error: Missing query'],
-          durationSeconds: (performance.now() - start) / 1000,
+          data: {
+            query: input?.query || '',
+            results: ['Error: Missing query'],
+            durationSeconds: (performance.now() - start) / 1000,
+          },
         }
       }
 
@@ -393,12 +393,13 @@ export const WebSearchTool = buildTool({
       }
       logToMarkdown('INFO', '搜索成功完成')
       logToMarkdown('INFO', '最终统计', finalStats)
-      logToMarkdown('DEBUG', '返回结果结构', output)
 
       return {
-        query: input.query,
-        results: output,
-        durationSeconds: duration,
+        data: {
+          query: input.query,
+          results: output,
+          durationSeconds: duration,
+        },
       }
     } catch (error) {
       const duration = (performance.now() - start) / 1000
@@ -413,20 +414,17 @@ export const WebSearchTool = buildTool({
       logError(error)
 
       return {
-        query: input?.query || '',
-        results: [`Error: ${errorMessage}`],
-        durationSeconds: duration,
+        data: {
+          query: input?.query || '',
+          results: [`Error: ${errorMessage}`],
+          durationSeconds: duration,
+        },
       }
     }
   },
 
   mapToolResultToToolResultBlockParam(output, toolUseID) {
-    logToMarkdown('INFO', 'mapToolResultToToolResultBlockParam() 被调用')
-    logToMarkdown('DEBUG', 'toolUseID', toolUseID)
-    logToMarkdown('DEBUG', 'output 参数', output)
-
     if (!output) {
-      logToMarkdown('WARN', 'output 为空，返回错误')
       return {
         tool_use_id: toolUseID,
         type: 'tool_result',
@@ -434,50 +432,22 @@ export const WebSearchTool = buildTool({
       }
     }
 
-    logToMarkdown('DEBUG', '开始格式化结果')
-    logToMarkdown('DEBUG', '查询内容', output.query)
-    logToMarkdown('DEBUG', '结果数量', output.results.length)
-
     let text = `Results for "${output.query}"\n\n`
 
-    for (let i = 0; i < output.results.length; i++) {
-      const r = output.results[i]
-      logToMarkdown('DEBUG', `处理结果 ${i + 1}/${output.results.length}`, {
-        type: typeof r,
-        isString: typeof r === 'string',
-        hasContent: !!(r as any).content
-      })
-
+    for (const r of output.results) {
       if (typeof r === 'string') {
         text += r + '\n\n'
-        logToMarkdown('DEBUG', `结果 ${i + 1} 是字符串:`, r)
       } else {
-        const content = (r as any).content
-        logToMarkdown('DEBUG', `结果 ${i + 1} 是对象，内容数量:`, content?.length || 0)
-
-        content.forEach((item: any, j: number) => {
-          const itemText = `${j + 1}. ${item.title}\n${item.url}\n${item.snippet || ''}\n\n`
-          text += itemText
-          logToMarkdown('DEBUG', `添加项目 ${j + 1}:`, {
-            hasTitle: !!item.title,
-            hasUrl: !!item.url,
-            hasSnippet: !!item.snippet
-          })
+        r.content.forEach((item: any, i: number) => {
+          text += `${i + 1}. ${item.title}\n${item.url}\n${item.snippet || ''}\n\n`
         })
       }
     }
 
-    const finalResult = {
+    return {
       tool_use_id: toolUseID,
       type: 'tool_result',
       content: text,
     }
-
-    logToMarkdown('INFO', '格式化完成')
-    logToMarkdown('DEBUG', '最终结果类型', typeof finalResult.content)
-    logToMarkdown('DEBUG', '最终结果长度', finalResult.content.length)
-    logToMarkdown('DEBUG', '最终结果预览 (前100字符)', finalResult.content.slice(0, 100))
-
-    return finalResult
   },
 }) satisfies ToolDef<any, Output, WebSearchProgress>
