@@ -11,7 +11,6 @@ import {
   renderToolUseMessage,
   renderToolUseProgressMessage,
 } from './UI.js'
-import { jinaSearch } from './jina_search'
 
 const inputSchema = lazySchema(() =>
   z.strictObject({
@@ -67,7 +66,7 @@ import type { WebSearchProgress } from '../../types/tools.js'
 
 /**
  * Search using DuckDuckGo via Python webtools script
- * Uses subprocess to call Python script with nanobot implementation
+ * This is the primary and only search method
  */
 async function searchDuckDuckGoAPI(
   query: string,
@@ -94,6 +93,15 @@ async function searchDuckDuckGoAPI(
 
       let stdout = ''
       let stderr = ''
+      let timedOut = false
+      
+      // Set timeout to prevent hanging
+      const timeout = setTimeout(() => {
+        timedOut = true
+        console.error('[WebSearch] Python process timed out after 30 seconds')
+        child.kill('SIGKILL')
+        reject(new Error('Search timeout: Python process took too long to respond'))
+      }, 30000) // 30 seconds timeout
 
       child.stdout.on('data', (data) => {
         stdout += data.toString()
@@ -104,6 +112,12 @@ async function searchDuckDuckGoAPI(
       })
 
       child.on('close', (code) => {
+        clearTimeout(timeout)
+        
+        if (timedOut) {
+          return // Already handled by timeout
+        }
+
         if (code !== 0) {
           console.error('[WebSearch] Python script failed:', stderr)
           reject(new Error(`Python script failed: ${stderr}`))
@@ -136,6 +150,7 @@ async function searchDuckDuckGoAPI(
       })
 
       child.on('error', (error) => {
+        clearTimeout(timeout)
         console.error('[WebSearch] Failed to start Python process:', error)
         reject(error)
       })
@@ -335,42 +350,8 @@ export const WebSearchTool = buildTool<InputSchema, Output, WebSearchProgress>({
       }
       await new Promise(resolve => setTimeout(resolve, 1000))
 
-      // Use Jina Search
-      console.log(`[WebSearch] Using Jina Search for: "${query}"`)
-      const jinaResult = await jinaSearch(query)
-
-      // Parse Jina search results
-      let results: Array<{ title: string; url: string; snippet?: string }> = []
-
-      if (jinaResult.startsWith('Error:')) {
-        throw new Error(`Jina Search failed: ${jinaResult}`)
-      } else {
-        // Parse the formatted results
-        const lines = jinaResult.split('\n').filter(line => line.trim())
-
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i]
-          // Match pattern: "1. Title\n   URL\n   snippet"
-          const match = line.match(/^\d+\.\s+(.+)$/)
-          if (match) {
-            const title = match[1]
-            if (i + 1 < lines.length && lines[i + 1].startsWith('   ')) {
-              const urlLine = lines[i + 1].trim()
-              const urlMatch = urlLine.match(/^URL:\s*(.+)$/)
-              const url = urlMatch ? urlMatch[1] : ''
-              let snippet = ''
-
-              if (i + 2 < lines.length && lines[i + 2].startsWith('   ')) {
-                snippet = lines[i + 2].trim()
-              }
-
-              if (url) {
-                results.push({ title, url, snippet })
-              }
-            }
-          }
-        }
-      }
+      // Use DuckDuckGo Search only
+      const results = await searchDuckDuckGoAPI(query)
 
       // Filter results by domain if specified
       let filteredResults = results

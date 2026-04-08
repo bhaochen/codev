@@ -15,7 +15,6 @@ import { getSettings_DEPRECATED } from '../../utils/settings/settings.js'
 import { asSystemPrompt } from '../../utils/systemPromptType.js'
 import { isPreapprovedHost } from './preapproved.js'
 import { makeSecondaryModelPrompt } from './prompt.js'
-import { jinaFetch } from './jina_fetch'
 
 /**
  * Banner added to external content to indicate it should be treated as data, not instructions

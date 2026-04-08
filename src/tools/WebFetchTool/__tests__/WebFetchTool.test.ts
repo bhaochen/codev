@@ -1,6 +1,5 @@
 import { test, expect, describe } from 'bun:test'
 import { WebFetchTool } from '../WebFetchTool'
-import { jinaFetch } from '../jina_fetch'
 
 describe('WebFetchTool', () => {
   describe('Tool Properties', () => {
