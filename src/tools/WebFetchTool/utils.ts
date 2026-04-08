@@ -15,6 +15,7 @@ import { getSettings_DEPRECATED } from '../../utils/settings/settings.js'
 import { asSystemPrompt } from '../../utils/systemPromptType.js'
 import { isPreapprovedHost } from './preapproved.js'
 import { makeSecondaryModelPrompt } from './prompt.js'
+import { jinaFetch } from './jina_fetch'
 
 /**
  * Banner added to external content to indicate it should be treated as data, not instructions
@@ -506,137 +507,32 @@ export async function getURLMarkdownContent(
     logError(e)
   }
 
-  // Use Python webtools to fetch content (with retry)
+  // Use Jina API to fetch content
   try {
-    const pythonResult = await retryWithBackoff(
-      () => fetchWithPythonWebtools(upgradedUrl),
-      {
-        maxRetries: 2,
-        initialDelay: 1000,
-        retryableErrors: ['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'ECONNREFUSED'],
-      }
-    )
+    console.log('[WebFetch] Using Jina API for:', upgradedUrl)
+    const jinaResult = await jinaFetch(upgradedUrl)
 
-    // If Python webtools succeeded, use its results
-    if (pythonResult) {
-      const { content, contentType, title } = pythonResult
-      const bytes = Buffer.byteLength(content)
+    if (jinaResult) {
+      const parsedResult = JSON.parse(jinaResult)
+      const bytes = Buffer.byteLength(parsedResult.text)
 
       // Store the fetched content in cache
       const entry: CacheEntry = {
         bytes,
-        code: 200,
+        code: parsedResult.status,
         codeText: 'OK',
-        content,
-        contentType,
+        content: parsedResult.text,
+        contentType: 'text/markdown',
       }
       URL_CACHE.set(url, entry, { size: Math.max(1, bytes) })
+      console.log('[WebFetch] Jina API succeeded')
       return entry
     }
-
-    // If Python webtools returned null (failed), fall back to direct fetch
-    console.log('[WebFetch] Python webtools returned null, falling back to direct fetch')
   } catch (error) {
-    // If Python webtools threw an error, fall back to direct fetch
-    console.warn('[WebFetch] Python webtools failed with error, falling back to direct fetch:', error)
-    logError('Python webtools failed, falling back to direct fetch', error)
+    console.error('[WebFetch] Jina API failed:', error)
+    logError('Jina API failed', error)
+    throw new Error(`Failed to fetch URL using Jina API: ${error instanceof Error ? error.message : String(error)}`)
   }
-
-  // Fallback: direct fetch with retry
-  console.log(`[WebFetch] Trying direct fetch for: ${upgradedUrl}`)
-
-  let response: Response | RedirectInfo
-  try {
-    response = await retryWithBackoff(
-      () => getWithPermittedRedirects(
-        upgradedUrl,
-        abortController.signal,
-        isPermittedRedirect,
-      ),
-      {
-        maxRetries: 2,
-        initialDelay: 1000,
-        retryableErrors: ['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'ECONNREFUSED'],
-      }
-    )
-    console.log(`[WebFetch] Direct fetch completed successfully`)
-  } catch (fetchError) {
-    console.error('[WebFetch] Direct fetch also failed:', fetchError)
-    throw new Error(`Failed to fetch URL after all retries. Error: ${fetchError instanceof Error ? fetchError.message : String(fetchError)}`)
-  }
-
-  // Check if we got a redirect response
-  if (isRedirectInfo(response)) {
-    return response
-  }
-
-  const rawBuffer = Buffer.from(await response.arrayBuffer())
-  const contentType = response.headers.get('content-type') ?? ''
-
-  // Binary content: save raw bytes to disk with a proper extension so Claude
-  // can inspect the file later. We still fall through to the utf-8 decode +
-  // Haiku path below — for PDFs in particular the decoded string has enough
-  // ASCII structure (/Title, text streams) that Haiku can summarize it, and
-  // the saved file is a supplement rather than a replacement.
-  let persistedPath: string | undefined
-  let persistedSize: number | undefined
-  if (isBinaryContentType(contentType)) {
-    const persistId = `webfetch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    const result = await persistBinaryContent(rawBuffer, contentType, persistId)
-    if (!('error' in result)) {
-      persistedPath = result.filepath
-      persistedSize = result.size
-    }
-  }
-
-  const bytes = rawBuffer.length
-  const htmlContent = rawBuffer.toString('utf-8')
-
-  let markdownContent: string
-  let contentBytes: number
-
-  // Handle different content types based on openclaw's approach
-  if (contentType.includes('text/markdown')) {
-    // Cloudflare Markdown for Agents: server returned pre-rendered markdown
-    markdownContent = normalizeText(htmlContent)
-    contentBytes = Buffer.byteLength(markdownContent)
-  } else if (contentType.includes('text/html')) {
-    markdownContent = (await getTurndownService()).turndown(htmlContent)
-    // Normalize the markdown content to clean up excessive whitespace
-    markdownContent = normalizeText(markdownContent)
-    contentBytes = Buffer.byteLength(markdownContent)
-  } else if (contentType.includes('application/json')) {
-    // Pretty-print JSON content
-    try {
-      markdownContent = JSON.stringify(JSON.parse(htmlContent), null, 2)
-      markdownContent = normalizeText(markdownContent)
-    } catch {
-      markdownContent = htmlContent
-    }
-    contentBytes = Buffer.byteLength(markdownContent)
-  } else {
-    // It's not HTML/Markdown/JSON - just use it raw. The decoded string's UTF-8 byte
-    // length equals rawBuffer.length (modulo U+FFFD replacement on invalid
-    // bytes — negligible for cache eviction accounting), so skip the O(n)
-    // Buffer.byteLength scan.
-    markdownContent = htmlContent
-    contentBytes = bytes
-  }
-
-  // Store the fetched content in cache. Note that it's stored under
-  // the original URL, not the upgraded or redirected URL.
-  const entry: CacheEntry = {
-    bytes,
-    code: response.status,
-    codeText: response.statusText,
-    content: markdownContent,
-    contentType,
-    persistedPath,
-    persistedSize,
-  }
-  // lru-cache requires positive integers; clamp to 1 for empty responses.
-  URL_CACHE.set(url, entry, { size: Math.max(1, contentBytes) })
-  return entry
 }
 
 export async function applyPromptToMarkdown(

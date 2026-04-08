@@ -11,6 +11,7 @@ import {
   renderToolUseMessage,
   renderToolUseProgressMessage,
 } from './UI.js'
+import { jinaSearch } from './jina_search'
 
 const inputSchema = lazySchema(() =>
   z.strictObject({
@@ -334,8 +335,42 @@ export const WebSearchTool = buildTool<InputSchema, Output, WebSearchProgress>({
       }
       await new Promise(resolve => setTimeout(resolve, 1000))
 
-      // Call DuckDuckGo Search
-      const results = await searchDuckDuckGoAPI(query)
+      // Use Jina Search
+      console.log(`[WebSearch] Using Jina Search for: "${query}"`)
+      const jinaResult = await jinaSearch(query)
+
+      // Parse Jina search results
+      let results: Array<{ title: string; url: string; snippet?: string }> = []
+
+      if (jinaResult.startsWith('Error:')) {
+        throw new Error(`Jina Search failed: ${jinaResult}`)
+      } else {
+        // Parse the formatted results
+        const lines = jinaResult.split('\n').filter(line => line.trim())
+
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i]
+          // Match pattern: "1. Title\n   URL\n   snippet"
+          const match = line.match(/^\d+\.\s+(.+)$/)
+          if (match) {
+            const title = match[1]
+            if (i + 1 < lines.length && lines[i + 1].startsWith('   ')) {
+              const urlLine = lines[i + 1].trim()
+              const urlMatch = urlLine.match(/^URL:\s*(.+)$/)
+              const url = urlMatch ? urlMatch[1] : ''
+              let snippet = ''
+
+              if (i + 2 < lines.length && lines[i + 2].startsWith('   ')) {
+                snippet = lines[i + 2].trim()
+              }
+
+              if (url) {
+                results.push({ title, url, snippet })
+              }
+            }
+          }
+        }
+      }
 
       // Filter results by domain if specified
       let filteredResults = results

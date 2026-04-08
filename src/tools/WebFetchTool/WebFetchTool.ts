@@ -11,13 +11,9 @@ import {
   renderToolUseProgressMessage,
 } from './UI.js' // UI 渲染函数
 import {
-  applyPromptToMarkdown,
   type FetchedContent,
   getURLMarkdownContent,
-  isPreapprovedUrl,
-  MAX_MARKDOWN_LENGTH,
-  UNTRUSTED_BANNER,
-} from './utils.js' // 抓网页, 处理 markdown, 判断 url 是否可信
+} from './utils.js' // 抓网页, 处理 markdown
 
 const inputSchema = lazySchema(() =>
   z.strictObject({ // 严格对象 不允许多字段
@@ -125,41 +121,70 @@ ${DESCRIPTION}`
   renderToolResultMessage,
   async call(
     { url, prompt },
-    { abortController, options: { isNonInteractiveSession } },
+    { abortController },
   ) {
     const start = Date.now()
 
-    // Provide a default prompt if not provided
-    const effectivePrompt = prompt?.trim() || 'Summarize the main content of this page'
+    try {
+      const response = await getURLMarkdownContent(url, abortController)
 
-    const response = await getURLMarkdownContent(url, abortController)
+      // Check if we got a redirect to a different host
+      if ('type' in response && response.type === 'redirect') {
+        const statusText =
+          response.statusCode === 301
+            ? 'Moved Permanently'
+            : response.statusCode === 308
+              ? 'Permanent Redirect'
+              : response.statusCode === 307
+                ? 'Temporary Redirect'
+                : 'Found'
 
-    // Check if we got a redirect to a different host
-    if ('type' in response && response.type === 'redirect') {
-      const statusText =
-        response.statusCode === 301
-          ? 'Moved Permanently'
-          : response.statusCode === 308
-            ? 'Permanent Redirect'
-            : response.statusCode === 307
-              ? 'Temporary Redirect'
-              : 'Found'
-
-      const message = `REDIRECT DETECTED: The URL redirects to a different host.
+        const message = `REDIRECT DETECTED: The URL redirects to a different host.
 
 Original URL: ${response.originalUrl}
 Redirect URL: ${response.redirectUrl}
 Status: ${response.statusCode} ${statusText}
 
 To complete your request, I need to fetch content from the redirected URL. Please use WebFetch again with these parameters:
-- url: "${response.redirectUrl}"
-- prompt: "${effectivePrompt}"`
+- url: "${response.redirectUrl}"`
+
+        const output: Output = {
+          bytes: Buffer.byteLength(message),
+          code: response.statusCode,
+          codeText: statusText,
+          result: message,
+          durationMs: Date.now() - start,
+          url,
+        }
+
+        return {
+          data: output,
+        }
+      }
+
+      const {
+        content,
+        bytes,
+        code,
+        codeText,
+        persistedPath,
+        persistedSize,
+      } = response as FetchedContent
+
+      // Directly return the content fetched by Jina API without Claude processing
+      let result = content
+
+      // Binary content (PDFs, etc.) was additionally saved to disk with a
+      // mime-derived extension. Note it so the user can inspect the raw file.
+      if (persistedPath) {
+        result += `\n\n[Binary content also saved to ${persistedPath}]`
+      }
 
       const output: Output = {
-        bytes: Buffer.byteLength(message),
-        code: response.statusCode,
-        codeText: statusText,
-        result: message,
+        bytes,
+        code,
+        codeText,
+        result,
         durationMs: Date.now() - start,
         url,
       }
@@ -167,60 +192,22 @@ To complete your request, I need to fetch content from the redirected URL. Pleas
       return {
         data: output,
       }
-    }
+    } catch (error) {
+      // Handle errors from getURLMarkdownContent
+      const errorMessage = `Failed to fetch URL: ${error instanceof Error ? error.message : String(error)}`
+      
+      const output: Output = {
+        bytes: Buffer.byteLength(errorMessage),
+        code: 0,
+        codeText: 'Error',
+        result: errorMessage,
+        durationMs: Date.now() - start,
+        url,
+      }
 
-    const {
-      content,
-      bytes,
-      code,
-      codeText,
-      contentType,
-      persistedPath,
-      persistedSize,
-    } = response as FetchedContent
-
-    const isPreapproved = isPreapprovedUrl(url)
-
-    let result: string
-    if (
-      isPreapproved &&
-      contentType.includes('text/markdown') &&
-      content.length < MAX_MARKDOWN_LENGTH
-    ) {
-      result = content
-    } else {
-      result = await applyPromptToMarkdown(
-        effectivePrompt,
-        content,
-        abortController.signal,
-        isNonInteractiveSession,
-        isPreapproved,
-      )
-    }
-
-    // Add untrusted banner for non-preapproved content
-    if (!isPreapproved) {
-      result = `${UNTRUSTED_BANNER}\n\n${result}`
-    }
-
-    // Binary content (PDFs, etc.) was additionally saved to disk with a
-    // mime-derived extension. Note it so Claude can inspect the raw file
-    // if the Haiku summary above isn't enough.
-    if (persistedPath) {
-      result += `\n\n[Binary content (${contentType}, ${formatFileSize(persistedSize ?? bytes)}) also saved to ${persistedPath}]`
-    }
-
-    const output: Output = {
-      bytes,
-      code,
-      codeText,
-      result,
-      durationMs: Date.now() - start,
-      url,
-    }
-
-    return {
-      data: output,
+      return {
+        data: output,
+      }
     }
   },
   mapToolResultToToolResultBlockParam({ result }, toolUseID) {
