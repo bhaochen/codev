@@ -1,7 +1,7 @@
 # VersperClaw: Not Only AI Assistant Code Agent
 
 <div align="center">
-  <img src="assets/VersperAI_Banner.png" alt="VersperAI" width="500">
+  <img src="assets/VersperAI_Banner.png" alt="VersperAI">
 </div>
 
 ## Quick Start
@@ -14,7 +14,14 @@ curl -fsSL https://raw.githubusercontent.com/versperai/VersperClaw/main/install.
 git clone https://github.com/versperai/VersperClaw.git && cd VersperClaw && bun install && bun run build:dev:full && ./cli-dev
 ```
 
-## WebSearch && WebFetch Tools - 100% local free no need remote api fee
+## WebSearch & WebFetch Tools - 100% local free no remote api fee
+
+<p align="center">
+  <img src="assets/WebSearchTool.png"/>
+  <img src="assets/WebSearchTool2.png"/>
+  <img src="assets/WebSearchTool3.png"/>
+</p
+
 
 ```bash
 # local config search engine - searxng in archlinux
