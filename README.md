@@ -11,13 +11,13 @@
 curl -fsSL https://raw.githubusercontent.com/versperai/VersperClaw/main/install.sh | bash
 
 # source install
-git clone https://github.com/versperai/VersperClaw && cd VersperClaw && bun install && bun run build:dev:full && ./cli-dev
+git clone https://github.com/versperai/VersperClaw.git && cd VersperClaw && bun install && bun run build:dev:full && ./cli-dev
 ```
 
-## WebSearch && WebFetch Tools
+## WebSearch && WebFetch Tools - 100% free
 
 ```bash
-# config search engine - searxng in archlinux
+# local config search engine - searxng in archlinux
 # make sure have install docker and docker-compose
 sudo pacman -S docker-compose && docker
 docker --version && docker compose version
@@ -41,7 +41,7 @@ docker compose up -d
 firefox http://localhost:8080
 ```
 
-## Telegram
+## Telegram - Interactive Config
 
 ```bash
 # On startup, the CLI runs silently in the background, maintains a persistent Telegram connection, and listens for messages.
@@ -50,4 +50,115 @@ firefox http://localhost:8080
 
 # enter it into the cli input field and interactive configuration parameters
 /telegram
+```
+
+# Legacy Python Version
+
+### Demos dev/python
+
+#### 1.Auto Scientific Research & evolve code experiment and write AI ccf/sci draft paper also support checkpoint
+
+<p align="center">
+  <img src="assets/legacy/paper.gif" height="250"/>
+  <img src="assets/legacy/versper.gif" height="250"/>
+</p
+
+#### 2.Web Search
+
+![versperclaw_weather](assets/legacy/versperclaw1.jpg)
+
+#### 3.Deep Search
+
+![versperclaw_weather](assets/legacy/versperclaw2.jpg)
+
+#### 4.Live Chrome Control
+
+![control_browser_use_gemini](assets/legacy/control_browser_use_gemini.jpg)
+
+#### 5.Gateway - WeXin, Telegram and so on
+
+```bash
+# telegram, wechat and whatsapp
+versper setup gateway
+
+# then start listen
+versper gateway
+```
+
+```bash
+# Source install
+git clone -b dev/python https://github.com/versperai/VersperClaw.git
+
+# If you want check out the have been legacyed python version code, just switch to the dev/python branch
+
+# make sure you have installed uv and creat .venv via uv venv
+uv pip install -r requirements.txt # or uv sync
+source .venv/bin/activate
+uv pip install -e .
+
+# use codex, openrouter, or claude remote model via api
+versper setup
+```
+
+```bash
+# if use vllm or llama.cpp in local model for inference 
+# for example use llama.cpp
+llama-server \
+  --model unsloth/Qwen3.5-4B-GGUF/Qwen3.5-4B-UD-Q4_K_XL.gguf \
+  --mmproj unsloth/Qwen3.5-4B-GGUF/mmproj-F16.gguf \
+  --seed 3407 \
+  --temp 1.0 \
+  --top-p 0.95 \
+  --min-p 0.01 \
+  --top-k 40 \
+  -c 49152 \
+  --port 8001 \
+  --chat-template-kwargs '{"enable_thinking":true}' \
+  --host 0.0.0.0
+
+# check model name and pass inference
+curl http://localhost:8001/v1/models
+
+curl http://localhost:8001/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen",
+    "messages": [
+      {"role": "user", "content": "hello"}
+    ]
+  }'
+
+cd ~/.versper && nvim config.yaml
+# model:
+#  api_key: sk-no-key-required
+#  base_url: http://localhost:8001/v1
+#  default: unsloth/Qwen3.5-4B-GGUF
+#  provider: custom
+```
+
+```bash
+versper doctor # make sure all checks passed
+```
+
+## Add-on
+
+```bash
+if ban mcp in ~/.versper/.env:
+export VERSPER_BROWSER_USE_MCP=0
+```
+
+```bash
+# live chrome control
+npm install -g chrome-devtools-mcp@latest
+npm install -g agent-browser@latest
+
+# make sure you have installed chrome
+google-chrome-stable
+
+# fill it in the search bar and click the box
+chrome://inspect/#remote-debugging
+
+# check chrome connect
+versper
+/browser status
 ```
