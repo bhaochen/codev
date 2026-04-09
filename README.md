@@ -60,11 +60,11 @@ firefox http://localhost:8080
 /telegram
 ```
 
-# Legacy Python Version
+## Legacy Python Version
 
 ### Demos dev/python
 
-#### 1.Auto Scientific Research & evolve code experiment and write AI ccf/sci draft paper also support checkpoint
+#### 1. Auto Scientific Research & evolve code experiment and write AI ccf/sci draft paper also support checkpoint
 
 <table align="center">
   <tr>
@@ -88,7 +88,7 @@ firefox http://localhost:8080
   </tr>
 </table>
 
-#### 3.Gateway - WeXin, Telegram and so on
+#### 3. Gateway - WeXin, Telegram and so on
 
 ```bash
 # telegram, wechat and whatsapp
@@ -153,7 +153,7 @@ cd ~/.versper && nvim config.yaml
 versper doctor # make sure all checks passed
 ```
 
-## Add-on
+### Add-on
 
 ```bash
 if ban mcp in ~/.versper/.env:
