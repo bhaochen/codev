@@ -17,9 +17,9 @@ git clone https://github.com/versperai/VersperClaw.git && cd VersperClaw && bun 
 ## WebSearch & WebFetch Tools - 100% local free no remote api fee
 
 <p align="center">
-  <img src="assets/WebSearchTool.png" width="32%" height="200" style="object-fit: cover;"/>
-  <img src="assets/WebSearchTool2.png" width="32%" height="200" style="object-fit: cover;"/>
-  <img src="assets/WebSearchTool3.png" width="32%" height="200" style="object-fit: cover;"/>
+  <img src="assets/WebSearchTool.png" width="32%" height="700" style="object-fit: cover;"/>
+  <img src="assets/WebSearchTool2.png" width="32%" height="700" style="object-fit: cover;"/>
+  <img src="assets/WebSearchTool3.png" width="32%" height="700" style="object-fit: cover;"/>
 </p>
 
 ```bash
