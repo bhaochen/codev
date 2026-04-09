@@ -12,7 +12,7 @@ BOLD='\033[1m'
 DIM='\033[2m'
 RESET='\033[0m'
 
-REPO="https://github.com/paoloanzn/free-code.git"
+REPO="https://github.com/versperai/VerserClaw.git"
 INSTALL_DIR="$HOME/versperclaw"
 BUN_MIN_VERSION="1.3.11"
 
@@ -28,11 +28,13 @@ header() {
   echo ""
   printf "${BOLD}${CYAN}"
   cat <<'ART'
-   ___                            _
-  / _|_ __ ___  ___        ___ __| | ___
- | |_| '__/ _ \/ _ \_____ / __/ _` |/ _ \
- |  _| | |  __/  __/_____| (_| (_| |  __/
- |_| |_|  \___|\___|      \___\__,_|\___|
+
+ __     __                             ____ _                
+ \ \   / /__ _ __ ___ _ __   ___ _ __ / ___| | __ ___      __
+  \ \ / / _ \ '__/ __| '_ \ / _ \ '__| |   | |/ _` \ \ /\ / /
+   \ V /  __/ |  \__ \ |_) |  __/ |  | |___| | (_| |\ V  V / 
+    \_/ \___|_|  |___/ .__/ \___|_|   \____|_|\__,_| \_/\_/  
+                    |_|
 
 ART
   printf "${RESET}"
@@ -57,7 +59,7 @@ check_git() {
   if ! command -v git &>/dev/null; then
     fail "git is not installed. Install it first:
     macOS:  xcode-select --install
-    Linux:  sudo apt install git  (or your distro's equivalent)"
+    Linux:  sudo pacman -S git  (or your distro's equivalent eg: sudo apt install git)"
   fi
   ok "git: $(git --version | head -1)"
 }
@@ -123,7 +125,7 @@ install_deps() {
 }
 
 build_binary() {
-  info "Building free-code (all experimental features enabled)..."
+  info "Building VersperClaw (all experimental features enabled)..."
   cd "$INSTALL_DIR"
   bun run build:dev:full
   ok "Binary built: $INSTALL_DIR/cli-dev"

@@ -17,11 +17,10 @@ git clone https://github.com/versperai/VersperClaw.git && cd VersperClaw && bun 
 ## WebSearch & WebFetch Tools - 100% local free no remote api fee
 
 <p align="center">
-  <img src="assets/WebSearchTool.png" width="33%"/>
-  <img src="assets/WebSearchTool2.png" width="33%"/>
-  <img src="assets/WebSearchTool3.png" width="33%"/>
-</p
-
+  <img src="assets/WebSearchTool.png" width="32%" height="200" style="object-fit: cover;"/>
+  <img src="assets/WebSearchTool2.png" width="32%" height="200" style="object-fit: cover;"/>
+  <img src="assets/WebSearchTool3.png" width="32%" height="200" style="object-fit: cover;"/>
+</p>
 
 ```bash
 # local config search engine - searxng in archlinux
