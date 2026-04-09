@@ -66,24 +66,29 @@ firefox http://localhost:8080
 
 #### 1.Auto Scientific Research & evolve code experiment and write AI ccf/sci draft paper also support checkpoint
 
-<p align="center">
-  <img src="assets/legacy/paper.gif" height="250"/>
-  <img src="assets/legacy/versper.gif" height="250"/>
-</p
+<table align="center">
+  <tr>
+    <td><img src="assets/legacy/paper.gif"/></td>
+    <td><img src="assets/legacy/versper.gif"/></td>
+  </tr>
+</table>
 
-#### 2.Web Search
+#### 2. WebToolAgent
 
-![versperclaw_weather](assets/legacy/versperclaw1.jpg)
+<table align="center">
+  <tr>
+    <td align="center"><b>Web Search</b></td>
+    <td align="center"><b>Deep Search</b></td>
+    <td align="center"><b>Live Chrome Control</b></td>
+  </tr>
+  <tr>
+    <td><img src="assets/legacy/versperclaw1.jpg" width="100%"></td>
+    <td><img src="assets/legacy/versperclaw2.jpg" width="100%"></td>
+    <td><img src="assets/legacy/control_browser_use_gemini.jpg" width="100%"></td>
+  </tr>
+</table>
 
-#### 3.Deep Search
-
-![versperclaw_weather](assets/legacy/versperclaw2.jpg)
-
-#### 4.Live Chrome Control
-
-![control_browser_use_gemini](assets/legacy/control_browser_use_gemini.jpg)
-
-#### 5.Gateway - WeXin, Telegram and so on
+#### 3.Gateway - WeXin, Telegram and so on
 
 ```bash
 # telegram, wechat and whatsapp
