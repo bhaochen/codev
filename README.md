@@ -14,7 +14,7 @@ curl -fsSL https://raw.githubusercontent.com/versperai/VersperClaw/main/install.
 git clone https://github.com/versperai/VersperClaw.git && cd VersperClaw && bun install && bun run build:dev:full && ./cli-dev
 ```
 
-## WebSearch && WebFetch Tools - 100% free
+## WebSearch && WebFetch Tools - 100% local free no need remote api fee
 
 ```bash
 # local config search engine - searxng in archlinux
