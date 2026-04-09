@@ -140,7 +140,7 @@ export function Clawd(t0) {
   }
   let t8;
   if ($[16] === Symbol.for("react.memo_cache_sentinel")) {
-    t8 = <Text color="clawd_body" backgroundColor="clawd_background">█████</Text>;
+    t8 = <Text color="clawd_body" backgroundColor="clawd_background">██▄██</Text>;
     $[16] = t8;
   } else {
     t8 = $[16];
@@ -219,7 +219,7 @@ function AppleTerminalClawd(t0) {
   let t6;
   let t7;
   if ($[6] === Symbol.for("react.memo_cache_sentinel")) {
-    t6 = <Text backgroundColor="clawd_body">{" ".repeat(7)}</Text>;
+    t6 = <Text backgroundColor="clawd_body">{"  ▄▄  "}</Text>;
     t7 = <Text color="clawd_body">▘▘ ▝▝</Text>;
     $[6] = t6;
     $[7] = t7;
