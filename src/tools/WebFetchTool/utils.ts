@@ -15,6 +15,47 @@ import { getSettings_DEPRECATED } from '../../utils/settings/settings.js'
 import { asSystemPrompt } from '../../utils/systemPromptType.js'
 import { isPreapprovedHost } from './preapproved.js'
 import { makeSecondaryModelPrompt } from './prompt.js'
+import { writeFileSync, existsSync, readFileSync } from 'fs'
+import { join } from 'path'
+
+/**
+ * 日志记录函数 - 将 WebFetch 抓取信息写入 log.md
+ */
+function logWebFetch(message: string, level: 'INFO' | 'SUCCESS' | 'ERROR' | 'WARN', data?: any) {
+  const timestamp = new Date().toISOString()
+  const emoji = {
+    INFO: '🔵',
+    SUCCESS: '✅',
+    ERROR: '❌',
+    WARN: '⚠️'
+  }[level]
+
+  let logEntry = `\n[${timestamp}] [${level}] ${emoji} ${message}`
+
+  if (data !== undefined) {
+    if (typeof data === 'string') {
+      logEntry += `\n\`\`\`\n${data}\n\`\`\``
+    } else {
+      logEntry += `\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``
+    }
+  }
+
+  const logPath = join(process.cwd(), 'log.md')
+
+  try {
+    if (existsSync(logPath)) {
+      const existingContent = readFileSync(logPath, 'utf-8')
+      writeFileSync(logPath, existingContent + logEntry, 'utf-8')
+    } else {
+      writeFileSync(logPath, logEntry, 'utf-8')
+    }
+  } catch (error) {
+    console.error(`[WebFetch] 无法写入日志文件: ${error}`)
+  }
+
+  // 同时输出到控制台
+  console.log(`[WebFetch] ${level}: ${message}`, data !== undefined ? data : '')
+}
 
 /**
  * Banner added to external content to indicate it should be treated as data, not instructions
@@ -388,18 +429,25 @@ export async function getWithPermittedRedirects(
   signal: AbortSignal,
   redirectChecker: (originalUrl: string, redirectUrl: string) => boolean,
   depth = 0,
+  userAgent?: string,
 ): Promise<Response | RedirectInfo> {
   if (depth > MAX_REDIRECTS) {
     throw new Error(`Too many redirects (exceeded ${MAX_REDIRECTS})`)
   }
   try {
+    // Use provided userAgent or fall back to getWebFetchUserAgent()
+    // Only fall back if userAgent is explicitly undefined or null
+    const finalUserAgent = userAgent !== undefined && userAgent !== null
+      ? userAgent
+      : getWebFetchUserAgent()
+
     const response = await fetchWithTimeout(url, {
       signal,
       timeout: FETCH_TIMEOUT_MS,
       redirect: 'manual', // Handle redirects manually
       headers: {
         Accept: 'text/markdown, text/html, */*',
-        'User-Agent': getWebFetchUserAgent(),
+        'User-Agent': finalUserAgent,
       },
     })
 
@@ -420,6 +468,7 @@ export async function getWithPermittedRedirects(
           signal,
           redirectChecker,
           depth + 1,
+          userAgent,
         )
       } else {
         // Return redirect information to the caller
@@ -457,6 +506,133 @@ export type FetchedContent = {
   contentType: string
   persistedPath?: string
   persistedSize?: number
+}
+
+/**
+ * Local fetch implementation - fetches and processes web content without external APIs
+ * Based on WebSearchTool's approach and Python WebFetchTool reference
+ */
+async function localFetch(
+  url: string,
+  signal: AbortSignal,
+  redirectChecker: (originalUrl: string, redirectUrl: string) => boolean,
+  extractMode: 'markdown' | 'text' = 'markdown'
+): Promise<{
+  content: string
+  contentType: string
+  finalUrl?: string
+  persistedPath?: string
+  persistedSize?: number
+}> {
+  // Use a simple User-Agent to avoid MACRO dependency issues
+  const userAgent = 'Mozilla/5.0 (compatible; WebFetchTool/1.0)'
+
+  // 1. Use getWithPermittedRedirects to handle redirects with custom headers
+  const response = await getWithPermittedRedirects(url, signal, redirectChecker, userAgent)
+
+  if (isRedirectInfo(response)) {
+    throw new Error('Cross-host redirect detected')
+  }
+
+  // 2. Check Content-Type
+  const contentType = response.headers.get('content-type') || 'text/html'
+
+  // 3. Handle binary content
+  if (isBinaryContentType(contentType)) {
+    const buffer = Buffer.from(await response.arrayBuffer())
+    const persisted = await persistBinaryContent(buffer, contentType, Date.now().toString())
+    if ('error' in persisted) {
+      throw new Error(persisted.error)
+    }
+    return {
+      content: `[Binary content saved to ${persisted.filepath}]`,
+      contentType,
+      persistedPath: persisted.filepath,
+      persistedSize: persisted.size,
+    }
+  }
+
+  // 4. Handle HTML content
+  if (contentType.includes('text/html')) {
+    const htmlContent = await response.text()
+
+    // Convert to markdown or text based on extractMode
+    let markdown: string
+    if (extractMode === 'markdown') {
+      const turndownService = await getTurndownService()
+      markdown = turndownService.turndown(htmlContent)
+    } else {
+      // Text mode: only strip tags
+      markdown = stripTags(htmlContent)
+    }
+
+    // Clean and normalize content
+    markdown = normalizeText(markdown)
+
+    // Truncate if too long
+    if (markdown.length > MAX_MARKDOWN_LENGTH) {
+      markdown = markdown.slice(0, MAX_MARKDOWN_LENGTH) + '\n\n[Content truncated due to length...]'
+    }
+
+    // Add untrusted banner
+    // 记录抓取的 HTML 内容到 log.md
+    logWebFetch('成功抓取 HTML 内容', 'SUCCESS', {
+      url: url,
+      extractMode: extractMode,
+      contentType: 'text/html',
+      contentLength: markdown.length,
+      finalUrl: response.url,
+      contentPreview: markdown.slice(0, 200) + (markdown.length > 200 ? '...' : '')
+    })
+
+
+    return {
+      content: markdown,
+      contentType: 'text/markdown',
+      finalUrl: response.url,
+    }
+  }
+
+  // 5. Handle JSON content
+  if (contentType.includes('application/json')) {
+    const jsonContent = await response.json()
+    const formattedJson = JSON.stringify(jsonContent, null, 2)
+    const jsonText = `# JSON Response\n\n\`\`\`json\n${formattedJson}\n\`\`\``
+
+    // 记录抓取的 JSON 内容到 log.md
+    logWebFetch('成功抓取 JSON 内容', 'SUCCESS', {
+      url: url,
+      contentType: 'application/json',
+      contentLength: jsonText.length,
+      finalUrl: response.url,
+      contentPreview: jsonText.slice(0, 200) + (jsonText.length > 200 ? '...' : '')
+    })
+
+    return {
+      content: jsonText,
+      contentType: 'application/json',
+      finalUrl: response.url,
+    }
+  }
+
+  // 6. Handle other text content
+  const textContent = await response.text()
+  const plainText = normalizeText(textContent)
+
+  // 记录抓取的文本内容到 log.md
+  logWebFetch('成功抓取文本内容', 'SUCCESS', {
+    url: url,
+    contentType: contentType,
+    contentLength: plainText.length,
+    finalUrl: response.url,
+    contentPreview: plainText.slice(0, 200) + (plainText.length > 200 ? '...' : '')
+  })
+
+  return {
+    content: plainText,
+    contentType: contentType,
+    finalUrl: response.url,
+  }
 }
 
 export async function getURLMarkdownContent(
@@ -506,31 +682,60 @@ export async function getURLMarkdownContent(
     logError(e)
   }
 
-  // Use Jina API to fetch content
+  // Use local fetch to get content
   try {
-    console.log('[WebFetch] Using Jina API for:', upgradedUrl)
-    const jinaResult = await jinaFetch(upgradedUrl)
+    console.log('[WebFetch] Using local fetch for:', upgradedUrl)
 
-    if (jinaResult) {
-      const parsedResult = JSON.parse(jinaResult)
-      const bytes = Buffer.byteLength(parsedResult.text)
-
-      // Store the fetched content in cache
-      const entry: CacheEntry = {
-        bytes,
-        code: parsedResult.status,
-        codeText: 'OK',
-        content: parsedResult.text,
-        contentType: 'text/markdown',
+    const localResult = await retryWithBackoff(
+      () => localFetch(upgradedUrl, abortController.signal, isPermittedRedirect, 'markdown'),
+      {
+        maxRetries: 3,
+        initialDelay: 1000,
+        retryableErrors: ['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND'],
       }
-      URL_CACHE.set(url, entry, { size: Math.max(1, bytes) })
-      console.log('[WebFetch] Jina API succeeded')
-      return entry
+    )
+
+    const bytes = Buffer.byteLength(localResult.content)
+
+    // Store the fetched content in cache
+    const entry: CacheEntry = {
+      bytes,
+      code: 200,
+      codeText: 'OK',
+      content: localResult.content,
+      contentType: localResult.contentType,
+      persistedPath: localResult.persistedPath,
+      persistedSize: localResult.persistedSize,
     }
+    URL_CACHE.set(url, entry, { size: Math.max(1, bytes) })
+    console.log('[WebFetch] Local fetch succeeded')
+    return entry
   } catch (error) {
-    console.error('[WebFetch] Jina API failed:', error)
-    logError('Jina API failed', error)
-    throw new Error(`Failed to fetch URL using Jina API: ${error instanceof Error ? error.message : String(error)}`)
+    console.error('[WebFetch] Local fetch failed:', error)
+    logError('Local fetch failed', error)
+
+    // Try Python webtools fallback
+    try {
+      console.log('[WebFetch] Trying Python webtools fallback')
+      const pythonResult = await fetchWithPythonWebtools(upgradedUrl)
+
+      if (pythonResult) {
+        const bytes = Buffer.byteLength(pythonResult.content)
+        const entry: CacheEntry = {
+          bytes,
+          code: 200,
+          codeText: 'OK',
+          content: pythonResult.content,
+          contentType: pythonResult.contentType,
+        }
+        URL_CACHE.set(url, entry, { size: Math.max(1, bytes) })
+        return entry
+      }
+    } catch (pythonError) {
+      console.error('[WebFetch] Python fallback also failed:', pythonError)
+    }
+
+    throw new Error(`Failed to fetch URL: ${error instanceof Error ? error.message : String(error)}`)
   }
 }
 

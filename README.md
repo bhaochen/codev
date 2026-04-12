@@ -15,7 +15,7 @@ git clone https://github.com/versperai/VersperClaw.git && cd VersperClaw && bun 
 ```
 
 ```bash
-# make symbol link
+# make symbol link for everywhere can use VersperClaw just with a  
 ln -sf "$(pwd)/VersperClaw" "$HOME/.local/bin/VersperClaw"
 
 # make sure `~/.local/bin` in PATH 
