@@ -15,47 +15,6 @@ import { getSettings_DEPRECATED } from '../../utils/settings/settings.js'
 import { asSystemPrompt } from '../../utils/systemPromptType.js'
 import { isPreapprovedHost } from './preapproved.js'
 import { makeSecondaryModelPrompt } from './prompt.js'
-import { writeFileSync, existsSync, readFileSync } from 'fs'
-import { join } from 'path'
-
-/**
- * 日志记录函数 - 将 WebFetch 抓取信息写入 log.md
- */
-function logWebFetch(message: string, level: 'INFO' | 'SUCCESS' | 'ERROR' | 'WARN', data?: any) {
-  const timestamp = new Date().toISOString()
-  const emoji = {
-    INFO: '🔵',
-    SUCCESS: '✅',
-    ERROR: '❌',
-    WARN: '⚠️'
-  }[level]
-
-  let logEntry = `\n[${timestamp}] [${level}] ${emoji} ${message}`
-
-  if (data !== undefined) {
-    if (typeof data === 'string') {
-      logEntry += `\n\`\`\`\n${data}\n\`\`\``
-    } else {
-      logEntry += `\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``
-    }
-  }
-
-  const logPath = join(process.cwd(), 'log.md')
-
-  try {
-    if (existsSync(logPath)) {
-      const existingContent = readFileSync(logPath, 'utf-8')
-      writeFileSync(logPath, existingContent + logEntry, 'utf-8')
-    } else {
-      writeFileSync(logPath, logEntry, 'utf-8')
-    }
-  } catch (error) {
-    console.error(`[WebFetch] 无法写入日志文件: ${error}`)
-  }
-
-  // 同时输出到控制台
-  console.log(`[WebFetch] ${level}: ${message}`, data !== undefined ? data : '')
-}
 
 /**
  * Banner added to external content to indicate it should be treated as data, not instructions
@@ -575,17 +534,6 @@ async function localFetch(
     }
 
     // Add untrusted banner
-    // 记录抓取的 HTML 内容到 log.md
-    logWebFetch('成功抓取 HTML 内容', 'SUCCESS', {
-      url: url,
-      extractMode: extractMode,
-      contentType: 'text/html',
-      contentLength: markdown.length,
-      finalUrl: response.url,
-      contentPreview: markdown.slice(0, 200) + (markdown.length > 200 ? '...' : '')
-    })
-
-
     return {
       content: markdown,
       contentType: 'text/markdown',
@@ -599,15 +547,6 @@ async function localFetch(
     const formattedJson = JSON.stringify(jsonContent, null, 2)
     const jsonText = `# JSON Response\n\n\`\`\`json\n${formattedJson}\n\`\`\``
 
-    // 记录抓取的 JSON 内容到 log.md
-    logWebFetch('成功抓取 JSON 内容', 'SUCCESS', {
-      url: url,
-      contentType: 'application/json',
-      contentLength: jsonText.length,
-      finalUrl: response.url,
-      contentPreview: jsonText.slice(0, 200) + (jsonText.length > 200 ? '...' : '')
-    })
-
     return {
       content: jsonText,
       contentType: 'application/json',
@@ -618,15 +557,6 @@ async function localFetch(
   // 6. Handle other text content
   const textContent = await response.text()
   const plainText = normalizeText(textContent)
-
-  // 记录抓取的文本内容到 log.md
-  logWebFetch('成功抓取文本内容', 'SUCCESS', {
-    url: url,
-    contentType: contentType,
-    contentLength: plainText.length,
-    finalUrl: response.url,
-    contentPreview: plainText.slice(0, 200) + (plainText.length > 200 ? '...' : '')
-  })
 
   return {
     content: plainText,
