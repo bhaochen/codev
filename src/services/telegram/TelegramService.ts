@@ -3,6 +3,7 @@ import type {
   TelegramAnswerCallbackQueryResponse,
   TelegramBotCommand,
   TelegramCallbackEvent,
+  TelegramChatAction,
   TelegramEditMessageResponse,
   TelegramGetMeResponse,
   TelegramGetUpdatesResponse,
@@ -10,6 +11,7 @@ import type {
   TelegramInlineKeyboardMarkup,
   TelegramRuntimeConfig,
   TelegramSendMessageResponse,
+  TelegramSendChatActionResponse,
   TelegramSetMyCommandsResponse,
   TelegramServiceState,
   TelegramUpdate,
@@ -301,6 +303,24 @@ class TelegramService {
       {
         callback_query_id: callbackQueryId,
         ...(text ? { text } : {}),
+      },
+    )
+  }
+
+  async sendChatAction(
+    chatId: string,
+    action: TelegramChatAction = 'typing',
+  ): Promise<void> {
+    if (!this.config) {
+      throw new Error('Telegram service is not running')
+    }
+
+    await this.callTelegram<TelegramSendChatActionResponse>(
+      this.config,
+      'sendChatAction',
+      {
+        chat_id: Number(chatId),
+        action,
       },
     )
   }
