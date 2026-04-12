@@ -128,14 +128,14 @@ build_binary() {
   info "Building VersperClaw (all experimental features enabled)..."
   cd "$INSTALL_DIR"
   bun run build:dev:full
-  ok "Binary built: $INSTALL_DIR/cli-dev"
+  ok "Binary built: $INSTALL_DIR/VersperClaw"
 }
 
 link_binary() {
   local link_dir="$HOME/.local/bin"
   mkdir -p "$link_dir"
 
-  ln -sf "$INSTALL_DIR/cli-dev" "$link_dir/versperclaw"
+  ln -sf "$INSTALL_DIR/VersperClaw" "$link_dir/versperclaw"
   ok "Symlinked: $link_dir/versperclaw"
 
   if ! echo "$PATH" | tr ':' '\n' | grep -qx "$link_dir"; then
@@ -179,6 +179,6 @@ printf "  ${BOLD}Or log in with Claude.ai:${RESET}\n"
 printf "    ${CYAN}versperclaw /login${RESET}\n"
 echo ""
 printf "  ${DIM}Source: $INSTALL_DIR${RESET}\n"
-printf "  ${DIM}Binary: $INSTALL_DIR/cli-dev${RESET}\n"
+printf "  ${DIM}Binary: $INSTALL_DIR/VersperClaw${RESET}\n"
 printf "  ${DIM}Link:   ~/.local/bin/versperclaw${RESET}\n"
 echo ""

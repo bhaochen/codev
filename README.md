@@ -11,7 +11,26 @@
 curl -fsSL https://raw.githubusercontent.com/versperai/VersperClaw/main/install.sh | bash
 
 # source install
-git clone https://github.com/versperai/VersperClaw.git && cd VersperClaw && bun install && bun run build:dev:full && ./cli-dev
+git clone https://github.com/versperai/VersperClaw.git && cd VersperClaw && bun install && bun run build:dev:full && ./VersperClaw
+```
+
+```bash
+# make symbol link
+ln -sf "$(pwd)/VersperClaw" "$HOME/.local/bin/VersperClaw"
+
+# make sure `~/.local/bin` in PATH 
+# check if have in path
+echo $PATH | grep -q "$HOME/.local/bin" && echo "In PATH" || echo "Out PATH"
+
+# if not in PATH ，need add to your shell configuration
+
+# for bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+
+# for zsh
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
 ```
 
 ## WebSearch & WebFetch Tools - 100% local free no remote api fee

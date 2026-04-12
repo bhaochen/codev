@@ -113,10 +113,10 @@ const features = [...featureSet]
 
 const outfile = compile
   ? dev
-    ? './dist/cli-dev'
+    ? './dist/VersperClaw'
     : './dist/cli'
   : dev
-    ? './cli-dev'
+    ? './VersperClaw'
     : './cli'
 const buildTime = new Date().toISOString()
 const version = dev ? getDevVersion(pkg.version) : pkg.version
