@@ -3,8 +3,8 @@ import * as React from 'react';
 import { Box, Text } from '../../ink.js';
 import { env } from '../../utils/env.js';
 export type ClawdPose = 'default' | 'arms-up' // both arms raised (used during jump)
-| 'look-left' // both pupils shifted left
-| 'look-right'; // both pupils shifted right
+  | 'look-left' // both pupils shifted left
+  | 'look-right'; // both pupils shifted right
 
 type Props = {
   pose?: ClawdPose;
@@ -140,7 +140,7 @@ export function Clawd(t0) {
   }
   let t8;
   if ($[16] === Symbol.for("react.memo_cache_sentinel")) {
-    t8 = <Text color="clawd_body" backgroundColor="clawd_background">██▄██</Text>;
+    t8 = <Text color="clawd_body" backgroundColor="clawd_background">█████</Text>;
     $[16] = t8;
   } else {
     t8 = $[16];
@@ -219,7 +219,7 @@ function AppleTerminalClawd(t0) {
   let t6;
   let t7;
   if ($[6] === Symbol.for("react.memo_cache_sentinel")) {
-    t6 = <Text backgroundColor="clawd_body">{"  ▄▄  "}</Text>;
+    t6 = <Text backgroundColor="clawd_body">{" ".repeat(7)}</Text>;
     t7 = <Text color="clawd_body">▘▘ ▝▝</Text>;
     $[6] = t6;
     $[7] = t7;
