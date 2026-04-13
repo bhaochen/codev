@@ -18,6 +18,9 @@ git clone https://github.com/versperai/VersperClaw.git && cd VersperClaw && bun 
 # make symbol link for everywhere can use VersperClaw just with a  
 ln -sf "$(pwd)/VersperClaw" "$HOME/.local/bin/VersperClaw"
 
+# overwrite
+cp VersperClaw ~/.local/bin/VersperClaw
+
 # make sure `~/.local/bin` in PATH 
 # check if have in path
 echo $PATH | grep -q "$HOME/.local/bin" && echo "In PATH" || echo "Out PATH"
