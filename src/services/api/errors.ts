@@ -573,6 +573,22 @@ export function getAssistantMessageFromError(
     })
   }
 
+  // Handle "exceeds the available context size" errors (alternative format used by some API providers)
+  // This error format is functionally equivalent to "prompt is too long" and should trigger auto-compact
+  if (
+    error instanceof Error &&
+    error.message.toLowerCase().includes('exceeds the available context size')
+  ) {
+    // Content stays generic (UI matches on exact string). The raw error with
+    // token counts goes into errorDetails — reactive compact's retry loop
+    // parses the gap from there via getPromptTooLongTokenGap.
+    return createAssistantAPIErrorMessage({
+      content: PROMPT_TOO_LONG_ERROR_MESSAGE,
+      error: 'invalid_request',
+      errorDetails: error.message,
+    })
+  }
+
   // Check for PDF page limit errors
   if (
     error instanceof Error &&
