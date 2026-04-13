@@ -483,7 +483,7 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
 
       // If we have cached models, show them
       if (cachedModels.length > 0) {
-        let modelsToShow = cachedModels.slice(0, 100) // Show top 100 models
+        let modelsToShow = cachedModels // Show all models
 
         // If there's a free model, put it at the front
         if (firstFreeModel) {
