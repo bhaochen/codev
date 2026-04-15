@@ -319,7 +319,7 @@ class TelegramService {
       this.config,
       'sendChatAction',
       {
-        chat_id: Number(chatId),
+        chat_id: chatId,
         action,
       },
     )
