@@ -71,7 +71,7 @@ docker compose up -d
 firefox http://localhost:8080
 ```
 
-## 3. SubAgent - background run with tool call chain and swap file output context
+## 3. SubAgent - back run & tool call agent and swap file output
 
 ### 3.1 Auto Creat SubAgent
 
@@ -127,9 +127,9 @@ echo 'export CLAUDE_CODE_MAX_CONTEXT_TOKENS=61440' >> ~/.bashrc
 
 # Legacy Python Version
 
-## Demos dev/python
+> Demos dev/python
 
-### 1. Auto Scientific Research & evolve code experiment and write AI ccf/sci draft paper also support checkpoint
+## 1. Auto Scientific Research & evolve code and write ccf/sci & checkpoint
 
 <table align="center">
   <tr>
@@ -138,7 +138,7 @@ echo 'export CLAUDE_CODE_MAX_CONTEXT_TOKENS=61440' >> ~/.bashrc
   </tr>
 </table>
 
-### 2. WebToolAgent
+## 2. WebToolAgent
 
 <table align="center">
   <tr>
@@ -153,7 +153,7 @@ echo 'export CLAUDE_CODE_MAX_CONTEXT_TOKENS=61440' >> ~/.bashrc
   </tr>
 </table>
 
-### 3. Gateway - WeXin, Telegram and so on
+## 3. Gateway - WeXin, Telegram and so on
 
 ```bash
 # telegram, wechat and whatsapp
@@ -218,7 +218,7 @@ cd ~/.versper && nvim config.yaml
 versper doctor # make sure all checks passed
 ```
 
-## Add-on
+## 4. Add-on env
 
 ```bash
 if ban mcp in ~/.versper/.env:
