@@ -82,7 +82,7 @@ firefox http://localhost:8080
   </tr>
 </table>
 
-### 3,2 Tool Agent Call Chains and Swap File Context
+### 3.2 Tool Agent Call Chains and Swap File Context
 
 <table align="center">
     <td><img src="assets/subagent/subagent_toolcall_chain1" width="100%"></td>
@@ -218,7 +218,7 @@ cd ~/.versper && nvim config.yaml
 versper doctor # make sure all checks passed
 ```
 
-## 4. Add-on env
+## 4. Add-on - mcp dependency and env
 
 ```bash
 if ban mcp in ~/.versper/.env:
