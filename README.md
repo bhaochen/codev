@@ -84,11 +84,17 @@ firefox http://localhost:8080
 
 ## Dream
 
+<div align="center">
+  <img src="assets/auto_dream.png" alt="VersperAI">
+</div>
+
 ```bash
+# set auto-dream config
 nvim ~/.claude/settings.json
 
-"autoMemoryEnabled": true,
-"autoDreamEnabled": true
+{
+  "autoMemoryEnabled": true,
+  "autoDreamEnabled": true
 }
 ```
 
