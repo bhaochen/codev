@@ -4,7 +4,7 @@
   <img src="assets/VersperAI_Banner.png" alt="VersperAI">
 </div>
 
-## Quick Start
+## 1. Quick Start
 
 ```bash
 # script install
@@ -36,7 +36,7 @@ echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
-## WebSearch & WebFetch Tools - 100% local free no remote api fee
+## 2. WebSearch & WebFetch Tools - 100% local free no remote api fee
 
 <table align="center">
   <tr>
@@ -71,18 +71,27 @@ docker compose up -d
 firefox http://localhost:8080
 ```
 
-## Telegram - Interactive Config
+## 3. SubAgent - background run with tool call chain and swap file output context
 
-```bash
-# On startup, the CLI runs silently in the background, maintains a persistent Telegram connection, and listens for messages.
-# start VersperClaw Cli
-./cli-dev
+### 3.1 Auto Creat SubAgent
 
-# enter it into the cli input field and interactive configuration parameters
-/telegram
-```
+<table align="center">
+    <td><img src="assets/subagent/sub_agent1" width="100%"></td>
+    <td><img src="assets/subagent/sub_agent2_background" width="100%"></td>
+    <td><img src="assets/subagent/subagent_backcontext" width="100%"></td>
+  </tr>
+</table>
 
-## Dream
+### 3,2 Tool Agent Call Chains and Swap File Context
+
+<table align="center">
+    <td><img src="assets/subagent/subagent_toolcall_chain1" width="100%"></td>
+    <td><img src="assets/subagent/subagent_toolcall_chain2" width="100%"></td>
+    <td><img src="assets/subagent/subagent_toolcall_chain3" width="100%"></td>
+  </tr>
+</table>
+
+## 4. Auto Dream
 
 <div align="center">
   <img src="assets/auto_dream.png" alt="VersperAI">
@@ -98,18 +107,29 @@ nvim ~/.claude/settings.json
 }
 ```
 
-## Auto Compact
+## 5. Telegram - Interactive Config
+
+```bash
+# On startup, the CLI runs silently in the background, maintains a persistent Telegram connection, and listens for messages.
+# start VersperClaw Cli
+./cli-dev
+
+# enter it into the cli input field and interactive configuration parameters
+/telegram
+```
+
+## 6. Auto Compact
 
 ```bash
 echo 'export CLAUDE_CODE_AUTO_COMPACT_WINDOW=57344' >> ~/.bashrc
 echo 'export CLAUDE_CODE_MAX_CONTEXT_TOKENS=61440' >> ~/.bashrc
 ```
 
-## Legacy Python Version
+# Legacy Python Version
 
-### Demos dev/python
+## Demos dev/python
 
-#### 1. Auto Scientific Research & evolve code experiment and write AI ccf/sci draft paper also support checkpoint
+### 1. Auto Scientific Research & evolve code experiment and write AI ccf/sci draft paper also support checkpoint
 
 <table align="center">
   <tr>
@@ -118,7 +138,7 @@ echo 'export CLAUDE_CODE_MAX_CONTEXT_TOKENS=61440' >> ~/.bashrc
   </tr>
 </table>
 
-#### 2. WebToolAgent
+### 2. WebToolAgent
 
 <table align="center">
   <tr>
@@ -133,7 +153,7 @@ echo 'export CLAUDE_CODE_MAX_CONTEXT_TOKENS=61440' >> ~/.bashrc
   </tr>
 </table>
 
-#### 3. Gateway - WeXin, Telegram and so on
+### 3. Gateway - WeXin, Telegram and so on
 
 ```bash
 # telegram, wechat and whatsapp
@@ -198,7 +218,7 @@ cd ~/.versper && nvim config.yaml
 versper doctor # make sure all checks passed
 ```
 
-### Add-on
+## Add-on
 
 ```bash
 if ban mcp in ~/.versper/.env:
