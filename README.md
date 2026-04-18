@@ -82,6 +82,23 @@ firefox http://localhost:8080
 /telegram
 ```
 
+## Dream
+
+```bash
+nvim ~/.claude/settings.json
+
+"autoMemoryEnabled": true,
+"autoDreamEnabled": true
+}
+```
+
+## Auto Compact
+
+```bash
+echo 'export CLAUDE_CODE_AUTO_COMPACT_WINDOW=57344' >> ~/.bashrc
+echo 'export CLAUDE_CODE_MAX_CONTEXT_TOKENS=61440' >> ~/.bashrc
+```
+
 ## Legacy Python Version
 
 ### Demos dev/python

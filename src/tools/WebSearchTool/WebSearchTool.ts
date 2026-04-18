@@ -124,6 +124,7 @@ function cleanSearchResult(result: any) {
 export const WebSearchTool = buildTool({
   name: WEB_SEARCH_TOOL_NAME,
   description: 'Search the web using local SearXNG',
+  shouldDefer: true,
 
   getToolUseSummary,
   getActivityDescription(input) {
