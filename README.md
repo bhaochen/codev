@@ -69,6 +69,9 @@ docker compose up -d
 
 # check in every browser
 firefox http://localhost:8080
+
+# allow tool search in ~/.bashrc
+export ENABLE_TOOL_SEARCH=true
 ```
 
 ## 3. SubAgent - back run & tool call agent and swap file output
