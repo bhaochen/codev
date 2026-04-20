@@ -79,6 +79,7 @@ export ENABLE_TOOL_SEARCH=true
 ### 3.1 Auto Creat SubAgent
 
 <table align="center">
+  <tr>
     <td><img src="assets/subagent/sub_agent1" width="100%"></td>
     <td><img src="assets/subagent/sub_agent2_background" width="100%"></td>
     <td><img src="assets/subagent/subagent_backcontext" width="100%"></td>
@@ -88,6 +89,7 @@ export ENABLE_TOOL_SEARCH=true
 ### 3.2 Tool Agent Call Chains and Swap File Context
 
 <table align="center">
+  <tr>
     <td><img src="assets/subagent/subagent_toolcall_chain1" width="100%"></td>
     <td><img src="assets/subagent/subagent_toolcall_chain2" width="100%"></td>
     <td><img src="assets/subagent/subagent_toolcall_chain3" width="100%"></td>
