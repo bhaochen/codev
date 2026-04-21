@@ -70,7 +70,14 @@ docker compose up -d
 # check in every browser
 firefox http://localhost:8080
 
-# allow tool search in ~/.bashrc
+# set tool_search env in ~/.claude/settings.json
+{
+  "env": {
+    "ENABLE_TOOL_SEARCH": "true"
+  }
+}
+
+# or allow tool search in ~/.bashrc
 export ENABLE_TOOL_SEARCH=true
 ```
 
@@ -110,6 +117,11 @@ nvim ~/.claude/settings.json
   "autoMemoryEnabled": true,
   "autoDreamEnabled": true
 }
+
+# eg:
+# ● Improved 1 memory fold
+# ⎿ user_profile.md
+# cd ~/.claude/projects
 ```
 
 ## 5. Telegram - Interactive Config
@@ -126,8 +138,20 @@ nvim ~/.claude/settings.json
 ## 6. Auto Compact
 
 ```bash
+# set env in ~/.claude/settings.json
+{
+  "env": {
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "57344",
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "61440"
+  }
+}
+
+# or via bash set env
 echo 'export CLAUDE_CODE_AUTO_COMPACT_WINDOW=57344' >> ~/.bashrc
 echo 'export CLAUDE_CODE_MAX_CONTEXT_TOKENS=61440' >> ~/.bashrc
+
+# effective = 108K - effectiveContextWindow - used for auto-compact summary
+# threshold = 95K - autoCompactThreshold - buffer to avoid failed
 ```
 
 # Legacy Python Version
