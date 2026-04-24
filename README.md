@@ -118,7 +118,6 @@ nvim ~/.claude/settings.json
   "autoDreamEnabled": true
 }
 
-# eg:
 # ● Improved 1 memory fold
 # ⎿ user_profile.md
 # cd ~/.claude/projects
