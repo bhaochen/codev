@@ -4,6 +4,7 @@ import { buildTool, type ToolDef } from '../../Tool.js'
 import { lazySchema } from '../../utils/lazySchema.js'
 import { logError } from '../../utils/log.js'
 import { getWebSearchPrompt, WEB_SEARCH_TOOL_NAME } from './prompt.js'
+import { tavily } from '@tavily/core'
 import {
   getToolUseSummary,
   renderToolResultMessage,
@@ -94,6 +95,38 @@ async function searchSearXNG(
 }
 
 /**
+ * 使用 Tavily 云搜索
+ */
+async function searchTavily(
+  query: string
+): Promise<Array<{ title: string; url: string; snippet?: string }>> {
+  try {
+    const apiKey = process.env.TAVILY_API_KEY
+    if (!apiKey) {
+      throw new Error('TAVILY_API_KEY is not set')
+    }
+
+    const client = tavily({ apiKey })
+    const response = await client.search(query, {
+      maxResults: 10,
+      searchDepth: 'basic',
+      topic: 'general',
+    })
+
+    return (response.results || []).map((r: any) => ({
+      title: r.title,
+      url: r.url,
+      snippet: r.content,
+    }))
+  } catch (error) {
+    logError('Tavily search failed', error)
+    throw new Error(
+      `Tavily search failed: ${error instanceof Error ? error.message : String(error)}`
+    )
+  }
+}
+
+/**
  * 文本清洗
  */
 function stripTags(text: string): string {
@@ -123,7 +156,7 @@ function cleanSearchResult(result: any) {
 
 export const WebSearchTool = buildTool({
   name: WEB_SEARCH_TOOL_NAME,
-  description: 'Search the web using local SearXNG',
+  description: 'Search the web using local SearXNG or Tavily (when TAVILY_API_KEY is set)',
   shouldDefer: true,
 
   getToolUseSummary,
@@ -201,7 +234,10 @@ export const WebSearchTool = buildTool({
         })
       }
 
-      const results = await searchSearXNG(input.query)
+      const useTavily = !!process.env.TAVILY_API_KEY
+      const results = useTavily
+        ? await searchTavily(input.query)
+        : await searchSearXNG(input.query)
 
       const cleaned = results.map(r => ({
         ...r,

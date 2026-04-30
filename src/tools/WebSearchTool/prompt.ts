@@ -6,14 +6,15 @@ export function getWebSearchPrompt(): string {
   const currentMonthYear = getLocalMonthYear()
 
   return `
-- Allows VersperClaw to search the web using a local SearXNG search engine and use the results to inform responses
+- Allows VersperClaw to search the web using a local SearXNG search engine or Tavily cloud search (when TAVILY_API_KEY is configured) and use the results to inform responses
 - Provides up-to-date information for current events, technical documentation, and recent data
 - Returns structured search results including titles, URLs, and snippets
 - Works with all AI providers including local models
 - Designed for high-recall search to support reasoning and retrieval-augmented generation (RAG)
 
 Search Strategy:
-  - Uses SearXNG metasearch engine (aggregates multiple sources)
+  - Default: Uses SearXNG metasearch engine (aggregates multiple sources)
+  - When TAVILY_API_KEY is set: Uses Tavily cloud search API for high-quality, LLM-optimized results
   - Results may vary in quality; prioritize relevance and credibility
   - If results are weak or empty, try rephrasing the query
   - Prefer more specific queries when possible (add keywords, version numbers, or context)
