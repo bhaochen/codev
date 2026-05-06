@@ -65,28 +65,25 @@ export function SearchableModelPicker({
   }
 }, [isFastMode, authVersion])
 
-  // Poll for OpenRouter models when cache is empty
+  // Poll for OpenRouter/OpenCode models when cache is empty
   React.useEffect(() => {
     let mounted = true
     let pollTimer: NodeJS.Timeout | null = null
 
-    async function checkOpenRouterCache() {
+    async function checkProviderCache() {
       try {
         const { getAPIProvider } = await import('../utils/model/providers.js')
         const provider = getAPIProvider()
 
         if (provider === 'openrouter' && modelOptions.length === 0) {
-          // Check cache every 500ms
           pollTimer = setInterval(async () => {
             if (!mounted) {
               if (pollTimer) clearInterval(pollTimer)
               return
             }
-
             try {
               const { hasOpenRouterModelsCache } = await import('../utils/model/openRouterModels.js')
               if (hasOpenRouterModelsCache()) {
-                // Cache is now populated, trigger re-render
                 if (mounted) {
                   setAppState(prev => ({ ...prev, authVersion: prev.authVersion + 1 }))
                 }
@@ -97,8 +94,34 @@ export function SearchableModelPicker({
               if (pollTimer) clearInterval(pollTimer)
             }
           }, 500)
+          setTimeout(() => {
+            if (pollTimer && mounted) {
+              clearInterval(pollTimer)
+              pollTimer = null
+            }
+          }, 10000)
+        }
 
-          // Stop polling after 10 seconds
+        if (provider === 'opencode' && modelOptions.length <= 1) {
+          pollTimer = setInterval(async () => {
+            if (!mounted) {
+              if (pollTimer) clearInterval(pollTimer)
+              return
+            }
+            try {
+              const { getCachedOpencodeModels } = await import('../services/api/opencodeClient.js')
+              const models = getCachedOpencodeModels()
+              if (models && models.length > 0) {
+                if (mounted) {
+                  setAppState(prev => ({ ...prev, authVersion: prev.authVersion + 1 }))
+                }
+                if (pollTimer) clearInterval(pollTimer)
+              }
+            } catch (error) {
+              console.error('Error checking OpenCode cache:', error)
+              if (pollTimer) clearInterval(pollTimer)
+            }
+          }, 500)
           setTimeout(() => {
             if (pollTimer && mounted) {
               clearInterval(pollTimer)
@@ -111,7 +134,7 @@ export function SearchableModelPicker({
       }
     }
 
-    checkOpenRouterCache()
+    checkProviderCache()
 
     return () => {
       mounted = false

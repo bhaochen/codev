@@ -149,6 +149,8 @@ export async function getAnthropicClient({
   const provider = getAPIProvider()
   let opencodeFetchOverride: ClientOptions['fetch'] | undefined
   if (provider === 'opencode' && model) {
+    // Fetch models in background
+    import('./opencodeClient.js').then(m => m.fetchOpencodeModels())
     opencodeFetchOverride = createOpenCodeFetchOverride(model)
   }
 

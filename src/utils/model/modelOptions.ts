@@ -4,6 +4,7 @@ import {
   isClaudeAISubscriber,
   isMaxSubscriber,
   isTeamPremiumSubscriber,
+  getOpenCodeModelName,
 } from '../auth.js'
 import { getModelStrings } from './modelStrings.js'
 import {
@@ -487,6 +488,30 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
   // Local API: Show only Default option
   if (getAPIProvider() === 'local') {
     return [getDefaultOptionForUser(fastMode)]
+  }
+
+  // OpenCode Zen: Fetch models dynamically from API
+  if (getAPIProvider() === 'opencode') {
+    const defaultOpt = getDefaultOptionForUser(fastMode)
+    try {
+      const { getCachedOpencodeModels } = require('../../services/api/opencodeClient.js')
+      const models = getCachedOpencodeModels()
+      if (models && Array.isArray(models) && models.length > 0) {
+        return [
+          defaultOpt,
+          ...models.map(m => ({
+            value: m.id,
+            label: m.name || m.id,
+            description: 'OpenCode Zen Model',
+          })),
+        ]
+      }
+    } catch {
+      // Ignore errors
+    }
+    
+    // Return only default if models are not yet fetched
+    return [defaultOpt]
   }
 
   // OpenRouter API: Show all available models from OpenRouter

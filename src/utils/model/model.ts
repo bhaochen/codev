@@ -250,10 +250,9 @@ export function getDefaultMainLoopModelSetting(): ModelName | ModelAlias {
   }
 
   // Check if using OpenCode Zen provider
+  // Always check config file directly since provider cache may be stale
   let isOpenCodeProvider = apiProvider === 'opencode'
-
-  // If getAPIProvider() returns null, check the config file directly
-  if (!isOpenCodeProvider && apiProvider === null) {
+  if (!isOpenCodeProvider) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { readFileSync } = require('fs') as typeof import('fs')

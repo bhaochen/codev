@@ -449,7 +449,26 @@ export function getOpenCodeApiKey(): null | string {
 
 export function getOpenCodeModelName(): null | string {
   const config = getGlobalConfig()
-  return config.openCodeModelName || null
+  if (config.authProvider === 'opencode' && config.openCodeModelName) {
+    return config.openCodeModelName
+  }
+  // Fallback: read config file directly in case getGlobalConfig() is stale
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { readFileSync } = require('fs') as typeof import('fs')
+    const { getGlobalClaudeFile } = require('./env.js') as typeof import('./env.js')
+    const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
+    const fileConfig = JSON.parse(raw) as {
+      authProvider?: string
+      openCodeModelName?: string
+    }
+    if (fileConfig.authProvider === 'opencode' && fileConfig.openCodeModelName) {
+      return fileConfig.openCodeModelName
+    }
+  } catch {
+    // Ignore errors
+  }
+  return null
 }
 
 export async function saveLocalModelConfig(baseUrl: string, modelName: string): Promise<void> {

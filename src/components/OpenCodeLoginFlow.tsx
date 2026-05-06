@@ -12,14 +12,11 @@ type OpenCodeLoginFlowProps = {
 
 type LoginMode = 'menu' | 'free_models' | 'api_key'
 
-const FREE_MODELS = [
-  { label: 'Big Pickle (推荐)', value: 'big-pickle', description: '旗舰模型，限时免费，适合复杂任务' },
-  { label: 'GPT 5 Nano', value: 'gpt-5-nano', description: '永久免费，轻量快速，隐私安全' },
-  { label: 'MiniMax M2.5 Free', value: 'minimax-m2.5-free', description: '限时免费，编码推理强' },
-  { label: 'GLM 4.7 Free', value: 'glm-4.7-free', description: '限时免费，智谱开源模型' },
-  { label: 'Kimi K2.5 Free', value: 'kimi-k2.5-free', description: '限时免费，月之暗面模型' },
-  { label: 'Nemotron 3 Super Free', value: 'nemotron-3-super-free', description: '限时免费，NVIDIA 模型，100万上下文' },
-]
+type OpencodeModel = {
+  label: string
+  value: string
+  description: string
+}
 
 export function OpenCodeLoginFlow({
   onDone,
@@ -27,12 +24,14 @@ export function OpenCodeLoginFlow({
 }: OpenCodeLoginFlowProps): React.ReactNode {
   const [mode, setMode] = useState<LoginMode>('menu')
   const [isBusy, setIsBusy] = useState(false)
+  const [isLoadingModels, setIsLoadingModels] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
   const [inputValue, setInputValue] = useState('')
   const [cursorOffset, setCursorOffset] = useState(0)
-  const [selectedModel, setSelectedModel] = useState('big-pickle')
+  const [selectedModel, setSelectedModel] = useState('')
   const [existingApiKey, setExistingApiKey] = useState<string | null>(null)
   const [existingModelName, setExistingModelName] = useState<string | null>(null)
+  const [availableModels, setAvailableModels] = useState<OpencodeModel[]>([])
 
   useEffect(() => {
     const key = getOpenCodeApiKey()
@@ -45,6 +44,52 @@ export function OpenCodeLoginFlow({
       setSelectedModel(model)
     }
   }, [])
+
+  const fetchModels = async () => {
+    setIsLoadingModels(true)
+    try {
+      // Use native https module for better reliability in bundled environment
+      const https = await import('https')
+      const data = await new Promise<string>((resolve, reject) => {
+        const req = https.get('https://opencode.ai/zen/v1/models', {
+          headers: {
+            'User-Agent': 'claude-code/2.1.88',
+          },
+          timeout: 15000,
+        }, res => {
+          let body = ''
+          res.on('data', chunk => { body += chunk })
+          res.on('end', () => resolve(body))
+          res.on('error', reject)
+        })
+        req.on('error', reject)
+        req.on('timeout', () => {
+          req.destroy()
+          reject(new Error('Request timed out'))
+        })
+      })
+
+      const parsed = JSON.parse(data) as { data?: Array<{ id: string }> }
+      if (Array.isArray(parsed.data) && parsed.data.length > 0) {
+        const models = parsed.data.map(m => ({
+          label: m.id,
+          value: m.id,
+          description: m.id.endsWith('-free') ? '限时免费模型' : 'OpenCode Zen 模型',
+        }))
+        setAvailableModels(models)
+        if (!selectedModel && models.length > 0) {
+          setSelectedModel(models[0].value)
+        }
+      } else {
+        setStatus('API returned empty model list')
+      }
+    } catch (err) {
+      console.error('OpenCode models fetch error:', err)
+      setStatus(`Failed to fetch models: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    } finally {
+      setIsLoadingModels(false)
+    }
+  }
 
   const menuOptions = [
     {
@@ -81,16 +126,23 @@ export function OpenCodeLoginFlow({
 
     if (value === 'free_models') {
       setMode('free_models')
+      // Fetch models when entering free models mode
+      if (availableModels.length === 0) {
+        await fetchModels()
+      }
       return
     }
   }
 
-  async function handleFreeModelSelect(): Promise<void> {
+  async function handleFreeModelSelect(modelValue?: string): Promise<void> {
+    const modelToSave = modelValue || selectedModel
+    if (!modelToSave) return
+    
     setIsBusy(true)
     setStatus(null)
     try {
       // 免费模型不需要 API Key，直接保存模型名称
-      await saveOpenCodeApiKey('', selectedModel)
+      await saveOpenCodeApiKey('', modelToSave)
       onDone()
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
@@ -131,19 +183,39 @@ export function OpenCodeLoginFlow({
   }
 
   if (mode === 'free_models') {
+    if (isLoadingModels) {
+      return (
+        <Box flexDirection="column" gap={1}>
+          <Text>Loading available models...</Text>
+        </Box>
+      )
+    }
+
+    if (availableModels.length === 0) {
+      return (
+        <Box flexDirection="column" gap={1}>
+          <Text bold={true}>No models available</Text>
+          <Text dimColor={true}>
+            {status || 'Failed to fetch models from OpenCode Zen API.'}
+          </Text>
+          <Box flexDirection="row" gap={2} marginTop={1}>
+            <Text color="subtle">Esc to go back</Text>
+          </Box>
+        </Box>
+      )
+    }
+
     return (
       <Box flexDirection="column" gap={1}>
         <Text bold={true}>
           {startingMessage ?? 'Select a free model from OpenCode Zen.'}
         </Text>
         <Text dimColor={true}>
-          Free models are limited-time offers except GPT 5 Nano (permanently free).
-          {'\n'}
-          No API key needed — just start coding!
+          Free models are available from OpenCode Zen API.
         </Text>
         <Text>Select model:</Text>
         <Select
-          options={FREE_MODELS.map(model => ({
+          options={availableModels.map(model => ({
             label: (
               <Text>
                 {model.label}{' '}
@@ -155,8 +227,8 @@ export function OpenCodeLoginFlow({
           }))}
           onChange={value => {
             setSelectedModel(value)
-            // 选择后直接提交
-            void handleFreeModelSelect()
+            // 选择后自动提交，直接传递 value 避免闭包问题
+            void handleFreeModelSelect(value)
           }}
         />
         <Box flexDirection="row" gap={2} marginTop={1}>
@@ -222,12 +294,12 @@ export function OpenCodeLoginFlow({
     <Box flexDirection="column" gap={1}>
       <Text bold={true}>
         {startingMessage ??
-          'Better-Clawd can use OpenCode Zen free models or with a standard OpenCode Zen API key.'}
+          'Better-Clawd can use OpenCode Zen free models or with a Zen API key.'}
       </Text>
       <Text dimColor={true}>
         OpenCode Zen provides free models out of the box — no API key required.
         {'\n'}
-        Free models include Big Pickle, GPT 5 Nano, and more.
+        Free models are fetched from the API dynamically.
       </Text>
       {status ? <Text color="error">{status}</Text> : null}
       <Box>
