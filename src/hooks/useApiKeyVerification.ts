@@ -63,6 +63,12 @@ export function useApiKeyVerification(): ApiKeyVerificationResult {
       return 'missing'
     }
     
+    // Check OpenCode Zen authentication
+    // OpenCode Zen uses free models by default, no API key required
+    if (authProvider === 'opencode') {
+      return 'valid'
+    }
+    
     // Anthropic authentication
     if (!isAnthropicAuthEnabled() || isClaudeAISubscriber()) {
       return 'valid'
@@ -128,6 +134,12 @@ export function useApiKeyVerification(): ApiKeyVerificationResult {
         } else {
           setStatus('missing')
         }
+        return
+      }
+      
+      // Check OpenCode Zen authentication
+      if (authProvider === 'opencode') {
+        setStatus('valid')
         return
       }
       
@@ -207,6 +219,12 @@ export function useApiKeyVerification(): ApiKeyVerificationResult {
       } else {
         setStatus('missing')
       }
+      return
+    }
+    
+    // Check OpenCode Zen authentication
+    if (authProvider === 'opencode') {
+      setStatus('valid')
       return
     }
     
