@@ -15,7 +15,7 @@ git clone https://github.com/versperai/VersperClaw.git && cd VersperClaw && bun 
 
 # if want global use bin file
 cp VersperClaw ~/.local/bin
-# then can use VersperClaw in everywhere
+# then can use VersperClaw in everywhere after /login
 ```
 
 ## 2. LLM Based - Auto Compact
@@ -26,9 +26,8 @@ cp VersperClaw ~/.local/bin
   </tr>
 </table>
 
-> Maximum_Context_Window = min(CLAUDE_CODE_MAX_CONTEXT_TOKENS, CLAUDE_CODE_AUTO_COMPACT_WINDOW) - 20000
-
 ```bash
+# Maximum_Context_Window = min(CLAUDE_CODE_MAX_CONTEXT_TOKENS, CLAUDE_CODE_AUTO_COMPACT_WINDOW) - 20000
 # set 200k env in ~/.claude/settings.json or terminal
 # the 20k is used to compact as buffer band
 {
