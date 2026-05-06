@@ -55,7 +55,9 @@ sudo usermod -aG docker $USER
 
 # make sure open pc and now start docker daemon
 sudo systemctl enable --now docker
+```
 
+```bash
 # install searxng in docker-compose
 curl -fsSL \
   -O https://raw.githubusercontent.com/searxng/searxng/master/container/docker-compose.yml \
@@ -63,6 +65,8 @@ curl -fsSL \
 
 # add json source in formats behind html - jsonl in 87 lines
 cd searxng/core-config/ && sudo nvim settings.yml
+
+# or use VersperSearch a pre-build docker config in https://github.com/versperai/VersperSearch
 
 # start searxng engine
 docker compose up -d
