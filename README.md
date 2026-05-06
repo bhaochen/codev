@@ -11,29 +11,11 @@
 curl -fsSL https://raw.githubusercontent.com/versperai/VersperClaw/main/install.sh | bash
 
 # source install
-git clone https://github.com/versperai/VersperClaw.git && cd VersperClaw && bun install && bun run build:dev:full && ./VersperClaw
-```
+git clone https://github.com/versperai/VersperClaw.git && cd VersperClaw && bun install && bun run build:dev:full && ./VersperClaw 
 
-```bash
-# make symbol link for everywhere can use VersperClaw just with a  
-ln -sf "$(pwd)/VersperClaw" "$HOME/.local/bin/VersperClaw"
-
-# overwrite
-cp VersperClaw ~/.local/bin/VersperClaw
-
-# make sure `~/.local/bin` in PATH 
-# check if have in path
-echo $PATH | grep -q "$HOME/.local/bin" && echo "In PATH" || echo "Out PATH"
-
-# if not in PATH ，need add to your shell configuration
-
-# for bash
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-source ~/.bashrc
-
-# for zsh
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
-source ~/.zshrc
+# if want global use bin file
+cp VersperClaw ~/.local/bin
+# then can use VersperClaw in everywhere
 ```
 
 ## 2. WebSearch & WebFetch Tools - 100% local free no remote api fee
@@ -46,6 +28,10 @@ source ~/.zshrc
   </tr>
 </table>
 
+### Choice One - SearXNG:
+
+#### 1. Docker Configuration
+
 ```bash
 # local config search engine - searxng in archlinux
 # make sure have install docker and docker-compose
@@ -57,8 +43,12 @@ sudo usermod -aG docker $USER
 sudo systemctl enable --now docker
 ```
 
+#### 2. Docker-Compose Pull
+
+> use VersperSearch a pre-build docker config in https://github.com/versperai/VersperSearch
+
 ```bash
-# install searxng in docker-compose
+# or install searxng in docker-compose by yourself
 curl -fsSL \
   -O https://raw.githubusercontent.com/searxng/searxng/master/container/docker-compose.yml \
   -O https://raw.githubusercontent.com/searxng/searxng/master/container/.env.example
@@ -66,11 +56,13 @@ curl -fsSL \
 # add json source in formats behind html - jsonl in 87 lines
 cd searxng/core-config/ && sudo nvim settings.yml
 
-# or use VersperSearch a pre-build docker config in https://github.com/versperai/VersperSearch
-
 # start searxng engine
 docker compose up -d
+```
 
+#### 3. Check Search Feature
+
+```bash
 # check in every browser
 firefox http://localhost:8080
 
@@ -84,6 +76,10 @@ firefox http://localhost:8080
 # or allow tool search in ~/.bashrc
 export ENABLE_TOOL_SEARCH=true
 ```
+
+### Choice Two - Tavily:
+
+> when TAVILY_API_KEY is set in env
 
 ## 3. SubAgent - back run & tool call agent and swap file output
 
