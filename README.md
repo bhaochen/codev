@@ -18,7 +18,29 @@ cp VersperClaw ~/.local/bin
 # then can use VersperClaw in everywhere
 ```
 
-## 2. WebSearch & WebFetch Tools - 100% local free no remote api fee
+## 2. LLM Based - Auto Compact
+
+<table align="center">
+  <tr>
+    <td><img src="assets/ctx_auto_compose/ctx_line.png"></td>
+  </tr>
+</table>
+
+> Maximum_Context_Window = min(CLAUDE_CODE_MAX_CONTEXT_TOKENS, CLAUDE_CODE_AUTO_COMPACT_WINDOW) - 20000
+
+```bash
+# set 200k env in ~/.claude/settings.json or terminal
+# the 20k is used to compact as buffer band
+{
+  "env": {
+    "USER_TYPE": "ant",
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "200000",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "200000"
+  }
+}
+```
+
+## 3. WebSearch & WebFetch Tools
 
 <table align="center">
   <tr>
@@ -29,6 +51,8 @@ cp VersperClaw ~/.local/bin
 </table>
 
 ### Choice One - SearXNG:
+
+> 100% local free no remote api fee
 
 #### 1. Docker Configuration
 
@@ -72,7 +96,6 @@ firefox http://localhost:8080
     "ENABLE_TOOL_SEARCH": "true"
   }
 }
-
 # or allow tool search in ~/.bashrc
 export ENABLE_TOOL_SEARCH=true
 ```
@@ -81,9 +104,9 @@ export ENABLE_TOOL_SEARCH=true
 
 > when TAVILY_API_KEY is set in env
 
-## 3. SubAgent - back run & tool call agent and swap file output
+## 4. SubAgent - back run & tool call agent and swap file output
 
-### 3.1 Auto Creat SubAgent
+### 4.1 Auto Creat SubAgent
 
 <table align="center">
   <tr>
@@ -93,7 +116,7 @@ export ENABLE_TOOL_SEARCH=true
   </tr>
 </table>
 
-### 3.2 Tool Agent Call Chains and Swap File Context
+### 4.2 Tool Agent Call Chains and Swap File Context
 
 <table align="center">
   <tr>
@@ -103,7 +126,7 @@ export ENABLE_TOOL_SEARCH=true
   </tr>
 </table>
 
-## 4. Auto Dream
+## 5. Auto Dream
 
 <div align="center">
   <img src="assets/auto_dream.png" alt="VersperAI">
@@ -123,34 +146,15 @@ nvim ~/.claude/settings.json
 # cd ~/.claude/projects
 ```
 
-## 5. Telegram - Interactive Config
+## 6. Telegram - Interactive Config
 
 ```bash
 # On startup, the CLI runs silently in the background, maintains a persistent Telegram connection, and listens for messages.
 # start VersperClaw Cli
-./cli-dev
+./VersperClaw
 
 # enter it into the cli input field and interactive configuration parameters
 /telegram
-```
-
-## 6. Auto Compact
-
-```bash
-# set env in ~/.claude/settings.json
-{
-  "env": {
-    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "57344",
-    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "61440"
-  }
-}
-
-# or via bash set env
-echo 'export CLAUDE_CODE_AUTO_COMPACT_WINDOW=57344' >> ~/.bashrc
-echo 'export CLAUDE_CODE_MAX_CONTEXT_TOKENS=61440' >> ~/.bashrc
-
-# effective = 108K - effectiveContextWindow - used for auto-compact summary
-# threshold = 95K - autoCompactThreshold - buffer to avoid failed
 ```
 
 # Legacy Python Version
