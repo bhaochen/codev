@@ -8,42 +8,38 @@ import {
 
 const OPENCODE_BASE_URL = 'https://opencode.ai/zen/v1'
 
-let cachedModels: Array<{ id: string; name?: string }> | null = null
+// Known free models that don't have -free suffix
+const FREE_MODEL_IDS = new Set([
+  'big-pickle',
+  'gpt-5-nano',
+])
+
+let cachedModels: Array<{ id: string; name?: string; isFree: boolean }> | null = null
 let fetchPromise: Promise<void> | null = null
 
 export async function fetchOpencodeModels(): Promise<void> {
-  if (cachedModels || fetchPromise) return
+  if (fetchPromise) return
   
   fetchPromise = (async () => {
     try {
-      const https = await import('https')
-      const data = await new Promise<string>((resolve, reject) => {
-        const apiKey = getOpenCodeApiKey()
-        const headers: Record<string, string> = {
-          'User-Agent': 'claude-code/2.1.88',
-        }
-        if (apiKey) {
-          headers.Authorization = `Bearer ${apiKey}`
-        }
-        const req = https.get(`${OPENCODE_BASE_URL}/models`, {
-          headers,
-          timeout: 15000,
-        }, res => {
-          let body = ''
-          res.on('data', chunk => { body += chunk })
-          res.on('end', () => resolve(body))
-          res.on('error', reject)
-        })
-        req.on('error', reject)
-        req.on('timeout', () => {
-          req.destroy()
-          reject(new Error('Request timed out'))
-        })
-      })
+      const apiKey = getOpenCodeApiKey()
+      const headers: Record<string, string> = {
+        'User-Agent': 'claude-code/2.1.88',
+      }
+      if (apiKey) {
+        headers.Authorization = `Bearer ${apiKey}`
+      }
 
-      const parsed = JSON.parse(data) as { data?: Array<{ id: string; name?: string }> }
-      if (Array.isArray(parsed.data)) {
-        cachedModels = parsed.data.map(m => ({ id: m.id, name: m.name || m.id }))
+      const res = await fetch(`${OPENCODE_BASE_URL}/models`, { headers })
+      if (!res.ok) return
+
+      const data = await res.json() as { data?: Array<{ id: string; name?: string }> }
+      if (Array.isArray(data.data)) {
+        cachedModels = data.data.map(m => ({
+          id: m.id,
+          name: m.name || m.id,
+          isFree: m.id.endsWith('-free') || FREE_MODEL_IDS.has(m.id),
+        }))
       }
     } catch {
       // Ignore errors
@@ -55,7 +51,7 @@ export async function fetchOpencodeModels(): Promise<void> {
   await fetchPromise
 }
 
-export function getCachedOpencodeModels(): Array<{ id: string; name?: string }> {
+export function getCachedOpencodeModels(): Array<{ id: string; name?: string; isFree: boolean }> {
   return cachedModels || []
 }
 

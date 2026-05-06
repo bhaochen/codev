@@ -71,48 +71,36 @@ export async function call(
         context.setMessages(stripSignatureBlocks);
 
         if (success) {
-          // 这些 reset 的本质: 换账号 = 全部重置
-          // Post-login refresh logic. Keep in sync with onboarding in src/interactiveHelpers.tsx
-          // 成本统计 Reset cost state when switching accounts
+          // These reset: switching account = full reset
           resetCostState();
-
-          // 远程配置 Refresh remotely managed settings after login (non-blocking)
           void refreshRemoteManagedSettings();
-          // Refresh policy limits after login (non-blocking)
           void refreshPolicyLimits();
-     
-          // 用户缓存 Clear user data cache BEFORE GrowthBook refresh so it picks up fresh credentials
           resetUserCache();
-
-          // Feature flags(GrowthBook) Refresh GrowthBook after login to get updated feature flags (e.g., for claude.ai MCPs)
           refreshGrowthBookAfterAuthChange();
-
-          // 设备信任 记住这台设备
-          // Clear any stale trusted device token from a previous account before
-          // re-enrolling — prevents sending the old token on bridge calls while
-          // the async enrollTrustedDevice() is in-flight.
           clearTrustedDeviceToken();
-          // Enroll as a trusted device for Remote Control (10-min fresh-session window)
           void enrollTrustedDevice();
-
-          // 权限系统(killswitch) 防止越权操作, 自动模式滥用
-          // Reset killswitch gate checks and re-run with new org
           resetBypassPermissionsCheck();
           const appState = context.getAppState();
           void checkAndDisableBypassPermissionsIfNeeded(appState.toolPermissionContext, context.setAppState);
       
-          // 自动模式 gating, Feature flag 控制功能开关
           if (feature('TRANSCRIPT_CLASSIFIER')) {
             resetAutoModeGateCheck();
             void checkAndDisableAutoModeIfNeeded(appState.toolPermissionContext, context.setAppState, appState.fastMode);
           }
 
-          // Increment authVersion to trigger re-fetching of auth-dependent data in hooks (e.g., MCP servers)
+          // For OpenCode provider, pre-fetch models so /model shows them immediately
+          const { getAPIProvider } = await import('../../utils/model/providers.js')
+          if (getAPIProvider() === 'opencode') {
+            const { fetchOpencodeModels } = await import('../../services/api/opencodeClient.js')
+            void fetchOpencodeModels()
+          }
+
+          // Increment authVersion to trigger re-fetching of auth-dependent data
           context.setAppState(prev => ({
             ...prev,
-            authVersion: prev.authVersion + 1, // 触发全局更新, 用 version 触发所有 hook 重新 fetch
-            mainLoopModel: null, // 重置为 null，使用新 provider 的默认模型
-            mainLoopModelForSession: null, // 重置 session 模型
+            authVersion: prev.authVersion + 1,
+            mainLoopModel: null,
+            mainLoopModelForSession: null,
           }));
         }
 

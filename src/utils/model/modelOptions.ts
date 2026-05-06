@@ -491,7 +491,7 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
   }
 
   // OpenCode Zen: Fetch models dynamically from API
-  // If no API key, show only free models (ending with -free)
+  // If no API key, show only free models
   // If API key is provided, show all models except free ones
   if (getAPIProvider() === 'opencode') {
     const defaultOpt = getDefaultOptionForUser(fastMode)
@@ -503,8 +503,8 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
       
       if (models && Array.isArray(models) && models.length > 0) {
         const filtered = hasApiKey
-          ? models.filter(m => !m.id.endsWith('-free'))
-          : models.filter(m => m.id.endsWith('-free'))
+          ? models.filter(m => !m.isFree)
+          : models.filter(m => m.isFree)
         
         if (filtered.length > 0) {
           return [
