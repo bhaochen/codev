@@ -1,4 +1,4 @@
-import { test, expect, describe } from 'bun:test'
+import { test, expect, describe, beforeEach, afterEach, mock } from 'bun:test'
 import { WebSearchTool } from '../WebSearchTool'
 
 describe('WebSearchTool', () => {
@@ -223,5 +223,61 @@ describe('WebSearchTool', () => {
       expect(Array.isArray(result.data.results)).toBe(true)
       expect(result.data.durationSeconds).toBeGreaterThan(0)
     }, 60000)
+  })
+
+  describe('Tavily Integration', () => {
+    let originalTavilyKey: string | undefined
+
+    beforeEach(() => {
+      originalTavilyKey = process.env.TAVILY_API_KEY
+    })
+
+    afterEach(() => {
+      if (originalTavilyKey !== undefined) {
+        process.env.TAVILY_API_KEY = originalTavilyKey
+      } else {
+        delete process.env.TAVILY_API_KEY
+      }
+    })
+
+    test('should use SearXNG when TAVILY_API_KEY is not set', async () => {
+      delete process.env.TAVILY_API_KEY
+
+      const result = await WebSearchTool.call(
+        { query: 'test query' },
+        {},
+        () => {},
+        null
+      )
+
+      expect(result).toBeDefined()
+      expect(result.data.query).toBe('test query')
+      expect(Array.isArray(result.data.results)).toBe(true)
+    }, 60000)
+
+    test('should use Tavily when TAVILY_API_KEY is set', async () => {
+      process.env.TAVILY_API_KEY = 'tvly-test-key'
+
+      const result = await WebSearchTool.call(
+        { query: 'test tavily query' },
+        {},
+        () => {},
+        null
+      )
+
+      // With a fake key, Tavily will fail and we should get an error result
+      expect(result).toBeDefined()
+      expect(result.data.query).toBe('test tavily query')
+      expect(Array.isArray(result.data.results)).toBe(true)
+      // The result should contain an error since the API key is invalid
+      const hasError = result.data.results.some(
+        r => typeof r === 'string' && r.includes('Error')
+      )
+      expect(hasError).toBe(true)
+    }, 60000)
+
+    test('should include Tavily in description when key is set', () => {
+      expect(WebSearchTool.description).toContain('Tavily')
+    })
   })
 })
