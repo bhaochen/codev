@@ -43,6 +43,8 @@ import { useAppState, useSetAppState } from '../../state/AppState.js';
 import { getEffortSuffix } from '../../utils/effort.js';
 import { useMainLoopModel } from '../../hooks/useMainLoopModel.js';
 import { renderModelSetting } from '../../utils/model/model.js';
+import { CtxProgressBar } from '../CtxProgressBar.js';
+import { useContextUsage } from '../../hooks/useContextUsage.js';
 const LEFT_PANEL_MAX_WIDTH = 50;
 export function LogoV2() {
   const $ = _c(94);
@@ -158,6 +160,7 @@ export function LogoV2() {
   useEffect(t7, t8);
   const model = useMainLoopModel();
   const fullModelDisplayName = renderModelSetting(model);
+  const contextUsage = useContextUsage();
   const setAppState = useSetAppState();
 
   // Poll for OpenRouter models when using 'default' model
@@ -381,7 +384,7 @@ export function LogoV2() {
       t18 = $[42];
       t19 = $[43];
     }
-    return <><OffscreenFreeze><Box flexDirection="column" borderStyle="round" borderColor="startupAccent" borderText={t11} paddingX={1} paddingY={1} alignItems="center" width={columns}><Text bold={true}>{welcomeMessage}</Text>{t12}{t13}<Text dimColor={true}>{billingType}</Text><Text dimColor={true}>{agentName ? `@${agentName} · ${truncatedCwd}` : truncatedCwd}</Text></Box></OffscreenFreeze>{t14}{t15}{t16}{t17}{t18}{t19}</>;
+    return <><OffscreenFreeze><Box flexDirection="column" borderStyle="round" borderColor="startupAccent" borderText={t11} paddingX={1} paddingY={1} alignItems="center" width={columns}><Text bold={true}>{welcomeMessage}</Text>{t12}{t13}{contextUsage.hasData && <CtxProgressBar currentTokens={contextUsage.currentTokens} contextWindowTokens={contextUsage.contextWindowTokens} compactionTargetTokens={contextUsage.compactionTargetTokens} utilizationPct={contextUsage.utilizationPct} />}<Text dimColor={true}>{billingType}</Text><Text dimColor={true}>{agentName ? `@${agentName} · ${truncatedCwd}` : truncatedCwd}</Text></Box></OffscreenFreeze>{t14}{t15}{t16}{t17}{t18}{t19}</>;
   }
   const welcomeMessage_0 = formatWelcomeMessage(username);
   const modelLine = !process.env.IS_DEMO && config.oauthAccount?.organizationName ? `${modelDisplayName} · ${billingType} · ${config.oauthAccount.organizationName}` : `${modelDisplayName} · ${billingType}`;
@@ -448,7 +451,7 @@ export function LogoV2() {
   }
   let t22;
   if ($[53] !== t20 || $[54] !== t21) {
-    t22 = <Box flexDirection="column" alignItems="center">{t20}{t21}</Box>;
+    t22 = <Box flexDirection="column" alignItems="center">{t20}{contextUsage.hasData && <CtxProgressBar currentTokens={contextUsage.currentTokens} contextWindowTokens={contextUsage.contextWindowTokens} compactionTargetTokens={contextUsage.compactionTargetTokens} utilizationPct={contextUsage.utilizationPct} />}{t21}</Box>;
     $[53] = t20;
     $[54] = t21;
     $[55] = t22;
