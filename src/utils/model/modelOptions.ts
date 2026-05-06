@@ -95,7 +95,6 @@ export function getDefaultOptionForUser(fastMode = false): ModelOption {
   }
   
   // Check if we should use OpenCode Zen model
-  let openCodeModelName: string | null = null
   if (isOpenCode || provider === null) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -106,20 +105,18 @@ export function getDefaultOptionForUser(fastMode = false): ModelOption {
         authProvider?: string
         openCodeModelName?: string
       }
-      if (config.authProvider === 'opencode' && config.openCodeModelName) {
-        openCodeModelName = config.openCodeModelName
+      if (config.authProvider === 'opencode') {
+        const currentModel = config.openCodeModelName || 'big-pickle'
+        const displayName = currentModel === 'big-pickle' ? 'Big Pickle' : currentModel
+        return {
+          value: null,
+          label: 'Default (recommended)',
+          description: `Use the default OpenCode Zen model (currently ${displayName})`,
+          descriptionForModel: `Default OpenCode Zen model (currently ${displayName})`,
+        }
       }
     } catch {
       // Ignore errors
-    }
-  }
-  
-  if (openCodeModelName) {
-    return {
-      value: null,
-      label: 'Default (recommended)',
-      description: `Use the default OpenCode Zen model (currently ${openCodeModelName})`,
-      descriptionForModel: `Default OpenCode Zen model (currently ${openCodeModelName})`,
     }
   }
   
@@ -509,11 +506,30 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
         if (filtered.length > 0) {
           return [
             defaultOpt,
-            ...filtered.map(m => ({
-              value: m.id,
-              label: m.name || m.id,
-              description: hasApiKey ? 'OpenCode Zen Model' : '限时免费模型',
-            })),
+            ...filtered.map(m => {
+              let label = m.name || m.id
+              let description = hasApiKey ? 'OpenCode Zen Model' : '限时免费模型'
+              
+              if (m.id === 'big-pickle') {
+                label = 'Big Pickle'
+                description = '旗舰模型，限时免费，适合复杂任务'
+              } else if (m.id === 'gpt-5-nano') {
+                label = 'GPT 5 Nano'
+                description = '永久免费，轻量快速，隐私安全'
+              } else if (m.id === 'minimax-m2.5-free') {
+                label = 'MiniMax M2.5 Free'
+              } else if (m.id === 'hy3-preview-free') {
+                label = 'HY3 Preview Free'
+              } else if (m.id === 'ling-2.6-flash-free') {
+                label = 'Ling 2.6 Flash Free'
+              } else if (m.id === 'trinity-large-preview-free') {
+                label = 'Trinity Large Preview Free'
+              } else if (m.id === 'nemotron-3-super-free') {
+                label = 'Nemotron 3 Super Free'
+              }
+              
+              return { value: m.id, label, description }
+            }),
           ]
         }
       }
@@ -521,7 +537,6 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
       // Ignore errors
     }
     
-    // Return only default if models are not yet fetched
     return [defaultOpt]
   }
 

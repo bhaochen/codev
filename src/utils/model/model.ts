@@ -479,6 +479,22 @@ export function getPublicModelDisplayName(model: ModelName): string | null {
       return 'Haiku 4.5'
     case getModelStrings().haiku35:
       return 'Haiku 3.5'
+    case 'big-pickle':
+      return 'Big Pickle'
+    case 'gpt-5-nano':
+      return 'GPT 5 Nano'
+    case 'minimax-m2.5-free':
+      return 'MiniMax M2.5 Free'
+    case 'minimax-m2.5':
+      return 'MiniMax M2.5'
+    case 'hy3-preview-free':
+      return 'HY3 Preview Free'
+    case 'ling-2.6-flash-free':
+      return 'Ling 2.6 Flash Free'
+    case 'trinity-large-preview-free':
+      return 'Trinity Large Preview Free'
+    case 'nemotron-3-super-free':
+      return 'Nemotron 3 Super Free'
     default:
       return null
   }
