@@ -262,7 +262,7 @@ export function getDefaultMainLoopModelSetting(): ModelName | ModelAlias {
         authProvider?: string
         openCodeModelName?: string
       }
-      isOpenCodeProvider = config.authProvider === 'opencode' && !!config.openCodeModelName
+      isOpenCodeProvider = config.authProvider === 'opencode'
     } catch {
       // Ignore errors, fall through to default behavior
     }
@@ -273,7 +273,7 @@ export function getDefaultMainLoopModelSetting(): ModelName | ModelAlias {
     if (openCodeModelName) {
       return openCodeModelName
     }
-    // Fallback to Big Pickle if no model is configured
+    // Fallback to big-pickle for free models
     return 'big-pickle'
   }
 

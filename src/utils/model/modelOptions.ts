@@ -491,20 +491,31 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
   }
 
   // OpenCode Zen: Fetch models dynamically from API
+  // If no API key, show only free models (ending with -free)
+  // If API key is provided, show all models except free ones
   if (getAPIProvider() === 'opencode') {
     const defaultOpt = getDefaultOptionForUser(fastMode)
     try {
       const { getCachedOpencodeModels } = require('../../services/api/opencodeClient.js')
+      const { getOpenCodeApiKey: getApiKey } = require('../../utils/auth.js')
       const models = getCachedOpencodeModels()
+      const hasApiKey = !!getApiKey()
+      
       if (models && Array.isArray(models) && models.length > 0) {
-        return [
-          defaultOpt,
-          ...models.map(m => ({
-            value: m.id,
-            label: m.name || m.id,
-            description: 'OpenCode Zen Model',
-          })),
-        ]
+        const filtered = hasApiKey
+          ? models.filter(m => !m.id.endsWith('-free'))
+          : models.filter(m => m.id.endsWith('-free'))
+        
+        if (filtered.length > 0) {
+          return [
+            defaultOpt,
+            ...filtered.map(m => ({
+              value: m.id,
+              label: m.name || m.id,
+              description: hasApiKey ? 'OpenCode Zen Model' : '限时免费模型',
+            })),
+          ]
+        }
       }
     } catch {
       // Ignore errors
