@@ -13,6 +13,7 @@ import {
   isMaxSubscriber,
   isProSubscriber,
   isTeamPremiumSubscriber,
+  getOpenCodeModelName,
 } from '../auth.js'
 import {
   has1mContext,
@@ -246,6 +247,35 @@ export function getDefaultMainLoopModelSetting(): ModelName | ModelAlias {
     }
     // Fallback to 'default' if no local model name is configured
     return 'default'
+  }
+
+  // Check if using OpenCode Zen provider
+  let isOpenCodeProvider = apiProvider === 'opencode'
+
+  // If getAPIProvider() returns null, check the config file directly
+  if (!isOpenCodeProvider && apiProvider === null) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { readFileSync } = require('fs') as typeof import('fs')
+      const { getGlobalClaudeFile } = require('./env.js') as typeof import('./env.js')
+      const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
+      const config = JSON.parse(raw) as {
+        authProvider?: string
+        openCodeModelName?: string
+      }
+      isOpenCodeProvider = config.authProvider === 'opencode' && !!config.openCodeModelName
+    } catch {
+      // Ignore errors, fall through to default behavior
+    }
+  }
+
+  if (isOpenCodeProvider) {
+    const openCodeModelName = getOpenCodeModelName()
+    if (openCodeModelName) {
+      return openCodeModelName
+    }
+    // Fallback to Big Pickle if no model is configured
+    return 'big-pickle'
   }
 
   // Ants default to defaultModel from flag config, or Opus 1M if not configured

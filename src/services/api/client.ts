@@ -12,6 +12,8 @@ import {
   getOpenRouterApiKey,
   getOpenAIApiKey,
   getLocalBaseUrl,
+  getOpenCodeApiKey,
+  getOpenCodeModelName,
 } from 'src/utils/auth.js'
 import { getUserAgent } from 'src/utils/http.js'
 import { getSmallFastModel } from 'src/utils/model/model.js'
@@ -20,8 +22,10 @@ import {
   isFirstPartyAnthropicBaseUrl,
   getOpenRouterBaseUrl,
   getOpenAIBaseUrl,
+  getOpencodeBaseUrl,
 } from 'src/utils/model/providers.js'
 import { getProxyFetchOptions } from 'src/utils/proxy.js'
+import { createOpenCodeFetchOverride } from './opencodeClient.js'
 import {
   getIsNonInteractiveSession,
   getSessionId,
@@ -141,7 +145,14 @@ export async function getAnthropicClient({
     await configureApiKeyHeaders(defaultHeaders, getIsNonInteractiveSession())
   }
 
-  const resolvedFetch = buildFetch(fetchOverride, source)
+  // For OpenCode provider, use custom fetch to convert Anthropic format to OpenAI format
+  const provider = getAPIProvider()
+  let opencodeFetchOverride: ClientOptions['fetch'] | undefined
+  if (provider === 'opencode' && model) {
+    opencodeFetchOverride = createOpenCodeFetchOverride(model)
+  }
+
+  const resolvedFetch = buildFetch(fetchOverride || opencodeFetchOverride, source)
 
   const ARGS = {
     defaultHeaders,
@@ -303,7 +314,6 @@ export async function getAnthropicClient({
   }
 
   // Determine authentication method based on available tokens
-  const provider = getAPIProvider()
   let clientConfig: ConstructorParameters<typeof Anthropic>[0] = {
     apiKey: isClaudeAISubscriber() ? null : apiKey || getAnthropicApiKey(),
     authToken: isClaudeAISubscriber()
@@ -345,6 +355,14 @@ export async function getAnthropicClient({
     }
   }
 
+  // Handle OpenCode Zen - uses custom fetch override to convert Anthropic format to OpenAI format
+  // No need to set baseURL here as the fetch override handles the endpoint directly
+  if (provider === 'opencode') {
+    // The fetch override will handle the API conversion
+    // Just set a dummy apiKey to satisfy the SDK
+    clientConfig.apiKey = 'opencode-zen'
+  }
+
   return new Anthropic(clientConfig)
 }
 
@@ -354,8 +372,8 @@ async function configureApiKeyHeaders(
 ): Promise<void> {
   const provider = getAPIProvider()
   
-  // Skip for OpenRouter, OpenAI, and Local - they use apiKey parameter instead
-  if (provider === 'openrouter' || provider === 'openai' || provider === 'local') {
+  // Skip for OpenRouter, OpenAI, Local, and OpenCode - they use apiKey parameter instead
+  if (provider === 'openrouter' || provider === 'openai' || provider === 'local' || provider === 'opencode') {
     return
   }
 

@@ -24,6 +24,7 @@ import { Dialog } from '../../components/design-system/Dialog.js';
 import { OpenAILoginFlow } from '../../components/OpenAILoginFlow.js'
 import { OpenRouterLoginFlow } from '../../components/OpenRouterLoginFlow.js'
 import { LocalLoginFlow } from '../../components/LocalLoginFlow.js'
+import { OpenCodeLoginFlow } from '../../components/OpenCodeLoginFlow.js'
 
 import { useMainLoopModel } from '../../hooks/useMainLoopModel.js';
 
@@ -47,7 +48,7 @@ import {
 import { resetUserCache } from '../../utils/user.js';
 
 // TODO
-type AuthProviderChoice = 'anthropic' | 'openai' | 'openrouter' | 'local'
+type AuthProviderChoice = 'anthropic' | 'openai' | 'openrouter' | 'local' | 'opencode'
 
 /* 第一层: 入口函数 call()
  * CLI 执行 /login 真正被调用的函数
@@ -177,6 +178,18 @@ export function Login(props: {
       {
         label: (
           <Text>
+            OpenCode Zen{' '}
+            <Text dimColor={true}>
+              Free models (Big Pickle, GPT 5 Nano) or Zen API key
+            </Text>
+            {'\n'}
+          </Text>
+        ),
+        value: 'opencode',
+      },
+      {
+        label: (
+          <Text>
             Local{' '}
             <Text dimColor={true}>
               Local model server (Ollama, LM Studio, vLLM, etc.)
@@ -223,6 +236,11 @@ export function Login(props: {
       <OpenRouterLoginFlow
         onDone={onFlowDone}
         startingMessage="Better-Clawd can use OpenRouter with your OpenRouter API key."
+      />
+    ) : selectedProvider === 'opencode' ? (
+      <OpenCodeLoginFlow
+        onDone={onFlowDone}
+        startingMessage="Better-Clawd can use OpenCode Zen free models or with a Zen API key."
       />
     ) : selectedProvider === 'local' ? (
       <LocalLoginFlow

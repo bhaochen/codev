@@ -7,6 +7,7 @@ export type APIProvider =
   | 'openrouter'
   | 'openai'
   | 'local'
+  | 'opencode'
   | 'bedrock'
   | 'vertex'
   | 'foundry'
@@ -25,12 +26,14 @@ function getStoredProviderPreference(): APIProvider | null {
     const { readFileSync } = require('fs') as typeof import('fs')
     const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
     const config = JSON.parse(raw) as {
-      authProvider?: 'anthropic' | 'openrouter' | 'openai' | 'local'
+      authProvider?: 'anthropic' | 'openrouter' | 'openai' | 'local' | 'opencode'
       openRouterApiKey?: string
       openAiApiKey?: string
       openAiAccessToken?: string
       localBaseUrl?: string
       localModelName?: string
+      openCodeApiKey?: string
+      openCodeModelName?: string
     }
 
     let result: APIProvider | null
@@ -46,6 +49,9 @@ function getStoredProviderPreference(): APIProvider | null {
         break
       case 'local':
         result = config.localBaseUrl ? 'local' : null
+        break
+      case 'opencode':
+        result = 'opencode'
         break
       case 'anthropic':
         result = 'firstParty'
@@ -82,6 +88,8 @@ function getExplicitProviderOverride(): APIProvider | null {
       return 'openai'
     case 'local':
       return 'local'
+    case 'opencode':
+      return 'opencode'
     case 'bedrock':
       return 'bedrock'
     case 'vertex':
@@ -133,6 +141,19 @@ export function isOpenAIConfigured(): boolean {
   return getStoredProviderPreference() === 'openai'
 }
 
+export function isOpencodeConfigured(): boolean {
+  if (getExplicitProviderOverride() === 'opencode') {
+    return true
+  }
+
+  // Check config file
+  return getStoredProviderPreference() === 'opencode'
+}
+
+export function getOpencodeBaseUrl(): string {
+  return process.env.OPENCODE_BASE_URL ?? 'https://opencode.ai/zen/v1'
+}
+
 export function getOpenRouterBaseUrl(): string {
   const configuredBaseUrl = process.env.OPENROUTER_BASE_URL
   const fallbackBaseUrl = 'https://openrouter.ai/api'
@@ -176,11 +197,13 @@ export function getAPIProvider(): APIProvider | null {
       ? 'vertex'
       : isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY)
         ? 'foundry'
-        : isOpenAIConfigured()
-          ? 'openai'
-          : isOpenRouterConfigured()
-            ? 'openrouter'
-            : getStoredProviderPreference()
+        : isOpencodeConfigured()
+          ? 'opencode'
+          : isOpenAIConfigured()
+            ? 'openai'
+            : isOpenRouterConfigured()
+              ? 'openrouter'
+              : getStoredProviderPreference()
 }
 
 export function getAPIProviderForStatsig(): AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS {
@@ -190,7 +213,7 @@ export function getAPIProviderForStatsig(): AnalyticsMetadata_I_VERIFIED_THIS_IS
 export function isAnthropicCompatibleProvider(
   provider: APIProvider = getAPIProvider(),
 ): boolean {
-  return provider !== 'openai'
+  return provider !== 'openai' && provider !== 'opencode'
 }
 
 /**

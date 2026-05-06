@@ -31,6 +31,14 @@ function getBuiltinModelStrings(provider: APIProvider): ModelStrings {
     return out as ModelStrings
   }
 
+  if (provider === 'opencode') {
+    const out = getBuiltinModelStrings('firstParty') as Record<string, string>
+    out.haiku45 = process.env.OPENCODE_HAIKU_MODEL || 'gpt-5-nano'
+    out.sonnet46 = process.env.OPENCODE_SONNET_MODEL || 'big-pickle'
+    out.opus46 = process.env.OPENCODE_OPUS_MODEL || 'big-pickle'
+    return out as ModelStrings
+  }
+
   if (provider === 'openrouter') {
     const out = getBuiltinModelStrings('firstParty') as Record<string, string>
     out.sonnet46 =

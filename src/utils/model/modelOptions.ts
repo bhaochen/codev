@@ -68,6 +68,7 @@ export function getDefaultOptionForUser(fastMode = false): ModelOption {
   const provider = getAPIProvider()
   const isOpenAI = provider === 'openai'
   const isLocal = provider === 'local'
+  const isOpenCode = provider === 'opencode'
   const is3P = provider !== 'firstParty'
   
   // Check if we should use local model
@@ -89,6 +90,35 @@ export function getDefaultOptionForUser(fastMode = false): ModelOption {
       }
     } catch {
       // Ignore errors
+    }
+  }
+  
+  // Check if we should use OpenCode Zen model
+  let openCodeModelName: string | null = null
+  if (isOpenCode || provider === null) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { readFileSync } = require('fs') as typeof import('fs')
+      const { getGlobalClaudeFile } = require('../env.js') as typeof import('../env.js')
+      const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
+      const config = JSON.parse(raw) as {
+        authProvider?: string
+        openCodeModelName?: string
+      }
+      if (config.authProvider === 'opencode' && config.openCodeModelName) {
+        openCodeModelName = config.openCodeModelName
+      }
+    } catch {
+      // Ignore errors
+    }
+  }
+  
+  if (openCodeModelName) {
+    return {
+      value: null,
+      label: 'Default (recommended)',
+      description: `Use the default OpenCode Zen model (currently ${openCodeModelName})`,
+      descriptionForModel: `Default OpenCode Zen model (currently ${openCodeModelName})`,
     }
   }
   

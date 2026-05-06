@@ -430,6 +430,28 @@ export async function saveOpenRouterApiKey(apiKey: string): Promise<void> {
   clearStoredProviderCache()
 }
 
+export async function saveOpenCodeApiKey(apiKey: string, modelName?: string): Promise<void> {
+  saveGlobalConfig(current => ({
+    ...current,
+    authProvider: 'opencode',
+    openCodeApiKey: apiKey || undefined,
+    openCodeModelName: modelName || undefined,
+  }))
+  // Clear provider cache so it will be re-read on next access
+  const { clearStoredProviderCache } = await import('./model/providers.js')
+  clearStoredProviderCache()
+}
+
+export function getOpenCodeApiKey(): null | string {
+  const config = getGlobalConfig()
+  return config.openCodeApiKey || null
+}
+
+export function getOpenCodeModelName(): null | string {
+  const config = getGlobalConfig()
+  return config.openCodeModelName || null
+}
+
 export async function saveLocalModelConfig(baseUrl: string, modelName: string): Promise<void> {
   if (!baseUrl.trim()) {
     throw new Error('Base URL cannot be empty')

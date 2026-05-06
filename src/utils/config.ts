@@ -187,7 +187,7 @@ export type GlobalConfig = {
   apiKeyHelper?: string
   
   // Authentication provider configuration
-  authProvider?: 'anthropic' | 'openai' | 'openrouter' | 'local'
+  authProvider?: 'anthropic' | 'openai' | 'openrouter' | 'local' | 'opencode'
   
   // OpenRouter API key
   openRouterApiKey?: string
@@ -199,6 +199,10 @@ export type GlobalConfig = {
   // Local model configuration
   localBaseUrl?: string
   localModelName?: string
+  
+  // OpenCode Zen configuration
+  openCodeApiKey?: string
+  openCodeModelName?: string
   
   projects?: Record<string, ProjectConfig>
   numStartups: number
