@@ -7,6 +7,7 @@ import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growt
 import { calculateTokenWarningState, getEffectiveContextWindowSize, isAutoCompactEnabled } from '../services/compact/autoCompact.js';
 import { useCompactWarningSuppression } from '../services/compact/compactWarningHook.js';
 import { getUpgradeMessage } from '../utils/model/contextWindowUpgradeCheck.js';
+import { CtxProgressBar } from './CtxProgressBar.js';
 type Props = {
   tokenUsage: number;
   model: string;
@@ -163,10 +164,13 @@ export function TokenWarning(t0) {
     }
     return t4;
   }
+  const effectiveWindow = getEffectiveContextWindowSize(model);
+  const utilizationPct = Math.round((tokenUsage / Math.max(1, effectiveWindow)) * 100);
+  const compactionTargetTokens = effectiveWindow - 13_000;
   const autocompactLabel = reactiveOnlyMode ? `${100 - displayPercentLeft}% context used` : `${displayPercentLeft}% until auto-compact`;
   let t4;
   if ($[9] !== autocompactLabel || $[10] !== isAboveErrorThreshold || $[11] !== percentLeft) {
-    t4 = <Box flexDirection="row">{showAutoCompactWarning ? <Text dimColor={true} wrap="truncate">{upgradeMessage ? `${autocompactLabel} \u00b7 ${upgradeMessage}` : autocompactLabel}</Text> : <Text color={isAboveErrorThreshold ? "error" : "warning"} wrap="truncate">{upgradeMessage ? `Context low (${percentLeft}% remaining) \u00b7 ${upgradeMessage}` : `Context low (${percentLeft}% remaining) \u00b7 Run /compact to compact & continue`}</Text>}</Box>;
+    t4 = <Box flexDirection="row">{showAutoCompactWarning ? <><CtxProgressBar currentTokens={tokenUsage} contextWindowTokens={effectiveWindow} compactionTargetTokens={compactionTargetTokens} utilizationPct={utilizationPct} />{upgradeMessage && <Text dimColor={true}> · {upgradeMessage}</Text>}</> : <Text color={isAboveErrorThreshold ? "error" : "warning"} wrap="truncate">{upgradeMessage ? `Context low (${percentLeft}% remaining) \u00b7 ${upgradeMessage}` : `Context low (${percentLeft}% remaining) \u00b7 Run /compact to compact & continue`}</Text>}</Box>;
     $[9] = autocompactLabel;
     $[10] = isAboveErrorThreshold;
     $[11] = percentLeft;
