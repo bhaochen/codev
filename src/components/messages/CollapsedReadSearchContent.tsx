@@ -159,6 +159,7 @@ export function CollapsedReadSearchContent({
     memoryWriteCount,
     messages: groupMessages
   } = message;
+  const rawWebFetchCount = message.webFetchCount ?? 0;
   const [theme] = useTheme();
   const toolUseIds = getToolUseIdsFromCollapsedGroup(message);
   const anyError = toolUseIds.some(id => lookups.erroredToolUseIDs.has(id));
@@ -173,21 +174,24 @@ export function CollapsedReadSearchContent({
   const maxListCountRef = useRef(0);
   const maxMcpCountRef = useRef(0);
   const maxBashCountRef = useRef(0);
+  const maxWebFetchCountRef = useRef(0);
   maxReadCountRef.current = Math.max(maxReadCountRef.current, rawReadCount);
   maxSearchCountRef.current = Math.max(maxSearchCountRef.current, rawSearchCount);
   maxListCountRef.current = Math.max(maxListCountRef.current, rawListCount);
   maxMcpCountRef.current = Math.max(maxMcpCountRef.current, message.mcpCallCount ?? 0);
   maxBashCountRef.current = Math.max(maxBashCountRef.current, message.bashCount ?? 0);
+  maxWebFetchCountRef.current = Math.max(maxWebFetchCountRef.current, rawWebFetchCount);
   const readCount = maxReadCountRef.current;
   const searchCount = maxSearchCountRef.current;
   const listCount = maxListCountRef.current;
   const mcpCallCount = maxMcpCountRef.current;
+  const webFetchCount = maxWebFetchCountRef.current;
   // Subtract commands surfaced as "Committed …" / "Created PR …" so the
   // same command isn't counted twice. gitOpBashCount is read live (no max-ref
   // needed — it's 0 until results arrive, then only grows).
   const gitOpBashCount = message.gitOpBashCount ?? 0;
   const bashCount = isFullscreenEnvEnabled() ? Math.max(0, maxBashCountRef.current - gitOpBashCount) : 0;
-  const hasNonMemoryOps = searchCount > 0 || readCount > 0 || listCount > 0 || replCount > 0 || mcpCallCount > 0 || bashCount > 0 || gitOpBashCount > 0;
+  const hasNonMemoryOps = searchCount > 0 || readCount > 0 || listCount > 0 || replCount > 0 || mcpCallCount > 0 || bashCount > 0 || gitOpBashCount > 0 || webFetchCount > 0;
   const readPaths = message.readFilePaths;
   const searchArgs = message.searchArgs;
   let incomingHint = message.latestDisplayHint;
@@ -411,37 +415,48 @@ export function CollapsedReadSearchContent({
         {bashCount === 1 ? 'command' : 'commands'}
       </Text>);
   }
+  if (webFetchCount > 0) {
+    const isFirst_5 = nonMemParts.length === 0;
+    const verb_2 = isActiveGroup ? isFirst_5 ? 'Fetching' : 'fetching' : isFirst_5 ? 'Fetched' : 'fetched';
+    if (!isFirst_5) {
+      nonMemParts.push(<Text key="comma-webfetch">, </Text>);
+    }
+    nonMemParts.push(<Text key="webfetch">
+        {verb_2} <Text bold>{webFetchCount}</Text> URL{' '}
+        {webFetchCount === 1 ? '' : 's'}
+      </Text>);
+  }
 
   // Build memory parts (auto-memory) — rendered after nonMemParts
   const hasPrecedingNonMem = nonMemParts.length > 0;
   const memParts: React.ReactNode[] = [];
   if (memoryReadCount > 0) {
-    const isFirst_5 = !hasPrecedingNonMem && memParts.length === 0;
-    const verb_2 = isActiveGroup ? isFirst_5 ? 'Recalling' : 'recalling' : isFirst_5 ? 'Recalled' : 'recalled';
-    if (!isFirst_5) {
+    const isFirst_6 = !hasPrecedingNonMem && memParts.length === 0;
+    const verb_3 = isActiveGroup ? isFirst_6 ? 'Recalling' : 'recalling' : isFirst_6 ? 'Recalled' : 'recalled';
+    if (!isFirst_6) {
       memParts.push(<Text key="comma-mr">, </Text>);
     }
     memParts.push(<Text key="mem-read">
-        {verb_2} <Text bold>{memoryReadCount}</Text>{' '}
+        {verb_3} <Text bold>{memoryReadCount}</Text>{' '}
         {memoryReadCount === 1 ? 'memory' : 'memories'}
       </Text>);
   }
   if (memorySearchCount > 0) {
-    const isFirst_6 = !hasPrecedingNonMem && memParts.length === 0;
-    const verb_3 = isActiveGroup ? isFirst_6 ? 'Searching' : 'searching' : isFirst_6 ? 'Searched' : 'searched';
-    if (!isFirst_6) {
+    const isFirst_7 = !hasPrecedingNonMem && memParts.length === 0;
+    const verb_4 = isActiveGroup ? isFirst_7 ? 'Searching' : 'searching' : isFirst_7 ? 'Searched' : 'searched';
+    if (!isFirst_7) {
       memParts.push(<Text key="comma-ms">, </Text>);
     }
-    memParts.push(<Text key="mem-search">{`${verb_3} memories`}</Text>);
+    memParts.push(<Text key="mem-search">{`${verb_4} memories`}</Text>);
   }
   if (memoryWriteCount > 0) {
-    const isFirst_7 = !hasPrecedingNonMem && memParts.length === 0;
-    const verb_4 = isActiveGroup ? isFirst_7 ? 'Writing' : 'writing' : isFirst_7 ? 'Wrote' : 'wrote';
-    if (!isFirst_7) {
+    const isFirst_8 = !hasPrecedingNonMem && memParts.length === 0;
+    const verb_5 = isActiveGroup ? isFirst_8 ? 'Writing' : 'writing' : isFirst_8 ? 'Wrote' : 'wrote';
+    if (!isFirst_8) {
       memParts.push(<Text key="comma-mw">, </Text>);
     }
     memParts.push(<Text key="mem-write">
-        {verb_4} <Text bold>{memoryWriteCount}</Text>{' '}
+        {verb_5} <Text bold>{memoryWriteCount}</Text>{' '}
         {memoryWriteCount === 1 ? 'memory' : 'memories'}
       </Text>);
   }

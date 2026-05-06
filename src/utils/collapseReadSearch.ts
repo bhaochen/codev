@@ -14,6 +14,7 @@ import {
   type PrAction,
 } from '../tools/shared/gitOperationTracking.js'
 import { TOOL_SEARCH_TOOL_NAME } from '../tools/ToolSearchTool/prompt.js'
+import { WEB_FETCH_TOOL_NAME } from '../tools/WebFetchTool/prompt.js'
 import type {
   CollapsedReadSearchGroup,
   CollapsibleMessage,
@@ -158,6 +159,21 @@ export function getToolSearchOrReadInfo(
       isREPL: true,
       isMemoryWrite: false,
       isAbsorbedSilently: true,
+    }
+  }
+
+  // WebFetch is absorbed silently — counted separately so display says
+  // "Fetched N URLs" instead of "Read N files". Remains visible in verbose
+  // mode via the groupMessages iteration.
+  if (toolName === WEB_FETCH_TOOL_NAME) {
+    return {
+      isCollapsible: true,
+      isSearch: false,
+      isRead: false,
+      isList: false,
+      isREPL: false,
+      isMemoryWrite: false,
+      isAbsorbedSilently: false,
     }
   }
 
@@ -620,6 +636,9 @@ type GroupAccumulator = {
   // memories, not explicit Read calls). Paths mirrored into readFilePaths +
   // memoryReadFilePaths so the inline "recalled N memories" text is accurate.
   relevantMemories?: { path: string; content: string; mtimeMs: number }[]
+  // WebFetch operations (tracked separately for "Fetched N URLs")
+  webFetchCount?: number
+  webFetchURLs?: string[]
 }
 
 function createEmptyGroup(): GroupAccumulator {
@@ -638,6 +657,8 @@ function createEmptyGroup(): GroupAccumulator {
     hookTotalMs: 0,
     hookCount: 0,
     hookInfos: [],
+    webFetchCount: 0,
+    webFetchURLs: [],
   }
   if (feature('TEAMMEM')) {
     group.teamMemorySearchCount = 0
@@ -748,6 +769,10 @@ function createCollapsedGroup(
   if (group.relevantMemories && group.relevantMemories.length > 0) {
     result.relevantMemories = group.relevantMemories
   }
+  if ((group.webFetchCount ?? 0) > 0) {
+    result.webFetchCount = group.webFetchCount
+    result.webFetchURLs = group.webFetchURLs
+  }
   return result
 }
 
@@ -800,6 +825,16 @@ export function collapseReadSearchGroups(
         // Snip/ToolSearch absorbed silently — no count, no summary text.
         // Hidden from the default view but still shown in verbose mode
         // (Ctrl+O) via the groupMessages iteration in CollapsedReadSearchContent.
+      } else if (toolInfo.name === WEB_FETCH_TOOL_NAME) {
+        // WebFetch — counted separately so the summary says
+        // "Fetched N URLs" instead of "Read N files".
+        const count = countToolUses(msg)
+        currentGroup.webFetchCount = (currentGroup.webFetchCount ?? 0) + count
+        const input = toolInfo.input as { url?: string } | undefined
+        if (input?.url) {
+          currentGroup.webFetchURLs?.push(input.url)
+          currentGroup.latestDisplayHint = input.url
+        }
       } else if (toolInfo.mcpServerName) {
         // MCP search/read — counted separately so the summary says
         // "Queried slack N times" instead of "Read N files".
