@@ -2928,7 +2928,7 @@ async function run(): Promise<CommanderCommand> {
       tasks: {},
       agentNameRegistry: new Map(),
       verbose: verbose ?? getGlobalConfig().verbose ?? false,
-      mainLoopModel: initialMainLoopModel,
+      mainLoopModel: initialMainLoopModel ?? resolvedInitialModel,
       mainLoopModelForSession: null,
       isBriefOnly: initialIsBriefOnly,
       expandedView: getGlobalConfig().showSpinnerTree ? 'teammates' : getGlobalConfig().showExpandedTodos ? 'tasks' : 'none',

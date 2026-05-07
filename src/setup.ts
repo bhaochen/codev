@@ -390,12 +390,16 @@ export async function setup(
     await getRecentActivity()
   }
 
-  // Start background fetch of OpenRouter models if configured
-  // This is non-blocking and runs in the background
+  // Start background fetch of dynamic provider model lists if configured.
+  // This is non-blocking and warms the /model picker before the user opens it.
   const { getConfiguredAuthProvider } = await import('./utils/auth.js')
-  if (getConfiguredAuthProvider() === 'openrouter') {
+  const configuredAuthProvider = getConfiguredAuthProvider()
+  if (configuredAuthProvider === 'openrouter') {
     const { startOpenRouterModelsFetch } = await import('./utils/model/openRouterModels.js')
     startOpenRouterModelsFetch()
+  } else if (configuredAuthProvider === 'opencode') {
+    const { fetchOpencodeModels } = await import('./services/api/opencodeClient.js')
+    void fetchOpencodeModels()
   }
 
   // If permission mode is set to bypass, verify we're in a safe environment

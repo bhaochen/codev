@@ -103,6 +103,9 @@ export function SearchableModelPicker({
         }
 
         if (provider === 'opencode' && modelOptions.length <= 1) {
+          const { fetchOpencodeModels } = await import('../services/api/opencodeClient.js')
+          void fetchOpencodeModels()
+
           pollTimer = setInterval(async () => {
             if (!mounted) {
               if (pollTimer) clearInterval(pollTimer)
