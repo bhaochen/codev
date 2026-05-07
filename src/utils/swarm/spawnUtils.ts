@@ -94,6 +94,10 @@ export function buildInheritedCliFlags(options?: {
  * parent's env, so we forward any that are set in the current process.
  */
 const TEAMMATE_ENV_VARS = [
+  // Explicit provider override — without these, spawned teammates can fall
+  // back to firstParty even when the leader is pinned to OpenCode/OpenAI/etc.
+  'BETTER_CLAWD_API_PROVIDER',
+  'CLAUDE_CODE_API_PROVIDER',
   // API provider selection — without these, teammates default to firstParty
   // and send requests to the wrong endpoint (GitHub issue #23561)
   'CLAUDE_CODE_USE_BEDROCK',
@@ -121,6 +125,15 @@ const TEAMMATE_ENV_VARS = [
   'http_proxy',
   'NO_PROXY',
   'no_proxy',
+  // Third-party provider endpoints / auth overrides that may be configured
+  // only in the parent shell environment.
+  'OPENAI_API_KEY',
+  'OPENAI_ACCESS_TOKEN',
+  'CODEX_ACCESS_TOKEN',
+  'OPENROUTER_API_KEY',
+  'OPENAI_BASE_URL',
+  'OPENROUTER_BASE_URL',
+  'OPENCODE_BASE_URL',
   'SSL_CERT_FILE',
   'NODE_EXTRA_CA_CERTS',
   'REQUESTS_CA_BUNDLE',

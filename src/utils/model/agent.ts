@@ -8,6 +8,7 @@ import {
   parseUserSpecifiedModel,
 } from './model.js'
 import { getAPIProvider } from './providers.js'
+import { getOpenCodeApiKey } from '../auth.js'
 
 export const AGENT_MODEL_OPTIONS = [...MODEL_ALIASES, 'inherit'] as const
 export type AgentModelAlias = (typeof AGENT_MODEL_OPTIONS)[number]
@@ -48,6 +49,14 @@ export function getAgentModel(
   // This ensures subagents use the same cross-region inference profile (e.g., "eu.", "us.")
   // as the parent, which is required when IAM permissions only allow specific regions.
   const parentRegionPrefix = getBedrockRegionPrefix(parentModel)
+  const provider = getAPIProvider()
+
+  // OpenCode free-mode sessions are known to be more reliable when subagents
+  // stay on the parent's already-working model instead of switching to alias-
+  // derived variants like haiku -> gpt-5-nano. If the user has configured an
+  // OpenCode API key, keep honoring explicit alias-based model selection.
+  const shouldInheritParentForKeylessOpenCode =
+    provider === 'opencode' && !getOpenCodeApiKey()
 
   // Helper to apply parent region prefix for Bedrock models.
   // `originalSpec` is the raw model string before resolution (alias or full ID).
@@ -59,15 +68,31 @@ export function getAgentModel(
     resolvedModel: string,
     originalSpec: string,
   ): string => {
-    if (parentRegionPrefix && getAPIProvider() === 'bedrock') {
+    if (parentRegionPrefix && provider === 'bedrock') {
       if (getBedrockRegionPrefix(originalSpec)) return resolvedModel
       return applyBedrockRegionPrefix(resolvedModel, parentRegionPrefix)
     }
     return resolvedModel
   }
 
+  const shouldStickToParentModel = (spec: string): boolean => {
+    if (!shouldInheritParentForKeylessOpenCode) {
+      return false
+    }
+    const normalized = spec.toLowerCase()
+    return (
+      normalized === 'haiku' ||
+      normalized === 'sonnet' ||
+      normalized === 'opus' ||
+      normalized === 'best'
+    )
+  }
+
   // Prioritize tool-specified model if provided
   if (toolSpecifiedModel) {
+    if (shouldStickToParentModel(toolSpecifiedModel)) {
+      return parentModel
+    }
     if (aliasMatchesParentTier(toolSpecifiedModel, parentModel)) {
       return parentModel
     }
@@ -85,6 +110,10 @@ export function getAgentModel(
       mainLoopModel: parentModel,
       exceeds200kTokens: false,
     })
+  }
+
+  if (shouldStickToParentModel(agentModelWithExp)) {
+    return parentModel
   }
 
   if (aliasMatchesParentTier(agentModelWithExp, parentModel)) {

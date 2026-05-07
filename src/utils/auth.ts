@@ -307,7 +307,7 @@ export function getOpenRouterApiKeyWithSource(): {
     : { key: null, source: 'none' }
 }
 
-export function getConfiguredAuthProvider(): 'anthropic' | 'openrouter' | 'openai' | 'local' | null {
+export function getConfiguredAuthProvider(): 'anthropic' | 'openrouter' | 'openai' | 'local' | 'opencode' | null {
   // First try to get from cache for performance
   const storedProvider = getGlobalConfig().authProvider
   if (storedProvider) {
@@ -319,13 +319,13 @@ export function getConfiguredAuthProvider(): 'anthropic' | 'openrouter' | 'opena
 }
 
 // Read authProvider directly from file to bypass cache
-export function getConfiguredAuthProviderFromFile(): 'anthropic' | 'openrouter' | 'openai' | 'local' | null {
+export function getConfiguredAuthProviderFromFile(): 'anthropic' | 'openrouter' | 'openai' | 'local' | 'opencode' | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { readFileSync } = require('fs') as typeof import('fs')
     const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
     const config = JSON.parse(raw) as {
-      authProvider?: 'anthropic' | 'openrouter' | 'openai' | 'local'
+      authProvider?: 'anthropic' | 'openrouter' | 'openai' | 'local' | 'opencode'
     }
 
     if (config.authProvider) {
