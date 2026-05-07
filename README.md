@@ -18,11 +18,11 @@ cp VersperClaw ~/.local/bin
 # then can use VersperClaw in everywhere after /login
 ```
 
-## 2. LLM Based - Auto Compact
+## 2. Auto Compact & Dream & SubAgent
 
 <table align="center">
   <tr>
-    <td><img src="assets/ctx_auto_compose/ctx_line.png"></td>
+    <td><img src="assets/ctx_auto_compose/compact_dream_subagent.png"></td>
   </tr>
 </table>
 
@@ -36,6 +36,16 @@ cp VersperClaw ~/.local/bin
     "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "200000",
     "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "200000"
   }
+}
+```
+
+```bash
+# set auto-dream config
+nvim ~/.claude/settings.json
+
+{
+  "autoMemoryEnabled": true,
+  "autoDreamEnabled": true
 }
 ```
 
@@ -103,49 +113,7 @@ export ENABLE_TOOL_SEARCH=true
 
 > when TAVILY_API_KEY is set in env
 
-## 4. SubAgent - back run & tool call agent and swap file output
-
-### 4.1 Auto Creat SubAgent
-
-<table align="center">
-  <tr>
-    <td><img src="assets/subagent/sub_agent1" width="100%"></td>
-    <td><img src="assets/subagent/sub_agent2_background" width="100%"></td>
-    <td><img src="assets/subagent/subagent_backcontext" width="100%"></td>
-  </tr>
-</table>
-
-### 4.2 Tool Agent Call Chains and Swap File Context
-
-<table align="center">
-  <tr>
-    <td><img src="assets/subagent/subagent_toolcall_chain1" width="100%"></td>
-    <td><img src="assets/subagent/subagent_toolcall_chain2" width="100%"></td>
-    <td><img src="assets/subagent/subagent_toolcall_chain3" width="100%"></td>
-  </tr>
-</table>
-
-## 5. Auto Dream
-
-<div align="center">
-  <img src="assets/auto_dream.png" alt="VersperAI">
-</div>
-
-```bash
-# set auto-dream config
-nvim ~/.claude/settings.json
-
-{
-  "autoMemoryEnabled": true,
-  "autoDreamEnabled": true
-}
-
-# ● Improved 1 memory fold
-# ⎿ user_profile.md
-# cd ~/.claude/projects
-```
-
-## 6. Telegram - Interactive Config
+## 4. Telegram - Interactive Config
 
 ```bash
 # On startup, the CLI runs silently in the background, maintains a persistent Telegram connection, and listens for messages.
