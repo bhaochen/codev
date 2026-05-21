@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto'
 import { getOpenCodeApiKey, getOpenCodeModelName } from '../../utils/auth.js'
 import {
   convertAnthropicToolsToOpenAI,
@@ -31,7 +32,10 @@ export async function fetchOpencodeModels(): Promise<void> {
       }
 
       const res = await fetch(`${OPENCODE_BASE_URL}/models`, { headers })
-      if (!res.ok) return
+      if (!res.ok) {
+        console.error(`[opencodeClient] Failed to fetch models: ${res.status} ${res.statusText}`)
+        return
+      }
 
       const data = await res.json() as { data?: Array<{ id: string; name?: string }> }
       if (Array.isArray(data.data)) {
@@ -41,8 +45,8 @@ export async function fetchOpencodeModels(): Promise<void> {
           isFree: m.id.endsWith('-free') || FREE_MODEL_IDS.has(m.id),
         }))
       }
-    } catch {
-      // Ignore errors
+    } catch (error) {
+      console.error('[opencodeClient] Error fetching models:', error)
     } finally {
       fetchPromise = null
     }
@@ -182,6 +186,7 @@ export function createOpenCodeFetchOverride(
   const apiKey = getOpenCodeApiKey() || ''
   const modelName = getOpenCodeModelName() || model || 'big-pickle'
   const endpoint = chatCompletionsUrl(apiKey ? OPENCODE_BASE_URL : OPENCODE_BASE_URL)
+  const sessionId = randomUUID()
 
   return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = input instanceof URL ? input.href : typeof input === 'string' ? input : input.url
@@ -252,17 +257,23 @@ export function createOpenCodeFetchOverride(
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'User-Agent': 'claude-code/2.1.88',
+      'x-opencode-session': sessionId,
+      'x-opencode-request': randomUUID(),
+      'x-opencode-client': 'better-clawd/2.1.87',
     }
     if (apiKey) {
       headers.Authorization = `Bearer ${apiKey}`
     }
 
+    const t0 = Date.now()
     const openaiResponse = await fetch(endpoint, {
       method: 'POST',
       headers,
       body: JSON.stringify(requestBody),
       signal: init?.signal,
     })
+    const t1 = Date.now()
+    console.error(`[opencodeClient] ${isStreaming ? 'stream' : 'non-stream'} fetch took ${t1 - t0}ms, status=${openaiResponse.status}`)
 
     if (!openaiResponse.ok) {
       return openaiResponse
@@ -357,13 +368,42 @@ function convertOpenAIStreamToAnthropicWithReasoning(
   const encoder = new TextEncoder()
   const decoder = new TextDecoder()
 
-  let messageId = `msg_${Date.now()}`
+  const messageId = `msg_${Date.now()}`
   let contentIndex = 0
   let hasStartedContent = false
   let hasReasoningBlock = false
+  let hasSentMessageStart = false
   let currentToolCallIndex = -1
   const toolCalls: Map<number, { id: string; name: string; arguments: string }> = new Map()
   let totalOutputTokens = 0
+
+  function sendMessageStart(controller: ReadableStreamDefaultController<Uint8Array>): void {
+    if (hasSentMessageStart) return
+    hasSentMessageStart = true
+    controller.enqueue(
+      encoder.encode(
+        `event: message_start\ndata: {"type":"message_start","message":{"id":"${messageId}","type":"message","role":"assistant","content":[],"model":"${model}","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":0,"output_tokens":0}}}\n\n`,
+      ),
+    )
+  }
+
+  function sendStreamEnd(controller: ReadableStreamDefaultController<Uint8Array>, stopReason?: string): void {
+    if (!hasSentMessageStart) return
+    if (hasStartedContent) {
+      controller.enqueue(encoder.encode(`event: content_block_stop\ndata: {"index":${contentIndex - 1}}\n\n`))
+    }
+    for (const [idx] of toolCalls) {
+      controller.enqueue(
+        encoder.encode(`event: content_block_stop\ndata: {"index":${contentIndex + idx}}\n\n`),
+      )
+    }
+    controller.enqueue(
+      encoder.encode(
+        `event: message_delta\ndata: {"delta":{"stop_reason":"${stopReason || (toolCalls.size > 0 ? 'tool_use' : 'end_turn')}"},"usage":{"output_tokens":${totalOutputTokens}}}\n\n`,
+      ),
+    )
+    controller.enqueue(encoder.encode('event: message_stop\ndata: {}\n\n'))
+  }
 
   return new ReadableStream({
     async start(controller) {
@@ -373,7 +413,12 @@ function convertOpenAIStreamToAnthropicWithReasoning(
       try {
         while (true) {
           const { done, value } = await reader.read()
-          if (done) break
+          if (done) {
+            if (hasSentMessageStart) {
+              sendStreamEnd(controller)
+            }
+            break
+          }
 
           buffer += decoder.decode(value, { stream: true })
 
@@ -384,20 +429,7 @@ function convertOpenAIStreamToAnthropicWithReasoning(
             if (!line.startsWith('data: ')) continue
             const data = line.slice(6).trim()
             if (data === '[DONE]') {
-              if (hasStartedContent) {
-                controller.enqueue(encoder.encode(`event: content_block_stop\ndata: {"index":${contentIndex - 1}}\n\n`))
-              }
-              for (const [idx, tc] of toolCalls) {
-                controller.enqueue(
-                  encoder.encode(`event: content_block_stop\ndata: {"index":${contentIndex + idx}}\n\n`),
-                )
-              }
-              controller.enqueue(
-                encoder.encode(
-                  `event: message_delta\ndata: {"delta":{"stop_reason":"${toolCalls.size > 0 ? 'tool_use' : 'end_turn'}"},"usage":{"output_tokens":${totalOutputTokens}}}\n\n`,
-                ),
-              )
-              controller.enqueue(encoder.encode('event: message_stop\ndata: {}\n\n'))
+              sendStreamEnd(controller)
               return
             }
 
@@ -422,6 +454,16 @@ function convertOpenAIStreamToAnthropicWithReasoning(
               chunk = JSON.parse(data)
             } catch {
               continue
+            }
+
+            if (!hasSentMessageStart) {
+              const inputTokens = chunk.usage?.prompt_tokens || 0
+              controller.enqueue(
+                encoder.encode(
+                  `event: message_start\ndata: {"type":"message_start","message":{"id":"${messageId}","type":"message","role":"assistant","content":[],"model":"${model}","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":${inputTokens},"output_tokens":0}}}\n\n`,
+                ),
+              )
+              hasSentMessageStart = true
             }
 
             if (chunk.usage?.completion_tokens) {
@@ -491,7 +533,7 @@ function convertOpenAIStreamToAnthropicWithReasoning(
                     hasStartedContent ? contentIndex + 1 + tc.index : contentIndex + tc.index
                   controller.enqueue(
                     encoder.encode(
-                      `event: content_block_start\ndata: {"index":${toolBlockIndex},"content_block":{"type":"text","text":""}}\n\n`,
+                      `event: content_block_start\ndata: {"index":${toolBlockIndex},"content_block":{"type":"tool_use","id":"${tc.id}","name":"${tc.function?.name || ''}","input":{}}}\n\n`,
                     ),
                   )
                 } else if (tc.function?.arguments) {
@@ -509,17 +551,23 @@ function convertOpenAIStreamToAnthropicWithReasoning(
                   encoder.encode(`event: content_block_stop\ndata: {"index":${contentIndex}}\n\n`),
                 )
               }
-              controller.enqueue(
-                encoder.encode(
-                  `event: message_delta\ndata: {"delta":{"stop_reason":"${choice.finish_reason === 'tool_calls' ? 'tool_use' : 'end_turn'}"},"usage":{"output_tokens":${totalOutputTokens}}}\n\n`,
-                ),
-              )
-              controller.enqueue(encoder.encode('event: message_stop\ndata: {}\n\n'))
+              sendStreamEnd(controller, choice.finish_reason === 'tool_calls' ? 'tool_use' : 'end_turn')
               return
             }
           }
         }
       } finally {
+        if (!hasSentMessageStart) {
+          controller.enqueue(
+            encoder.encode(
+              `event: message_start\ndata: {"type":"message_start","message":{"id":"${messageId}","type":"message","role":"assistant","content":[],"model":"${model}","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":0,"output_tokens":0}}}\n\n`,
+            ),
+          )
+          controller.enqueue(
+            encoder.encode('event: message_delta\ndata: {"delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":0}}\n\n'),
+          )
+          controller.enqueue(encoder.encode('event: message_stop\ndata: {}\n\n'))
+        }
         reader.releaseLock()
         controller.close()
       }

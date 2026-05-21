@@ -25,7 +25,7 @@ import {
   getOpencodeBaseUrl,
 } from 'src/utils/model/providers.js'
 import { getProxyFetchOptions } from 'src/utils/proxy.js'
-import { createOpenCodeFetchOverride } from './opencodeClient.js'
+import { createOpenCodeFetchOverride, fetchOpencodeModels } from './opencodeClient.js'
 import {
   getIsNonInteractiveSession,
   getSessionId,
@@ -148,10 +148,11 @@ export async function getAnthropicClient({
   // For OpenCode provider, use custom fetch to convert Anthropic format to OpenAI format
   const provider = getAPIProvider()
   let opencodeFetchOverride: ClientOptions['fetch'] | undefined
-  if (provider === 'opencode' && model) {
+  if (provider === 'opencode') {
+    const resolvedModel = model || getOpenCodeModelName() || 'big-pickle'
     // Fetch models in background
-    import('./opencodeClient.js').then(m => m.fetchOpencodeModels())
-    opencodeFetchOverride = createOpenCodeFetchOverride(model)
+    void fetchOpencodeModels()
+    opencodeFetchOverride = createOpenCodeFetchOverride(resolvedModel)
   }
 
   const resolvedFetch = buildFetch(fetchOverride || opencodeFetchOverride, source)

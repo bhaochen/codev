@@ -34,7 +34,7 @@ export function OpenCodeLoginFlow({
     setIsBusy(true)
     setStatus(null)
     try {
-      await saveOpenCodeApiKey('', '')
+      await saveOpenCodeApiKey('public', '')
       onDone()
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))

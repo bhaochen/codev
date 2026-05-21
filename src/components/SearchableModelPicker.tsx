@@ -103,8 +103,14 @@ export function SearchableModelPicker({
         }
 
         if (provider === 'opencode' && modelOptions.length <= 1) {
-          const { fetchOpencodeModels } = await import('../services/api/opencodeClient.js')
-          void fetchOpencodeModels()
+          let retryCount = 0
+          const MAX_RETRIES = 5
+
+          async function tryFetch(): Promise<void> {
+            const { fetchOpencodeModels } = await import('../services/api/opencodeClient.js')
+            await fetchOpencodeModels()
+          }
+          void tryFetch()
 
           pollTimer = setInterval(async () => {
             if (!mounted) {
@@ -119,18 +125,21 @@ export function SearchableModelPicker({
                   setAppState(prev => ({ ...prev, authVersion: prev.authVersion + 1 }))
                 }
                 if (pollTimer) clearInterval(pollTimer)
+              } else if (retryCount < MAX_RETRIES) {
+                retryCount++
+                void tryFetch()
               }
             } catch (error) {
               console.error('Error checking OpenCode cache:', error)
               if (pollTimer) clearInterval(pollTimer)
             }
-          }, 500)
+          }, 2000)
           setTimeout(() => {
             if (pollTimer && mounted) {
               clearInterval(pollTimer)
               pollTimer = null
             }
-          }, 10000)
+          }, 60000)
         }
       } catch (error) {
         console.error('Error checking API provider:', error)

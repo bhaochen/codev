@@ -92,14 +92,14 @@ export async function call(
           const { getAPIProvider } = await import('../../utils/model/providers.js')
           if (getAPIProvider() === 'opencode') {
             const { fetchOpencodeModels } = await import('../../services/api/opencodeClient.js')
-            void fetchOpencodeModels()
+            await fetchOpencodeModels()
           }
 
           // Increment authVersion to trigger re-fetching of auth-dependent data
           context.setAppState(prev => ({
             ...prev,
             authVersion: prev.authVersion + 1,
-            mainLoopModel: null,
+            mainLoopModel: 'big-pickle',
             mainLoopModelForSession: null,
           }));
         }

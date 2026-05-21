@@ -95,18 +95,30 @@ export function getDefaultOptionForUser(fastMode = false): ModelOption {
   }
   
   // Check if we should use OpenCode Zen model
-  if (isOpenCode || provider === null) {
+  if (isOpenCode) {
+    const currentModel = getOpenCodeModelName() || 'big-pickle'
+    const displayName = currentModel === 'big-pickle' ? 'Big Pickle' : currentModel
+    return {
+      value: null,
+      label: 'Default (recommended)',
+      description: `Use the default OpenCode Zen model (currently ${displayName})`,
+      descriptionForModel: `Default OpenCode Zen model (currently ${displayName})`,
+    }
+  }
+
+  // Fallback: when provider cache is stale (null), check config file directly
+  if (provider === null) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { readFileSync } = require('fs') as typeof import('fs')
       const { getGlobalClaudeFile } = require('../env.js') as typeof import('../env.js')
       const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
-      const config = JSON.parse(raw) as {
+      const fileConfig = JSON.parse(raw) as {
         authProvider?: string
         openCodeModelName?: string
       }
-      if (config.authProvider === 'opencode') {
-        const currentModel = config.openCodeModelName || 'big-pickle'
+      if (fileConfig.authProvider === 'opencode') {
+        const currentModel = fileConfig.openCodeModelName || 'big-pickle'
         const displayName = currentModel === 'big-pickle' ? 'Big Pickle' : currentModel
         return {
           value: null,
@@ -500,7 +512,7 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
       
       if (models && Array.isArray(models) && models.length > 0) {
         const filtered = hasApiKey
-          ? models.filter(m => !m.isFree)
+          ? models
           : models.filter(m => m.isFree)
         
         if (filtered.length > 0) {
