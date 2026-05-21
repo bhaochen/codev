@@ -14,32 +14,32 @@ import type {
   BuiltInAgentDefinition,
 } from '../loadAgentsDir.js'
 
-const CLAUDE_CODE_DOCS_MAP_URL =
+const VERSPER_CLAW_DOCS_MAP_URL =
   'https://code.claude.com/docs/en/claude_code_docs_map.md'
 const CDP_DOCS_MAP_URL = 'https://platform.claude.com/llms.txt'
 
-export const CLAUDE_CODE_GUIDE_AGENT_TYPE = 'claude-code-guide'
+export const VERSPER_CLAW_GUIDE_AGENT_TYPE = 'claude-code-guide'
 
-function getClaudeCodeGuideBasePrompt(): string {
+function getVersperClawGuideBasePrompt(): string {
   // Ant-native builds alias find/grep to embedded bfs/ugrep and remove the
   // dedicated Glob/Grep tools, so point at find/grep instead.
   const localSearchHint = hasEmbeddedSearchTools()
     ? `${FILE_READ_TOOL_NAME}, \`find\`, and \`grep\``
     : `${FILE_READ_TOOL_NAME}, ${GLOB_TOOL_NAME}, and ${GREP_TOOL_NAME}`
 
-  return `You are the Claude guide agent. Your primary responsibility is helping users understand and use Claude Code, the Claude Agent SDK, and the Claude API (formerly the Anthropic API) effectively.
+  return `You are the VersperClaw guide agent. Your primary responsibility is helping users understand and use VersperClaw, the Claude Agent SDK, and the Claude API (formerly the Anthropic API) effectively.
 
 **Your expertise spans three domains:**
 
-1. **Claude Code** (the CLI tool): Installation, configuration, hooks, skills, MCP servers, keyboard shortcuts, IDE integrations, settings, and workflows.
+1. **VersperClaw** (the CLI tool): Installation, configuration, hooks, skills, MCP servers, keyboard shortcuts, IDE integrations, settings, and workflows.
 
-2. **Claude Agent SDK**: A framework for building custom AI agents based on Claude Code technology. Available for Node.js/TypeScript and Python.
+2. **Claude Agent SDK**: A framework for building custom AI agents based on VersperClaw technology. Available for Node.js/TypeScript and Python.
 
 3. **Claude API**: The Claude API (formerly known as the Anthropic API) for direct model interaction, tool use, and integrations.
 
 **Documentation sources:**
 
-- **Claude Code docs** (${CLAUDE_CODE_DOCS_MAP_URL}): Fetch this for questions about the Claude Code CLI tool, including:
+- **VersperClaw docs** (${VERSPER_CLAW_DOCS_MAP_URL}): Fetch this for questions about the VersperClaw CLI tool, including:
   - Installation, setup, and getting started
   - Hooks (pre/post command execution)
   - Custom skills
@@ -95,9 +95,9 @@ function getFeedbackGuideline(): string {
   return "- When you cannot find an answer or the feature doesn't exist, direct the user to use /feedback to report a feature request or bug"
 }
 
-export const CLAUDE_CODE_GUIDE_AGENT: BuiltInAgentDefinition = {
-  agentType: CLAUDE_CODE_GUIDE_AGENT_TYPE,
-  whenToUse: `Use this agent when the user asks questions ("Can Claude...", "Does Claude...", "How do I...") about: (1) Claude Code (the CLI tool) - features, hooks, slash commands, MCP servers, settings, IDE integrations, keyboard shortcuts; (2) Claude Agent SDK - building custom agents; (3) Claude API (formerly Anthropic API) - API usage, tool use, Anthropic SDK usage. **IMPORTANT:** Before spawning a new agent, check if there is already a running or recently completed claude-code-guide agent that you can continue via ${SEND_MESSAGE_TOOL_NAME}.`,
+export const VERSPER_CLAW_GUIDE_AGENT: BuiltInAgentDefinition = {
+  agentType: VERSPER_CLAW_GUIDE_AGENT_TYPE,
+  whenToUse: `Use this agent when the user asks questions ("Can Claude...", "Does Claude...", "How do I...") about: (1) VersperClaw (the CLI tool) - features, hooks, slash commands, MCP servers, settings, IDE integrations, keyboard shortcuts; (2) Claude Agent SDK - building custom agents; (3) Claude API (formerly Anthropic API) - API usage, tool use, Anthropic SDK usage. **IMPORTANT:** Before spawning a new agent, check if there is already a running or recently completed claude-code-guide agent that you can continue via ${SEND_MESSAGE_TOOL_NAME}.`,
   // Ant-native builds: Glob/Grep tools are removed; use Bash (with embedded
   // bfs/ugrep via find/grep aliases) for local file search instead.
   tools: hasEmbeddedSearchTools()
@@ -181,7 +181,7 @@ export const CLAUDE_CODE_GUIDE_AGENT: BuiltInAgentDefinition = {
 
     // Add the feedback guideline (conditional based on whether user is using 3P services)
     const feedbackGuideline = getFeedbackGuideline()
-    const basePromptWithFeedback = `${getClaudeCodeGuideBasePrompt()}
+    const basePromptWithFeedback = `${getVersperClawGuideBasePrompt()}
 ${feedbackGuideline}`
 
     // If we have any context to add, append it to the base system prompt
