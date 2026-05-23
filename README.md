@@ -65,7 +65,7 @@ cp VersperClaw ~/.local/bin
 > If you no need `auto-compact / dream / control context-window` 
 > and `websearch` feature. you can no configuration anything
 >
-> if you no need free `local-websearch` you can skip config searxng
+> if you no need free `local-websearch` you can skip config `searxng``
 > and just set `TAVILY_API_KEY` in env 
 
 ```bash
@@ -86,12 +86,10 @@ cp VersperClaw ~/.local/bin
   "autoMemoryEnabled": true,
   "autoDreamEnabled": true
 }
-
 ```
 
 ```bash
-## config searxng
-
+# Config SearXNG
 # 1. docker configuration
 # local config search engine - searxng in archlinux
 # make sure have install docker and docker-compose
@@ -118,7 +116,6 @@ docker compose up -d
 # 3. check search feature
 # check in every browser
 firefox http://localhost:8080
-# or allow tool search in ~/.bashrc
 ```
 
 
