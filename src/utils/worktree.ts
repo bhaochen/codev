@@ -205,6 +205,35 @@ function worktreesDir(repoRoot: string): string {
   return join(repoRoot, '.claude', 'worktrees')
 }
 
+export async function ensureWorktreesDirExcluded(repoRoot: string): Promise<void> {
+  const gitDir = await resolveGitDir(repoRoot)
+  const commonDir = gitDir ? ((await getCommonDir(gitDir)) ?? gitDir) : null
+  if (!commonDir) return
+
+  const excludePath = join(commonDir, 'info', 'exclude')
+  const pattern = '.claude/worktrees/'
+  let existing = ''
+  try {
+    existing = await readFile(excludePath, 'utf-8')
+  } catch {
+    // Missing exclude file is normal in freshly initialized repositories.
+  }
+
+  const alreadyExcluded = existing
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .some(line => line === pattern || line === `/${pattern}`)
+  if (alreadyExcluded) return
+
+  await mkdir(dirname(excludePath), { recursive: true })
+  const prefix = existing.length === 0 || existing.endsWith('\n') ? existing : `${existing}\n`
+  await writeFile(
+    excludePath,
+    `${prefix}# Claude worktree sessions\n${pattern}\n`,
+    'utf-8',
+  )
+}
+
 // Flatten nested slugs (`user/feature` → `user+feature`) for both the branch
 // name and the directory path. Nesting in either location is unsafe:
 //   - git refs: `worktree-user` (file) vs `worktree-user/feature` (needs dir)
@@ -507,7 +536,7 @@ export async function copyWorktreeIncludeFiles(
  * Post-creation setup for a newly created worktree.
  * Propagates settings.local.json, configures git hooks, and symlinks directories.
  */
-async function performPostCreationSetup(
+export async function performPostCreationSetup(
   repoRoot: string,
   worktreePath: string,
 ): Promise<void> {

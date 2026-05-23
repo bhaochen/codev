@@ -2129,6 +2129,15 @@ export function isUsing3PServices(): boolean {
 }
 
 /**
+ * Check if the user has an active OpenAI OAuth login.
+ * Returns false when no OpenAI tokens are configured (this is a no-op stub
+ * for the desktop server; OpenAI OAuth is a cc-haha-specific feature).
+ */
+export function hasOpenAIAuthLogin(): boolean {
+  return false
+}
+
+/**
  * Get the configured otelHeadersHelper from settings
  */
 function getConfiguredOtelHeadersHelper(): string | undefined {

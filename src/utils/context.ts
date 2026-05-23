@@ -144,6 +144,40 @@ export function calculateContextPercentages(
 }
 
 /**
+ * Compute a combined token total from an estimated count and the provider's
+ * usage payload. The API total is used when available, falling back to the
+ * local estimate. This is intended for display in status bars / progress views
+ * immediately after the model finishes responding. The local estimate is kept
+ * as a lower bound because it includes system/tool/message material that some
+ * provider usage payloads under-report.
+ *
+ * Pass `contextWindow` to clamp the result to the model's context window size.
+ * This prevents display values from exceeding 100% for providers (e.g. DeepSeek)
+ * whose input_tokens already approach the window limit before output is added.
+ */
+export function calculateCurrentContextTokenTotal(
+  estimatedTokens: number,
+  currentUsage: {
+    input_tokens: number
+    output_tokens?: number
+    cache_creation_input_tokens: number
+    cache_read_input_tokens: number
+  } | null,
+  contextWindow?: number,
+): number {
+  if (!currentUsage) return estimatedTokens
+
+  const totalFromAPI =
+    currentUsage.input_tokens +
+    currentUsage.cache_creation_input_tokens +
+    currentUsage.cache_read_input_tokens +
+    (currentUsage.output_tokens ?? 0)
+
+  const total = Math.max(estimatedTokens, totalFromAPI)
+  return contextWindow !== undefined ? Math.min(total, contextWindow) : total
+}
+
+/**
  * Returns the model's default and upper limit for max output tokens.
  */
 export function getModelMaxOutputTokens(model: string): {
