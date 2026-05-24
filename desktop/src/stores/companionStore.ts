@@ -1,6 +1,29 @@
 import { create } from 'zustand'
 import type { CompanionStatus } from '../types/companion'
 
+const AVATAR_KEY = 'companion-avatar-url'
+const BACKGROUND_KEY = 'companion-background-url'
+
+function loadPersisted(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function persist(key: string, value: string | null) {
+  try {
+    if (value === null) {
+      localStorage.removeItem(key)
+    } else {
+      localStorage.setItem(key, value)
+    }
+  } catch {
+    // localStorage may be full; silently ignore
+  }
+}
+
 interface CompanionStore {
   status: CompanionStatus
   serverUrl: string
@@ -44,8 +67,8 @@ export const useCompanionStore = create<CompanionStore>((set) => ({
   micEnabled: true,
   cameraEnabled: true,
   error: null,
-  avatarUrl: null,
-  backgroundUrl: null,
+  avatarUrl: loadPersisted(AVATAR_KEY),
+  backgroundUrl: loadPersisted(BACKGROUND_KEY),
 
   setServerUrl: (url) => set({ serverUrl: url }),
   setVoiceName: (name) => set({ voiceName: name }),
@@ -60,8 +83,14 @@ export const useCompanionStore = create<CompanionStore>((set) => ({
   setMicEnabled: (enabled) => set({ micEnabled: enabled }),
   setCameraEnabled: (enabled) => set({ cameraEnabled: enabled }),
   setError: (error) => set({ error }),
-  setAvatarUrl: (url) => set({ avatarUrl: url }),
-  setBackgroundUrl: (url) => set({ backgroundUrl: url }),
+  setAvatarUrl: (url) => {
+    persist(AVATAR_KEY, url)
+    set({ avatarUrl: url })
+  },
+  setBackgroundUrl: (url) => {
+    persist(BACKGROUND_KEY, url)
+    set({ backgroundUrl: url })
+  },
   reset: () =>
     set({
       status: 'disconnected',
