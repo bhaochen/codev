@@ -29,8 +29,11 @@ export function Companion() {
     },
     [companionAudio],
   )
+  const onDone = useCallback(() => {
+    companionAudio.flush()
+  }, [companionAudio])
 
-  const ws = useCompanionWebSocket({ onAudioReceived })
+  const ws = useCompanionWebSocket({ onAudioReceived, onDone })
   const webcam = useWebcam(ws.connected && cameraEnabled)
   useMicrophone(ws.connected && micEnabled, ws.sendAudio)
 

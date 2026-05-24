@@ -3,6 +3,7 @@ import { useCompanionStore } from '../stores/companionStore'
 
 interface Callbacks {
   onAudioReceived: (data: ArrayBuffer) => void
+  onDone?: () => void
 }
 
 export function useCompanionWebSocket(callbacks: Callbacks) {
@@ -102,6 +103,7 @@ export function useCompanionWebSocket(callbacks: Callbacks) {
               )
               setGenerating(false)
               setSpeaking(false)
+              callbacksRef.current.onDone?.()
               break
           }
         } catch {
