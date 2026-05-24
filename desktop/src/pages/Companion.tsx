@@ -101,6 +101,7 @@ export function Companion() {
       <CompanionTranscript
         transcript={transcript}
         fullTranscript={fullTranscript}
+        generating={generating || speaking}
         onSendText={handleSendText}
         disabled={status !== 'connected'}
       />

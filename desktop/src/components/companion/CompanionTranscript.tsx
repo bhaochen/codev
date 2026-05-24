@@ -4,11 +4,12 @@ import { useTranslation } from '../../i18n'
 interface CompanionTranscriptProps {
   transcript: string
   fullTranscript: string
+  generating: boolean
   onSendText: (text: string) => void
   disabled?: boolean
 }
 
-export function CompanionTranscript({ transcript, fullTranscript, onSendText, disabled }: CompanionTranscriptProps) {
+export function CompanionTranscript({ transcript, fullTranscript, generating, onSendText, disabled }: CompanionTranscriptProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [inputValue, setInputValue] = useState('')
   const t = useTranslation()
@@ -38,7 +39,11 @@ export function CompanionTranscript({ transcript, fullTranscript, onSendText, di
       {/* Transcript display */}
       <div
         ref={scrollRef}
-        className="max-h-[150px] overflow-y-auto rounded-2xl bg-black/40 backdrop-blur-md border border-white/10 p-4 mb-2 scrollbar-thin"
+        className={`max-h-[150px] overflow-y-auto rounded-2xl bg-black/40 backdrop-blur-md border p-4 mb-2 scrollbar-thin transition-all duration-500 ${
+          generating
+            ? 'border-purple-500/50 shadow-[0_0_20px_rgba(147,51,234,0.2)]'
+            : 'border-white/10'
+        }`}
       >
         {fullTranscript && (
           <div className="text-white/40 text-xs mb-2 whitespace-pre-wrap leading-relaxed">
@@ -59,7 +64,11 @@ export function CompanionTranscript({ transcript, fullTranscript, onSendText, di
       </div>
 
       {/* Text input row */}
-      <div className="flex items-center gap-2 rounded-2xl bg-black/40 backdrop-blur-md border border-white/10 px-4 py-2">
+      <div className={`flex items-center gap-2 rounded-2xl bg-black/40 backdrop-blur-md border px-4 py-2 transition-all duration-500 ${
+          generating
+            ? 'border-purple-500/50 shadow-[0_0_20px_rgba(147,51,234,0.2)]'
+            : 'border-white/10'
+        }`}>
         <input
           type="text"
           value={inputValue}

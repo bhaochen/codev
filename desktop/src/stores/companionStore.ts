@@ -12,6 +12,8 @@ interface CompanionStore {
   micEnabled: boolean
   cameraEnabled: boolean
   error: string | null
+  avatarUrl: string | null
+  backgroundUrl: string | null
 
   setServerUrl: (url: string) => void
   setVoiceName: (name: string) => void
@@ -24,6 +26,8 @@ interface CompanionStore {
   setMicEnabled: (enabled: boolean) => void
   setCameraEnabled: (enabled: boolean) => void
   setError: (error: string | null) => void
+  setAvatarUrl: (url: string | null) => void
+  setBackgroundUrl: (url: string | null) => void
   reset: () => void
 }
 
@@ -40,6 +44,8 @@ export const useCompanionStore = create<CompanionStore>((set) => ({
   micEnabled: true,
   cameraEnabled: true,
   error: null,
+  avatarUrl: null,
+  backgroundUrl: null,
 
   setServerUrl: (url) => set({ serverUrl: url }),
   setVoiceName: (name) => set({ voiceName: name }),
@@ -54,6 +60,8 @@ export const useCompanionStore = create<CompanionStore>((set) => ({
   setMicEnabled: (enabled) => set({ micEnabled: enabled }),
   setCameraEnabled: (enabled) => set({ cameraEnabled: enabled }),
   setError: (error) => set({ error }),
+  setAvatarUrl: (url) => set({ avatarUrl: url }),
+  setBackgroundUrl: (url) => set({ backgroundUrl: url }),
   reset: () =>
     set({
       status: 'disconnected',
