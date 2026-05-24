@@ -1,12 +1,14 @@
 # VersperClaw: Not Only AI Assistant Code Agent
 
 <div align="center">
-  <img src="assets/VersperAI_Banner.png" alt="VersperAI">
+  <img src="assets/Versper.png" alt="VersperAI">
 </div>
 
 
 ## 📢 News
 
+- **2026-05-25** 🤖 **AI Friend on Desktop** — Companion mode with `real-time audio/video`, avatar & background image upload, edge glow effect on transcript, and localStorage persistence.
+- **2026-05-25** 🖥️ Desktop app launched — Tauri-based native UI with sidebar, tabs, title bar, and session management. Subagent inherits parent class config. Branding updated to Versper AI.
 - **2026-05-23** 🧘 Added OpenCode Zen Provider — a new model provider for calm, focused AI interactions.
 - **2026-05-22** 🔧 Fixed OpenCode login flow and refined prompt identity for clearer agent behavior.
 - **2026-05-08** 🐛 Fixed model list not refreshing after `/login` opencode freemodel exit; subagent creation now works without API key in free mode.
@@ -118,10 +120,31 @@ docker compose up -d
 firefox http://localhost:8080
 ```
 
+```bash
+# ai_friend api in 8889 so local build Omni model or use cloud service on 8889
+```
+
+
+## 🌐 Desktop
+
+<table align="center">
+  <tr>
+    <td><img src="assets/desktop.png"></td>
+  </tr>
+</table>
+
 
 ## ✨ Features
 
-## Auto Compact & Dream & SubAgent
+### AI Friend via Omni model
+
+<table align="center">
+  <tr>
+    <td><img src="assets/ai_friend.png"></td>
+  </tr>
+</table>
+
+### Auto Compact & Dream & SubAgent
 
 <table align="center">
   <tr>
@@ -129,8 +152,7 @@ firefox http://localhost:8080
   </tr>
 </table>
 
-
-## WebSearch & WebFetch Tools
+### WebSearch & WebFetch Tools
 
 <table align="center">
   <tr>
@@ -140,9 +162,3 @@ firefox http://localhost:8080
   </tr>
 </table>
 
-
-## Telegram - Interactive Config
-
-```bash
-/telegram
-```
