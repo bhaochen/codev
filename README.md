@@ -1,7 +1,7 @@
 # VersperClaw: Not Only AI Assistant Code Agent
 
 <div align="center">
-  <img src="assets/Versper.png" alt="VersperAI">
+  <img src="assets/Versper.png" alt="VersperAI" width="600">
 </div>
 
 
