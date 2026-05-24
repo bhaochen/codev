@@ -974,7 +974,7 @@ export const en = {
 
   // ─── Empty Session ──────────────────────────────────────
   'empty.title': 'New session',
-  'empty.subtitle': 'Start a fresh coding session. Claude is ready to help you build, debug, and architect your project.',
+  'empty.subtitle': 'Start a fresh coding session. VersperClaw is ready to help you build, debug, and architect your project.',
   'empty.placeholder': 'Ask anything...',
   'empty.addFiles': 'Add files or photos',
   'empty.slashCommands': 'Slash commands',
