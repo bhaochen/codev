@@ -6,8 +6,9 @@ const TAB_STORAGE_KEY = 'cc-haha-open-tabs'
 export const SETTINGS_TAB_ID = '__settings__'
 export const SCHEDULED_TAB_ID = '__scheduled__'
 export const TERMINAL_TAB_PREFIX = '__terminal__'
+export const COMPANION_TAB_ID = '__companion__'
 
-export type TabType = 'session' | 'settings' | 'scheduled' | 'terminal'
+export type TabType = 'session' | 'settings' | 'scheduled' | 'terminal' | 'companion'
 
 export type Tab = {
   sessionId: string
@@ -152,7 +153,7 @@ export const useTabStore = create<TabStore>((set, get) => ({
 
   saveTabs: () => {
     const { tabs, activeTabId } = get()
-    const persistableTabs = tabs.filter((tab) => tab.type !== 'terminal')
+    const persistableTabs = tabs.filter((tab) => tab.type !== 'terminal' && tab.type !== 'companion')
     const data: TabPersistence = {
       openTabs: persistableTabs.map((t) => ({ sessionId: t.sessionId, title: t.title, type: t.type })),
       activeTabId: activeTabId && persistableTabs.some((tab) => tab.sessionId === activeTabId)
@@ -182,13 +183,13 @@ export const useTabStore = create<TabStore>((set, get) => ({
       const validTabs: Tab[] = data.openTabs
         .filter((t) => {
           // Special tabs are always valid
-          if (t.type === 'settings' || t.type === 'scheduled') return true
+          if (t.type === 'settings' || t.type === 'scheduled' || t.type === 'companion') return true
           if (t.type === 'terminal') return false
           // Session tabs must exist on server
           return existingIds.has(t.sessionId)
         })
         .map((t) => {
-          if (t.type === 'settings' || t.type === 'scheduled') {
+          if (t.type === 'settings' || t.type === 'scheduled' || t.type === 'companion') {
             return { sessionId: t.sessionId, title: t.title, type: t.type, status: 'idle' as const }
           }
           return {

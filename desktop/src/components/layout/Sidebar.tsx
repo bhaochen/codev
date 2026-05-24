@@ -5,7 +5,7 @@ import { useUIStore } from '../../stores/uiStore'
 import { useTranslation, type TranslationKey } from '../../i18n'
 import { ConfirmDialog } from '../shared/ConfirmDialog'
 import type { SessionListItem } from '../../types/session'
-import { useTabStore, SETTINGS_TAB_ID, SCHEDULED_TAB_ID } from '../../stores/tabStore'
+import { useTabStore, SETTINGS_TAB_ID, SCHEDULED_TAB_ID, COMPANION_TAB_ID } from '../../stores/tabStore'
 import { useChatStore } from '../../stores/chatStore'
 import { useOpenTargetStore } from '../../stores/openTargetStore'
 import { desktopUiPreferencesApi, type SidebarProjectPreferences } from '../../api/desktopUiPreferences'
@@ -696,6 +696,21 @@ export function Sidebar({ isMobile = false, onRequestClose }: SidebarProps) {
             icon={<ClockIcon />}
           >
             {t('sidebar.scheduled')}
+          </NavItem>
+        )}
+        {!isMobile && (
+          <NavItem
+            active={activeTabId === COMPANION_TAB_ID}
+            collapsed={!expanded}
+            label={t('sidebar.companion')}
+            touchFriendly={isMobile}
+            onClick={() => {
+              useTabStore.getState().openTab(COMPANION_TAB_ID, t('sidebar.companion'), 'companion')
+              closeMobileDrawer()
+            }}
+            icon={<span className="material-symbols-outlined text-[18px]">videocam</span>}
+          >
+            {t('sidebar.companion')}
           </NavItem>
         )}
       </div>

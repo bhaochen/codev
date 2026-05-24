@@ -5,6 +5,7 @@ import { ActiveSession } from '../../pages/ActiveSession'
 import { ScheduledTasks } from '../../pages/ScheduledTasks'
 import { Settings } from '../../pages/Settings'
 import { TerminalSettings } from '../../pages/TerminalSettings'
+import { Companion } from '../../pages/Companion'
 
 export function ContentRouter() {
   const activeTabId = useTabStore((s) => s.activeTabId)
@@ -19,6 +20,8 @@ export function ContentRouter() {
     page = <Settings />
   } else if (activeTabType === 'scheduled') {
     page = <ScheduledTasks />
+  } else if (activeTabType === 'companion') {
+    page = <Companion />
   } else if (activeTabType !== 'terminal') {
     page = <ActiveSession />
   }
