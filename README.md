@@ -7,7 +7,7 @@
 
 ## 📢 News
 
-- **2026-05-25** 🤖 **AI Friend on Desktop** — Companion mode with `real-time audio/video`, avatar & background image upload, edge glow effect on transcript, and localStorage persistence.
+- **2026-05-25** 🤖 AI Friend on Desktop — Companion mode with `real-time audio/video`, avatar & background image upload, edge glow effect on transcript, and localStorage persistence.
 - **2026-05-25** 🖥️ Desktop app launched — Tauri-based native UI with sidebar, tabs, title bar, and session management. Subagent inherits parent class config. Branding updated to Versper AI.
 - **2026-05-23** 🧘 Added OpenCode Zen Provider — a new model provider for calm, focused AI interactions.
 - **2026-05-22** 🔧 Fixed OpenCode login flow and refined prompt identity for clearer agent behavior.
@@ -121,6 +121,7 @@ firefox http://localhost:8080
 ```
 
 ```bash
+cd desktop && bun run tauri dev
 # ai_friend api in 8889 so local build Omni model or use cloud service on 8889
 ```
 
