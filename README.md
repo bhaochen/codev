@@ -147,17 +147,17 @@ cd desktop && bun run tauri dev
 
 #### 🧠 Core Mechanisms of Cycle Long Run
 
-* **Auto Compact** — Automatically optimizes and compresses historical context to bypass sequence length bottlenecks.
-* **Dream** — Consolidates raw operational data into structured, long-term parametric insights asynchronously.
+- Auto Compact — Automatically optimizes and compresses historical context to bypass sequence length bottlenecks.
+- Dream — Asynchronously distills operational data into long-term insights.
 
 #### 🗂️ SubAgent Swarm Topology
 
-| SubAgent Type | Core Responsibility | Operational Gate |
-| :--- | :--- | :--- |
-| 🛡️ **General-Purpose** | Orchestrates routing, high-level user interaction, and dispatching. | Active |
-| 🔍 **Explore** | Conducts deep semantic search and autonomous tool discovery. | Active |
-| 📋 **Plan** | Handles multi-step chain-of-thought strategy and task decomposition. | Active |
-| 🧪 **Verification** | Executes automated runtime validation, assertion checks, and fault tolerance. | Active |
+| SubAgent Type | Core Responsibility |
+| :--- | :--- |
+| 🛡️ **General-Purpose** | Orchestrates routing, high-level user interaction, and dispatching. |
+| 🔍 **Explore** | Conducts deep semantic search and autonomous tool discovery. |
+| 📋 **Plan** | Handles multi-step chain-of-thought strategy and task decomposition. |
+| 🧪 **Verification** | Executes automated runtime validation, assertion checks, and fault tolerance. |
 
 <table align="center">
   <tr>
