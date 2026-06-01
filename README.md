@@ -75,13 +75,15 @@ cp VersperClaw ~/.local/bin
 # set 200k env in ~/.claude/settings.json or terminal
 # the 20k is used to compact as buffer band
 # set tool_search env
+# set agentteam in tmux
 {
   "env": {
     "USER_TYPE": "ant",
     "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "200000",
     "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "200000",
     "ENABLE_TOOL_SEARCH": "true",
-    # "TAVILY_API_KEY": ""
+    "TAVILY_API_KEY": "",
+    "teammateMode": "tmux"
   }
 
   # set auto-dream config
@@ -137,15 +139,25 @@ cd desktop && bun run tauri dev
 
 ## ✨ Features
 
-### AI Friend via Omni model
+### Agent Team and View via Tmux
 
-<table align="center">
-  <tr>
-    <td><img src="assets/ai_friend.png"></td>
-  </tr>
-</table>
+
 
 ### Auto Compact & Dream & SubAgent
+
+#### 🧠 Core Mechanisms of Cycle Long Run
+
+* **Auto Compact** — Automatically optimizes and compresses historical context to bypass sequence length bottlenecks.
+* **Dream** — Consolidates raw operational data into structured, long-term parametric insights asynchronously.
+
+#### 🗂️ SubAgent Swarm Topology
+
+| SubAgent Type | Core Responsibility | Operational Gate |
+| :--- | :--- | :--- |
+| 🛡️ **General-Purpose** | Orchestrates routing, high-level user interaction, and dispatching. | Active |
+| 🔍 **Explore** | Conducts deep semantic search and autonomous tool discovery. | Active |
+| 📋 **Plan** | Handles multi-step chain-of-thought strategy and task decomposition. | Active |
+| 🧪 **Verification** | Executes automated runtime validation, assertion checks, and fault tolerance. | Active |
 
 <table align="center">
   <tr>
@@ -163,3 +175,10 @@ cd desktop && bun run tauri dev
   </tr>
 </table>
 
+### AI Friend via Omni model
+
+<table align="center">
+  <tr>
+    <td><img src="assets/ai_friend.png"></td>
+  </tr>
+</table>
