@@ -17,7 +17,7 @@ import {
   isTmuxAvailable,
 } from './detection.js'
 import { registerTmuxBackend } from './registry.js'
-import type { CreatePaneResult, PaneBackend, PaneId } from './types.js'
+import type { CreatePaneResult, PaneBackend, PaneId, PaneSpawnOptions } from './types.js'
 
 // Track whether the first pane has been used for external swarm session
 let firstPaneUsedForExternal = false
@@ -129,6 +129,7 @@ export class TmuxBackend implements PaneBackend {
   async createTeammatePaneInSwarmView(
     name: string,
     color: AgentColorName,
+    spawnOptions?: PaneSpawnOptions,
   ): Promise<CreatePaneResult> {
     const releaseLock = await acquirePaneCreationLock()
 
@@ -136,7 +137,7 @@ export class TmuxBackend implements PaneBackend {
       const insideTmux = await this.isRunningInside()
 
       if (insideTmux) {
-        return await this.createTeammatePaneWithLeader(name, color)
+        return await this.createTeammatePaneWithLeader(name, color, spawnOptions)
       }
 
       return await this.createTeammatePaneExternal(name, color)
@@ -547,10 +548,13 @@ export class TmuxBackend implements PaneBackend {
 
   /**
    * Creates a teammate pane when running inside tmux (with leader).
+   * If spawnOptions.command is provided, runs it directly in the pane
+   * via split-window <shell-command>, bypassing the shell intermediary.
    */
   private async createTeammatePaneWithLeader(
     teammateName: string,
     teammateColor: AgentColorName,
+    spawnOptions?: PaneSpawnOptions,
   ): Promise<CreatePaneResult> {
     const currentPaneId = await this.getCurrentPaneId()
     const windowTarget = await this.getCurrentWindowTarget()
@@ -565,6 +569,24 @@ export class TmuxBackend implements PaneBackend {
     }
     const isFirstTeammate = paneCount === 1
 
+    // Build split-window args
+    // If spawnOptions.command is provided, pass it directly as the
+    // shell-command argument to split-window. This avoids the bash
+    // intermediary and the subsequent send-keys step.
+    const splitArgs: string[] = []
+    if (spawnOptions?.command) {
+      // Working directory via tmux -c flag (no need for cd ... &&)
+      if (spawnOptions.cwd) {
+        splitArgs.push('-c', spawnOptions.cwd)
+      }
+      // Environment vars via tmux -e flags (no need for env KEY=VALUE prefix)
+      if (spawnOptions.envVars) {
+        for (const [key, val] of Object.entries(spawnOptions.envVars)) {
+          splitArgs.push('-e', `${key}=${val}`)
+        }
+      }
+    }
+
     let splitResult
     if (isFirstTeammate) {
       // First teammate: split horizontally from the leader pane
@@ -578,6 +600,8 @@ export class TmuxBackend implements PaneBackend {
         '-P',
         '-F',
         '#{pane_id}',
+        ...splitArgs,
+        ...(spawnOptions?.command ? [spawnOptions.command] : []),
       ])
     } else {
       // Additional teammates: split from an existing teammate pane
@@ -607,6 +631,8 @@ export class TmuxBackend implements PaneBackend {
         '-P',
         '-F',
         '#{pane_id}',
+        ...splitArgs,
+        ...(spawnOptions?.command ? [spawnOptions.command] : []),
       ])
     }
 
@@ -623,8 +649,11 @@ export class TmuxBackend implements PaneBackend {
     await this.setPaneTitle(paneId, teammateName, teammateColor)
     await this.rebalancePanesWithLeader(windowTarget)
 
-    // Wait for shell to initialize before returning, so commands can be sent immediately
-    await waitForPaneShellReady()
+    // If we passed a command directly, there's no shell waiting for
+    // input — skip the shell-init delay.
+    if (!spawnOptions?.command) {
+      await waitForPaneShellReady()
+    }
 
     return { paneId, isFirstTeammate }
   }
@@ -635,6 +664,7 @@ export class TmuxBackend implements PaneBackend {
   private async createTeammatePaneExternal(
     teammateName: string,
     teammateColor: AgentColorName,
+    spawnOptions?: PaneSpawnOptions,
   ): Promise<CreatePaneResult> {
     const { windowTarget, paneId: firstPaneId } =
       await this.createExternalSwarmSession()
@@ -644,6 +674,19 @@ export class TmuxBackend implements PaneBackend {
       throw new Error('Could not determine pane count for swarm window')
     }
     const isFirstTeammate = !firstPaneUsedForExternal && paneCount === 1
+
+    // Build split-window args (same logic as createTeammatePaneWithLeader)
+    const splitArgs: string[] = []
+    if (spawnOptions?.command) {
+      if (spawnOptions.cwd) {
+        splitArgs.push('-c', spawnOptions.cwd)
+      }
+      if (spawnOptions.envVars) {
+        for (const [key, val] of Object.entries(spawnOptions.envVars)) {
+          splitArgs.push('-e', `${key}=${val}`)
+        }
+      }
+    }
 
     let paneId: string
 
@@ -655,6 +698,12 @@ export class TmuxBackend implements PaneBackend {
       )
 
       await this.enablePaneBorderStatus(windowTarget, true)
+
+      // First pane in external session can't use split-window with command,
+      // so fall back to send-keys.
+      if (spawnOptions?.command) {
+        await this.sendCommandToPane(paneId, spawnOptions.command, true)
+      }
     } else {
       const listResult = await runTmuxInSwarm([
         'list-panes',
@@ -695,8 +744,9 @@ export class TmuxBackend implements PaneBackend {
     await this.setPaneTitle(paneId, teammateName, teammateColor, true)
     await this.rebalancePanesTiled(windowTarget)
 
-    // Wait for shell to initialize before returning, so commands can be sent immediately
-    await waitForPaneShellReady()
+    if (!spawnOptions?.command) {
+      await waitForPaneShellReady()
+    }
 
     return { paneId, isFirstTeammate }
   }

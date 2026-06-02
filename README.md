@@ -83,7 +83,8 @@ cp VersperClaw ~/.local/bin
     "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "200000",
     "ENABLE_TOOL_SEARCH": "true",
     "TAVILY_API_KEY": "",
-    "teammateMode": "tmux"
+  # "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "0", default 1 
+    "teammateMode": "tmux" # or in-process
   }
 
   # set auto-dream config
@@ -141,7 +142,11 @@ cd desktop && bun run tauri dev
 
 ### Agent Team and View via Tmux
 
-
+<table align="center">
+  <tr>
+    <td><img src="assets/agentmate2.png"></td>
+  </tr>
+</table>
 
 ### Auto Compact & Dream & SubAgent
 

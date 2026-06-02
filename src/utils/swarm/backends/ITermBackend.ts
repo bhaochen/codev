@@ -3,7 +3,7 @@ import { logForDebugging } from '../../../utils/debug.js'
 import { execFileNoThrow } from '../../../utils/execFileNoThrow.js'
 import { IT2_COMMAND, isInITerm2, isIt2CliAvailable } from './detection.js'
 import { registerITermBackend } from './registry.js'
-import type { CreatePaneResult, PaneBackend, PaneId } from './types.js'
+import type { CreatePaneResult, PaneBackend, PaneId, PaneSpawnOptions } from './types.js'
 
 // Track session IDs for teammates
 const teammateSessionIds: string[] = []
@@ -114,6 +114,7 @@ export class ITermBackend implements PaneBackend {
   async createTeammatePaneInSwarmView(
     name: string,
     color: AgentColorName,
+    _spawnOptions?: PaneSpawnOptions,
   ): Promise<CreatePaneResult> {
     logForDebugging(
       `[ITermBackend] createTeammatePaneInSwarmView called for ${name} with color ${color}`,

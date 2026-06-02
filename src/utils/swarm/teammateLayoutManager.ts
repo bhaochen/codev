@@ -1,7 +1,7 @@
 import type { AgentColorName } from '../../tools/AgentTool/agentColorManager.js'
 import { AGENT_COLORS } from '../../tools/AgentTool/agentColorManager.js'
 import { detectAndGetBackend } from './backends/registry.js'
-import type { PaneBackend } from './backends/types.js'
+import type { PaneBackend, PaneSpawnOptions } from './backends/types.js'
 
 // Track color assignments for teammates (persisted per session)
 const teammateColorAssignments = new Map<string, AgentColorName>()
@@ -76,9 +76,10 @@ export async function isInsideTmux(): Promise<boolean> {
 export async function createTeammatePaneInSwarmView(
   teammateName: string,
   teammateColor: AgentColorName,
+  spawnOptions?: PaneSpawnOptions,
 ): Promise<{ paneId: string; isFirstTeammate: boolean }> {
   const backend = await getBackend()
-  return backend.createTeammatePaneInSwarmView(teammateName, teammateColor)
+  return backend.createTeammatePaneInSwarmView(teammateName, teammateColor, spawnOptions)
 }
 
 /**

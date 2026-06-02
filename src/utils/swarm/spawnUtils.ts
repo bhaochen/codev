@@ -9,11 +9,34 @@ import {
   getMainLoopModelOverride,
   getSessionBypassPermissionsMode,
 } from '../../bootstrap/state.js'
+import { readlinkSync } from 'fs'
 import { quote } from '../bash/shellQuote.js'
 import { isInBundledMode } from '../bundledMode.js'
 import type { PermissionMode } from '../permissions/PermissionMode.js'
 import { getTeammateModeFromSnapshot } from './backends/teammateModeSnapshot.js'
 import { TEAMMATE_COMMAND_ENV_VAR } from './constants.js'
+
+/**
+ * Resolves the real executable path for the current process.
+ *
+ * In bun-compiled mode, process.execPath may return a bunfs virtual path
+ * (e.g., /$bunfs/root/VersperClaw) that only exists within the bun runtime.
+ * When a tmux pane tries to execute this path in a regular shell, it fails
+ * with "No such file or directory".
+ *
+ * Fix: use /proc/self/exe on Linux to resolve the real binary path.
+ * On unsupported platforms, falls back to process.execPath.
+ */
+function resolveRealExecPath(): string {
+  try {
+    if (process.platform === 'linux') {
+      return readlinkSync('/proc/self/exe')
+    }
+  } catch {
+    // Not on Linux or /proc not available — fall through
+  }
+  return process.execPath
+}
 
 /**
  * Gets the command to use for spawning teammate processes.
@@ -24,7 +47,7 @@ export function getTeammateCommand(): string {
   if (process.env[TEAMMATE_COMMAND_ENV_VAR]) {
     return process.env[TEAMMATE_COMMAND_ENV_VAR]
   }
-  return isInBundledMode() ? process.execPath : process.argv[1]!
+  return isInBundledMode() ? resolveRealExecPath() : process.argv[1]!
 }
 
 /**
@@ -141,19 +164,42 @@ const TEAMMATE_ENV_VARS = [
 ] as const
 
 /**
- * Builds the `env KEY=VALUE ...` string for teammate spawn commands.
- * Always includes CLAUDECODE=1 and CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1,
- * plus any provider/config env vars that are set in the current process.
+ * Builds a map of environment variables for teammate spawn commands.
+ * Skips CLAUDECODE and CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS if already set
+ * in the current environment (e.g., from settings.json env or tmux global env).
+ *
+ * Returns a Record<string, string> suitable for tmux -e flags or manual
+ * env KEY=VALUE construction.
  */
-export function buildInheritedEnvVars(): string {
-  const envVars = ['CLAUDECODE=1', 'CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1']
+export function buildInheritedEnvMap(): Record<string, string> {
+  const envMap: Record<string, string> = {}
+
+  // Only hardcode these if NOT already set in process env — the user may
+  // have them in ~/.claude/settings.json env, tmux set-environment, etc.
+  if (!process.env.CLAUDECODE) {
+    envMap.CLAUDECODE = '1'
+  }
+  if (!process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS) {
+    envMap.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = '1'
+  }
 
   for (const key of TEAMMATE_ENV_VARS) {
     const value = process.env[key]
     if (value !== undefined && value !== '') {
-      envVars.push(`${key}=${quote([value])}`)
+      envMap[key] = value
     }
   }
 
-  return envVars.join(' ')
+  return envMap
+}
+
+/**
+ * Builds the `env KEY=VALUE ...` string for teammate spawn commands.
+ * Delegates to buildInheritedEnvMap() for the values.
+ */
+export function buildInheritedEnvVars(): string {
+  const envMap = buildInheritedEnvMap()
+  return Object.entries(envMap)
+    .map(([key, value]) => `${key}=${quote([value])}`)
+    .join(' ')
 }

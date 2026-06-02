@@ -32,6 +32,21 @@ export type CreatePaneResult = {
 }
 
 /**
+ * Optional parameters for directly executing a command in a newly created pane,
+ * bypassing the shell intermediary and subsequent send-keys step.
+ * Supported by TmuxBackend via split-window <shell-command>; ignored by
+ * ITermBackend (falls back to send-keys).
+ */
+export type PaneSpawnOptions = {
+  /** The command to execute directly in the pane (instead of a shell) */
+  command: string
+  /** Working directory for the pane (tmux -c flag) */
+  cwd: string
+  /** Environment variables to set on the pane (tmux -e flags) */
+  envVars?: Record<string, string>
+}
+
+/**
  * Interface for pane management backends.
  * Abstracts operations for creating and managing terminal panes
  * for teammate visualization in swarm mode.
@@ -66,11 +81,14 @@ export type PaneBackend = {
    *
    * @param name - The teammate's name for display
    * @param color - The color to use for the pane border/title
+   * @param spawnOptions - Optional command to run directly in the pane
+   *   (TmuxBackend only; ITermBackend ignores this and falls back to send-keys)
    * @returns The pane ID and whether this was the first teammate
    */
   createTeammatePaneInSwarmView(
     name: string,
     color: AgentColorName,
+    spawnOptions?: PaneSpawnOptions,
   ): Promise<CreatePaneResult>
 
   /**

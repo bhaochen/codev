@@ -3,6 +3,7 @@
  * Extracted from TeammateTool to allow reuse by AgentTool.
  */
 
+import { readlinkSync } from 'fs'
 import React from 'react'
 import {
   getChromeFlagOverride,
@@ -35,7 +36,7 @@ import {
   resetBackendDetection,
 } from '../../utils/swarm/backends/registry.js'
 import { getTeammateModeFromSnapshot } from '../../utils/swarm/backends/teammateModeSnapshot.js'
-import type { BackendType } from '../../utils/swarm/backends/types.js'
+import type { BackendType, PaneSpawnOptions } from '../../utils/swarm/backends/types.js'
 import { isPaneBackend } from '../../utils/swarm/backends/types.js'
 import {
   SWARM_SESSION_NAME,
@@ -49,8 +50,9 @@ import {
   type InProcessSpawnConfig,
   spawnInProcessTeammate,
 } from '../../utils/swarm/spawnInProcess.js'
-import { buildInheritedEnvVars } from '../../utils/swarm/spawnUtils.js'
+import { buildInheritedEnvMap, buildInheritedEnvVars } from '../../utils/swarm/spawnUtils.js'
 import {
+  mutateTeamFileAsync,
   readTeamFileAsync,
   sanitizeAgentName,
   sanitizeName,
@@ -186,6 +188,23 @@ async function ensureSession(sessionName: string): Promise<void> {
 }
 
 /**
+ * Resolves the real executable path for the current process.
+ * In bun-compiled mode, process.execPath returns a bunfs virtual path
+ * (e.g., /$bunfs/root/VersperClaw). Uses /proc/self/exe on Linux to
+ * resolve the real binary path so spawned tmux panes can find it.
+ */
+function resolveRealExecPath(): string {
+  try {
+    if (process.platform === 'linux') {
+      return readlinkSync('/proc/self/exe')
+    }
+  } catch {
+    // Not on Linux or /proc not available — fall through
+  }
+  return process.execPath
+}
+
+/**
  * Gets the command to spawn a teammate.
  * For native builds (compiled binaries), use process.execPath.
  * For non-native (node/bun running a script), use process.argv[1].
@@ -194,7 +213,7 @@ function getTeammateCommand(): string {
   if (process.env[TEAMMATE_COMMAND_ENV_VAR]) {
     return process.env[TEAMMATE_COMMAND_ENV_VAR]
   }
-  return isInBundledMode() ? process.execPath : process.argv[1]!
+  return isInBundledMode() ? resolveRealExecPath() : process.argv[1]!
 }
 
 /**
@@ -381,23 +400,9 @@ async function handleSpawnSplitPane(
   // Assign a unique color to this teammate
   const teammateColor = assignTeammateColor(teammateId)
 
-  // Create a pane in the swarm view
-  // - Inside tmux: splits current window (leader on left, teammates on right)
-  // - In iTerm2 with it2: uses native iTerm2 split panes
-  // - Outside both: creates claude-swarm session with tiled teammates
-  const { paneId, isFirstTeammate } = await createTeammatePaneInSwarmView(
-    sanitizedName,
-    teammateColor,
-  )
-
-  // Enable pane border status on first teammate when inside tmux
-  // (outside tmux, this is handled in createTeammatePaneInSwarmView)
-  if (isFirstTeammate && insideTmux) {
-    await enablePaneBorderStatus()
-  }
-
   // Build the command to spawn Claude Code with teammate identity
-  // Note: We spawn without a prompt - initial instructions are sent via mailbox
+  // We build this BEFORE creating the pane so it can be passed directly
+  // to split-window (TmuxBackend), bypassing the shell intermediary.
   const binaryPath = getTeammateCommand()
 
   // Build teammate identity CLI args (replaces CLAUDE_CODE_* env vars)
@@ -414,7 +419,6 @@ async function handleSpawnSplitPane(
     .join(' ')
 
   // Build CLI flags to propagate to teammate
-  // Pass plan_mode_required to prevent inheriting bypass permissions
   let inheritedFlags = buildInheritedCliFlags({
     planModeRequired: plan_mode_required,
     permissionMode: appState.toolPermissionContext.mode,
@@ -422,26 +426,45 @@ async function handleSpawnSplitPane(
 
   // If teammate has a custom model, add --model flag (or replace inherited one)
   if (model) {
-    // Remove any inherited --model flag first
     inheritedFlags = inheritedFlags
       .split(' ')
       .filter((flag, i, arr) => flag !== '--model' && arr[i - 1] !== '--model')
       .join(' ')
-    // Add the teammate's model
     inheritedFlags = inheritedFlags
       ? `${inheritedFlags} --model ${quote([model])}`
       : `--model ${quote([model])}`
   }
 
   const flagsStr = inheritedFlags ? ` ${inheritedFlags}` : ''
-  // Propagate env vars that teammates need but may not inherit from tmux split-window shells.
-  // Includes CLAUDECODE, CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS, and API provider vars.
-  const envStr = buildInheritedEnvVars()
-  const spawnCommand = `cd ${quote([workingDir])} && env ${envStr} ${quote([binaryPath])} ${teammateArgs}${flagsStr}`
+  // Build env var map (skips vars already in settings.json / tmux global env)
+  const envMap = buildInheritedEnvMap()
+  const envStr = buildInheritedEnvVars() // string form for send-keys fallback
+  const spawnCommand = `${quote([binaryPath])} ${teammateArgs}${flagsStr}`
 
-  // Send the command to the new pane
-  // Use swarm socket when running outside tmux (external swarm session)
-  await sendCommandToPane(paneId, spawnCommand, !insideTmux)
+  // Create a pane in the swarm view, passing the command directly
+  // TmuxBackend runs it via split-window <shell-command> (no shell needed).
+  // ITermBackend ignores spawnOptions and falls back to send-keys.
+  const { paneId, isFirstTeammate } = await createTeammatePaneInSwarmView(
+    sanitizedName,
+    teammateColor,
+    {
+      command: spawnCommand,
+      cwd: workingDir,
+      envVars: envMap,
+    } satisfies PaneSpawnOptions,
+  )
+
+  // Enable pane border status on first teammate when inside tmux
+  if (isFirstTeammate && insideTmux) {
+    await enablePaneBorderStatus()
+  }
+
+  // For non-tmux backends (iTerm2), fall back to send-keys with the
+  // full shell command (cd + env prefix). TmuxBackend already ran it.
+  if (detectionResult.backend.type !== 'tmux') {
+    const shellCommand = `cd ${quote([workingDir])} && env ${envStr} ${spawnCommand}`
+    await sendCommandToPane(paneId, shellCommand, !insideTmux)
+  }
 
   // Determine session/window names for output
   const sessionName = insideTmux ? 'current' : SWARM_SESSION_NAME
@@ -485,28 +508,24 @@ async function handleSpawnSplitPane(
     toolUseId: context.toolUseId,
   })
 
-  // Register agent in the team file
-  const teamFile = await readTeamFileAsync(teamName)
-  if (!teamFile) {
-    throw new Error(
-      `Team "${teamName}" does not exist. Call spawnTeam first to create the team.`,
-    )
-  }
-  teamFile.members.push({
-    agentId: teammateId,
-    name: sanitizedName,
-    agentType: agent_type,
-    model,
-    prompt,
-    color: teammateColor,
-    planModeRequired: plan_mode_required,
-    joinedAt: Date.now(),
-    tmuxPaneId: paneId,
-    cwd: workingDir,
-    subscriptions: [],
-    backendType: detectionResult.backend.type,
+  // Register agent in the team file using atomic read-modify-write to avoid
+  // concurrent spawn clobbering other members.
+  await mutateTeamFileAsync(teamName, (teamFile) => {
+    teamFile.members.push({
+      agentId: teammateId,
+      name: sanitizedName,
+      agentType: agent_type,
+      model,
+      prompt,
+      color: teammateColor,
+      planModeRequired: plan_mode_required,
+      joinedAt: Date.now(),
+      tmuxPaneId: paneId,
+      cwd: workingDir,
+      subscriptions: [],
+      backendType: detectionResult.backend.type,
+    })
   })
-  await writeTeamFileAsync(teamName, teamFile)
 
   // Send initial instructions to teammate via mailbox
   // The teammate's inbox poller will pick this up and submit it as their first turn
@@ -699,28 +718,24 @@ async function handleSpawnSeparateWindow(
     toolUseId: context.toolUseId,
   })
 
-  // Register agent in the team file
-  const teamFile = await readTeamFileAsync(teamName)
-  if (!teamFile) {
-    throw new Error(
-      `Team "${teamName}" does not exist. Call spawnTeam first to create the team.`,
-    )
-  }
-  teamFile.members.push({
-    agentId: teammateId,
-    name: sanitizedName,
-    agentType: agent_type,
-    model,
-    prompt,
-    color: teammateColor,
-    planModeRequired: plan_mode_required,
-    joinedAt: Date.now(),
-    tmuxPaneId: paneId,
-    cwd: workingDir,
-    subscriptions: [],
-    backendType: 'tmux', // This handler always uses tmux directly
+  // Register agent in the team file using atomic read-modify-write to avoid
+  // concurrent spawn clobbering other members.
+  await mutateTeamFileAsync(teamName, (teamFile) => {
+    teamFile.members.push({
+      agentId: teammateId,
+      name: sanitizedName,
+      agentType: agent_type,
+      model,
+      prompt,
+      color: teammateColor,
+      planModeRequired: plan_mode_required,
+      joinedAt: Date.now(),
+      tmuxPaneId: paneId,
+      cwd: workingDir,
+      subscriptions: [],
+      backendType: 'tmux', // This handler always uses tmux directly
+    })
   })
-  await writeTeamFileAsync(teamName, teamFile)
 
   // Send initial instructions to teammate via mailbox
   // The teammate's inbox poller will pick this up and submit it as their first turn
@@ -985,28 +1000,24 @@ async function handleSpawnInProcess(
     }
   })
 
-  // Register agent in the team file
-  const teamFile = await readTeamFileAsync(teamName)
-  if (!teamFile) {
-    throw new Error(
-      `Team "${teamName}" does not exist. Call spawnTeam first to create the team.`,
-    )
-  }
-  teamFile.members.push({
-    agentId: teammateId,
-    name: sanitizedName,
-    agentType: agent_type,
-    model,
-    prompt,
-    color: teammateColor,
-    planModeRequired: plan_mode_required,
-    joinedAt: Date.now(),
-    tmuxPaneId: 'in-process',
-    cwd: getCwd(),
-    subscriptions: [],
-    backendType: 'in-process',
+  // Register agent in the team file using atomic read-modify-write to avoid
+  // concurrent spawn clobbering other members.
+  await mutateTeamFileAsync(teamName, (teamFile) => {
+    teamFile.members.push({
+      agentId: teammateId,
+      name: sanitizedName,
+      agentType: agent_type,
+      model,
+      prompt,
+      color: teammateColor,
+      planModeRequired: plan_mode_required,
+      joinedAt: Date.now(),
+      tmuxPaneId: 'in-process',
+      cwd: getCwd(),
+      subscriptions: [],
+      backendType: 'in-process',
+    })
   })
-  await writeTeamFileAsync(teamName, teamFile)
 
   // Note: Do NOT send the prompt via mailbox for in-process teammates.
   // In-process teammates receive the prompt directly via startInProcessTeammate().

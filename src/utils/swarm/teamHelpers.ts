@@ -10,6 +10,7 @@ import { execFileNoThrowWithCwd } from '../execFileNoThrow.js'
 import { gitExe } from '../git.js'
 import { lazySchema } from '../lazySchema.js'
 import type { PermissionMode } from '../permissions/PermissionMode.js'
+import * as lockfile from '../lockfile.js'
 import { jsonParse, jsonStringify } from '../slowOperations.js'
 import { getTasksDir, notifyTasksUpdated } from '../tasks.js'
 import { getAgentName, getTeamName, isTeammate } from '../teammate.js'
@@ -179,6 +180,52 @@ export async function writeTeamFileAsync(
   const teamDir = getTeamDir(teamName)
   await mkdir(teamDir, { recursive: true })
   await writeFile(getTeamFilePath(teamName), jsonStringify(teamFile, null, 2))
+}
+
+/**
+ * Atomically read-modify-write a team file under a file lock.
+ * Use this for concurrent member updates such as teammate spawning.
+ * Ensures parallel spawn operations don't clobber each other's member registrations.
+ */
+export async function mutateTeamFileAsync(
+  teamName: string,
+  mutator: (teamFile: TeamFile) => TeamFile | void,
+): Promise<TeamFile> {
+  const teamDir = getTeamDir(teamName)
+  const teamFilePath = getTeamFilePath(teamName)
+  const lockFilePath = `${teamFilePath}.lock`
+
+  await mkdir(teamDir, { recursive: true })
+  // Ensure the file exists (create if not, ignore if already exists)
+  try {
+    await writeFile(teamFilePath, '{}', { encoding: 'utf-8', flag: 'wx' })
+  } catch (e) {
+    if (getErrnoCode(e) !== 'EEXIST') {
+      throw e
+    }
+  }
+
+  const release = await lockfile.lock(teamFilePath, {
+    lockfilePath: lockFilePath,
+    retries: {
+      retries: 10,
+      minTimeout: 5,
+      maxTimeout: 100,
+    },
+  })
+
+  try {
+    const current = await readTeamFileAsync(teamName)
+    if (!current || !Array.isArray(current.members)) {
+      throw new Error(`Team "${teamName}" does not exist`)
+    }
+
+    const next = mutator(current) ?? current
+    await writeFile(teamFilePath, jsonStringify(next, null, 2))
+    return next
+  } finally {
+    await release()
+  }
 }
 
 /**
