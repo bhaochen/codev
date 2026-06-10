@@ -1103,6 +1103,27 @@ export class ConversationService {
   }
 
   private resolveCliArgs(baseArgs: string[]): string[] {
+    // Prefer the standalone CLI binary (dist/cli) when available. This binary
+    // has the full implementation including runHeadless for SDK mode, unlike
+    // the OSS-build sidecar which uses a stub src/cli/print.ts that doesn't
+    // export runHeadless, causing the subprocess to crash during startup.
+    //
+    // When running inside the compiled sidecar, import.meta.dir resolves to a
+    // virtual bunfs path — use CLAUDE_APP_ROOT (set by the sidecar launcher)
+    // to construct the real filesystem path instead.
+    const appRoot = process.env.CLAUDE_APP_ROOT
+    if (appRoot) {
+      const standaloneCli = path.resolve(appRoot, '../../../../dist/cli')
+      if (fs.existsSync(standaloneCli)) {
+        return [standaloneCli, ...baseArgs]
+      }
+    }
+    // Fallback for direct bun dev mode (outside the sidecar)
+    const standaloneCli = path.resolve(import.meta.dir, '../../../dist/cli')
+    if (fs.existsSync(standaloneCli)) {
+      return [standaloneCli, ...baseArgs]
+    }
+
     const launcher = resolveClaudeCliLauncher({
       cliPath: process.env.CLAUDE_CLI_PATH,
       execPath: process.execPath,
@@ -1118,7 +1139,8 @@ export class ConversationService {
           ...baseArgs,
         ]
       }
-      return [path.resolve(import.meta.dir, '../../../bin/claude-haha'), ...baseArgs]
+      // Try claude-haha from PATH (installed via npm/pip)
+      return ['claude-haha', ...baseArgs]
     }
 
     return buildClaudeCliArgs(launcher, baseArgs, process.env.CLAUDE_APP_ROOT)

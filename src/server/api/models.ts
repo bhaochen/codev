@@ -161,6 +161,94 @@ function normalizeEffortLevel(value: unknown): (typeof EFFORT_LEVELS)[number] {
     : DEFAULT_EFFORT
 }
 
+// ─── CLI provider model cache (fetched from external APIs) ─────
+
+let cliProviderModelCache: ApiModelInfo[] | null = null
+let cliProviderModelCacheTime = 0
+const CLI_PROVIDER_CACHE_TTL = 5 * 60 * 1000 // 5 minutes
+
+async function fetchCliProviderModels(): Promise<ApiModelInfo[]> {
+  if (cliProviderModelCache && Date.now() - cliProviderModelCacheTime < CLI_PROVIDER_CACHE_TTL) {
+    return cliProviderModelCache
+  }
+
+  try {
+    // Read ~/.claude.json directly — avoids importing CLI-side config modules
+    const { homedir } = await import('node:os')
+    const { readFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    let config: Record<string, unknown> = {}
+    try {
+      const raw = readFileSync(join(homedir(), '.claude.json'), 'utf8')
+      config = JSON.parse(raw)
+    } catch {
+      return []
+    }
+    const authProvider = config.authProvider as string | undefined
+
+    // ── OpenCode ──────────────────────────────────────────────
+    if (authProvider === 'opencode' && config.openCodeApiKey) {
+      try {
+        const res = await fetch('https://models.dev/api.json')
+        if (res.ok) {
+          const data = await res.json() as any
+          const opencodeModels = data?.opencode?.models || {}
+          const models: ApiModelInfo[] = []
+
+          for (const [modelId, modelCfg] of Object.entries(opencodeModels) as [string, any][]) {
+            if (modelCfg.status === 'deprecated') continue
+            const isFree = modelCfg.cost?.input === 0 && modelCfg.cost?.output === 0
+            models.push({
+              id: modelId,
+              name: modelCfg.name || modelId,
+              description: isFree ? 'Free model' : 'Paid model',
+              context: '',
+            })
+          }
+
+          if (models.length > 0) {
+            cliProviderModelCache = models
+            cliProviderModelCacheTime = Date.now()
+            return models
+          }
+        }
+      } catch {
+        // fall through
+      }
+    }
+
+    // ── OpenRouter ────────────────────────────────────────────
+    if (authProvider === 'openrouter' && config.openRouterApiKey) {
+      try {
+        const res = await fetch('https://openrouter.ai/api/v1/models', {
+          headers: { Authorization: `Bearer ${config.openRouterApiKey}` },
+        })
+        if (res.ok) {
+          const data = await res.json() as any
+          const models: ApiModelInfo[] = (data.data || []).map((m: any) => ({
+            id: m.id,
+            name: m.name || m.id,
+            description: m.description || '',
+            context: String(m.context_length || ''),
+          }))
+
+          if (models.length > 0) {
+            cliProviderModelCache = models
+            cliProviderModelCacheTime = Date.now()
+            return models
+          }
+        }
+      } catch {
+        // fall through
+      }
+    }
+  } catch {
+    // fall through
+  }
+
+  return []
+}
+
 // ─── Router ───────────────────────────────────────────────────────────────────
 
 export async function handleModelsApi(
@@ -217,6 +305,16 @@ async function handleModelsList(): Promise<Response> {
       provider: { id: activeProvider.id, name: activeProvider.name },
     })
   }
+
+  // No cc-haha provider active — check if CLI has an auth provider configured
+  const cliModels = await fetchCliProviderModels()
+  if (cliModels.length > 0) {
+    return Response.json({
+      models: cliModels,
+      provider: { id: 'cli', name: 'CLI Provider' },
+    })
+  }
+
   return Response.json({ models: getStandaloneModelList(), provider: null })
 }
 
@@ -261,11 +359,16 @@ async function handleCurrentModel(req: Request): Promise<Response> {
     const lookupId = contextTier ? `${currentModelId}:${contextTier}` : currentModelId
 
     // Build available models for name lookup
+    const cliModelsFallback = !isOpenAIProviderActive && !activeProvider
+      ? await fetchCliProviderModels()
+      : []
     const availableModels = isOpenAIProviderActive
       ? buildOpenAIModelList()
       : activeProvider
         ? buildProviderModelList(activeProvider.models)
-        : getStandaloneModelList()
+        : cliModelsFallback.length > 0
+          ? cliModelsFallback
+          : getStandaloneModelList()
 
     const modelEntry = availableModels.find((m) => m.id === lookupId)
       || availableModels.find((m) => m.id === currentModelId)
