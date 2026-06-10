@@ -1,8 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicegui/nicegui/main/nicegui/static/tauri-schema-v2.json",
-  "productName": "Claude Code Haha",
+  "productName": "Versper AI Claw",
   "version": "0.2.9",
-  "identifier": "com.claude-code-haha.desktop",
+  "identifier": "com.versperai.claw.desktop",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Claude Code Haha",
+        "title": "Versper AI Claw",
         "width": 1440,
         "height": 960,
         "minWidth": 960,

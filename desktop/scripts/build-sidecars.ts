@@ -32,7 +32,7 @@ await mkdir(binariesDir, { recursive: true })
 await compileExecutable({
   entrypoint: path.join(desktopRoot, 'sidecars/claude-sidecar.ts'),
   outfileBase: path.join(binariesDir, `claude-sidecar-${targetTriple}`),
-  productName: 'Claude Code Sidecar',
+  productName: 'Versper Sidecar',
   bunTarget,
 })
 
@@ -145,7 +145,7 @@ async function compileExecutable({
       autoloadPackageJson: true,
       windows: {
         title: productName,
-        publisher: 'Claude Code',
+        publisher: 'Versper AI',
         description: productName,
         hideConsole: true,
       },

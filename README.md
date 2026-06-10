@@ -126,6 +126,8 @@ firefox http://localhost:8080
 ```
 
 ```bash
+# cd desktop && rm -rf node_modules/.vite && bun run dev
+#  cd desktop && bun run vite build
 cd desktop && bun run tauri dev
 # ai_friend api in 8889 so local build Omni model or use cloud service on 8889
 ```

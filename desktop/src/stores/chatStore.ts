@@ -560,7 +560,7 @@ function buildAgentCompletionNotification(
   const lastAssistant = [...messages].reverse().find((message) => message.type === 'assistant_text')
   const suffix = preview.length > AGENT_COMPLETION_NOTIFICATION_PREVIEW_CHARS ? '...' : ''
   return {
-    title: 'Claude Code Haha 已完成回复',
+    title: 'Versper AI Claw 已完成回复',
     body: preview.slice(0, AGENT_COMPLETION_NOTIFICATION_PREVIEW_CHARS) + suffix,
     dedupeKey: `agent-completion:${sessionId}:${lastAssistant?.id ?? Date.now()}`,
   }
@@ -1240,7 +1240,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           dedupeKey: `permission:${msg.requestId}`,
           cooldownScope: 'permission-prompt',
           requestAttention: true,
-          title: 'Claude Code Haha 需要你的确认',
+          title: 'Versper AI Claw 需要你的确认',
           body: msg.toolName
             ? `${msg.toolName} 请求执行，正在等待允许。`
             : '有一个工具请求正在等待允许。',
@@ -1279,7 +1279,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           dedupeKey: `computer-use-permission:${msg.requestId}`,
           cooldownScope: 'permission-prompt',
           requestAttention: true,
-          title: 'Claude Code Haha 需要你的确认',
+          title: 'Versper AI Claw 需要你的确认',
           body: msg.request.reason || 'Computer Use 正在等待允许。',
           target: { type: 'session', sessionId },
         })
