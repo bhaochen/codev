@@ -1,5 +1,14 @@
 export type CompanionStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
 
+export type ScenarioOption = {
+  id: string
+  name: string
+  nameEn: string
+  icon: string
+  description: string
+  descriptionEn: string
+}
+
 export type CompanionConfig = {
   serverUrl: string
   voiceName: string

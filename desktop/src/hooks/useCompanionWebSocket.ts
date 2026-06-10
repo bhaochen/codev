@@ -57,20 +57,11 @@ export function useCompanionWebSocket(callbacks: Callbacks) {
     wsRef.current = ws
 
     ws.onopen = () => {
-      reconnectAttemptRef.current = 0
       setStatus('connected')
     }
 
     ws.onclose = () => {
-      if (!manualDisconnectRef.current) {
-        // Auto reconnect with exponential backoff
-        const attempt = reconnectAttemptRef.current
-        const delay = Math.min(1000 * Math.pow(2, attempt), 30000)
-        reconnectAttemptRef.current = attempt + 1
-        reconnectTimerRef.current = setTimeout(() => {
-          connect()
-        }, delay)
-      }
+      // No auto-reconnect — user clicks "call" to retry
       setStatus('disconnected')
     }
 
