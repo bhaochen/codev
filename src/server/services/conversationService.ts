@@ -1103,47 +1103,45 @@ export class ConversationService {
   }
 
   private resolveCliArgs(baseArgs: string[]): string[] {
-    // Prefer the standalone CLI binary (dist/cli) when available. This binary
-    // has the full implementation including runHeadless for SDK mode, unlike
-    // the OSS-build sidecar which uses a stub src/cli/print.ts that doesn't
-    // export runHeadless, causing the subprocess to crash during startup.
+    // The standalone dist/cli binary (April 18, pre-fork) is known to be
+    // broken for --print / SDK mode — it parses --sdk-url but never
+    // establishes the WebSocket connection and produces no stream-json
+    // output.  Bypass it unconditionally and delegate to the sidecar or
+    // source-based launcher instead.
     //
-    // When running inside the compiled sidecar, import.meta.dir resolves to a
-    // virtual bunfs path — use CLAUDE_APP_ROOT (set by the sidecar launcher)
-    // to construct the real filesystem path instead.
-    const appRoot = process.env.CLAUDE_APP_ROOT
-    if (appRoot) {
-      const standaloneCli = path.resolve(appRoot, '../../../../dist/cli')
-      if (fs.existsSync(standaloneCli)) {
-        return [standaloneCli, ...baseArgs]
-      }
-    }
-    // Fallback for direct bun dev mode (outside the sidecar)
-    const standaloneCli = path.resolve(import.meta.dir, '../../../dist/cli')
-    if (fs.existsSync(standaloneCli)) {
-      return [standaloneCli, ...baseArgs]
-    }
+    // When running inside the compiled sidecar, import.meta.dir resolves to
+    // a virtual bunfs path — use CLAUDE_APP_ROOT (set by the sidecar
+    // launcher) to find the repo root for source-based fallback.
 
     const launcher = resolveClaudeCliLauncher({
       cliPath: process.env.CLAUDE_CLI_PATH,
       execPath: process.execPath,
     })
 
-    if (!launcher) {
-      if (process.platform === 'win32') {
-        return [
-          process.execPath,
-          '--preload',
-          path.resolve(import.meta.dir, '../../../preload.ts'),
-          path.resolve(import.meta.dir, '../../entrypoints/cli.tsx'),
-          ...baseArgs,
-        ]
-      }
-      // Try claude-haha from PATH (installed via npm/pip)
-      return ['claude-haha', ...baseArgs]
+    if (launcher) {
+      return buildClaudeCliArgs(launcher, baseArgs, process.env.CLAUDE_APP_ROOT)
     }
 
-    return buildClaudeCliArgs(launcher, baseArgs, process.env.CLAUDE_APP_ROOT)
+    // No launcher detected — try running from source via bun.
+    const repoRoot = process.env.CLAUDE_APP_ROOT
+      ? path.resolve(process.env.CLAUDE_APP_ROOT, '../../../..')
+      : path.resolve(import.meta.dir, '../../..')
+    const sourceEntry = path.resolve(repoRoot, 'src/entrypoints/cli.tsx')
+    if (fs.existsSync(sourceEntry)) {
+      return [process.execPath, sourceEntry, ...baseArgs]
+    }
+
+    if (process.platform === 'win32') {
+      return [
+        process.execPath,
+        '--preload',
+        path.resolve(import.meta.dir, '../../../preload.ts'),
+        path.resolve(import.meta.dir, '../../entrypoints/cli.tsx'),
+        ...baseArgs,
+      ]
+    }
+    // Try claude-haha from PATH (installed via npm/pip)
+    return ['claude-haha', ...baseArgs]
   }
 
   private clearStaleLock(sessionId: string): boolean {

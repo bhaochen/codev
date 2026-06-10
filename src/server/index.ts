@@ -231,7 +231,11 @@ export function startServer(port = PORT, host = HOST) {
 
         // Internal SDK WebSocket used by the spawned Claude CLI.
         if (url.pathname.startsWith('/sdk/')) {
-          if (classifyH5Request(req, url, h5RequestContext) !== 'internal-sdk') {
+          const classification = classifyH5Request(req, url, h5RequestContext)
+          console.log(
+            `[SDK-WS] classifyH5Request=${classification}, clientAddress=${h5RequestContext.clientAddress}, origin=${req.headers.get('Origin')}, path=${url.pathname}`,
+          )
+          if (classification !== 'internal-sdk') {
             return h5AccessControlRejectedResponse()
           }
 

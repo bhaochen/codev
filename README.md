@@ -130,6 +130,10 @@ firefox http://localhost:8080
 #  cd desktop && bun run vite build
 cd desktop && bun run tauri dev
 # ai_friend api in 8889 so local build Omni model or use cloud service on 8889
+
+# test
+HTTP_PROXY=http://127.0.0.1:8888 HTTPS_PROXY=http://127.0.0.1:8888 bun run tauri dev
+mitmproxy -p 8888
 ```
 
 
