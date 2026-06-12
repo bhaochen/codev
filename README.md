@@ -136,6 +136,14 @@ HTTP_PROXY=http://127.0.0.1:8888 HTTPS_PROXY=http://127.0.0.1:8888 bun run tauri
 mitmproxy -p 8888
 ```
 
+```bash
+# /voice
+uv venv
+uv  uv pip install faster-whisper edge-tts
+
+hf download Systran/faster-whisper-base \
+  --local-dir ~/.cache/huggingface/hub/models--Systran--faster-whisper-base
+```
 
 ## 🌐 Desktop
 
