@@ -2,7 +2,6 @@ import { normalizeLanguageForSTT } from '../../hooks/useVoice.js'
 import { getShortcutDisplay } from '../../keybindings/shortcutFormat.js'
 import { logEvent } from '../../services/analytics/index.js'
 import type { LocalCommandCall } from '../../types/command.js'
-import { isAnthropicAuthEnabled } from '../../utils/auth.js'
 import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js'
 import { settingsChangeDetector } from '../../utils/settings/changeDetector.js'
 import {
@@ -14,7 +13,7 @@ import { isVoiceAvailable } from '../../voice/voiceModeEnabled.js'
 const LANG_HINT_MAX_SHOWS = 2
 
 export const call: LocalCommandCall = async () => {
-  // Check only the GrowthBook kill-switch — voice might use Doubao (no auth)
+  // Check only the GrowthBook kill-switch
   if (!isVoiceAvailable()) {
     return {
       type: 'text' as const,
@@ -25,7 +24,7 @@ export const call: LocalCommandCall = async () => {
   const currentSettings = getInitialSettings()
   const isCurrentlyEnabled = currentSettings.voiceEnabled === true
 
-  // Toggle OFF — no checks needed
+  // Toggle OFF
   if (isCurrentlyEnabled) {
     const result = updateSettingsForSource('userSettings', {
       voiceEnabled: false,
@@ -45,33 +44,8 @@ export const call: LocalCommandCall = async () => {
     }
   }
 
-  // Toggle ON — run pre-flight checks first
-  const { isVoiceStreamAvailable } = await import(
-    '../../services/voiceStreamSTT.js'
-  )
+  // Toggle ON — local provider (no auth needed)
   const { checkRecordingAvailability } = await import('../../services/voice.js')
-
-  // Determine available STT backend: prefer Anthropic, fall back to Doubao
-  const hasAnthropicAuth = isAnthropicAuthEnabled() && isVoiceStreamAvailable()
-  let useDoubao = false
-  if (!hasAnthropicAuth) {
-    const { isDoubaoAvailable } = await import('../../services/doubaoSTT.js')
-    if (!(await isDoubaoAvailable())) {
-      // Neither backend is available
-      if (!isAnthropicAuthEnabled()) {
-        return {
-          type: 'text' as const,
-          value:
-            'Voice mode requires a Claude.ai account or the Doubao ASR backend. Please run /login to sign in, or install Doubao ASR.',
-        }
-      }
-      return {
-        type: 'text' as const,
-        value: 'Voice mode is not available.',
-      }
-    }
-    useDoubao = true
-  }
 
   // Check recording availability (microphone access)
   const recording = await checkRecordingAvailability()
@@ -98,16 +72,15 @@ export const call: LocalCommandCall = async () => {
     }
   }
 
-  // Probe mic access so the OS permission dialog fires now rather than
-  // on the user's first hold-to-talk activation.
+  // Probe mic access so the OS permission dialog fires now
   if (!(await requestMicrophonePermission())) {
     let guidance: string
     if (process.platform === 'win32') {
-      guidance = 'Settings \u2192 Privacy \u2192 Microphone'
+      guidance = 'Settings → Privacy → Microphone'
     } else if (process.platform === 'linux') {
       guidance = "your system's audio settings"
     } else {
-      guidance = 'System Settings \u2192 Privacy & Security \u2192 Microphone'
+      guidance = 'System Settings → Privacy & Security → Microphone'
     }
     return {
       type: 'text' as const,
@@ -115,10 +88,10 @@ export const call: LocalCommandCall = async () => {
     }
   }
 
-  // All checks passed — enable voice and store backend choice
+  // Enable voice with local provider
   const result = updateSettingsForSource('userSettings', {
     voiceEnabled: true,
-    ...(useDoubao ? { voiceProvider: 'doubao' as const } : { voiceProvider: 'anthropic' as const }),
+    voiceProvider: 'local' as const,
   })
   if (result.error) {
     return {
@@ -132,8 +105,6 @@ export const call: LocalCommandCall = async () => {
   const key = getShortcutDisplay('voice:pushToTalk', 'Chat', 'Space')
   const stt = normalizeLanguageForSTT(currentSettings.language)
   const cfg = getGlobalConfig()
-  // Reset the hint counter whenever the resolved STT language changes
-  // (including first-ever enable, where lastLanguage is undefined).
   const langChanged = cfg.voiceLangHintLastLanguage !== stt.code
   const priorCount = langChanged ? 0 : (cfg.voiceLangHintShownCount ?? 0)
   const showHint = !stt.fellBackFrom && priorCount < LANG_HINT_MAX_SHOWS
@@ -150,9 +121,8 @@ export const call: LocalCommandCall = async () => {
       voiceLangHintLastLanguage: stt.code,
     }))
   }
-  const backendNote = useDoubao ? ' [Doubao ASR]' : ''
   return {
     type: 'text' as const,
-    value: `Voice mode enabled. Hold ${key} to record.${langNote}${backendNote}`,
+    value: `Voice mode enabled (local whisper). Hold ${key} to record.${langNote}`,
   }
 }

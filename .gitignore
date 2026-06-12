@@ -1,14 +1,26 @@
 node_modules/
+packages/
 dist/
 cli
 .codex
 VersperClaw
 
 # Prebuilt native binaries (tracked in claude-code/ reference)
-vendor/audio-capture/
+vendor/
 
 # Desktop (Tauri) build artifacts
 desktop/src-tauri/target/
 desktop/src-tauri/binaries/
 desktop/src-tauri/gen/
 desktop/pnpm-lock.yaml
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Python env
+.venv/
+venv/
+env/

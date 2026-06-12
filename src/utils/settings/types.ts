@@ -868,10 +868,47 @@ export const SettingsSchema = lazySchema(() =>
               .optional()
               .describe('Enable voice mode (hold-to-talk dictation)'),
             voiceProvider: z
-              .enum(['anthropic', 'doubao'])
+              .enum(['local', 'doubao', 'anthropic'])
               .optional()
               .describe(
-                'Voice STT backend: "anthropic" (default) or "doubao" (Doubao ASR)',
+                'Voice STT backend: "local" (whisper/whisper.cpp / faster-whisper) or "doubao" (Doubao ASR).'
+                  + ' "anthropic" is a client-side compatibility alias.',
+              ),
+            voiceAutoTTS: z
+              .boolean()
+              .optional()
+              .describe('Automatically speak assistant replies in voice mode'),
+            voiceRecordKey: z
+              .string()
+              .optional()
+              .describe(
+                'Keyboard shortcut for push-to-talk voice input (e.g. "Space" or "ctrl+shift+space")',
+              ),
+            voiceTTSProvider: z
+              .enum(['edge', 'openai', 'elevenlabs', 'command'])
+              .optional()
+              .describe('Text-to-speech backend for spoken replies'),
+            voiceTTSVoice: z
+              .string()
+              .optional()
+              .describe('Preferred TTS voice identifier (provider-specific)'),
+            voiceTTSCommand: z
+              .string()
+              .optional()
+              .describe(
+                'Shell command template for command-based TTS. Supports {input}, {input_path}, and {output_path} placeholders.',
+              ),
+            voiceLanguage: z
+              .string()
+              .optional()
+              .describe(
+                'Preferred language for voice dictation (e.g. "en", "ja", "zh-CN")',
+              ),
+            voiceModel: z
+              .string()
+              .optional()
+              .describe(
+                'Optional whisper model or binary path override for local STT',
               ),
           }
         : {}),

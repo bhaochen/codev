@@ -123,6 +123,11 @@ const version = dev ? getDevVersion(pkg.version) : pkg.version
 
 mkdirSync(dirname(outfile), { recursive: true })
 
+// Merge defaultFeatures into features for consistent behavior
+for (const feature of defaultFeatures) {
+  featureSet.add(feature)
+}
+
 const externals = [
   '@ant/*',
   'audio-capture-napi',

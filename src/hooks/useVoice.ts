@@ -22,6 +22,7 @@ import {
   type VoiceStreamConnection,
 } from '../services/voiceStreamSTT.js'
 import { connectDoubaoStream } from '../services/doubaoSTT.js'
+import { connectLocalWhisperStream } from '../services/voice/whisperSTT.js'
 import { logForDebugging } from '../utils/debug.js'
 import { toError } from '../utils/errors.js'
 import { getSystemLocaleLanguage } from '../utils/intl.js'
@@ -137,6 +138,10 @@ export function normalizeLanguageForSTT(language: string | undefined): {
 
 function isDoubaoProvider(): boolean {
   return getInitialSettings().voiceProvider === 'doubao'
+}
+
+function isLocalProvider(): boolean {
+  return getInitialSettings().voiceProvider === 'local'
 }
 
 // Lazy-loaded voice module. We defer importing voice.ts (and its native
@@ -392,26 +397,31 @@ export function useVoice({
           !silentDropRetriedRef.current &&
           fullAudioRef.current.length > 0
         ) {
-          silentDropRetriedRef.current = true
-          logForDebugging(
-            `[voice] Silent-drop detected (no_data_timeout, ${String(fullAudioRef.current.length)} chunks); replaying on fresh connection`,
-          )
-          logEvent('tengu_voice_silent_drop_replay', {
-            recordingDurationMs,
-            chunkCount: fullAudioRef.current.length,
-          })
-          if (connectionRef.current) {
-            connectionRef.current.close()
-            connectionRef.current = null
-          }
-          const replayBuffer = fullAudioRef.current
-          await sleep(250)
-          if (isStale()) return
-          const stt = normalizeLanguageForSTT(getInitialSettings().language)
-          const keyterms = await getVoiceKeyterms()
-          if (isStale()) return
-          await new Promise<void>(resolve => {
-            void connectVoiceStream(
+// Local whisper doesn't support silent-drop replay (different backend)
+        if (isLocalProvider()) {
+          callbacks.onClose()
+          return
+        }
+        silentDropRetriedRef.current = true
+        logForDebugging(
+          `[voice] Silent-drop detected (no_data_timeout, ${String(fullAudioRef.current.length)} chunks); replaying on fresh connection`,
+        )
+        logEvent('tengu_voice_silent_drop_replay', {
+          recordingDurationMs,
+          chunkCount: fullAudioRef.current.length,
+        })
+        if (connectionRef.current) {
+          connectionRef.current.close()
+          connectionRef.current = null
+        }
+        const replayBuffer = fullAudioRef.current
+        await sleep(250)
+        if (isStale()) return
+        const stt = normalizeLanguageForSTT(getInitialSettings().language)
+        const keyterms = await getVoiceKeyterms()
+        if (isStale()) return
+        await new Promise<void>(resolve => {
+          void connectVoiceStream(
               {
                 onTranscript: (t, isFinal) => {
                   if (isStale()) return
@@ -580,7 +590,7 @@ export function useVoice({
   // stop when it loses focus. This enables a "multi-clauding army"
   // workflow where voice input follows window focus.
   useEffect(() => {
-    if (!enabled || !focusMode || isDoubaoProvider()) {
+    if (!enabled || !focusMode || isDoubaoProvider() || isLocalProvider()) {
       // Focus mode was disabled while a focus-driven recording was active —
       // stop the recording so it doesn't linger until the silence timer fires.
       if (focusTriggeredRef.current && stateRef.current === 'recording') {
@@ -785,15 +795,18 @@ export function useVoice({
     const attemptConnect = (keyterms: string[]): void => {
       const myAttemptGen = attemptGenRef.current
       // Select STT backend based on settings.voiceProvider
-      const connectFn = isDoubaoProvider()
-        ? (
-            cbs: Parameters<typeof connectDoubaoStream>[0],
-            opts: Parameters<typeof connectDoubaoStream>[1],
-          ) => connectDoubaoStream(cbs, opts)
-        : (
-            cbs: Parameters<typeof connectVoiceStream>[0],
-            opts: Parameters<typeof connectVoiceStream>[1],
-          ) => connectVoiceStream(cbs, opts)
+      let connectFn: (
+          cbs: VoiceStreamCallbacks,
+          opts: { language: string; keyterms: string[] },
+        ) => Promise<VoiceStreamConnection | null>
+      if (isLocalProvider()) {
+        connectFn = (cbs, _opts) =>
+          connectLocalWhisperStream(cbs, { language: stt.code })
+      } else if (isDoubaoProvider()) {
+        connectFn = (cbs, opts) => connectDoubaoStream(cbs, opts)
+      } else {
+        connectFn = (cbs, opts) => connectVoiceStream(cbs, opts)
+      }
       void connectFn(
         {
           onTranscript: (text: string, isFinal: boolean) => {
@@ -1000,12 +1013,21 @@ export function useVoice({
           return
         }
         if (!conn) {
-          logForDebugging(
-            '[voice] Failed to connect to voice_stream (no OAuth token?)',
-          )
-          onErrorRef.current?.(
-            'Voice mode requires a Claude.ai account. Please run /login to sign in.',
-          )
+          if (isLocalProvider()) {
+            logForDebugging(
+              '[voice] Local whisper STT failed to initialize',
+            )
+            onErrorRef.current?.(
+              'Local voice mode failed. Ensure Python with faster-whisper is installed.',
+            )
+          } else {
+            logForDebugging(
+              '[voice] Failed to connect to voice_stream (no OAuth token?)',
+            )
+            onErrorRef.current?.(
+              'Voice mode requires a Claude.ai account. Please run /login to sign in.',
+            )
+          }
           // Clear the audio buffer on failure
           audioBuffer.length = 0
           cleanup()
@@ -1023,8 +1045,8 @@ export function useVoice({
       })
     }
 
-    // Doubao backend doesn't use keyterms — skip the async fetch
-    if (isDoubaoProvider()) {
+    // Doubao and local backends don't use keyterms — skip the async fetch
+    if (isDoubaoProvider() || isLocalProvider()) {
       attemptConnect([])
     } else {
       void getVoiceKeyterms().then(attemptConnect)
@@ -1042,9 +1064,11 @@ export function useVoice({
   // delay of ~500ms on macOS).
   const handleKeyEvent = useCallback(
     (fallbackMs = REPEAT_FALLBACK_MS): void => {
-      const sttAvailable = isDoubaoProvider()
-        ? isDoubaoAvailableSync()
-        : isVoiceStreamAvailable()
+      const sttAvailable = isLocalProvider()
+        ? true
+        : isDoubaoProvider()
+          ? isDoubaoAvailableSync()
+          : isVoiceStreamAvailable()
       if (!enabled || !sttAvailable) {
         return
       }

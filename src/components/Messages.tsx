@@ -5,6 +5,7 @@ import type { UUID } from 'crypto';
 import type { RefObject } from 'react';
 import * as React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useAutoTTS } from '../hooks/useAutoTTS.js';
 import { every } from 'src/utils/set.js';
 import { getIsRemoteMode } from '../bootstrap/state.js';
 import type { Command } from '../commands.js';
@@ -542,6 +543,8 @@ const MessagesImpl = ({
     return renderRange ? collapsed_0.slice(renderRange[0], renderRange[1]) : sliceStart > 0 ? collapsed_0.slice(sliceStart) : collapsed_0;
   }, [collapsed_0, renderRange, virtualScrollRuntimeGate, disableRenderCap]);
   const streamingToolUseIDs = useMemo(() => new Set(streamingToolUses.map(__0 => __0.contentBlock.id)), [streamingToolUses]);
+
+  useAutoTTS(renderableMessages);
 
   // Divider insertion point: first renderableMessage whose uuid shares the
   // 24-char prefix with firstUnseenUuid (deriveUUID keeps the first 24

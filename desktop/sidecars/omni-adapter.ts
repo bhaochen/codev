@@ -18,13 +18,23 @@
 
 import { serve } from 'bun'
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, unlinkSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { randomBytes } from 'crypto'
 
-// ─── Config ──────────────────────────────────────────────────
+const pkgRoot = dirname(new URL(import.meta.url).pathname)
+
+const resolveModelDir = (): string => {
+  const envDir = process.env.OMNI_MODEL_DIR
+  const candidate = envDir
+    ? envDir
+    : join(pkgRoot, '..', '..', 'assets', 'omni-model')
+  const normalized = candidate.replace(/\/+$/, '')
+  return normalized
+}
 
 const PORT = parseInt(process.env.OMNI_PORT || '9301')
 const LLAMA = (process.env.LLAMA_SERVER || 'http://localhost:8025').replace(/\/+$/, '')
-const MODEL_DIR = (process.env.OMNI_MODEL_DIR || '/home/yuki/Code/Llm/MiniCPM-o-4_5-gguf').replace(/\/+$/, '')
+const MODEL_DIR = resolveModelDir()
 const TMP = process.env.OMNI_TMP || '/tmp/omni-adapter'
 const TTS_OUT = TMP + '/tts-output'
 
