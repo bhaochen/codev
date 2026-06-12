@@ -4,6 +4,9 @@ cli
 .codex
 VersperClaw
 
+# Prebuilt native binaries (tracked in claude-code/ reference)
+vendor/audio-capture/
+
 # Desktop (Tauri) build artifacts
 desktop/src-tauri/target/
 desktop/src-tauri/binaries/

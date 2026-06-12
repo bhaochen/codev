@@ -9,22 +9,13 @@ import {
   getInitialSettings,
   updateSettingsForSource,
 } from '../../utils/settings/settings.js'
-import { isVoiceModeEnabled } from '../../voice/voiceModeEnabled.js'
+import { isVoiceAvailable } from '../../voice/voiceModeEnabled.js'
 
 const LANG_HINT_MAX_SHOWS = 2
 
 export const call: LocalCommandCall = async () => {
-  // Check auth and kill-switch before allowing voice mode
-  if (!isVoiceModeEnabled()) {
-    // Differentiate: OAuth-less users get an auth hint, everyone else
-    // gets nothing (command shouldn't be reachable when the kill-switch is on).
-    if (!isAnthropicAuthEnabled()) {
-      return {
-        type: 'text' as const,
-        value:
-          'Voice mode requires a Claude.ai account. Please run /login to sign in.',
-      }
-    }
+  // Check only the GrowthBook kill-switch — voice might use Doubao (no auth)
+  if (!isVoiceAvailable()) {
     return {
       type: 'text' as const,
       value: 'Voice mode is not available.',
@@ -60,6 +51,28 @@ export const call: LocalCommandCall = async () => {
   )
   const { checkRecordingAvailability } = await import('../../services/voice.js')
 
+  // Determine available STT backend: prefer Anthropic, fall back to Doubao
+  const hasAnthropicAuth = isAnthropicAuthEnabled() && isVoiceStreamAvailable()
+  let useDoubao = false
+  if (!hasAnthropicAuth) {
+    const { isDoubaoAvailable } = await import('../../services/doubaoSTT.js')
+    if (!(await isDoubaoAvailable())) {
+      // Neither backend is available
+      if (!isAnthropicAuthEnabled()) {
+        return {
+          type: 'text' as const,
+          value:
+            'Voice mode requires a Claude.ai account or the Doubao ASR backend. Please run /login to sign in, or install Doubao ASR.',
+        }
+      }
+      return {
+        type: 'text' as const,
+        value: 'Voice mode is not available.',
+      }
+    }
+    useDoubao = true
+  }
+
   // Check recording availability (microphone access)
   const recording = await checkRecordingAvailability()
   if (!recording.available) {
@@ -67,15 +80,6 @@ export const call: LocalCommandCall = async () => {
       type: 'text' as const,
       value:
         recording.reason ?? 'Voice mode is not available in this environment.',
-    }
-  }
-
-  // Check for API key
-  if (!isVoiceStreamAvailable()) {
-    return {
-      type: 'text' as const,
-      value:
-        'Voice mode requires a Claude.ai account. Please run /login to sign in.',
     }
   }
 
@@ -111,8 +115,11 @@ export const call: LocalCommandCall = async () => {
     }
   }
 
-  // All checks passed — enable voice
-  const result = updateSettingsForSource('userSettings', { voiceEnabled: true })
+  // All checks passed — enable voice and store backend choice
+  const result = updateSettingsForSource('userSettings', {
+    voiceEnabled: true,
+    ...(useDoubao ? { voiceProvider: 'doubao' as const } : { voiceProvider: 'anthropic' as const }),
+  })
   if (result.error) {
     return {
       type: 'text' as const,
@@ -143,8 +150,9 @@ export const call: LocalCommandCall = async () => {
       voiceLangHintLastLanguage: stt.code,
     }))
   }
+  const backendNote = useDoubao ? ' [Doubao ASR]' : ''
   return {
     type: 'text' as const,
-    value: `Voice mode enabled. Hold ${key} to record.${langNote}`,
+    value: `Voice mode enabled. Hold ${key} to record.${langNote}${backendNote}`,
   }
 }

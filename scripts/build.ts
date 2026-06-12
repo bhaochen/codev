@@ -1,5 +1,5 @@
-import { chmodSync, existsSync, mkdirSync } from 'fs'
-import { dirname } from 'path'
+import { chmodSync, cpSync, existsSync, mkdirSync } from 'fs'
+import { dirname, join } from 'path'
 
 const pkg = await Bun.file(new URL('../package.json', import.meta.url)).json() as {
   name: string
@@ -201,6 +201,16 @@ if (proc.exitCode !== 0) {
 
 if (existsSync(outfile)) {
   chmodSync(outfile, 0o755)
+}
+
+// Copy vendor audio-capture binaries to dist/ for runtime resolution
+if (!compile) {
+  const distDir = dirname(outfile)
+  const vendorDir = join(distDir, 'vendor')
+  if (!existsSync(vendorDir)) {
+    cpSync('vendor', vendorDir, { recursive: true })
+    console.log(`Copied vendor/ → ${vendorDir}/`)
+  }
 }
 
 console.log(`Built ${outfile}`)

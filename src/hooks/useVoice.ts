@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSetVoiceState } from '../context/voice.js'
 import { useTerminalFocus } from '../ink/hooks/use-terminal-focus.js'
+import { isDoubaoAvailableSync } from '../services/doubaoSTT.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -20,6 +21,7 @@ import {
   isVoiceStreamAvailable,
   type VoiceStreamConnection,
 } from '../services/voiceStreamSTT.js'
+import { connectDoubaoStream } from '../services/doubaoSTT.js'
 import { logForDebugging } from '../utils/debug.js'
 import { toError } from '../utils/errors.js'
 import { getSystemLocaleLanguage } from '../utils/intl.js'
@@ -131,6 +133,10 @@ export function normalizeLanguageForSTT(language: string | undefined): {
   const base = lower.split('-')[0]
   if (base && SUPPORTED_LANGUAGE_CODES.has(base)) return { code: base }
   return { code: DEFAULT_STT_LANGUAGE, fellBackFrom: language }
+}
+
+function isDoubaoProvider(): boolean {
+  return getInitialSettings().voiceProvider === 'doubao'
 }
 
 // Lazy-loaded voice module. We defer importing voice.ts (and its native
@@ -574,7 +580,7 @@ export function useVoice({
   // stop when it loses focus. This enables a "multi-clauding army"
   // workflow where voice input follows window focus.
   useEffect(() => {
-    if (!enabled || !focusMode) {
+    if (!enabled || !focusMode || isDoubaoProvider()) {
       // Focus mode was disabled while a focus-driven recording was active —
       // stop the recording so it doesn't linger until the silence timer fires.
       if (focusTriggeredRef.current && stateRef.current === 'recording') {
@@ -778,7 +784,17 @@ export function useVoice({
 
     const attemptConnect = (keyterms: string[]): void => {
       const myAttemptGen = attemptGenRef.current
-      void connectVoiceStream(
+      // Select STT backend based on settings.voiceProvider
+      const connectFn = isDoubaoProvider()
+        ? (
+            cbs: Parameters<typeof connectDoubaoStream>[0],
+            opts: Parameters<typeof connectDoubaoStream>[1],
+          ) => connectDoubaoStream(cbs, opts)
+        : (
+            cbs: Parameters<typeof connectVoiceStream>[0],
+            opts: Parameters<typeof connectVoiceStream>[1],
+          ) => connectVoiceStream(cbs, opts)
+      void connectFn(
         {
           onTranscript: (text: string, isFinal: boolean) => {
             if (isStale()) return
@@ -1007,7 +1023,12 @@ export function useVoice({
       })
     }
 
-    void getVoiceKeyterms().then(attemptConnect)
+    // Doubao backend doesn't use keyterms — skip the async fetch
+    if (isDoubaoProvider()) {
+      attemptConnect([])
+    } else {
+      void getVoiceKeyterms().then(attemptConnect)
+    }
   }
 
   // ── Hold-to-talk handler ────────────────────────────────────────────
@@ -1021,7 +1042,10 @@ export function useVoice({
   // delay of ~500ms on macOS).
   const handleKeyEvent = useCallback(
     (fallbackMs = REPEAT_FALLBACK_MS): void => {
-      if (!enabled || !isVoiceStreamAvailable()) {
+      const sttAvailable = isDoubaoProvider()
+        ? isDoubaoAvailableSync()
+        : isVoiceStreamAvailable()
+      if (!enabled || !sttAvailable) {
         return
       }
 
