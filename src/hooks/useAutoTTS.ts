@@ -7,7 +7,7 @@ import type { RenderableMessage } from '../types/message.js'
 const CHINESE_VOICES: Record<string, string> = {
   zh: 'zh-CN-XiaoxiaoNeural',
   'zh-CN': 'zh-CN-XiaoxiaoNeural',
-  'zh-TW': 'zh-TW-HsiaoYuNeural',
+  'zh-TW': 'zh-TW-HsiaoChenNeural',
   'zh-HK': 'zh-HK-HiuMaanNeural',
 }
 

@@ -94,8 +94,15 @@ cp VersperClaw ~/.local/bin
   "autoDreamEnabled": true,
 
   # stt-tts support zh-CN
+  # TW girl voice
+  "voiceLanguage": "zh-TW",
+  "voiceTTSVoice": "zh-TW-HsiaoChenNeural"
+
+  # CN girl voice
   "voiceLanguage": "zh-CN",
   "voiceTTSVoice": "zh-CN-XiaoxiaoNeural"
+  
+  
 
 }
 ```
