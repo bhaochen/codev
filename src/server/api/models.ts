@@ -247,6 +247,32 @@ async function fetchCliProviderModels(): Promise<ApiModelInfo[]> {
         // fall through
       }
     }
+
+    // ── NVIDIA NIM ────────────────────────────────────────────
+    if (authProvider === 'nvidia' && config.nvidiaApiKey) {
+      try {
+        const res = await fetch('https://integrate.api.nvidia.com/v1/models', {
+          headers: { Authorization: `Bearer ${config.nvidiaApiKey}` },
+        })
+        if (res.ok) {
+          const data = await res.json() as any
+          const models: ApiModelInfo[] = (data.data || []).map((m: any) => ({
+            id: m.id,
+            name: m.id,
+            description: m.owned_by || '',
+            context: '',
+          }))
+
+          if (models.length > 0) {
+            cliProviderModelCache = models
+            cliProviderModelCacheTime = Date.now()
+            return models
+          }
+        }
+      } catch {
+        // fall through
+      }
+    }
   } catch {
     // fall through
   }
@@ -314,50 +340,46 @@ const CLI_PROVIDER_NAMES: Record<string, string> = {
 }
 
 async function handleModelsList(): Promise<Response> {
-  // First check if CLI has an authProvider configured — this takes precedence
-  // over cc-haha providers since CLI's /login command manages it
   const cliConfig = await readCliAuthProvider()
   const cliAuthProvider = cliConfig?.authProvider
 
-  if (cliAuthProvider && cliAuthProvider !== 'anthropic' && cliAuthProvider !== 'openai') {
-    const cliModels = await fetchCliProviderModels()
-    if (cliModels.length > 0) {
+  const { providers, activeId } = await providerService.listProviders()
+
+  if (activeId) {
+    const activeProvider = providers.find((p) => p.id === activeId)
+    if (activeProvider) {
+      if (activeProvider.presetId === 'tui-nvidia' && cliAuthProvider === 'nvidia') {
+        const cliModels = await fetchCliProviderModels()
+        if (cliModels.length > 0) {
+          return Response.json({
+            models: cliModels,
+            provider: { id: activeProvider.id, name: activeProvider.name },
+          })
+        }
+      }
+
+      if (isOpenAIOfficialProviderId(activeId)) {
+        return Response.json({
+          models: buildOpenAIModelList(),
+          provider: { id: OPENAI_OFFICIAL_PROVIDER_ID, name: OPENAI_OFFICIAL_PROVIDER_NAME },
+        })
+      }
+
       return Response.json({
-        models: cliModels,
-        provider: {
-          id: `cli-${cliAuthProvider}`,
-          name: CLI_PROVIDER_NAMES[cliAuthProvider] || cliAuthProvider,
-        },
+        models: buildProviderModelList(activeProvider.models),
+        provider: { id: activeProvider.id, name: activeProvider.name },
       })
     }
-    // If no models fetched yet but authProvider is set, still return provider info
-    // The model list will be populated once available
+  }
+
+  if (cliAuthProvider && cliAuthProvider !== 'anthropic' && cliAuthProvider !== 'openai') {
+    const cliModels = await fetchCliProviderModels()
     return Response.json({
-      models: [],
+      models: cliModels,
       provider: {
         id: `cli-${cliAuthProvider}`,
         name: CLI_PROVIDER_NAMES[cliAuthProvider] || cliAuthProvider,
       },
-    })
-  }
-
-  const { providers, activeId } = await providerService.listProviders()
-  if (isOpenAIOfficialProviderId(activeId)) {
-    return Response.json({
-      models: buildOpenAIModelList(),
-      provider: {
-        id: OPENAI_OFFICIAL_PROVIDER_ID,
-        name: OPENAI_OFFICIAL_PROVIDER_NAME,
-      },
-    })
-  }
-
-  const activeProvider = activeId ? providers.find((p) => p.id === activeId) : null
-  if (activeProvider) {
-    const modelList = buildProviderModelList(activeProvider.models)
-    return Response.json({
-      models: modelList,
-      provider: { id: activeProvider.id, name: activeProvider.name },
     })
   }
 

@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { OFFICIAL_DEFAULT_MODEL_ID, OFFICIAL_MODELS } from '../../constants/modelCatalog'
+import { OFFICIAL_DEFAULT_MODEL_ID } from '../../constants/modelCatalog'
 import {
   OPENAI_OFFICIAL_DEFAULT_MODEL_ID,
-  OPENAI_OFFICIAL_MODELS,
   OPENAI_OFFICIAL_PROVIDER_ID,
 } from '../../constants/openaiOfficialProvider'
 import { useTranslation } from '../../i18n'
@@ -42,88 +41,59 @@ type DropdownPosition = {
   maxHeight: number
 }
 
+const CLI_PROVIDER_NAMES: Record<string, string> = {
+  nvidia: 'NVIDIA',
+  openrouter: 'OpenRouter',
+  opencode: 'OpenCode Zen',
+  local: 'Local',
+}
+
 const DROPDOWN_WIDTH = 360
 const DROPDOWN_GAP = 8
 const VIEWPORT_MARGIN = 16
 const DROPDOWN_MAX_HEIGHT = 420
 const DROPDOWN_MIN_HEIGHT = 180
 
-function officialChoices(
-  providerId: string | null,
-  models: ModelInfo[],
-  isDefault: boolean,
-  officialName: string,
-): ProviderChoice {
-  return {
-    providerId,
-    providerName: officialName,
-    isDefault,
-    models,
-  }
-}
-
-function buildProviderModels(
-  provider: SavedProvider,
-  labels: Record<'main' | 'haiku' | 'sonnet' | 'opus', string>,
-): ModelInfo[] {
-  const entries: Array<{ id: string; label: string }> = [
-    { id: provider.models.main.trim(), label: labels.main },
-    { id: provider.models.haiku.trim(), label: labels.haiku },
-    { id: provider.models.sonnet.trim(), label: labels.sonnet },
-    { id: provider.models.opus.trim(), label: labels.opus },
-  ]
-
-  const byId = new Map<string, { id: string; labels: string[] }>()
-  for (const entry of entries) {
-    if (!entry.id) continue
-    const existing = byId.get(entry.id)
-    if (existing) {
-      if (!existing.labels.includes(entry.label)) {
-        existing.labels.push(entry.label)
-      }
-      continue
-    }
-    byId.set(entry.id, { id: entry.id, labels: [entry.label] })
-  }
-
-  return [...byId.values()].map((entry) => ({
-    id: entry.id,
-    name: entry.id,
-    description: entry.labels.join(' · '),
-    context: '',
-  }))
-}
-
 function buildProviderChoices(
   providers: SavedProvider[],
-  activeId: string | null,
   availableModels: ModelInfo[],
-  officialName: string,
-  openAIOfficialName: string,
-  labels: Record<'main' | 'haiku' | 'sonnet' | 'opus', string>,
+  activeProviderId: string | null,
 ): ProviderChoice[] {
-  const claudeOfficialModels = activeId === null && availableModels.length > 0
-    ? availableModels
-    : OFFICIAL_MODELS
-  const openAIOfficialModels = activeId === OPENAI_OFFICIAL_PROVIDER_ID && availableModels.length > 0
-    ? availableModels
-    : OPENAI_OFFICIAL_MODELS
+  if (activeProviderId && availableModels.length > 0) {
+    const isCli = activeProviderId.startsWith('cli-')
 
-  return [
-    officialChoices(null, claudeOfficialModels, activeId === null, officialName),
-    officialChoices(
-      OPENAI_OFFICIAL_PROVIDER_ID,
-      openAIOfficialModels,
-      activeId === OPENAI_OFFICIAL_PROVIDER_ID,
-      openAIOfficialName,
-    ),
-    ...providers.map((provider) => ({
-      providerId: provider.id,
-      providerName: provider.name,
-      isDefault: activeId === provider.id,
-      models: buildProviderModels(provider, labels),
-    })),
-  ]
+    if (isCli) {
+      const cliProviderKey = activeProviderId.replace('cli-', '')
+      const cliProviderName = CLI_PROVIDER_NAMES[cliProviderKey] || activeProviderId
+      return [{
+        providerId: activeProviderId,
+        providerName: cliProviderName,
+        isDefault: true,
+        models: availableModels,
+      }]
+    }
+
+    if (activeProviderId === OPENAI_OFFICIAL_PROVIDER_ID) {
+      return [{
+        providerId: OPENAI_OFFICIAL_PROVIDER_ID,
+        providerName: 'OpenAI',
+        isDefault: true,
+        models: availableModels,
+      }]
+    }
+
+    const provider = providers.find(p => p.id === activeProviderId)
+    if (provider) {
+      return [{
+        providerId: provider.id,
+        providerName: provider.name,
+        isDefault: true,
+        models: availableModels,
+      }]
+    }
+  }
+
+  return []
 }
 
 function resolveDefaultRuntimeSelection(
@@ -163,6 +133,7 @@ export function ModelSelector({
     currentModel: storeModel,
     availableModels,
     effortLevel,
+    activeProviderId,
     activeProviderName,
     setModel,
     setEffort,
@@ -272,26 +243,13 @@ export function ModelSelector({
     }
   }, [open, updateDropdownPosition])
 
-  const roleLabels = useMemo(
-    () => ({
-      main: t('settings.providers.mainModel'),
-      haiku: t('settings.providers.haikuModel'),
-      sonnet: t('settings.providers.sonnetModel'),
-      opus: t('settings.providers.opusModel'),
-    }),
-    [t],
-  )
-
   const providerChoices = useMemo(
     () => buildProviderChoices(
       providers,
-      activeId,
       availableModels,
-      t('settings.providers.officialName'),
-      t('settings.providers.openaiOfficialName'),
-      roleLabels,
+      activeProviderId,
     ),
-    [activeId, availableModels, providers, roleLabels, t],
+    [activeProviderId, availableModels, providers],
   )
 
   const selectedModel = isControlled

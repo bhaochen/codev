@@ -53,6 +53,7 @@ type SettingsStore = {
   effortLevel: EffortLevel
   thinkingEnabled: boolean
   availableModels: ModelInfo[]
+  activeProviderId: string | null
   activeProviderName: string | null
   locale: Locale
   theme: ThemeMode
@@ -134,6 +135,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   effortLevel: 'medium',
   thinkingEnabled: true,
   availableModels: [],
+  activeProviderId: null,
   activeProviderName: null,
   locale: getStoredLocale(),
   theme: useUIStore.getState().theme,
@@ -181,6 +183,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       set({
         permissionMode: mode,
         availableModels: modelsRes.models,
+        activeProviderId: modelsRes.provider?.id ?? null,
         activeProviderName: modelsRes.provider?.name ?? null,
         currentModel: model,
         effortLevel: level,
