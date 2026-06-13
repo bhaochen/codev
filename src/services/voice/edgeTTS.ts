@@ -1,14 +1,29 @@
 import { spawn } from 'child_process'
 import { existsSync } from 'fs'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { join, dirname } from 'path'
 
-const SCRIPTS_DIR = join(import.meta.dirname, '..', '..', '..', 'scripts')
+function findProjectRoot(): string {
+  let dir = process.cwd()
+  for (let i = 0; i < 20; i++) {
+    if (existsSync(join(dir, 'package.json')) && existsSync(join(dir, 'scripts'))) {
+      return dir
+    }
+    const parent = dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  return process.cwd()
+}
+
+const PROJECT_ROOT = findProjectRoot()
+const SCRIPTS_DIR = join(PROJECT_ROOT, 'scripts')
+const VENV_PYTHON = join(PROJECT_ROOT, '.venv', 'bin', 'python')
 
 function resolvePythonPath(customPath?: string): string {
   if (customPath) return customPath
-  const venvPython = join(import.meta.dirname, '..', '..', '..', '.venv', 'bin', 'python')
-  return existsSync(venvPython) ? venvPython : 'python3'
+  if (existsSync(VENV_PYTHON)) return VENV_PYTHON
+  return 'python3'
 }
 
 export type TTSResult = {

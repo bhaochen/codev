@@ -1,8 +1,8 @@
-import json, os, sys, tempfile, wave, struct
+import json, os, sys, tempfile, wave
 
 WAV_HEADER_SIZE = 44
 
-DEFAULT_MODEL_PATH = os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-base")
+WHISPER_CACHE = os.path.expanduser("~/.cache/whisper")
 
 def write_wav(path: str, raw_pcm: bytes, sample_rate: int = 16000):
     with wave.open(path, 'wb') as w:
@@ -11,21 +11,25 @@ def write_wav(path: str, raw_pcm: bytes, sample_rate: int = 16000):
         w.setframerate(sample_rate)
         w.writeframes(raw_pcm)
 
-def resolve_model(model_size: str) -> str:
-    if os.path.isdir(model_size):
-        return model_size
-    local_path = os.path.expanduser(f"~/.cache/huggingface/hub/models--Systran--faster-whisper-{model_size}")
-    if os.path.isdir(local_path):
-        return local_path
-    return model_size
+def transcribe(wav_path: str, model_size: str = "large-v3-turbo", language: str | None = None) -> dict:
+    try:
+        import whisper
+        model = whisper.load_model(model_size, download_root=WHISPER_CACHE)
+        opts = {}
+        if language:
+            opts["language"] = language
+        result = model.transcribe(wav_path, **opts)
+        return {"success": True, "text": result["text"].strip(), "language": result.get("language", "")}
+    except ImportError:
+        pass
 
-def transcribe(wav_path: str, model_size: str = "base", language: str | None = None) -> dict:
-    model_path = resolve_model(model_size)
-    import sys as _sys
-    _sys.stderr.write(f"[DEBUG transcribe] model_path={model_path}\n")
-    _sys.stderr.flush()
     try:
         from faster_whisper import WhisperModel
+        model_path = model_size
+        if not os.path.isdir(model_path):
+            local_path = os.path.expanduser(f"~/.cache/huggingface/hub/models--Systran--faster-whisper-{model_size}")
+            if os.path.isdir(local_path):
+                model_path = local_path
         model = WhisperModel(model_path, device="cpu", compute_type="int8")
         opts = {"beam_size": 1}
         if language:
@@ -36,18 +40,7 @@ def transcribe(wav_path: str, model_size: str = "base", language: str | None = N
     except ImportError:
         pass
 
-    try:
-        import whisper
-        model = whisper.load_model(model_size)
-        opts = {}
-        if language:
-            opts["language"] = language
-        result = model.transcribe(wav_path, **opts)
-        return {"success": True, "text": result["text"].strip(), "language": result.get("language", "")}
-    except ImportError:
-        pass
-
-    return {"success": False, "error": "Neither faster-whisper nor openai-whisper is installed. Run: pip install faster-whisper"}
+    return {"success": False, "error": "Neither openai-whisper nor faster-whisper is installed. Run: pip install openai-whisper"}
 
 def main():
     if len(sys.argv) < 2:
@@ -55,7 +48,7 @@ def main():
         sys.exit(1)
 
     wav_path = sys.argv[1]
-    model_size = "base"
+    model_size = "large-v3-turbo"
     language = None
 
     i = 2

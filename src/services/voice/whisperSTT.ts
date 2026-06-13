@@ -1,21 +1,36 @@
 import { spawn } from 'child_process'
-import { appendFileSync, existsSync, mkdtempSync, writeFileSync, unlinkSync, rmdirSync } from 'fs'
+import { existsSync, mkdtempSync, writeFileSync, unlinkSync, rmdirSync } from 'fs'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { join, dirname } from 'path'
 import type { VoiceStreamCallbacks, VoiceStreamConnection, FinalizeSource } from '../voiceStreamSTT.js'
 
-const SCRIPTS_DIR = join(import.meta.dirname, '..', '..', '..', 'scripts')
-const DEBUG_LOG = '/tmp/voice_debug.log'
-const dbg = (...args: unknown[]) => {
-  const msg = args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ')
-  const line = `[${new Date().toISOString()}] ${msg}\n`
-  appendFileSync(DEBUG_LOG, line)
+function findProjectRoot(): string {
+  let dir = process.cwd()
+  for (let i = 0; i < 20; i++) {
+    if (existsSync(join(dir, 'package.json')) && existsSync(join(dir, 'scripts'))) {
+      return dir
+    }
+    const parent = dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  return process.cwd()
+}
+
+const PROJECT_ROOT = findProjectRoot()
+const SCRIPTS_DIR = join(PROJECT_ROOT, 'scripts')
+const VENV_PYTHON = join(PROJECT_ROOT, '.venv', 'bin', 'python')
+
+const LOG = '/tmp/vc_whisper.log'
+function log(...args: unknown[]) {
+  const line = `[${new Date().toISOString()}] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}\n`
+  try { writeFileSync(LOG, line, { flag: 'a' }) } catch {}
 }
 
 function resolvePythonPath(customPath?: string): string {
   if (customPath) return customPath
-  const venvPython = join(import.meta.dirname, '..', '..', '..', '.venv', 'bin', 'python')
-  return existsSync(venvPython) ? venvPython : 'python3'
+  if (existsSync(VENV_PYTHON)) return VENV_PYTHON
+  return 'python3'
 }
 
 type WhisperOptions = {
@@ -24,16 +39,6 @@ type WhisperOptions = {
   pythonPath?: string
 }
 
-/**
- * A local Whisper STT provider that implements the VoiceStreamConnection
- * interface. Buffers incoming audio chunks, then on finalize() writes a
- * temporary WAV file and spawns a Python faster-whisper subprocess to
- * transcribe it.
- *
- * Requirements: pip install faster-whisper   (or openai-whisper)
- *
- * Whisper model files are cached at ~/.cache/whisper/ automatically.
- */
 export function connectLocalWhisperStream(
   callbacks: VoiceStreamCallbacks,
   options?: WhisperOptions,
@@ -44,34 +49,30 @@ export function connectLocalWhisperStream(
     let tmpDir: string | null = null
 
     const python = resolvePythonPath(options?.pythonPath)
-    const model = options?.model ?? 'base'
+    const model = options?.model ?? 'large-v3-turbo'
     const language = options?.language
-
-    dbg('whisperSTT', 'python', python, 'model', model, 'language', language)
+    log('projectRoot', PROJECT_ROOT, 'python', python, 'model', model, 'language', language)
 
     const connection: VoiceStreamConnection = {
       send(chunk: Buffer) {
         if (finalized) return
         chunks.push(Buffer.from(chunk))
-        if (chunks.length === 1) {
-          dbg('whisperSTT', 'first chunk', chunk.length, 'bytes')
-        }
+        if (chunks.length === 1) log('first chunk', chunk.length, 'bytes')
       },
 
       async finalize(): Promise<FinalizeSource> {
         if (finalized) return 'ws_already_closed'
         finalized = true
-
-        dbg('whisperSTT', 'finalize called, chunks', chunks.length)
+        log('finalize called, chunks', chunks.length)
 
         if (chunks.length === 0) {
-          dbg('whisperSTT', 'no audio chunks, returning no_data_timeout')
+          log('no chunks, returning no_data_timeout')
           callbacks.onClose()
           return 'no_data_timeout'
         }
 
         const audioBuf = Buffer.concat(chunks)
-        dbg('whisperSTT', 'total audio size', audioBuf.length, 'bytes')
+        log('total audio', audioBuf.length, 'bytes')
 
         try {
           tmpDir = mkdtempSync(join(tmpdir(), 'vc-whisper-'))
@@ -83,6 +84,7 @@ export function connectLocalWhisperStream(
           if (language) {
             args.push('--language', language)
           }
+          log('spawning', python, args.join(' '))
 
           const proc = spawn(python, args, { stdio: ['ignore', 'pipe', 'pipe'] })
 
@@ -101,7 +103,8 @@ export function connectLocalWhisperStream(
             proc.on('close', resolveExit)
           })
 
-          dbg('whisperSTT', 'subprocess exitCode', exitCode, 'stdout', stdout.slice(0, 200))
+          log('exitCode', exitCode, 'stdout', stdout.slice(0, 500), 'stderr', stderr.slice(0, 500))
+
           if (exitCode !== 0) {
             callbacks.onError(`Whisper transcription failed: ${stderr || 'unknown error'}`, {
               fatal: true,
@@ -111,8 +114,11 @@ export function connectLocalWhisperStream(
           }
 
           const result = JSON.parse(stdout)
-          if (result.success) {
+          log('result', result)
+          if (result.success && result.text) {
             callbacks.onTranscript(result.text, true)
+          } else if (result.success && !result.text) {
+            callbacks.onTranscript('', true)
           } else {
             callbacks.onError(
               result.error ?? 'Transcription failed',
@@ -128,14 +134,10 @@ export function connectLocalWhisperStream(
           if (tmpDir) {
             try {
               unlinkSync(join(tmpDir, 'input.wav'))
-            } catch {
-              // ignore
-            }
+            } catch {}
             try {
               rmdirSync(tmpDir)
-            } catch {
-              // ignore
-            }
+            } catch {}
           }
           callbacks.onClose()
         }
@@ -158,16 +160,15 @@ export function connectLocalWhisperStream(
   })
 }
 
-/** Check if a local whisper-capable Python installation exists. */
 export async function checkLocalWhisperAvailable(pythonPath?: string): Promise<boolean> {
   const python = resolvePythonPath(pythonPath)
   return new Promise(resolve => {
     const proc = spawn(python, [
       '-c',
       'import json;' +
-      'try: from faster_whisper import WhisperModel; print(json.dumps({"ok": True, "backend": "faster-whisper"}))' +
+      'try: import whisper; print(json.dumps({"ok": True, "backend": "whisper"}))' +
       'except ImportError:' +
-      '  try: import whisper; print(json.dumps({"ok": True, "backend": "whisper"}))' +
+      '  try: from faster_whisper import WhisperModel; print(json.dumps({"ok": True, "backend": "faster-whisper"}))' +
       '  except ImportError: print(json.dumps({"ok": False}))',
     ], { stdio: ['ignore', 'pipe', 'pipe'] })
 
@@ -184,7 +185,6 @@ export async function checkLocalWhisperAvailable(pythonPath?: string): Promise<b
   })
 }
 
-/** Write a valid PCM WAV file header and data. */
 function writeWavHeader(path: string, pcmData: Buffer, sampleRate: number): void {
   const numChannels = 1
   const bitsPerSample = 16
@@ -194,22 +194,19 @@ function writeWavHeader(path: string, pcmData: Buffer, sampleRate: number): void
 
   const header = Buffer.alloc(44)
 
-  // RIFF header
   header.write('RIFF', 0)
   header.writeUInt32LE(36 + dataSize, 4)
   header.write('WAVE', 8)
 
-  // fmt chunk
   header.write('fmt ', 12)
-  header.writeUInt32LE(16, 16) // chunk size
-  header.writeUInt16LE(1, 20)  // PCM format
+  header.writeUInt32LE(16, 16)
+  header.writeUInt16LE(1, 20)
   header.writeUInt16LE(numChannels, 22)
   header.writeUInt32LE(sampleRate, 24)
   header.writeUInt32LE(byteRate, 28)
   header.writeUInt16LE(blockAlign, 32)
   header.writeUInt16LE(bitsPerSample, 34)
 
-  // data chunk
   header.write('data', 36)
   header.writeUInt32LE(dataSize, 40)
 

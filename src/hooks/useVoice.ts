@@ -89,6 +89,9 @@ const LANGUAGE_NAME_TO_CODE: Record<string, string> = {
   svenska: 'sv',
   norwegian: 'no',
   norsk: 'no',
+  chinese: 'zh',
+  中文: 'zh',
+  汉语: 'zh',
 }
 
 // Subset of the GrowthBook speech_to_text_voice_stream_config allowlist.
@@ -114,6 +117,7 @@ const SUPPORTED_LANGUAGE_CODES = new Set([
   'da',
   'sv',
   'no',
+  'zh',
 ])
 
 // Normalize a language preference string (from settings.language) to a
