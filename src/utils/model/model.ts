@@ -552,6 +552,7 @@ export function getPublicModelName(model: ModelName): string {
 export function parseUserSpecifiedModel(
   modelInput: ModelName | ModelAlias,
 ): ModelName {
+  if (!modelInput) return getDefaultMainLoopModel()
   const modelInputTrimmed = modelInput.trim()
   const normalizedModel = modelInputTrimmed.toLowerCase()
 
@@ -661,7 +662,7 @@ export function isLegacyModelRemapEnabled(): boolean {
 }
 
 export function modelDisplayString(model: ModelSetting): string {
-  if (model === null) {
+  if (model === null || model === undefined) {
     if (process.env.USER_TYPE === 'ant') {
       return `Default for Ants (${renderDefaultModelSetting(getDefaultMainLoopModelSetting())})`
     } else if (isClaudeAISubscriber()) {
