@@ -9,6 +9,8 @@
 import type { ServerWebSocket } from 'bun'
 import type { ClientMessage, ServerMessage } from './events.js'
 import * as os from 'node:os'
+import * as fs from 'node:fs'
+import * as path from 'node:path'
 import {
   ConversationStartupError,
   conversationService,
@@ -1743,7 +1745,36 @@ async function getRuntimeSettings(sessionId?: string): Promise<RuntimeSettings> 
 }
 
 async function getDefaultRuntimeSettings(): Promise<RuntimeSettings> {
-  // Check if a custom provider is active
+  // First check if CLI has an authProvider configured in ~/.claude.json
+  // (opencode, nvidia, openrouter, local, etc.) - these take precedence
+  // over cc-haha providers since they are managed by the CLI's /login command
+  const cliConfig = await readCliGlobalConfig()
+  if (cliConfig?.authProvider && cliConfig.authProvider !== 'anthropic' && cliConfig.authProvider !== 'openai') {
+    const userSettings = await settingsService.getUserSettings()
+    const baseModel =
+      typeof userSettings.model === 'string' && userSettings.model.trim()
+        ? userSettings.model
+        : undefined
+    const modelContext =
+      typeof userSettings.modelContext === 'string' && userSettings.modelContext.trim()
+        ? userSettings.modelContext
+        : undefined
+    const effort =
+      typeof userSettings.effort === 'string' && userSettings.effort.trim()
+        ? userSettings.effort
+        : undefined
+    const thinking = resolveDesktopThinkingMode(userSettings)
+
+    return {
+      permissionMode: await settingsService.getPermissionMode().catch(() => undefined),
+      model: baseModel ? (modelContext ? `${baseModel}:${modelContext}` : baseModel) : undefined,
+      effort,
+      thinking,
+      providerId: undefined, // CLI manages auth via ~/.claude.json - pass undefined so shouldMarkManagedOAuth checks cli config
+    }
+  }
+
+  // Check if a custom cc-haha provider is active
   const { providers, activeId } = await providerService.listProviders()
   let resolvedActiveId = activeId
   if (activeId && !isKnownRuntimeProviderId(activeId, providers)) {
@@ -1801,6 +1832,30 @@ function resolveDesktopThinkingMode(
   settings: Record<string, unknown>,
 ): 'disabled' | undefined {
   return settings.alwaysThinkingEnabled === false ? 'disabled' : undefined
+}
+
+/**
+ * Read CLI's ~/.claude.json directly to check authProvider.
+ * Bypasses getGlobalConfig cache since this runs in the server process
+ * and needs to reflect changes made by CLI's /login command.
+ */
+function readCliGlobalConfig(): {
+  authProvider?: 'anthropic' | 'openai' | 'openrouter' | 'local' | 'opencode' | 'nvidia'
+  openCodeApiKey?: string
+  openCodeModelName?: string
+  nvidiaApiKey?: string
+  openRouterApiKey?: string
+  localBaseUrl?: string
+  localModelName?: string
+} | null {
+  const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude')
+  const configPath = path.join(configDir, '.claude.json')
+  try {
+    const raw = fs.readFileSync(configPath, 'utf-8')
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
 }
 
 async function buildSessionStartupDiagnosticMessage(

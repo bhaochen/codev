@@ -12,7 +12,7 @@
     </style>
     <script>
       (function () {
-        var bootDeadlineMs = 8000
+        var bootDeadlineMs = 30000
 
         function summarize(value) {
           if (!value) return 'Unknown startup error'
@@ -27,6 +27,8 @@
 
         function renderStartupError(reason) {
           if (window.__CC_HAHA_BOOTSTRAPPED__) return
+          if (window.__CC_HAHA_STARTUP_ERROR_SHOWN__) return
+          window.__CC_HAHA_STARTUP_ERROR_SHOWN__ = true
           var root = document.getElementById('root')
           if (!root) return
 
@@ -94,8 +96,13 @@
         })
 
         window.setTimeout(function () {
+          if (window.__CC_HAHA_STARTUP_ERROR_SHOWN__) return
           renderStartupError('Desktop app did not finish bootstrapping within ' + bootDeadlineMs + 'ms. This usually means the WebView could not execute the app bundle or startup code stopped before React mounted.')
         }, bootDeadlineMs)
+
+        window.addEventListener('load', function () {
+          window.__CC_HAHA_PAGE_LOADED__ = true
+        })
       })()
     </script>
   </head>

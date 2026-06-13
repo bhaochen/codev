@@ -35,6 +35,7 @@ import {
   normalizeModelMapping,
   normalizeProvidersIndex,
 } from './providerRuntimeEnv.js'
+import { PROVIDER_PRESETS } from '../config/providerPresets.js'
 import { getProxyFetchOptions } from '../../utils/proxy.js'
 import {
   getManualNetworkProxyUrl,
@@ -82,6 +83,84 @@ export class ProviderService {
     return path.join(this.getCcHahaDir(), 'providers.json')
   }
 
+  /**
+   * Path to the TUI's global config file (~/.claude.json).
+   * Always at the home directory level, not under CLAUDE_CONFIG_DIR.
+   */
+  private getTuiConfigPath(): string {
+    return path.join(os.homedir(), '.claude.json')
+  }
+
+  /**
+   * Auto-import the provider configured in the TUI's global config (~/.claude.json).
+   * When the user configured a provider via /login in the TUI, this ensures the
+   * desktop app sees and uses the same provider automatically.
+   *
+   * Only imports when no desktop provider is currently active, to avoid overriding
+   * the user's desktop-specific choice.
+   */
+  private async autoImportTuiProvider(): Promise<void> {
+    const tuiConfigPath = this.getTuiConfigPath()
+    let raw: string
+    try {
+      raw = await fs.readFile(tuiConfigPath, 'utf-8')
+    } catch {
+      return // No TUI config file
+    }
+
+    let tuiConfig: {
+      authProvider?: string
+      nvidiaApiKey?: string
+    }
+    try {
+      tuiConfig = JSON.parse(raw)
+    } catch {
+      return // Invalid JSON
+    }
+
+    const providerId = tuiConfig.authProvider
+    if (!providerId) return // No TUI provider configured
+
+    // Read current index to check if already imported
+    const index = await this.readIndex()
+    if (index.activeId) return // already has a desktop provider active
+
+    // Check if a TUI-imported provider already exists (e.g. from a previous import)
+    const tuiProviderTag = `tui-${providerId}`
+    const existing = index.providers.find(p => p.presetId === tuiProviderTag)
+    if (existing) {
+      index.activeId = existing.id
+      await this.writeIndex(index)
+      return
+    }
+
+    // Find the matching preset
+    const preset = PROVIDER_PRESETS.find(p => p.id === providerId)
+    if (!preset) return // No matching desktop preset for this TUI provider
+
+    // Extract API key based on provider type
+    let apiKey = ''
+    if (providerId === 'nvidia') {
+      apiKey = tuiConfig.nvidiaApiKey || ''
+      if (!apiKey) return
+    }
+
+    const provider: SavedProvider = {
+      id: crypto.randomUUID(),
+      presetId: tuiProviderTag,
+      name: `TUI: ${preset.name}`,
+      apiKey,
+      baseUrl: preset.baseUrl,
+      apiFormat: preset.apiFormat,
+      runtimeKind: 'anthropic_compatible',
+      models: preset.defaultModels,
+    }
+
+    index.providers.push(provider)
+    index.activeId = provider.id
+    await this.writeIndex(index)
+  }
+
   private async readIndex(): Promise<ProvidersIndex> {
     await ensurePersistentStorageUpgraded()
     return readRecoverableJsonFile({
@@ -125,6 +204,8 @@ export class ProviderService {
   // --- CRUD ---
 
   async listProviders(): Promise<{ providers: SavedProvider[]; activeId: string | null }> {
+    // Auto-import TUI provider so desktop follows the TUI's provider choice
+    await this.autoImportTuiProvider()
     const index = await this.readIndex()
     return { providers: index.providers, activeId: index.activeId }
   }

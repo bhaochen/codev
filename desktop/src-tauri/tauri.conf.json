@@ -6,7 +6,7 @@
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
-    "beforeDevCommand": "bun run build:sidecars && bun run dev",
+    "beforeDevCommand": "lsof -ti:1420 | xargs kill -9 2>/dev/null; bun run build:sidecars && bun run dev",
     "beforeBuildCommand": "bun run build && bun run build:sidecars"
   },
   "app": {

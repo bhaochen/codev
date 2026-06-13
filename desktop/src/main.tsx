@@ -7,6 +7,8 @@ import { runDesktopPersistenceMigrations } from './lib/persistenceMigrations'
 declare global {
   interface Window {
     __CC_HAHA_BOOTSTRAPPED__?: boolean
+    __CC_HAHA_PAGE_LOADED__?: boolean
+    __CC_HAHA_STARTUP_ERROR_SHOWN__?: boolean
     __CC_HAHA_SHOW_STARTUP_ERROR__?: (reason: unknown) => void
   }
 }
@@ -32,7 +34,10 @@ export async function bootstrapDesktopApp(
   loadModules: () => Promise<DesktopBootstrapModules> = loadDesktopBootstrapModules,
 ) {
   try {
+    console.log('[desktop] Loading desktop bootstrap modules...')
     const [{ App }, { ErrorBoundary }, { installClientDiagnosticsCapture }, { initializeTheme }] = await loadModules()
+    console.log('[desktop] Bootstrap modules loaded')
+
     initializeTheme()
     installClientDiagnosticsCapture()
 
@@ -40,6 +45,7 @@ export async function bootstrapDesktopApp(
       throw new Error('Desktop root element not found')
     }
 
+    console.log('[desktop] Rendering React...')
     ReactDOM.createRoot(root).render(
       <React.StrictMode>
         <ErrorBoundary>
@@ -48,6 +54,7 @@ export async function bootstrapDesktopApp(
       </React.StrictMode>,
     )
     window.__CC_HAHA_BOOTSTRAPPED__ = true
+    console.log('[desktop] React rendered, app bootstrapped')
   } catch (error) {
     console.error('[desktop] Failed to bootstrap app', error)
     if (root) {
@@ -60,7 +67,14 @@ export async function bootstrapDesktopApp(
   }
 }
 
-runDesktopPersistenceMigrations()
-void initializeAppZoom()
+console.log('[desktop] Starting migrations...')
+const migrationReport = runDesktopPersistenceMigrations()
+console.log('[desktop] Migrations complete', migrationReport)
 
+console.log('[desktop] Initializing app zoom...')
+const zoomPromise = initializeAppZoom()
+zoomPromise.then(level => console.log('[desktop] App zoom initialized:', level))
+           .catch(err => console.error('[desktop] App zoom failed:', err))
+
+console.log('[desktop] Bootstrapping desktop app...')
 void bootstrapDesktopApp()

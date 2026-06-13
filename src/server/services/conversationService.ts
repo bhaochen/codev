@@ -866,6 +866,61 @@ export class ConversationService {
     return args
   }
 
+  private readCliGlobalConfig(): {
+    authProvider?: 'anthropic' | 'openai' | 'openrouter' | 'local' | 'opencode' | 'nvidia'
+    openCodeApiKey?: string
+    openCodeModelName?: string
+    nvidiaApiKey?: string
+    openRouterApiKey?: string
+    localBaseUrl?: string
+    localModelName?: string
+  } | null {
+    const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude')
+    const configPath = path.join(configDir, '.claude.json')
+    try {
+      const raw = fs.readFileSync(configPath, 'utf-8')
+      return JSON.parse(raw) as ReturnType<typeof this.readCliGlobalConfig>
+    } catch {
+      return null
+    }
+  }
+
+  private buildCliProviderEnv(
+    authProvider: 'opencode' | 'nvidia' | 'openrouter' | 'local',
+    config: NonNullable<ReturnType<typeof this.readCliGlobalConfig>>,
+  ): Record<string, string> {
+    const env: Record<string, string> = {}
+
+    if (authProvider === 'opencode') {
+      if (config.openCodeApiKey) {
+        env.ANTHROPIC_API_KEY = config.openCodeApiKey
+      }
+      if (config.openCodeModelName) {
+        env.ANTHROPIC_MODEL = config.openCodeModelName
+      }
+      // opencode uses custom fetch override, no base URL override needed
+    } else if (authProvider === 'nvidia') {
+      if (config.nvidiaApiKey) {
+        env.ANTHROPIC_API_KEY = config.nvidiaApiKey
+      }
+      env.ANTHROPIC_BASE_URL = 'https://integrate.api.nvidia.com/v1'
+    } else if (authProvider === 'openrouter') {
+      if (config.openRouterApiKey) {
+        env.ANTHROPIC_API_KEY = config.openRouterApiKey
+      }
+      env.ANTHROPIC_BASE_URL = 'https://openrouter.ai/api/v1'
+    } else if (authProvider === 'local') {
+      if (config.localBaseUrl) {
+        env.ANTHROPIC_BASE_URL = config.localBaseUrl
+      }
+      if (config.localModelName) {
+        env.ANTHROPIC_MODEL = config.localModelName
+      }
+    }
+
+    return env
+  }
+
   private async buildChildEnv(
     workDir: string,
     sdkUrl?: string,
@@ -923,8 +978,25 @@ export class ConversationService {
     if (explicitProviderEnv && options?.model?.trim()) {
       explicitProviderEnv.ANTHROPIC_MODEL = options.model.trim()
     }
+
+    // Check for CLI-managed authProvider (opencode, nvidia, openrouter, local)
+    // These are configured via CLI's /login command and stored in ~/.claude.json
+    const cliConfig = this.readCliGlobalConfig()
+    const cliAuthProvider = cliConfig?.authProvider
+    const isCliManagedProvider =
+      cliAuthProvider !== undefined &&
+      cliAuthProvider !== 'anthropic' &&
+      cliAuthProvider !== 'openai'
+    const cliProviderEnv = isCliManagedProvider
+      ? this.buildCliProviderEnv(
+          cliAuthProvider as 'opencode' | 'nvidia' | 'openrouter' | 'local',
+          cliConfig!,
+        )
+      : null
+
     const attributionHeaderEnv = attributionHeaderEnvForModel(
       options?.model?.trim() ||
+        cliProviderEnv?.ANTHROPIC_MODEL ||
         explicitProviderEnv?.ANTHROPIC_MODEL ||
         cleanEnv.ANTHROPIC_MODEL,
     )
@@ -969,10 +1041,16 @@ export class ConversationService {
       // 否则 CLI 会忽略 provider 的 AUTH_TOKEN、错误地走 OAuth 打到第三方
       // endpoint。详见 src/utils/auth.ts isManagedOAuthContext()。
       ...(explicitProviderEnv ?? {}),
+      // CLI-managed provider env (opencode/nvidia/openrouter/local from ~/.claude.json)
+      // takes precedence over cc-haha provider env
+      ...(cliProviderEnv ?? {}),
       ...networkEnv,
-      ...(this.shouldMarkManagedOAuth(options?.providerId)
-        ? await this.buildOfficialOAuthEnv()
-        : {}),
+      // Skip Desktop OAuth when using CLI-managed providers (they handle their own auth)
+      ...(isCliManagedProvider
+        ? {}
+        : this.shouldMarkManagedOAuth(options?.providerId)
+          ? await this.buildOfficialOAuthEnv()
+          : {}),
       ...attributionHeaderEnv,
     }
   }
@@ -1021,6 +1099,13 @@ export class ConversationService {
 
   private shouldStripInheritedProviderEnv(providerId?: string | null): boolean {
     if (providerId !== undefined) {
+      return true
+    }
+
+    // Check ~/.claude.json first - if CLI has a non-anthropic/non-openai authProvider,
+    // strip inherited env so CLI reads from its own config
+    const cliConfig = this.readCliGlobalConfig()
+    if (cliConfig?.authProvider && cliConfig.authProvider !== 'anthropic' && cliConfig.authProvider !== 'openai') {
       return true
     }
 
@@ -1075,6 +1160,13 @@ export class ConversationService {
       return true
     }
     if (typeof providerId === 'string') {
+      return false
+    }
+
+    // Check ~/.claude.json first - if CLI has a non-anthropic/non-openai authProvider,
+    // it manages its own auth, skip Desktop OAuth injection
+    const cliConfig = this.readCliGlobalConfig()
+    if (cliConfig?.authProvider && cliConfig.authProvider !== 'anthropic' && cliConfig.authProvider !== 'openai') {
       return false
     }
 

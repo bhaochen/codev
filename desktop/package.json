@@ -5,12 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:kill": "fuser -k 1420/tcp 2>/dev/null; bun run dev",
     "build": "tsc -b && vite build",
     "build:sidecars": "bun run ./scripts/build-sidecars.ts",
     "build:macos-arm64": "bash ./scripts/build-macos-arm64.sh",
     "build:windows-x64": "powershell -ExecutionPolicy Bypass -File ./scripts/build-windows-x64.ps1",
     "preview": "vite preview",
-    "tauri": "GDK_BACKEND=x11 WEBKIT_DISABLE_COMPOSITING_MODE=1 tauri",
+    "tauri": "lsof -ti:1420 | xargs kill -9 2>/dev/null; GDK_BACKEND=x11 WEBKIT_DISABLE_COMPOSITING_MODE=1 tauri",
     "test": "vitest",
     "test:ui": "vitest --ui",
     "lint": "tsc --noEmit"

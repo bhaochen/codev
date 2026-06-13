@@ -167,6 +167,11 @@ let cliProviderModelCache: ApiModelInfo[] | null = null
 let cliProviderModelCacheTime = 0
 const CLI_PROVIDER_CACHE_TTL = 5 * 60 * 1000 // 5 minutes
 
+export function invalidateCliProviderModelCache(): void {
+  cliProviderModelCache = null
+  cliProviderModelCacheTime = 0
+}
+
 async function fetchCliProviderModels(): Promise<ApiModelInfo[]> {
   if (cliProviderModelCache && Date.now() - cliProviderModelCacheTime < CLI_PROVIDER_CACHE_TTL) {
     return cliProviderModelCache
@@ -285,7 +290,57 @@ export async function handleModelsApi(
 
 // ─── Handlers ─────────────────────────────────────────────────────────────────
 
+async function readCliAuthProvider(): Promise<{
+  authProvider?: 'anthropic' | 'openai' | 'openrouter' | 'local' | 'opencode' | 'nvidia'
+} | null> {
+  try {
+    const { homedir } = await import('node:os')
+    const { readFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const raw = readFileSync(join(homedir(), '.claude.json'), 'utf8')
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}
+
+const CLI_PROVIDER_NAMES: Record<string, string> = {
+  opencode: 'OpenCode Zen',
+  nvidia: 'NVIDIA',
+  openrouter: 'OpenRouter',
+  local: 'Local',
+  anthropic: 'Anthropic',
+  openai: 'OpenAI',
+}
+
 async function handleModelsList(): Promise<Response> {
+  // First check if CLI has an authProvider configured — this takes precedence
+  // over cc-haha providers since CLI's /login command manages it
+  const cliConfig = await readCliAuthProvider()
+  const cliAuthProvider = cliConfig?.authProvider
+
+  if (cliAuthProvider && cliAuthProvider !== 'anthropic' && cliAuthProvider !== 'openai') {
+    const cliModels = await fetchCliProviderModels()
+    if (cliModels.length > 0) {
+      return Response.json({
+        models: cliModels,
+        provider: {
+          id: `cli-${cliAuthProvider}`,
+          name: CLI_PROVIDER_NAMES[cliAuthProvider] || cliAuthProvider,
+        },
+      })
+    }
+    // If no models fetched yet but authProvider is set, still return provider info
+    // The model list will be populated once available
+    return Response.json({
+      models: [],
+      provider: {
+        id: `cli-${cliAuthProvider}`,
+        name: CLI_PROVIDER_NAMES[cliAuthProvider] || cliAuthProvider,
+      },
+    })
+  }
+
   const { providers, activeId } = await providerService.listProviders()
   if (isOpenAIOfficialProviderId(activeId)) {
     return Response.json({
@@ -303,15 +358,6 @@ async function handleModelsList(): Promise<Response> {
     return Response.json({
       models: modelList,
       provider: { id: activeProvider.id, name: activeProvider.name },
-    })
-  }
-
-  // No cc-haha provider active — check if CLI has an auth provider configured
-  const cliModels = await fetchCliProviderModels()
-  if (cliModels.length > 0) {
-    return Response.json({
-      models: cliModels,
-      provider: { id: 'cli', name: 'CLI Provider' },
     })
   }
 
