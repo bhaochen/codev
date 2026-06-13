@@ -140,7 +140,7 @@ export function playAudioFile(path: string): Promise<void> {
       args = [path]
     } else if (platform === 'linux') {
       cmd = 'ffplay'
-      args = ['-nodisp', '-autoexit', path]
+      args = ['-nodisp', '-autoexit', '-infbuf', path]
     } else if (platform === 'win32') {
       cmd = 'start'
       args = [path]
@@ -149,11 +149,33 @@ export function playAudioFile(path: string): Promise<void> {
       return
     }
 
-    const proc = spawn(cmd, args, { stdio: 'ignore' })
-    proc.on('close', code => {
-      if (code === 0) resolve()
-      else reject(new Error(`Playback exited with code ${code}`))
-    })
-    proc.on('error', reject)
+    if (platform === 'linux') {
+      const killProc = spawn('pkill', ['-9', 'ffplay'], { stdio: 'ignore' })
+      killProc.on('close', () => {
+        setTimeout(() => {
+          const proc = spawn(cmd, args, { stdio: 'ignore' })
+          proc.on('close', code => {
+            if (code === 0) resolve()
+            else resolve()
+          })
+          proc.on('error', () => resolve())
+        }, 50)
+      })
+      killProc.on('error', () => {
+        const proc = spawn(cmd, args, { stdio: 'ignore' })
+        proc.on('close', code => {
+          if (code === 0) resolve()
+          else resolve()
+        })
+        proc.on('error', () => resolve())
+      })
+    } else {
+      const proc = spawn(cmd, args, { stdio: 'ignore' })
+      proc.on('close', code => {
+        if (code === 0) resolve()
+        else reject(new Error(`Playback exited with code ${code}`))
+      })
+      proc.on('error', reject)
+    }
   })
 }

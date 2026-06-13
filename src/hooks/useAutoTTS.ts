@@ -5,6 +5,7 @@ import type { RenderableMessage } from '../types/message.js'
 
 export function useAutoTTS(messages: RenderableMessage[]): void {
   const triggeredIdsRef = useRef<Set<string>>(new Set())
+  const pendingPlayRef = useRef<Promise<void> | null>(null)
 
   useEffect(() => {
     const settings = getInitialSettings()
@@ -12,18 +13,18 @@ export function useAutoTTS(messages: RenderableMessage[]): void {
 
     for (const msg of messages) {
       if (msg.type !== 'assistant') continue
-      if (triggeredIdsRef.current.has(msg.id)) continue
+      if (triggeredIdsRef.current.has(msg.uuid)) continue
 
       const content = msg.message.content[0]
       if (content?.type !== 'text') continue
       if (!content.text.trim()) continue
 
-      triggeredIdsRef.current.add(msg.id)
+      triggeredIdsRef.current.add(msg.uuid)
 
       const text = content.text
       const voice = settings.voiceTTSVoice || 'en-US-JennyNeural'
 
-      void (async () => {
+      const run = async () => {
         const result = await speakWithEdgeTTS(text, {
           voice,
           pythonPath: settings.voiceTTSCommand || undefined,
@@ -31,7 +32,13 @@ export function useAutoTTS(messages: RenderableMessage[]): void {
         if (result.success && result.audioPath) {
           await playAudioFile(result.audioPath)
         }
-      })()
+      }
+
+      if (pendingPlayRef.current) {
+        pendingPlayRef.current = pendingPlayRef.current.then(run, run).catch(() => {})
+      } else {
+        pendingPlayRef.current = run().catch(() => {})
+      }
     }
   }, [messages])
 }
