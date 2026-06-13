@@ -92,6 +92,7 @@ export const call: LocalCommandCall = async () => {
   const result = updateSettingsForSource('userSettings', {
     voiceEnabled: true,
     voiceProvider: 'local' as const,
+    voiceAutoTTS: true,
   })
   if (result.error) {
     return {

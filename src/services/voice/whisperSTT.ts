@@ -1,4 +1,4 @@
-import { spawn } from 'child_process'
+import { spawn, type ChildProcess } from 'child_process'
 import { existsSync, mkdtempSync, writeFileSync, unlinkSync, rmdirSync } from 'fs'
 import { tmpdir } from 'os'
 import { join, dirname } from 'path'
@@ -21,14 +21,7 @@ const PROJECT_ROOT = findProjectRoot()
 const SCRIPTS_DIR = join(PROJECT_ROOT, 'scripts')
 const VENV_PYTHON = join(PROJECT_ROOT, '.venv', 'bin', 'python')
 
-const LOG = '/tmp/vc_whisper.log'
-function log(...args: unknown[]) {
-  const line = `[${new Date().toISOString()}] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}\n`
-  try { writeFileSync(LOG, line, { flag: 'a' }) } catch {}
-}
-
-function resolvePythonPath(customPath?: string): string {
-  if (customPath) return customPath
+function resolvePythonPath(): string {
   if (existsSync(VENV_PYTHON)) return VENV_PYTHON
   return 'python3'
 }
@@ -39,91 +32,159 @@ type WhisperOptions = {
   pythonPath?: string
 }
 
+let serverProc: ChildProcess | null = null
+let serverLoaded = false
+let serverLoadingResolve: (() => void) | null = null
+let serverLoadingReject: ((err: Error) => void) | null = null
+
+function getServer(): ChildProcess {
+  if (serverProc && serverProc.exitCode === null) {
+    return serverProc
+  }
+  const python = resolvePythonPath()
+  serverProc = spawn(python, [join(SCRIPTS_DIR, 'whisper_server.py')], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+  })
+
+  let buf = ''
+  serverProc.stdout!.on('data', (data: Buffer) => {
+    buf += data.toString()
+    const lines = buf.split('\n')
+    buf = lines.pop() ?? ''
+    for (const line of lines) {
+      if (!line) continue
+      try {
+        const msg = JSON.parse(line)
+        if (msg.type === 'ready') {
+          serverLoaded = true
+          serverLoadingResolve?.()
+          serverLoadingResolve = null
+          serverLoadingReject = null
+        } else if (msg.type === 'error') {
+          serverLoaded = false
+          serverLoadingReject?.(new Error(msg.message))
+          serverLoadingResolve = null
+          serverLoadingReject = null
+        }
+      } catch {}
+    }
+  })
+
+  serverProc.on('error', () => {
+    serverProc = null
+    serverLoaded = false
+    serverLoadingReject?.(new Error('Server process error'))
+  })
+  serverProc.on('close', () => {
+    serverProc = null
+    serverLoaded = false
+  })
+
+  return serverProc
+}
+
+export async function preloadWhisperModel(options?: WhisperOptions): Promise<void> {
+  if (serverLoaded) return
+
+  const proc = getServer()
+  const model = options?.model ?? 'small'
+
+  const responseReady = new Promise<void>((resolve, reject) => {
+    serverLoadingResolve = resolve
+    serverLoadingReject = reject
+    proc.stdin!.write(JSON.stringify({ type: 'load', model }) + '\n')
+  })
+
+  const timeout = new Promise<never>((_, reject) => {
+    setTimeout(() => reject(new Error('Model preload timeout')), 30000)
+  })
+
+  await Promise.race([responseReady, timeout])
+}
+
+async function transcribeWithServer(
+  wavPath: string,
+  language?: string | null,
+): Promise<{ text: string; language: string }> {
+  const proc = getServer()
+
+  const result = await new Promise<{ text: string; language: string }>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup()
+      reject(new Error('Transcription timeout'))
+    }, 30000)
+
+    let buf = ''
+    const cleanup = () => {
+      clearTimeout(timeout)
+      proc.stdout!.removeAllListeners('data')
+    }
+
+    proc.stdout!.on('data', (data: Buffer) => {
+      buf += data.toString()
+      const lines = buf.split('\n')
+      buf = lines.pop() ?? ''
+      for (const line of lines) {
+        if (!line) continue
+        try {
+          const msg = JSON.parse(line)
+          if (msg.type === 'result') {
+            cleanup()
+            resolve({ text: msg.text, language: msg.language })
+          } else if (msg.type === 'error') {
+            cleanup()
+            reject(new Error(msg.message))
+          }
+        } catch {}
+      }
+    })
+
+    proc.stdin!.write(JSON.stringify({ type: 'transcribe', wav: wavPath, language }) + '\n')
+  })
+
+  return result
+}
+
 export function connectLocalWhisperStream(
   callbacks: VoiceStreamCallbacks,
   options?: WhisperOptions,
 ): Promise<VoiceStreamConnection | null> {
-  return new Promise(resolve => {
+  return new Promise(async resolve => {
+    if (!serverLoaded) {
+      await preloadWhisperModel(options)
+    }
+
     const chunks: Buffer[] = []
     let finalized = false
     let tmpDir: string | null = null
-
-    const python = resolvePythonPath(options?.pythonPath)
-    const model = options?.model ?? 'large-v3-turbo'
-    const language = options?.language
-    log('projectRoot', PROJECT_ROOT, 'python', python, 'model', model, 'language', language)
 
     const connection: VoiceStreamConnection = {
       send(chunk: Buffer) {
         if (finalized) return
         chunks.push(Buffer.from(chunk))
-        if (chunks.length === 1) log('first chunk', chunk.length, 'bytes')
       },
 
       async finalize(): Promise<FinalizeSource> {
         if (finalized) return 'ws_already_closed'
         finalized = true
-        log('finalize called, chunks', chunks.length)
 
         if (chunks.length === 0) {
-          log('no chunks, returning no_data_timeout')
           callbacks.onClose()
           return 'no_data_timeout'
         }
 
         const audioBuf = Buffer.concat(chunks)
-        log('total audio', audioBuf.length, 'bytes')
 
         try {
           tmpDir = mkdtempSync(join(tmpdir(), 'vc-whisper-'))
           const wavPath = join(tmpDir, 'input.wav')
-
           writeWavHeader(wavPath, audioBuf, 16000)
 
-          const args = [join(SCRIPTS_DIR, 'transcribe.py'), wavPath, '--model', model]
-          if (language) {
-            args.push('--language', language)
-          }
-          log('spawning', python, args.join(' '))
-
-          const proc = spawn(python, args, { stdio: ['ignore', 'pipe', 'pipe'] })
-
-          let stdout = ''
-          let stderr = ''
-
-          proc.stdout.on('data', (data: Buffer) => {
-            stdout += data.toString()
-          })
-
-          proc.stderr.on('data', (data: Buffer) => {
-            stderr += data.toString()
-          })
-
-          const exitCode = await new Promise<number>(resolveExit => {
-            proc.on('close', resolveExit)
-          })
-
-          log('exitCode', exitCode, 'stdout', stdout.slice(0, 500), 'stderr', stderr.slice(0, 500))
-
-          if (exitCode !== 0) {
-            callbacks.onError(`Whisper transcription failed: ${stderr || 'unknown error'}`, {
-              fatal: true,
-            })
-            callbacks.onClose()
-            return 'ws_close'
-          }
-
-          const result = JSON.parse(stdout)
-          log('result', result)
-          if (result.success && result.text) {
+          const result = await transcribeWithServer(wavPath, options?.language)
+          if (result.text) {
             callbacks.onTranscript(result.text, true)
-          } else if (result.success && !result.text) {
-            callbacks.onTranscript('', true)
           } else {
-            callbacks.onError(
-              result.error ?? 'Transcription failed',
-              { fatal: true },
-            )
+            callbacks.onTranscript('', true)
           }
         } catch (err) {
           callbacks.onError(
@@ -132,12 +193,8 @@ export function connectLocalWhisperStream(
           )
         } finally {
           if (tmpDir) {
-            try {
-              unlinkSync(join(tmpDir, 'input.wav'))
-            } catch {}
-            try {
-              rmdirSync(tmpDir)
-            } catch {}
+            try { unlinkSync(join(tmpDir, 'input.wav')) } catch {}
+            try { rmdirSync(tmpDir) } catch {}
           }
           callbacks.onClose()
         }
@@ -160,29 +217,20 @@ export function connectLocalWhisperStream(
   })
 }
 
-export async function checkLocalWhisperAvailable(pythonPath?: string): Promise<boolean> {
-  const python = resolvePythonPath(pythonPath)
-  return new Promise(resolve => {
-    const proc = spawn(python, [
-      '-c',
-      'import json;' +
-      'try: import whisper; print(json.dumps({"ok": True, "backend": "whisper"}))' +
-      'except ImportError:' +
-      '  try: from faster_whisper import WhisperModel; print(json.dumps({"ok": True, "backend": "faster-whisper"}))' +
-      '  except ImportError: print(json.dumps({"ok": False}))',
-    ], { stdio: ['ignore', 'pipe', 'pipe'] })
-
-    let stdout = ''
-    proc.stdout.on('data', (data: Buffer) => { stdout += data.toString() })
-    proc.on('close', () => {
-      try {
-        const result = JSON.parse(stdout)
-        resolve(result.ok === true)
-      } catch {
-        resolve(false)
-      }
+export async function checkLocalWhisperAvailable(): Promise<boolean> {
+  try {
+    const python = resolvePythonPath()
+    return await new Promise(resolve => {
+      const proc = spawn(python, ['-c', 'import whisper; print("ok")'], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+      let out = ''
+      proc.stdout.on('data', d => { out += d.toString() })
+      proc.on('close', () => { resolve(out.trim() === 'ok') })
     })
-  })
+  } catch {
+    return false
+  }
 }
 
 function writeWavHeader(path: string, pcmData: Buffer, sampleRate: number): void {
@@ -193,11 +241,9 @@ function writeWavHeader(path: string, pcmData: Buffer, sampleRate: number): void
   const dataSize = pcmData.length
 
   const header = Buffer.alloc(44)
-
   header.write('RIFF', 0)
   header.writeUInt32LE(36 + dataSize, 4)
   header.write('WAVE', 8)
-
   header.write('fmt ', 12)
   header.writeUInt32LE(16, 16)
   header.writeUInt16LE(1, 20)
@@ -206,9 +252,7 @@ function writeWavHeader(path: string, pcmData: Buffer, sampleRate: number): void
   header.writeUInt32LE(byteRate, 28)
   header.writeUInt16LE(blockAlign, 32)
   header.writeUInt16LE(bitsPerSample, 34)
-
   header.write('data', 36)
   header.writeUInt32LE(dataSize, 40)
-
   writeFileSync(path, Buffer.concat([header, pcmData]))
 }

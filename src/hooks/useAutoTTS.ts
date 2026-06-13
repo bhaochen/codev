@@ -5,7 +5,6 @@ import type { RenderableMessage } from '../types/message.js'
 
 export function useAutoTTS(messages: RenderableMessage[]): void {
   const triggeredIdsRef = useRef<Set<string>>(new Set())
-  const pendingPlayRef = useRef<Promise<void> | null>(null)
 
   useEffect(() => {
     const settings = getInitialSettings()

@@ -81,8 +81,12 @@ export async function speakWithEdgeTTS(
       }
 
       try {
-        const result = JSON.parse(stdout)
-        resolve(result)
+        const raw = JSON.parse(stdout)
+        resolve({
+          success: raw.success,
+          audioPath: raw.audio_path ?? raw.audioPath,
+          error: raw.error,
+        })
       } catch {
         resolve({
           success: false,

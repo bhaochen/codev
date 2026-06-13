@@ -22,7 +22,7 @@ import {
   type VoiceStreamConnection,
 } from '../services/voiceStreamSTT.js'
 import { connectDoubaoStream } from '../services/doubaoSTT.js'
-import { connectLocalWhisperStream } from '../services/voice/whisperSTT.js'
+import { connectLocalWhisperStream, preloadWhisperModel } from '../services/voice/whisperSTT.js'
 import { logForDebugging } from '../utils/debug.js'
 import { toError } from '../utils/errors.js'
 import { getSystemLocaleLanguage } from '../utils/intl.js'
@@ -804,6 +804,7 @@ export function useVoice({
           opts: { language: string; keyterms: string[] },
         ) => Promise<VoiceStreamConnection | null>
       if (isLocalProvider()) {
+        void preloadWhisperModel({ language: stt.code })
         connectFn = (cbs, _opts) =>
           connectLocalWhisperStream(cbs, { language: stt.code })
       } else if (isDoubaoProvider()) {

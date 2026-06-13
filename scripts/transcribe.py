@@ -11,27 +11,18 @@ def write_wav(path: str, raw_pcm: bytes, sample_rate: int = 16000):
         w.setframerate(sample_rate)
         w.writeframes(raw_pcm)
 
-def transcribe(wav_path: str, model_size: str = "large-v3-turbo", language: str | None = None) -> dict:
-    try:
-        import whisper
-        model = whisper.load_model(model_size, download_root=WHISPER_CACHE)
-        opts = {}
-        if language:
-            opts["language"] = language
-        result = model.transcribe(wav_path, **opts)
-        return {"success": True, "text": result["text"].strip(), "language": result.get("language", "")}
-    except ImportError:
-        pass
+def get_model_path(name):
+    lp = os.path.expanduser(f"~/.cache/huggingface/hub/models--Systran--faster-whisper-{name}")
+    if os.path.isdir(lp):
+        return lp
+    return name
 
+def transcribe(wav_path: str, model_size: str = "small", language: str | None = None) -> dict:
     try:
         from faster_whisper import WhisperModel
-        model_path = model_size
-        if not os.path.isdir(model_path):
-            local_path = os.path.expanduser(f"~/.cache/huggingface/hub/models--Systran--faster-whisper-{model_size}")
-            if os.path.isdir(local_path):
-                model_path = local_path
-        model = WhisperModel(model_path, device="cpu", compute_type="int8")
-        opts = {"beam_size": 1}
+        model_path = get_model_path(model_size)
+        model = WhisperModel(model_path, device="cuda", compute_type="int8_float16")
+        opts = {"beam_size": 5}
         if language:
             opts["language"] = language
         segments, info = model.transcribe(wav_path, **opts)
@@ -40,7 +31,18 @@ def transcribe(wav_path: str, model_size: str = "large-v3-turbo", language: str 
     except ImportError:
         pass
 
-    return {"success": False, "error": "Neither openai-whisper nor faster-whisper is installed. Run: pip install openai-whisper"}
+    try:
+        import whisper
+        model = whisper.load_model(model_size, device="cuda", download_root=WHISPER_CACHE)
+        opts = {}
+        if language:
+            opts["language"] = language
+        result = model.transcribe(wav_path, **opts)
+        return {"success": True, "text": result["text"].strip(), "language": result.get("language", "")}
+    except ImportError:
+        pass
+
+    return {"success": False, "error": "Neither faster-whisper nor openai-whisper is installed. Run: pip install faster-whisper"}
 
 def main():
     if len(sys.argv) < 2:
@@ -48,7 +50,7 @@ def main():
         sys.exit(1)
 
     wav_path = sys.argv[1]
-    model_size = "large-v3-turbo"
+    model_size = "small"
     language = None
 
     i = 2
