@@ -499,6 +499,33 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
     return [getDefaultOptionForUser(fastMode)]
   }
 
+  // NVIDIA API: Show dynamically fetched models from the NVIDIA API catalog
+  if (getAPIProvider() === 'nvidia') {
+    // Trigger background fetch of NVIDIA models (non-blocking)
+    // This will populate the cache for subsequent calls
+    void import('../../services/api/nvidiaClient.js').then(({ fetchNvidiaModels }) => {
+      fetchNvidiaModels()
+    })
+
+    const { getCachedNvidiaModels } = require('../../services/api/nvidiaClient.js') as {
+      getCachedNvidiaModels: () => string[]
+    }
+    const models = getCachedNvidiaModels()
+
+    if (models && models.length > 0) {
+      return [
+        getDefaultOptionForUser(fastMode),
+        ...models.map(m => ({
+          value: m,
+          label: m,
+          description: 'NVIDIA NIM model',
+        })),
+      ]
+    }
+
+    return [getDefaultOptionForUser(fastMode)]
+  }
+
   // OpenCode Zen: Fetch models dynamically from API
   // If no API key, show only free models
   // If API key is provided, show all models except free ones

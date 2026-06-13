@@ -8,6 +8,7 @@ export type APIProvider =
   | 'openai'
   | 'local'
   | 'opencode'
+  | 'nvidia'
   | 'bedrock'
   | 'vertex'
   | 'foundry'
@@ -53,6 +54,9 @@ function getStoredProviderPreference(): APIProvider | null {
       case 'opencode':
         result = 'opencode'
         break
+      case 'nvidia':
+        result = config.nvidiaApiKey ? 'nvidia' : null
+        break
       case 'anthropic':
         result = 'firstParty'
         break
@@ -90,6 +94,8 @@ function getExplicitProviderOverride(): APIProvider | null {
       return 'local'
     case 'opencode':
       return 'opencode'
+    case 'nvidia':
+      return 'nvidia'
     case 'bedrock':
       return 'bedrock'
     case 'vertex':
@@ -124,6 +130,19 @@ export function isOpenRouterConfigured(): boolean {
 
   // Check config file
   return getStoredProviderPreference() === 'openrouter'
+}
+
+export function isNvidiaConfigured(): boolean {
+  if (getExplicitProviderOverride() === 'nvidia' || Boolean(process.env.NVIDIA_API_KEY)) {
+    return true
+  }
+
+  // Check config file
+  return getStoredProviderPreference() === 'nvidia'
+}
+
+export function getNvidiaBaseUrl(): string {
+  return process.env.NVIDIA_BASE_URL ?? 'https://integrate.api.nvidia.com/v1'
 }
 
 export function isOpenAIConfigured(): boolean {
@@ -199,7 +218,9 @@ export function getAPIProvider(): APIProvider | null {
         ? 'foundry'
         : isOpencodeConfigured()
           ? 'opencode'
-          : isOpenAIConfigured()
+          : isNvidiaConfigured()
+            ? 'nvidia'
+            : isOpenAIConfigured()
             ? 'openai'
             : isOpenRouterConfigured()
               ? 'openrouter'
@@ -213,7 +234,7 @@ export function getAPIProviderForStatsig(): AnalyticsMetadata_I_VERIFIED_THIS_IS
 export function isAnthropicCompatibleProvider(
   provider: APIProvider = getAPIProvider(),
 ): boolean {
-  return provider !== 'openai' && provider !== 'opencode'
+  return provider !== 'openai' && provider !== 'opencode' && provider !== 'nvidia'
 }
 
 /**

@@ -25,6 +25,7 @@ import { OpenAILoginFlow } from '../../components/OpenAILoginFlow.js'
 import { OpenRouterLoginFlow } from '../../components/OpenRouterLoginFlow.js'
 import { LocalLoginFlow } from '../../components/LocalLoginFlow.js'
 import { OpenCodeLoginFlow } from '../../components/OpenCodeLoginFlow.js'
+import { NvidiaLoginFlow } from '../../components/NvidiaLoginFlow.js'
 
 import { useMainLoopModel } from '../../hooks/useMainLoopModel.js';
 
@@ -48,7 +49,7 @@ import {
 import { resetUserCache } from '../../utils/user.js';
 
 // TODO
-type AuthProviderChoice = 'anthropic' | 'openai' | 'openrouter' | 'local' | 'opencode'
+type AuthProviderChoice = 'anthropic' | 'openai' | 'openrouter' | 'local' | 'opencode' | 'nvidia'
 
 /* 第一层: 入口函数 call()
  * CLI 执行 /login 真正被调用的函数
@@ -88,18 +89,26 @@ export async function call(
             void checkAndDisableAutoModeIfNeeded(appState.toolPermissionContext, context.setAppState, appState.fastMode);
           }
 
-          // For OpenCode provider, pre-fetch models so /model shows them immediately
+          // Pre-fetch models for providers that support dynamic model listing
           const { getAPIProvider } = await import('../../utils/model/providers.js')
-          if (getAPIProvider() === 'opencode') {
+          const provider = getAPIProvider()
+          if (provider === 'opencode') {
             const { fetchOpencodeModels } = await import('../../services/api/opencodeClient.js')
             await fetchOpencodeModels()
+          } else if (provider === 'nvidia') {
+            const { fetchNvidiaModels } = await import('../../services/api/nvidiaClient.js')
+            await fetchNvidiaModels()
           }
+
+          // Clear cached model strings so they re-initialize with the new provider
+          const { clearModelStrings } = await import('../../utils/model/modelStrings.js')
+          clearModelStrings()
 
           // Increment authVersion to trigger re-fetching of auth-dependent data
           context.setAppState(prev => ({
             ...prev,
             authVersion: prev.authVersion + 1,
-            mainLoopModel: 'big-pickle',
+            mainLoopModel: provider === 'nvidia' ? null : 'big-pickle',
             mainLoopModelForSession: null,
           }));
         }
@@ -187,6 +196,18 @@ export function Login(props: {
         ),
         value: 'local',
       },
+      {
+        label: (
+          <Text>
+            NVIDIA{' '}
+            <Text dimColor={true}>
+              NVIDIA NIM API key from build.nvidia.com
+            </Text>
+            {'\n'}
+          </Text>
+        ),
+        value: 'nvidia',
+      },
     ],
     [],
   )
@@ -234,6 +255,11 @@ export function Login(props: {
       <LocalLoginFlow
         onDone={onFlowDone}
         startingMessage="Configure local model server (Ollama, LM Studio, vLLM, etc.)."
+      />
+    ) : selectedProvider === 'nvidia' ? (
+      <NvidiaLoginFlow
+        onDone={onFlowDone}
+        startingMessage="Better-Clawd can use NVIDIA with your NVIDIA API key."
       />
     ) : (
       <ConsoleOAuthFlow

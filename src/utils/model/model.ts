@@ -277,6 +277,11 @@ export function getDefaultMainLoopModelSetting(): ModelName | ModelAlias {
     return 'big-pickle'
   }
 
+  // Check if using NVIDIA provider
+  if (apiProvider === 'nvidia') {
+    return getModelStrings().sonnet46
+  }
+
   // Ants default to defaultModel from flag config, or Opus 1M if not configured
   if (process.env.USER_TYPE === 'ant') {
     return (

@@ -307,7 +307,7 @@ export function getOpenRouterApiKeyWithSource(): {
     : { key: null, source: 'none' }
 }
 
-export function getConfiguredAuthProvider(): 'anthropic' | 'openrouter' | 'openai' | 'local' | 'opencode' | null {
+export function getConfiguredAuthProvider(): 'anthropic' | 'openrouter' | 'openai' | 'local' | 'opencode' | 'nvidia' | null {
   // First try to get from cache for performance
   const storedProvider = getGlobalConfig().authProvider
   if (storedProvider) {
@@ -319,13 +319,13 @@ export function getConfiguredAuthProvider(): 'anthropic' | 'openrouter' | 'opena
 }
 
 // Read authProvider directly from file to bypass cache
-export function getConfiguredAuthProviderFromFile(): 'anthropic' | 'openrouter' | 'openai' | 'local' | 'opencode' | null {
+export function getConfiguredAuthProviderFromFile(): 'anthropic' | 'openrouter' | 'openai' | 'local' | 'opencode' | 'nvidia' | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { readFileSync } = require('fs') as typeof import('fs')
     const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
     const config = JSON.parse(raw) as {
-      authProvider?: 'anthropic' | 'openrouter' | 'openai' | 'local' | 'opencode'
+      authProvider?: 'anthropic' | 'openrouter' | 'openai' | 'local' | 'opencode' | 'nvidia'
     }
 
     if (config.authProvider) {
@@ -424,6 +424,36 @@ export async function saveOpenRouterApiKey(apiKey: string): Promise<void> {
     ...current,
     authProvider: 'openrouter',
     openRouterApiKey: trimmedKey,
+  }))
+  // Clear provider cache so it will be re-read on next access
+  const { clearStoredProviderCache } = await import('./model/providers.js')
+  clearStoredProviderCache()
+}
+
+export function getNvidiaApiKey(): string | null {
+  if (process.env.NVIDIA_API_KEY) {
+    return process.env.NVIDIA_API_KEY
+  }
+
+  const config = getGlobalConfig()
+  return config.nvidiaApiKey || null
+}
+
+export async function saveNvidiaApiKey(apiKey: string): Promise<void> {
+  if (!apiKey || typeof apiKey !== 'string') {
+    throw new Error('Invalid API key: API key must be a non-empty string.')
+  }
+
+  const trimmedKey = apiKey.trim()
+
+  if (!trimmedKey) {
+    throw new Error('Invalid API key: API key cannot be empty or whitespace only.')
+  }
+
+  saveGlobalConfig(current => ({
+    ...current,
+    authProvider: 'nvidia',
+    nvidiaApiKey: trimmedKey,
   }))
   // Clear provider cache so it will be re-read on next access
   const { clearStoredProviderCache } = await import('./model/providers.js')

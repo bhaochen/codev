@@ -26,6 +26,7 @@ import {
 } from 'src/utils/model/providers.js'
 import { getProxyFetchOptions } from 'src/utils/proxy.js'
 import { createOpenCodeFetchOverride, fetchOpencodeModels } from './opencodeClient.js'
+import { createNvidiaFetchOverride } from './nvidiaClient.js'
 import {
   getIsNonInteractiveSession,
   getSessionId,
@@ -155,7 +156,13 @@ export async function getAnthropicClient({
     opencodeFetchOverride = createOpenCodeFetchOverride(resolvedModel)
   }
 
-  const resolvedFetch = buildFetch(fetchOverride || opencodeFetchOverride, source)
+  // For NVIDIA provider, use custom fetch to convert Anthropic format to OpenAI-compatible format
+  let nvidiaFetchOverride: ClientOptions['fetch'] | undefined
+  if (provider === 'nvidia') {
+    nvidiaFetchOverride = createNvidiaFetchOverride()
+  }
+
+  const resolvedFetch = buildFetch(fetchOverride || opencodeFetchOverride || nvidiaFetchOverride, source)
 
   const ARGS = {
     defaultHeaders,
@@ -366,6 +373,11 @@ export async function getAnthropicClient({
     clientConfig.apiKey = 'opencode-zen'
   }
 
+  // Handle NVIDIA - uses custom fetch override to convert Anthropic format to OpenAI format
+  if (provider === 'nvidia') {
+    clientConfig.apiKey = 'nvidia-nim'
+  }
+
   return new Anthropic(clientConfig)
 }
 
@@ -375,8 +387,8 @@ async function configureApiKeyHeaders(
 ): Promise<void> {
   const provider = getAPIProvider()
   
-  // Skip for OpenRouter, OpenAI, Local, and OpenCode - they use apiKey parameter instead
-  if (provider === 'openrouter' || provider === 'openai' || provider === 'local' || provider === 'opencode') {
+  // Skip for OpenRouter, OpenAI, Local, OpenCode, and NVIDIA - they use apiKey parameter instead
+  if (provider === 'openrouter' || provider === 'openai' || provider === 'local' || provider === 'opencode' || provider === 'nvidia') {
     return
   }
 

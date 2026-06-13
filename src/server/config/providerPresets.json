@@ -211,6 +211,25 @@
     }
   },
   {
+    "id": "nvidia",
+    "name": "NVIDIA NIM",
+    "baseUrl": "https://integrate.api.nvidia.com/v1",
+    "apiFormat": "openai_chat",
+    "defaultModels": {
+      "main": "nvidia/llama-3.1-nemotron-70b-instruct",
+      "haiku": "nvidia/llama-3.1-nemotron-70b-instruct",
+      "sonnet": "nvidia/llama-3.1-nemotron-70b-instruct",
+      "opus": "nvidia/llama-3.1-nemotron-70b-instruct"
+    },
+    "needsApiKey": true,
+    "websiteUrl": "https://build.nvidia.com",
+    "apiKeyUrl": "https://build.nvidia.com",
+    "authStrategy": "api_key",
+    "defaultEnv": {
+      "NVIDIA_BASE_URL": "https://integrate.api.nvidia.com/v1"
+    }
+  },
+  {
     "id": "custom",
     "name": "Custom",
     "baseUrl": "",

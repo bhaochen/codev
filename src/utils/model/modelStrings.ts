@@ -50,6 +50,15 @@ function getBuiltinModelStrings(provider: APIProvider): ModelStrings {
     return out as ModelStrings
   }
 
+  if (provider === 'nvidia') {
+    const out = getBuiltinModelStrings('firstParty') as Record<string, string>
+    out.haiku45 = process.env.NVIDIA_HAIKU_MODEL || 'nvidia/llama-3.1-nemotron-70b-instruct'
+    out.sonnet45 = process.env.NVIDIA_SONNET_MODEL || 'nvidia/llama-3.1-nemotron-70b-instruct'
+    out.sonnet46 = process.env.NVIDIA_SONNET_MODEL || 'nvidia/llama-3.1-nemotron-70b-instruct'
+    out.opus46 = process.env.NVIDIA_OPUS_MODEL || 'nvidia/llama-3.1-nemotron-70b-instruct'
+    return out as ModelStrings
+  }
+
   const out = {} as ModelStrings
   for (const key of MODEL_KEYS) {
     out[key] = ALL_MODEL_CONFIGS[key][provider]
@@ -190,4 +199,13 @@ export async function ensureModelStringsInitialized(): Promise<void> {
 
   // For Bedrock, wait for the profile fetch
   await updateBedrockModelStrings()
+}
+
+/**
+ * Clear cached model strings so the next call to getModelStrings()
+ * re-initializes from the current provider. Call this after changing
+ * the auth provider (e.g., after /login).
+ */
+export function clearModelStrings(): void {
+  setModelStringsState(null as unknown as ModelStrings)
 }

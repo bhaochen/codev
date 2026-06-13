@@ -400,6 +400,9 @@ export async function setup(
   } else if (configuredAuthProvider === 'opencode') {
     const { fetchOpencodeModels } = await import('./services/api/opencodeClient.js')
     void fetchOpencodeModels()
+  } else if (configuredAuthProvider === 'nvidia') {
+    const { fetchNvidiaModels } = await import('./services/api/nvidiaClient.js')
+    void fetchNvidiaModels()
   }
 
   // If permission mode is set to bypass, verify we're in a safe environment

@@ -187,7 +187,7 @@ export type GlobalConfig = {
   apiKeyHelper?: string
   
   // Authentication provider configuration
-  authProvider?: 'anthropic' | 'openai' | 'openrouter' | 'local' | 'opencode'
+  authProvider?: 'anthropic' | 'openai' | 'openrouter' | 'local' | 'opencode' | 'nvidia'
   
   // OpenRouter API key
   openRouterApiKey?: string
@@ -203,6 +203,9 @@ export type GlobalConfig = {
   // OpenCode Zen configuration
   openCodeApiKey?: string
   openCodeModelName?: string
+
+  // NVIDIA API key
+  nvidiaApiKey?: string
   
   projects?: Record<string, ProjectConfig>
   numStartups: number
@@ -663,6 +666,7 @@ export const GLOBAL_CONFIG_KEYS = [
   'openAiAccessToken',
   'localBaseUrl',
   'localModelName',
+  'nvidiaApiKey',
   'installMethod',
   'autoUpdates',
   'autoUpdatesProtectedForNative',

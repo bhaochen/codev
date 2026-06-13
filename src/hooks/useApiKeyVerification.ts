@@ -62,13 +62,23 @@ export function useApiKeyVerification(): ApiKeyVerificationResult {
       }
       return 'missing'
     }
-    
+
     // Check OpenCode Zen authentication
     // OpenCode Zen uses free models by default, no API key required
     if (authProvider === 'opencode') {
       return 'valid'
     }
-    
+
+    // Check NVIDIA authentication
+    if (authProvider === 'nvidia') {
+      const config = getGlobalConfig()
+      const hasApiKey = !!config.nvidiaApiKey
+      if (hasApiKey) {
+        return 'valid'
+      }
+      return 'missing'
+    }
+
     // Anthropic authentication
     if (!isAnthropicAuthEnabled() || isClaudeAISubscriber()) {
       return 'valid'
@@ -142,7 +152,20 @@ export function useApiKeyVerification(): ApiKeyVerificationResult {
         setStatus('valid')
         return
       }
-      
+
+      // Check NVIDIA authentication
+      if (authProvider === 'nvidia') {
+        const { getGlobalConfig: getConfig } = await import('../utils/config.js')
+        const freshConfig = getConfig()
+        const hasApiKey = !!freshConfig.nvidiaApiKey
+        if (hasApiKey) {
+          setStatus('valid')
+        } else {
+          setStatus('missing')
+        }
+        return
+      }
+
       // Anthropic authentication
       if (!isAnthropicAuthEnabled() || isClaudeAISubscriber()) {
         setStatus('valid')
@@ -227,7 +250,19 @@ export function useApiKeyVerification(): ApiKeyVerificationResult {
       setStatus('valid')
       return
     }
-    
+
+    // Check NVIDIA authentication
+    if (authProvider === 'nvidia') {
+      const config = getGlobalConfig()
+      const hasApiKey = !!config.nvidiaApiKey
+      if (hasApiKey) {
+        setStatus('valid')
+      } else {
+        setStatus('missing')
+      }
+      return
+    }
+
     // Anthropic authentication
     if (!isAnthropicAuthEnabled() || isClaudeAISubscriber()) {
       setStatus('valid')
