@@ -91,7 +91,12 @@ cp VersperClaw ~/.local/bin
 
   # set auto-dream config
   "autoMemoryEnabled": true,
-  "autoDreamEnabled": true
+  "autoDreamEnabled": true,
+
+  # stt-tts support zh-CN
+  "voiceLanguage": "zh-CN",
+  "voiceTTSVoice": "zh-CN-XiaoxiaoNeural"
+
 }
 ```
 

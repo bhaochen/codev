@@ -3,6 +3,27 @@ import { speakWithEdgeTTS, playAudioFile } from '../services/voice/edgeTTS.js'
 import { getInitialSettings } from '../utils/settings/settings.js'
 import type { RenderableMessage } from '../types/message.js'
 
+// Map language codes to Edge TTS Chinese voices
+const CHINESE_VOICES: Record<string, string> = {
+  zh: 'zh-CN-XiaoxiaoNeural',
+  'zh-CN': 'zh-CN-XiaoxiaoNeural',
+  'zh-TW': 'zh-TW-HsiaoYuNeural',
+  'zh-HK': 'zh-HK-HiuMaanNeural',
+}
+
+function resolveEdgeTTSVoice(language: string | undefined, explicitVoice: string | undefined): string {
+  if (explicitVoice) return explicitVoice
+  if (!language) return 'en-US-JennyNeural'
+  const base = language.split('-')[0].toLowerCase()
+  if (base === 'zh') return CHINESE_VOICES[language] || CHINESE_VOICES['zh-CN']
+  if (base === 'ja') return 'ja-JP-NanamiNeural'
+  if (base === 'ko') return 'ko-KR-SunHiNeural'
+  if (base === 'fr') return 'fr-FR-DeniseNeural'
+  if (base === 'de') return 'de-DE-KatjaNeural'
+  if (base === 'es') return 'es-ES-ElviraNeural'
+  return 'en-US-JennyNeural'
+}
+
 export function useAutoTTS(messages: RenderableMessage[]): void {
   const triggeredIdsRef = useRef<Set<string>>(new Set())
   const pendingPlayRef = useRef<Promise<void> | null>(null)
@@ -22,7 +43,8 @@ export function useAutoTTS(messages: RenderableMessage[]): void {
       triggeredIdsRef.current.add(msg.uuid)
 
       const text = content.text
-      const voice = settings.voiceTTSVoice || 'en-US-JennyNeural'
+      const language = settings.voiceLanguage || settings.language
+      const voice = resolveEdgeTTSVoice(language, settings.voiceTTSVoice)
 
       const run = async () => {
         const result = await speakWithEdgeTTS(text, {

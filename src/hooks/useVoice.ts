@@ -421,7 +421,8 @@ export function useVoice({
         const replayBuffer = fullAudioRef.current
         await sleep(250)
         if (isStale()) return
-        const stt = normalizeLanguageForSTT(getInitialSettings().language)
+        const rawLanguage = getInitialSettings().voiceLanguage || getInitialSettings().language
+        const stt = normalizeLanguageForSTT(rawLanguage)
         const keyterms = await getVoiceKeyterms()
         if (isStale()) return
         await new Promise<void>(resolve => {
@@ -764,7 +765,7 @@ export function useVoice({
       return
     }
 
-    const rawLanguage = getInitialSettings().language
+    const rawLanguage = getInitialSettings().voiceLanguage || getInitialSettings().language
     const stt = normalizeLanguageForSTT(rawLanguage)
     logEvent('tengu_voice_recording_started', {
       focusTriggered: focusTriggeredRef.current,
