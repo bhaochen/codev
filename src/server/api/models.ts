@@ -348,7 +348,8 @@ async function handleModelsList(): Promise<Response> {
   if (activeId) {
     const activeProvider = providers.find((p) => p.id === activeId)
     if (activeProvider) {
-      if (activeProvider.presetId === 'tui-nvidia' && cliAuthProvider === 'nvidia') {
+      const presetType = activeProvider.presetId?.replace(/^tui-/, '')
+      if (presetType && cliAuthProvider === presetType) {
         const cliModels = await fetchCliProviderModels()
         if (cliModels.length > 0) {
           return Response.json({
