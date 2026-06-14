@@ -6,12 +6,7 @@ import { useChatStore } from './chatStore'
 import { useSessionRuntimeStore } from './sessionRuntimeStore'
 import { useSettingsStore } from './settingsStore'
 import { OFFICIAL_DEFAULT_MODEL_ID } from '../constants/modelCatalog'
-import {
-  OPENAI_OFFICIAL_DEFAULT_MODEL_ID,
-  OPENAI_OFFICIAL_PROVIDER_ID,
-} from '../constants/openaiOfficialProvider'
 import { saveTuiConfigPatch, clearConfigCache } from '../api/config'
-import { clearProviderModelCache } from '../api/providerModels'
 import type {
   SavedProvider,
   CreateProviderInput,
@@ -58,8 +53,9 @@ function mapSidecarToTuiProvider(provider: SavedProvider): TuiProviderMapping {
   const name = (provider.name || '').toLowerCase()
 
   // Detect local provider (Ollama, LM Studio, vLLM, etc.)
+  const isOpenAiFormat = apiFormat === 'openai_chat' || apiFormat === 'openai_responses'
   if (
-    apiFormat === 'openai' &&
+    isOpenAiFormat &&
     (baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1') || baseUrl.includes('0.0.0.0') ||
      name.includes('local') || name.includes('ollama'))
   ) {
@@ -74,7 +70,8 @@ function mapSidecarToTuiProvider(provider: SavedProvider): TuiProviderMapping {
   switch (apiFormat) {
     case 'anthropic':
       return { authProvider: 'anthropic', apiKeyField: 'anthropicApiKey', apiKey: provider.apiKey }
-    case 'openai': {
+    case 'openai_chat':
+    case 'openai_responses': {
       if (baseUrl.includes('nvidia') || name.includes('nvidia')) {
         return { authProvider: 'nvidia', apiKeyField: 'nvidiaApiKey', apiKey: provider.apiKey }
       }
@@ -228,11 +225,8 @@ export const useProviderStore = create<ProviderStore>((set, get) => ({
     patch.model = provider.models.main
 
     await saveTuiConfigPatch(patch)
-    clearProviderModelCache()
     clearConfigCache()
-
-    await settings.setModel(provider.models.main)
-    await settings.fetchAll()
+    await settings.syncFromConfig()
   },
 
   activateOfficial: async () => {
@@ -240,7 +234,6 @@ export const useProviderStore = create<ProviderStore>((set, get) => ({
     await get().fetchProviders()
     // 同步回 Anthropic first-party
     await saveTuiConfigPatch({ authProvider: 'anthropic' })
-    clearProviderModelCache()
     clearConfigCache()
     const settings = useSettingsStore.getState()
     await settings.setModel(OFFICIAL_DEFAULT_MODEL_ID)

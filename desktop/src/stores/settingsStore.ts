@@ -1,8 +1,8 @@
 import { create } from 'zustand'
 import { ApiError } from '../api/client'
 import { settingsApi } from '../api/settings'
+import { modelsApi } from '../api/models'
 import { h5AccessApi } from '../api/h5Access'
-import { fetchProviderModels, clearProviderModelCache } from '../api/providerModels'
 import { getTuiConfig, saveTuiConfigPatch, clearConfigCache } from '../api/config'
 import {
   isThemeMode,
@@ -39,6 +39,30 @@ export const UI_ZOOM_MAX = MAX_APP_ZOOM
 export const UI_ZOOM_STEP = APP_ZOOM_CONTROL_STEP
 export const UI_ZOOM_DEFAULT = DEFAULT_APP_ZOOM
 let desktopNotificationsSaveQueue: Promise<void> = Promise.resolve()
+
+function buildDefaultCliModels(providerKey: string): ModelInfo[] {
+  switch (providerKey) {
+    case 'nvidia':
+      return [
+        { id: 'nvidia/llama-3.1-nemotron-70b-instruct', name: 'Nemotron 70B', description: 'Default NVIDIA model', context: '' },
+      ]
+    case 'openai':
+      return [
+        { id: 'gpt-5.4-codex', name: 'GPT-5.4 Codex', description: 'Default OpenAI model', context: '' },
+        { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini', description: 'Fast OpenAI option', context: '' },
+      ]
+    case 'openrouter':
+      return [
+        { id: 'openrouter/default', name: 'OpenRouter Default', description: 'Set via OpenRouter dashboard', context: '' },
+      ]
+    case 'local':
+      return [
+        { id: 'local/default', name: 'Local Default', description: 'Check your local model server', context: '' },
+      ]
+    default:
+      return []
+  }
+}
 
 function getStoredLocale(): Locale {
   try {
@@ -173,47 +197,46 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     set({ isLoading: true, error: null })
     try {
       const previousH5Access = get().h5Access
-      const [directModels, { mode }, config, userSettings, h5AccessResult] = await Promise.all([
-        // Fetch models directly from provider APIs (TUI-style)
-        fetchProviderModels().catch(() => ({ models: [] as ModelInfo[], provider: null as { id: string; name: string } | null })),
+      const [sidecarResult, { mode }, config, userSettings, h5AccessResult] = await Promise.all([
+        // Fetch models from sidecar proxy (server-side, bypasses CORS)
+        modelsApi.list().catch(() => ({ models: [] as ModelInfo[], provider: null as { id: string; name: string } | null })),
         settingsApi.getPermissionMode(),
-        // Read model + effort from ~/.claude.json (TUI-style), bypassing sidecar
+        // Read model + effort from ~/.claude.json (TUI-style)
         getTuiConfig(),
         settingsApi.getUser(),
         loadH5AccessSettings(previousH5Access),
       ])
 
-      // Use direct models if available (TUI-style), otherwise fall back to sidecar
+      // Derive provider info from ~/.claude.json authProvider (correct names).
+      // Sidecar's provider name may be stale/corrupted (e.g. "TUI: NVIDIA NIM").
+      const CLI_NAMES: Record<string, string> = {
+        nvidia: 'NVIDIA',
+        openrouter: 'OpenRouter',
+        opencode: 'OpenCode Zen',
+        openai: 'OpenAI',
+        local: 'Local',
+        anthropic: 'Anthropic',
+      }
+      const authProvider = config.authProvider as string | undefined
       let availableModels: ModelInfo[]
       let activeProviderId: string | null
       let activeProviderName: string | null
 
-      if (directModels.models.length > 0) {
-        availableModels = directModels.models
-        activeProviderId = directModels.provider?.id ?? null
-        activeProviderName = directModels.provider?.name ?? null
-      } else {
-        // No direct models — always derive from ~/.claude.json authProvider.
-        // Never use sidecar's provider name: it may be stale and corrupted
-        // (e.g. "TUI: NVIDIA NIM" instead of "NVIDIA").
-        const authProvider = config.authProvider as string | undefined
-        if (authProvider) {
-          const CLI_PROVIDER_NAMES: Record<string, string> = {
-            nvidia: 'NVIDIA',
-            openrouter: 'OpenRouter',
-            opencode: 'OpenCode Zen',
-            openai: 'OpenAI',
-            local: 'Local',
-            anthropic: 'Anthropic',
-          }
-          availableModels = []
-          activeProviderId = `cli-${authProvider}`
-          activeProviderName = CLI_PROVIDER_NAMES[authProvider] ?? authProvider
+      if (authProvider) {
+        activeProviderId = `cli-${authProvider}`
+        activeProviderName = CLI_NAMES[authProvider] ?? authProvider
+        // Use sidecar models if available (from proxy), else build defaults
+        if (sidecarResult.models.length > 0) {
+          availableModels = sidecarResult.models
         } else {
-          availableModels = []
-          activeProviderId = null
-          activeProviderName = null
+          availableModels = buildDefaultCliModels(authProvider)
         }
+      } else {
+        activeProviderId = sidecarResult.provider?.id ?? null
+        activeProviderName = sidecarResult.provider?.name ?? null
+        availableModels = sidecarResult.models.length > 0
+          ? sidecarResult.models
+          : []
       }
 
       // Derive currentModel from config's model field, matched against availableModels
@@ -301,10 +324,9 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   syncFromConfig: async () => {
     // Re-read ~/.claude.json and re-fetch the model list for the new provider.
     // This keeps settingsStore in sync when cliAuthStore writes to the config file.
-    clearProviderModelCache()
     clearConfigCache()
-    const config = await getTuiConfig().catch(() => ({}))
-    const authProvider = config?.authProvider as string | undefined
+    const config = await getTuiConfig().catch(() => ({ authProvider: null }))
+    const authProvider = (config?.authProvider ?? null) as string | null
     if (!authProvider) {
       set({ activeProviderId: null, activeProviderName: null, availableModels: [], currentModel: null })
       return
@@ -320,13 +342,20 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     const cliProviderId = `cli-${authProvider}`
     const cliProviderName = CLI_NAMES[authProvider] ?? authProvider
 
-    // Fetch fresh models for the new provider
-    const { models } = await fetchProviderModels().catch(() => ({ models: [] as ModelInfo[], provider: null }))
+    // Fetch models from sidecar proxy (server-side, bypasses CORS)
+    const sidecarResult = await modelsApi.list().catch(() => ({
+      models: [] as ModelInfo[],
+      provider: null as { id: string; name: string } | null,
+    }))
+
+    // Fallback chain: sidecar models → default CLI models
+    const defaults = buildDefaultCliModels(authProvider)
+    const availableModels = sidecarResult.models.length > 0 ? sidecarResult.models : defaults
     set({
       activeProviderId: cliProviderId,
       activeProviderName: cliProviderName,
-      availableModels: models,
-      currentModel: models.length > 0 ? models[0] : null,
+      availableModels,
+      currentModel: availableModels[0] ?? null,
     })
   },
 

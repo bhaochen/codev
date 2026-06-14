@@ -156,7 +156,7 @@ let nvCacheTime = 0
 
 async function fetchNvidiaModels(apiKey?: string | null, baseUrl?: string): Promise<ModelInfo[]> {
   if (nvCache && Date.now() - nvCacheTime < OR_CACHE_TTL) {
-    return nvCache
+    return nvCache.length > 0 ? nvCache : []
   }
 
   if (!apiKey) {
