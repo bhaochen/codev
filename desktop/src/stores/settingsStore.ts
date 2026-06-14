@@ -3,6 +3,7 @@ import { ApiError } from '../api/client'
 import { settingsApi } from '../api/settings'
 import { modelsApi } from '../api/models'
 import { h5AccessApi } from '../api/h5Access'
+import { fetchProviderModels } from '../api/providerModels'
 import { getTuiConfig, saveTuiConfigPatch, clearConfigCache } from '../api/config'
 import {
   isThemeMode,
@@ -198,7 +199,8 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     try {
       const previousH5Access = get().h5Access
       const [sidecarResult, { mode }, config, userSettings, h5AccessResult] = await Promise.all([
-        // Fetch models from sidecar proxy (server-side, bypasses CORS)
+        // Fetch models from sidecar proxy for NVIDIA (bypasses CORS).
+        // OpenRouter/OpenCode models come from fetchProviderModels below.
         modelsApi.list().catch(() => ({ models: [] as ModelInfo[], provider: null as { id: string; name: string } | null })),
         settingsApi.getPermissionMode(),
         // Read model + effort from ~/.claude.json (TUI-style)
@@ -225,11 +227,13 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       if (authProvider) {
         activeProviderId = `cli-${authProvider}`
         activeProviderName = CLI_NAMES[authProvider] ?? authProvider
-        // Use sidecar models if available (from proxy), else build defaults
-        if (sidecarResult.models.length > 0) {
+        // NVIDIA: use sidecar proxy (bypasses CORS).
+        // OpenRouter/OpenCode: use direct fetch (works in browser).
+        if (authProvider === 'nvidia' && sidecarResult.models.length > 0) {
           availableModels = sidecarResult.models
         } else {
-          availableModels = buildDefaultCliModels(authProvider)
+          const { models } = await fetchProviderModels().catch(() => ({ models: [] as ModelInfo[], provider: null }))
+          availableModels = models.length > 0 ? models : buildDefaultCliModels(authProvider)
         }
       } else {
         activeProviderId = sidecarResult.provider?.id ?? null
@@ -342,15 +346,19 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     const cliProviderId = `cli-${authProvider}`
     const cliProviderName = CLI_NAMES[authProvider] ?? authProvider
 
-    // Fetch models from sidecar proxy (server-side, bypasses CORS)
-    const sidecarResult = await modelsApi.list().catch(() => ({
-      models: [] as ModelInfo[],
-      provider: null as { id: string; name: string } | null,
-    }))
-
-    // Fallback chain: sidecar models → default CLI models
-    const defaults = buildDefaultCliModels(authProvider)
-    const availableModels = sidecarResult.models.length > 0 ? sidecarResult.models : defaults
+    // NVIDIA: use sidecar proxy (bypasses CORS).
+    // OpenRouter/OpenCode: use direct fetch (works in browser).
+    let availableModels: ModelInfo[]
+    if (authProvider === 'nvidia') {
+      const sidecarResult = await modelsApi.list().catch(() => ({
+        models: [] as ModelInfo[],
+        provider: null as { id: string; name: string } | null,
+      }))
+      availableModels = sidecarResult.models.length > 0 ? sidecarResult.models : buildDefaultCliModels(authProvider)
+    } else {
+      const { models } = await fetchProviderModels().catch(() => ({ models: [] as ModelInfo[], provider: null }))
+      availableModels = models.length > 0 ? models : buildDefaultCliModels(authProvider)
+    }
     set({
       activeProviderId: cliProviderId,
       activeProviderName: cliProviderName,
