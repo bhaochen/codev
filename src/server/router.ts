@@ -28,6 +28,7 @@ import { handleOpenTargetsApi } from './api/open-targets.js'
 import { handleMemoryApi } from './api/memory.js'
 import { handleDesktopUiApi } from './api/desktop-ui.js'
 import { handleCliAuthApi } from './api/cli-auth.js'
+import { handleCliProxyApi } from './api/cli-proxy.js'
 
 export async function handleApiRequest(req: Request, url: URL): Promise<Response> {
   const path = url.pathname
@@ -122,6 +123,9 @@ export async function handleApiRequest(req: Request, url: URL): Promise<Response
 
     case 'cli-auth':
       return handleCliAuthApi(req, url, segments)
+
+    case 'cli-proxy':
+      return handleCliProxyApi(req, url, segments)
 
     case 'filesystem':
       return handleFilesystemRoute(url.pathname, url)

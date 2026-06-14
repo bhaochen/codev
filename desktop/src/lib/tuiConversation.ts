@@ -1,8 +1,9 @@
 /**
  * TUI-style conversation module for desktop.
  *
- * Reuses TUI's approach of directly calling provider APIs via HTTP,
- * without going through the cc-haha sidecar or CLI subprocess.
+ * All requests go through the sidecar proxy (/api/cli-proxy) to avoid
+ * browser CORS restrictions. The sidecar reads ~/.claude.json for auth
+ * and proxies to provider APIs server-side.
  *
  * Supports all provider types:
  *  - Anthropic protocol: firstParty, openrouter, openai, local
@@ -12,6 +13,7 @@
  */
 
 import { getTuiConfig } from '../api/config'
+import { getBaseUrl } from '../api/client'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -151,18 +153,24 @@ async function* streamOpenAI(
     stream: true,
   }
 
+  // Proxy through sidecar to avoid browser CORS
+  const proxyUrl = `${getBaseUrl()}/api/cli-proxy/chat/completions`
+
   let res: Response
   try {
-    res = await fetch(`${config.baseUrl.replace(/\/$/, '')}/chat/completions`, {
+    res = await fetch(proxyUrl, {
       method: 'POST',
-      headers: openaiHeaders(config.apiKey),
+      headers: {
+        'Content-Type': 'application/json',
+        // API key is read by sidecar from ~/.claude.json
+      },
       body: JSON.stringify(body),
       signal,
     })
   } catch (err) {
     const name = err instanceof TypeError ? err.name : ''
     const msg = err instanceof Error ? err.message : String(err)
-    console.error('[tuiConversation] OpenAI fetch failed:', { name, message: msg, url: config.baseUrl, model: config.model })
+    console.error('[tuiConversation] OpenAI fetch failed:', { name, message: msg, url: proxyUrl, model: config.model })
     yield { type: 'error', message: `Network error: ${msg}${name ? ` (${name})` : ''}` }
     yield { type: 'done' }
     return
@@ -184,7 +192,6 @@ async function* streamOpenAI(
   const decoder = new TextDecoder()
   const reader = res.body.getReader()
   let buffer = ''
-  let hasReceivedContent = false
   const IDLE_TIMEOUT_MS = 3000
 
   yield { type: 'content_block_start', index: 0, blockType: 'text' }
@@ -192,9 +199,6 @@ async function* streamOpenAI(
   while (true) {
     if (signal?.aborted) break
 
-    // Race between read and idle timeout.  Some local providers (Ollama, LM Studio,
-    // etc.) never send [DONE] or close the SSE connection after the response is
-    // complete.  The timeout lets us detect this and finish cleanly.
     const readPromise = reader.read()
     const timeoutPromise = new Promise<{ done: true; value: undefined }>((resolve) =>
       setTimeout(() => resolve({ done: true, value: undefined }), IDLE_TIMEOUT_MS),
@@ -272,18 +276,21 @@ export async function* sendMessage(
     }
     if (options?.system) body.system = options.system
 
+    // Proxy through sidecar to avoid browser CORS
+    const proxyUrl = `${getBaseUrl()}/api/cli-proxy/messages`
+
     let res: Response
     try {
-      res = await fetch(`${config.baseUrl.replace(/\/$/, '')}/messages`, {
+      res = await fetch(proxyUrl, {
         method: 'POST',
-        headers: anthropicHeaders(config.apiKey),
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
         signal: options?.signal,
       })
     } catch (err) {
       const name = err instanceof TypeError ? err.name : ''
       const msg = err instanceof Error ? err.message : String(err)
-      console.error('[tuiConversation] Anthropic fetch failed:', { name, message: msg, url: config.baseUrl, model: config.model })
+      console.error('[tuiConversation] Anthropic fetch failed:', { name, message: msg, url: proxyUrl, model: config.model })
       yield { type: 'error', message: `Network error: ${msg}${name ? ` (${name})` : ''}` }
       yield { type: 'done' }
       return

@@ -316,7 +316,7 @@ export async function handleModelsApi(
 
 // ─── Handlers ─────────────────────────────────────────────────────────────────
 
-async function readCliAuthProvider(): Promise<{
+export async function readCliAuthProvider(): Promise<{
   authProvider?: 'anthropic' | 'openai' | 'openrouter' | 'local' | 'opencode' | 'nvidia'
 } | null> {
   try {
