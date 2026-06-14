@@ -1,3 +1,0 @@
-# [env] is nightly-only in Cargo (1.95 stable doesn't support it).
-# The Wayland GDK_BACKEND workaround is handled via package.json's tauri script
-# and main.rs's defense-in-depth fallback.
