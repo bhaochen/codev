@@ -1151,6 +1151,78 @@ fn set_app_zoom(window: tauri::WebviewWindow, zoom_factor: f64) -> Result<(), St
         .map_err(|err| format!("set app zoom: {err}"))
 }
 
+/// Get the path to ~/.claude.json (mirrors TUI's getGlobalClaudeFile)
+fn get_global_claude_file_path() -> std::path::PathBuf {
+    // Same logic as TUI's getGlobalClaudeFile(): follow CLAUDE_CONFIG_DIR, then homedir
+    if let Ok(config_dir) = std::env::var("CLAUDE_CONFIG_DIR") {
+        std::path::PathBuf::from(config_dir).join(".claude.json")
+    } else {
+        dirs::home_dir()
+            .map(|h| h.join(".claude.json"))
+            .unwrap_or_else(|| std::path::PathBuf::from(".claude.json"))
+    }
+}
+
+/// Read the global Claude config file (~/.claude.json).
+/// Returns the parsed JSON or null if the file doesn't exist.
+#[tauri::command]
+fn get_claude_config() -> Result<serde_json::Value, String> {
+    let path = get_global_claude_file_path();
+    match fs::read_to_string(&path) {
+        Ok(content) => serde_json::from_str(&content)
+            .map_err(|e| format!("parse {}: {e}", path.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(serde_json::Value::Null),
+        Err(e) => Err(format!("read {}: {e}", path.display())),
+    }
+}
+
+/// Write the global Claude config file (~/.claude.json).
+/// The content is merged with the existing file (deep merge).
+#[tauri::command]
+fn save_claude_config(patch: serde_json::Value) -> Result<(), String> {
+    let path = get_global_claude_file_path();
+    // Ensure parent directory exists
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("create config dir {}: {e}", parent.display()))?;
+    }
+    // Read existing content
+    let existing: serde_json::Value = if path.exists() {
+        let content = fs::read_to_string(&path)
+            .map_err(|e| format!("read {}: {e}", path.display()))?;
+        serde_json::from_str(&content)
+            .unwrap_or(serde_json::Value::Object(serde_json::Map::new()))
+    } else {
+        serde_json::Value::Object(serde_json::Map::new())
+    };
+    // Deep merge: patch overrides existing
+    let merged = deep_merge_json(&existing, &patch);
+    let json = serde_json::to_string_pretty(&merged)
+        .map_err(|e| format!("serialize config: {e}"))?;
+    fs::write(&path, json)
+        .map_err(|e| format!("write {}: {e}", path.display()))?;
+    Ok(())
+}
+
+/// Deep-merge two JSON objects. Patch values override existing ones.
+/// Arrays are replaced, not concatenated.
+fn deep_merge_json(base: &serde_json::Value, patch: &serde_json::Value) -> serde_json::Value {
+    match (base, patch) {
+        (serde_json::Value::Object(base_map), serde_json::Value::Object(patch_map)) => {
+            let mut result = base_map.clone();
+            for (key, patch_val) in patch_map {
+                let merged = match result.get(key) {
+                    Some(existing_val) => deep_merge_json(existing_val, patch_val),
+                    None => patch_val.clone(),
+                };
+                result.insert(key.clone(), merged);
+            }
+            serde_json::Value::Object(result)
+        }
+        _ => patch.clone(),
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn open_windows_notification_settings_impl() -> Result<bool, String> {
     StdCommand::new("explorer.exe")
@@ -2129,7 +2201,9 @@ pub fn run() {
             get_app_mode,
             set_app_mode,
             detect_portable_dir,
-            set_app_zoom
+            set_app_zoom,
+            get_claude_config,
+            save_claude_config
         ]);
 
     // macOS: native menu bar (traffic-light overlay style)

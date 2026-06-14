@@ -544,7 +544,7 @@ const MessagesImpl = ({
   }, [collapsed_0, renderRange, virtualScrollRuntimeGate, disableRenderCap]);
   const streamingToolUseIDs = useMemo(() => new Set(streamingToolUses.map(__0 => __0.contentBlock.id)), [streamingToolUses]);
 
-  useAutoTTS(renderableMessages);
+  useAutoTTS(renderableMessages, isLoading);
 
   // Divider insertion point: first renderableMessage whose uuid shares the
   // 24-char prefix with firstUnseenUuid (deriveUUID keeps the first 24

@@ -1,5 +1,13 @@
+/**
+ * Desktop auth store that reads/writes ~/.claude.json directly via Rust Tauri commands.
+ * Mirrors TUI's src/utils/auth.ts save* functions.
+ *
+ * This removes the dependency on cc-haha's /api/cli-auth HTTP endpoint.
+ */
 import { create } from 'zustand'
-import { cliAuthApi, type AuthProvider, type CliAuthConfig } from '../api/cliAuth'
+import { getTuiConfig, saveTuiConfigPatch, clearConfigCache } from '../api/config'
+
+type AuthProvider = 'anthropic' | 'openai' | 'openrouter' | 'local' | 'opencode' | 'nvidia'
 
 type CliAuthStore = {
   authProvider: AuthProvider | null
@@ -38,16 +46,19 @@ export const useCliAuthStore = create<CliAuthStore>((set) => ({
   fetchAuth: async () => {
     set({ isLoading: true, error: null })
     try {
-      const config = await cliAuthApi.get()
+      const config = await getTuiConfig()
+      // Map TUI's authProvider names to our store's names
+      // TUI uses 'anthropic' → our 'anthropic' means firstParty
+      const authProvider = config.authProvider ?? null
       set({
-        authProvider: config.authProvider,
-        nvidiaApiKey: config.nvidiaApiKey || null,
-        openRouterApiKey: config.openRouterApiKey || null,
-        openAiApiKey: config.openAiApiKey || config.openAiAccessToken || null,
-        openCodeApiKey: config.openCodeApiKey || null,
-        openCodeModelName: config.openCodeModelName || null,
-        localBaseUrl: config.localBaseUrl || null,
-        localModelName: config.localModelName || null,
+        authProvider,
+        nvidiaApiKey: config.nvidiaApiKey ?? null,
+        openRouterApiKey: config.openRouterApiKey ?? null,
+        openAiApiKey: (config.openAiApiKey || config.openAiAccessToken) ?? null,
+        openCodeApiKey: config.openCodeApiKey ?? null,
+        openCodeModelName: config.openCodeModelName ?? null,
+        localBaseUrl: config.localBaseUrl ?? null,
+        localModelName: config.localModelName ?? null,
         isLoading: false,
       })
     } catch (err) {
@@ -58,8 +69,8 @@ export const useCliAuthStore = create<CliAuthStore>((set) => ({
   setAuthProvider: async (provider: AuthProvider) => {
     set({ isLoading: true, error: null })
     try {
-      await cliAuthApi.update({ authProvider: provider })
-      await cliAuthApi.invalidateCache()
+      await saveTuiConfigPatch({ authProvider: provider })
+      clearConfigCache()
       set({ authProvider: provider, isLoading: false })
     } catch (err) {
       set({ isLoading: false, error: err instanceof Error ? err.message : String(err) })
@@ -69,8 +80,11 @@ export const useCliAuthStore = create<CliAuthStore>((set) => ({
   saveNvidiaApiKey: async (apiKey: string) => {
     set({ isLoading: true, error: null })
     try {
-      await cliAuthApi.update({ authProvider: 'nvidia', nvidiaApiKey: apiKey })
-      await cliAuthApi.invalidateCache()
+      await saveTuiConfigPatch({
+        authProvider: 'nvidia',
+        nvidiaApiKey: apiKey,
+      })
+      clearConfigCache()
       set({ authProvider: 'nvidia', nvidiaApiKey: apiKey, isLoading: false })
     } catch (err) {
       set({ isLoading: false, error: err instanceof Error ? err.message : String(err) })
@@ -80,8 +94,11 @@ export const useCliAuthStore = create<CliAuthStore>((set) => ({
   saveOpenRouterApiKey: async (apiKey: string) => {
     set({ isLoading: true, error: null })
     try {
-      await cliAuthApi.update({ authProvider: 'openrouter', openRouterApiKey: apiKey })
-      await cliAuthApi.invalidateCache()
+      await saveTuiConfigPatch({
+        authProvider: 'openrouter',
+        openRouterApiKey: apiKey,
+      })
+      clearConfigCache()
       set({ authProvider: 'openrouter', openRouterApiKey: apiKey, isLoading: false })
     } catch (err) {
       set({ isLoading: false, error: err instanceof Error ? err.message : String(err) })
@@ -91,8 +108,12 @@ export const useCliAuthStore = create<CliAuthStore>((set) => ({
   saveOpenAIApiKey: async (apiKey: string) => {
     set({ isLoading: true, error: null })
     try {
-      await cliAuthApi.update({ authProvider: 'openai', openAiApiKey: apiKey })
-      await cliAuthApi.invalidateCache()
+      await saveTuiConfigPatch({
+        authProvider: 'openai',
+        openAiApiKey: apiKey,
+        openAiAccessToken: undefined, // Clear OAuth token when switching to API key
+      })
+      clearConfigCache()
       set({ authProvider: 'openai', openAiApiKey: apiKey, isLoading: false })
     } catch (err) {
       set({ isLoading: false, error: err instanceof Error ? err.message : String(err) })
@@ -102,10 +123,12 @@ export const useCliAuthStore = create<CliAuthStore>((set) => ({
   saveOpenCodeApiKey: async (apiKey: string, modelName?: string) => {
     set({ isLoading: true, error: null })
     try {
-      const updates: Record<string, unknown> = { authProvider: 'opencode', openCodeApiKey: apiKey }
-      if (modelName) updates.openCodeModelName = modelName
-      await cliAuthApi.update(updates as Partial<CliAuthConfig>)
-      await cliAuthApi.invalidateCache()
+      await saveTuiConfigPatch({
+        authProvider: 'opencode',
+        openCodeApiKey: apiKey || undefined,
+        openCodeModelName: modelName || undefined,
+      })
+      clearConfigCache()
       set({
         authProvider: 'opencode',
         openCodeApiKey: apiKey,
@@ -120,9 +143,18 @@ export const useCliAuthStore = create<CliAuthStore>((set) => ({
   saveLocalModelConfig: async (baseUrl: string, modelName: string) => {
     set({ isLoading: true, error: null })
     try {
-      await cliAuthApi.update({ authProvider: 'local', localBaseUrl: baseUrl, localModelName: modelName })
-      await cliAuthApi.invalidateCache()
-      set({ authProvider: 'local', localBaseUrl: baseUrl, localModelName: modelName, isLoading: false })
+      await saveTuiConfigPatch({
+        authProvider: 'local',
+        localBaseUrl: baseUrl,
+        localModelName: modelName,
+      })
+      clearConfigCache()
+      set({
+        authProvider: 'local',
+        localBaseUrl: baseUrl,
+        localModelName: modelName,
+        isLoading: false,
+      })
     } catch (err) {
       set({ isLoading: false, error: err instanceof Error ? err.message : String(err) })
     }
@@ -131,9 +163,31 @@ export const useCliAuthStore = create<CliAuthStore>((set) => ({
   clearAuth: async () => {
     set({ isLoading: true, error: null })
     try {
-      await cliAuthApi.update({ authProvider: null })
-      await cliAuthApi.invalidateCache()
-      set({ authProvider: null, nvidiaApiKey: null, openRouterApiKey: null, openAiApiKey: null, openCodeApiKey: null, localBaseUrl: null, localModelName: null, isLoading: false })
+      // Clear by writing null values for all auth fields
+      await saveTuiConfigPatch({
+        authProvider: null,
+        primaryApiKey: undefined,
+        openAiApiKey: undefined,
+        openAiAccessToken: undefined,
+        openRouterApiKey: undefined,
+        nvidiaApiKey: undefined,
+        openCodeApiKey: undefined,
+        openCodeModelName: undefined,
+        localBaseUrl: undefined,
+        localModelName: undefined,
+      })
+      clearConfigCache()
+      set({
+        authProvider: null,
+        nvidiaApiKey: null,
+        openRouterApiKey: null,
+        openAiApiKey: null,
+        openCodeApiKey: null,
+        openCodeModelName: null,
+        localBaseUrl: null,
+        localModelName: null,
+        isLoading: false,
+      })
     } catch (err) {
       set({ isLoading: false, error: err instanceof Error ? err.message : String(err) })
     }

@@ -3,6 +3,8 @@ import { ApiError } from '../api/client'
 import { settingsApi } from '../api/settings'
 import { modelsApi } from '../api/models'
 import { h5AccessApi } from '../api/h5Access'
+import { fetchProviderModels } from '../api/providerModels'
+import { getTuiConfig, saveTuiConfigPatch } from '../api/config'
 import {
   isThemeMode,
   type AppMode,
@@ -170,23 +172,60 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     set({ isLoading: true, error: null })
     try {
       const previousH5Access = get().h5Access
-      const [{ mode }, modelsRes, { model }, { level }, userSettings, h5AccessResult] = await Promise.all([
+      const [directModels, { mode }, config, userSettings, h5AccessResult] = await Promise.all([
+        // Fetch models directly from provider APIs (TUI-style)
+        fetchProviderModels().catch(() => ({ models: [] as ModelInfo[], provider: null as { id: string; name: string } | null })),
         settingsApi.getPermissionMode(),
-        modelsApi.list(),
-        modelsApi.getCurrent(),
-        modelsApi.getEffort(),
+        // Read model + effort from ~/.claude.json (TUI-style), bypassing sidecar
+        getTuiConfig(),
         settingsApi.getUser(),
         loadH5AccessSettings(previousH5Access),
       ])
+
+      // Use direct models if available (TUI-style), otherwise fall back to sidecar
+      let availableModels: ModelInfo[]
+      let activeProviderId: string | null
+      let activeProviderName: string | null
+
+      if (directModels.models.length > 0) {
+        availableModels = directModels.models
+        activeProviderId = directModels.provider?.id ?? null
+        activeProviderName = directModels.provider?.name ?? null
+      } else {
+        const sidecarRes = await modelsApi.list().catch(() => null)
+        if (sidecarRes && sidecarRes.models.length > 0) {
+          availableModels = sidecarRes.models
+          activeProviderId = sidecarRes.provider?.id ?? null
+          activeProviderName = sidecarRes.provider?.name ?? null
+        } else {
+          availableModels = []
+          activeProviderId = null
+          activeProviderName = null
+        }
+      }
+
+      // Derive currentModel from config's model field, matched against availableModels
+      const configModelId = config.model ?? null
+      const currentModel: ModelInfo | null = configModelId
+        ? availableModels.find((m) => m.id === configModelId) ?? {
+            id: configModelId,
+            name: configModelId,
+            description: '',
+            context: '',
+          }
+        : null
+      const effortLevel: EffortLevel =
+        (config.effortLevel as EffortLevel) ?? 'medium'
+
       const theme = isThemeMode(userSettings.theme) ? userSettings.theme : 'white'
       useUIStore.getState().setTheme(theme)
       set({
         permissionMode: mode,
-        availableModels: modelsRes.models,
-        activeProviderId: modelsRes.provider?.id ?? null,
-        activeProviderName: modelsRes.provider?.name ?? null,
-        currentModel: model,
-        effortLevel: level,
+        availableModels,
+        activeProviderId,
+        activeProviderName,
+        currentModel,
+        effortLevel,
         thinkingEnabled: userSettings.alwaysThinkingEnabled !== false,
         theme,
         skipWebFetchPreflight: userSettings.skipWebFetchPreflight !== false,
@@ -225,16 +264,22 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   },
 
   setModel: async (modelId) => {
-    await modelsApi.setCurrent(modelId)
-    const { model } = await modelsApi.getCurrent()
-    set({ currentModel: model })
+    await saveTuiConfigPatch({ model: modelId })
+    const availableModels = get().availableModels
+    const currentModel: ModelInfo | null = availableModels.find((m) => m.id === modelId) ?? {
+      id: modelId,
+      name: modelId,
+      description: '',
+      context: '',
+    }
+    set({ currentModel })
   },
 
   setEffort: async (level) => {
     const prev = get().effortLevel
     set({ effortLevel: level })
     try {
-      await modelsApi.setEffort(level)
+      await saveTuiConfigPatch({ effortLevel: level })
     } catch {
       set({ effortLevel: prev })
     }

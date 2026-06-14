@@ -9,6 +9,8 @@ import { useTabStore } from './tabStore'
 import { randomSpinnerVerb } from '../config/spinnerVerbs'
 import { notifyDesktop } from '../lib/desktopNotifications'
 import { deriveSessionTitle, isPlaceholderSessionTitle } from '../lib/sessionTitle'
+import * as tuiConversation from '../lib/tuiConversation'
+import type { ConversationMessage } from '../lib/tuiConversation'
 import { AGENT_LIFECYCLE_TYPES } from '../types/team'
 import type { ComposerAttachment } from '../lib/composerAttachments'
 import type { MessageEntry } from '../types/session'
@@ -145,6 +147,7 @@ type ChatStore = {
   clearComposerDraft: (sessionId: string) => void
   clearMessages: (sessionId: string) => void
   handleServerMessage: (sessionId: string, msg: ServerMessage) => void
+  startDirectConversation: (sessionId: string, content: string) => Promise<void>
 }
 
 const TASK_TOOL_NAMES = new Set(['TaskCreate', 'TaskUpdate', 'TaskGet', 'TaskList', 'TodoWrite'])
@@ -612,6 +615,21 @@ function mergeSlashCommandUpdates(
   return [...merged.values()]
 }
 
+function buildConversationHistory(messages: UIMessage[]): ConversationMessage[] {
+  const history: ConversationMessage[] = []
+  for (const msg of messages) {
+    if (msg.type === 'user_text') {
+      const record = msg as Extract<UIMessage, { type: 'user_text' }>
+      const text = (record as { modelContent?: string }).modelContent || record.content
+      history.push({ role: 'user', content: text })
+    } else if (msg.type === 'assistant_text') {
+      const text = (msg as Extract<UIMessage, { type: 'assistant_text' }>).content
+      history.push({ role: 'assistant', content: text })
+    }
+  }
+  return history
+}
+
 async function fetchAndMapSessionHistory(sessionId: string) {
   const { messages, taskNotifications } = await sessionsApi.getMessages(sessionId)
   const uiMessages = mapHistoryMessagesToUiMessages(messages)
@@ -663,13 +681,15 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       get().handleServerMessage(sessionId, msg)
     })
 
-    const runtimeSelection = useSessionRuntimeStore.getState().selections[sessionId]
-    if (runtimeSelection) {
-      wsManager.send(sessionId, { type: 'set_runtime_config', ...runtimeSelection })
-    }
-    if (!sessionId.startsWith('__') && !useTeamStore.getState().getMemberBySessionId(sessionId)) {
-      wsManager.send(sessionId, { type: 'prewarm_session' })
-    }
+    // Direct API mode: no sidecar runtime config to send
+    // const runtimeSelection = useSessionRuntimeStore.getState().selections[sessionId]
+    // if (runtimeSelection) {
+    //   wsManager.send(sessionId, { type: 'set_runtime_config', ...runtimeSelection })
+    // }
+    // Direct API mode: no CLI subprocess to prewarm
+    // if (!sessionId.startsWith('__') && !useTeamStore.getState().getMemberBySessionId(sessionId)) {
+    //   wsManager.send(sessionId, { type: 'prewarm_session' })
+    // }
 
     get().loadHistory(sessionId)
     sessionsApi.getSlashCommands(sessionId)
@@ -811,7 +831,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       return
     }
 
-    wsManager.send(sessionId, { type: 'user_message', content, attachments })
+    // Use direct provider API instead of sidecar CLI subprocess
+    get().startDirectConversation(sessionId, modelFacingContent)
   },
 
   respondToPermission: (sessionId, requestId, allowed, options) => {
@@ -852,29 +873,197 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   },
 
   stopGeneration: (sessionId) => {
-    wsManager.send(sessionId, { type: 'stop_generation' })
+    // Direct transport: no WebSocket to send stop signal to.
+    // For now, aborts are not supported in direct mode.
+    // The session will complete the current response naturally.
     if (pendingDeltaBySession.has(sessionId)) {
       const text = consumePendingDelta(sessionId)
       set((s) => ({ sessions: updateSessionIn(s.sessions, sessionId, (sess) => ({ streamingText: sess.streamingText + text })) }))
     }
-    set((s) => {
-      const session = s.sessions[sessionId]
-      if (!session) return s
-      if (session.elapsedTimer) clearInterval(session.elapsedTimer)
-      return {
-        sessions: {
-          ...s.sessions,
-          [sessionId]: {
-            ...session,
-            chatState: 'idle',
-            pendingPermission: null,
-            pendingComputerUsePermission: null,
-            apiRetry: null,
-            elapsedTimer: null,
-          },
-        },
+    clearPendingTaskToolUseIds(sessionId)
+    clearPendingToolParentUseIds(sessionId)
+  },
+
+  startDirectConversation: async (sessionId, _content) => {
+    const session = get().sessions[sessionId]
+    if (!session) return
+
+    // Build conversation history from existing messages.
+    // The user's new message is already in session.messages (added by sendMessage's
+    // synchronous set()), so no need to push it again.
+    const history = buildConversationHistory(session.messages)
+
+    // Use runtime-selected model if available (set via desktop session settings)
+    const runtimeSelection = useSessionRuntimeStore.getState().selections[sessionId]
+    const sendOptions: { model?: string } = {}
+    if (runtimeSelection?.modelId) {
+      sendOptions.model = runtimeSelection.modelId
+    }
+
+    try {
+      const stream = tuiConversation.sendMessage(history, sendOptions)
+      for await (const event of stream) {
+        switch (event.type) {
+          case 'content_block_start': {
+            if (event.blockType === 'text') {
+              set((s) => ({
+                sessions: updateSessionIn(s.sessions, sessionId, () => ({
+                  chatState: 'streaming',
+                  apiRetry: null,
+                })),
+              }))
+            }
+            break
+          }
+
+          case 'text_delta': {
+            appendPendingDelta(sessionId, event.text)
+            if (!flushTimerBySession.has(sessionId)) {
+              const timer = setTimeout(() => {
+                const text = pendingDeltaBySession.get(sessionId) ?? ''
+                pendingDeltaBySession.delete(sessionId)
+                flushTimerBySession.delete(sessionId)
+                set((s) => ({
+                  sessions: updateSessionIn(s.sessions, sessionId, (sess) => ({
+                    streamingText: sess.streamingText + text,
+                  })),
+                }))
+              }, 50)
+              flushTimerBySession.set(sessionId, timer)
+            }
+            break
+          }
+
+          case 'thinking_delta': {
+            set((s) => {
+              const sess = s.sessions[sessionId] ?? createDefaultSessionState()
+              const pendingText = `${sess.streamingText}${consumePendingDelta(sessionId)}`
+              let base = sess.messages
+              if (pendingText.trim()) {
+                base = appendAssistantTextMessage(base, pendingText, Date.now())
+              }
+              const last = base[base.length - 1]
+              if (last && last.type === 'thinking') {
+                const updated = [...base]
+                updated[updated.length - 1] = {
+                  ...last,
+                  content: last.content + event.thinking,
+                }
+                return {
+                  sessions: updateSessionIn(s.sessions, sessionId, () => ({
+                    messages: updated,
+                    chatState: 'thinking',
+                    activeThinkingId: last.id,
+                    streamingText: '',
+                  })),
+                }
+              }
+              const id = nextId()
+              return {
+                sessions: updateSessionIn(s.sessions, sessionId, () => ({
+                  messages: [
+                    ...base,
+                    { id, type: 'thinking', content: event.thinking, timestamp: Date.now() },
+                  ],
+                  chatState: 'thinking',
+                  activeThinkingId: id,
+                  streamingText: '',
+                })),
+              }
+            })
+            break
+          }
+
+          case 'content_block_stop': {
+            const pendingText = consumePendingDelta(sessionId)
+            set((s) => ({
+              sessions: updateSessionIn(s.sessions, sessionId, (sess) => {
+                const accumulatedText = `${sess.streamingText}${pendingText}`
+                if (!accumulatedText.trim()) return {}
+                return {
+                  messages: appendAssistantTextMessage(sess.messages, accumulatedText, Date.now()),
+                  streamingText: '',
+                }
+              }),
+            }))
+            break
+          }
+
+          case 'message_stop': {
+            // Flush any remaining pending delta
+            const remainingText = consumePendingDelta(sessionId)
+            if (remainingText.trim()) {
+              set((s) => ({
+                sessions: updateSessionIn(s.sessions, sessionId, (sess) => ({
+                  messages: appendAssistantTextMessage(
+                    sess.messages,
+                    `${sess.streamingText}${remainingText}`,
+                    Date.now(),
+                  ),
+                  streamingText: '',
+                })),
+              }))
+            }
+            const sess = get().sessions[sessionId]
+            if (sess?.elapsedTimer) {
+              clearInterval(sess.elapsedTimer)
+            }
+            set((s) => ({
+              sessions: updateSessionIn(s.sessions, sessionId, () => ({
+                chatState: 'idle',
+                elapsedTimer: null,
+                statusVerb: '',
+              })),
+            }))
+            break
+          }
+
+          case 'done':
+            break
+
+          case 'error': {
+            set((s) => ({
+              sessions: updateSessionIn(s.sessions, sessionId, (sess) => ({
+                chatState: 'idle',
+                messages: [
+                  ...sess.messages,
+                  {
+                    id: nextId(),
+                    type: 'error',
+                    message: event.message,
+                    code: 'CLI_ERROR',
+                    timestamp: Date.now(),
+                  } as UIMessage,
+                ],
+              })),
+            }))
+            break
+          }
+        }
       }
-    })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      const sess = get().sessions[sessionId]
+      if (sess?.elapsedTimer) {
+        clearInterval(sess.elapsedTimer)
+      }
+      set((s) => ({
+        sessions: updateSessionIn(s.sessions, sessionId, (sess) => ({
+          chatState: 'idle',
+          elapsedTimer: null,
+          messages: [
+            ...sess.messages,
+            {
+              id: nextId(),
+              type: 'error',
+              message,
+              code: 'CLI_ERROR',
+              timestamp: Date.now(),
+            } as UIMessage,
+          ],
+        })),
+      }))
+    }
   },
 
   loadHistory: async (sessionId) => {

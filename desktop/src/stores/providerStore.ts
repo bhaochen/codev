@@ -10,6 +10,7 @@ import {
   OPENAI_OFFICIAL_DEFAULT_MODEL_ID,
   OPENAI_OFFICIAL_PROVIDER_ID,
 } from '../constants/openaiOfficialProvider'
+import { saveTuiConfigPatch, clearConfigCache } from '../api/config'
 import type {
   SavedProvider,
   CreateProviderInput,
@@ -46,6 +47,34 @@ function providerModelIds(provider: SavedProvider): Set<string> {
       .map((modelId) => modelId.trim())
       .filter(Boolean),
   )
+}
+
+/** Map a sidecar SavedProvider to TUI ~/.claude.json authProvider fields */
+type TuiProviderMapping = { authProvider: string; apiKeyField: string; apiKey?: string } | null
+function mapSidecarToTuiProvider(provider: SavedProvider): TuiProviderMapping {
+  const apiFormat = provider.apiFormat || 'anthropic'
+  switch (apiFormat) {
+    case 'anthropic':
+      return { authProvider: 'anthropic', apiKeyField: 'anthropicApiKey', apiKey: provider.apiKey }
+    case 'openai': {
+      // Try to infer specific provider from base URL or name
+      const baseUrl = (provider.baseUrl || '').toLowerCase()
+      const name = (provider.name || '').toLowerCase()
+      if (baseUrl.includes('nvidia') || name.includes('nvidia')) {
+        return { authProvider: 'nvidia', apiKeyField: 'nvidiaApiKey', apiKey: provider.apiKey }
+      }
+      if (baseUrl.includes('openrouter') || name.includes('openrouter')) {
+        return { authProvider: 'openrouter', apiKeyField: 'openRouterApiKey', apiKey: provider.apiKey }
+      }
+      if (baseUrl.includes('opencode') || name.includes('opencode')) {
+        return { authProvider: 'opencode', apiKeyField: 'openCodeApiKey', apiKey: provider.apiKey }
+      }
+      // Generic OpenAI-compatible
+      return { authProvider: 'openai', apiKeyField: 'openAiApiKey', apiKey: provider.apiKey }
+    }
+    default:
+      return null
+  }
 }
 
 function resolveRuntimeRefreshSelection(
@@ -147,10 +176,11 @@ export const useProviderStore = create<ProviderStore>((set, get) => ({
   activateProvider: async (id) => {
     await providersApi.activate(id)
     await get().fetchProviders()
-    // 更新默认 provider 时，同步刷新默认 model，避免 settings.json 里残留
-    // 旧 provider 的 model id 导致默认选择指向不存在的模型。
+    // 同步 provider 信息到 ~/.claude.json，这样 fetchProviderModels() / tuiConversation
+    // 可以直接通过 TUI 方式来读取配置，无需依赖 sidecar。
     const settings = useSettingsStore.getState()
     if (id === OPENAI_OFFICIAL_PROVIDER_ID) {
+      await saveTuiConfigPatch({ authProvider: 'anthropic' })
       await settings.setModel(OPENAI_OFFICIAL_DEFAULT_MODEL_ID)
       await settings.fetchAll()
       return
@@ -158,7 +188,30 @@ export const useProviderStore = create<ProviderStore>((set, get) => ({
 
     const provider = get().providers.find((p) => p.id === id)
     if (!provider) return
+
+    // Map sidecar apiFormat to TUI authProvider
+    const tuiProvider = mapSidecarToTuiProvider(provider)
+    const patch: Record<string, unknown> = {}
+    if (tuiProvider) {
+      patch.authProvider = tuiProvider.authProvider
+      if (tuiProvider.apiKey) patch[tuiProvider.apiKeyField] = tuiProvider.apiKey
+    }
+    patch.model = provider.models.main
+    await saveTuiConfigPatch(patch)
+    clearConfigCache()
+
     await settings.setModel(provider.models.main)
+    await settings.fetchAll()
+  },
+
+  activateOfficial: async () => {
+    await providersApi.activateOfficial()
+    await get().fetchProviders()
+    // 同步回 Anthropic first-party
+    await saveTuiConfigPatch({ authProvider: 'anthropic' })
+    clearConfigCache()
+    const settings = useSettingsStore.getState()
+    await settings.setModel(OFFICIAL_DEFAULT_MODEL_ID)
     await settings.fetchAll()
   },
 

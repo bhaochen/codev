@@ -24,27 +24,47 @@ function resolveEdgeTTSVoice(language: string | undefined, explicitVoice: string
   return 'en-US-JennyNeural'
 }
 
-export function useAutoTTS(messages: RenderableMessage[]): void {
+export function useAutoTTS(messages: RenderableMessage[], isLoading?: boolean): void {
   const triggeredIdsRef = useRef<Set<string>>(new Set())
   const pendingPlayRef = useRef<Promise<void> | null>(null)
+
+  // Snapshot of message IDs present when the conversation first becomes "active".
+  // isLoading goes true on the first user submit and stays false on resume.
+  // By waiting for isLoading=true we ensure the snapshot captures the correct
+  // boundary: everything before it is history (skip), everything after is new.
+  const historyIdsRef = useRef<Set<string> | null>(null)
+  const wasLoadingRef = useRef<boolean>(false)
 
   useEffect(() => {
     const settings = getInitialSettings()
     if (!settings.voiceAutoTTS || !settings.voiceEnabled) return
 
-    for (const msg of messages) {
-      if (msg.type !== 'assistant') continue
-      if (triggeredIdsRef.current.has(msg.uuid)) continue
+    // Capture history snapshot on the transition from idle → active.
+    // This fires once: when the user first submits a message in a fresh REPL,
+    // or (importantly) never during a resume where isLoading stays false.
+    if (!historyIdsRef.current && !wasLoadingRef.current && isLoading) {
+      historyIdsRef.current = new Set(messages.map(m => m.uuid))
+    }
+    wasLoadingRef.current = isLoading ?? false
 
+    const voice = resolveEdgeTTSVoice(
+      settings.voiceLanguage || settings.language,
+      settings.voiceTTSVoice,
+    )
+
+    for (const msg of messages) {
+      if (triggeredIdsRef.current.has(msg.uuid)) continue
+      // Skip messages that were present before the conversation became active.
+      if (historyIdsRef.current?.has(msg.uuid)) continue
+
+      triggeredIdsRef.current.add(msg.uuid)
+
+      if (msg.type !== 'assistant') continue
       const content = msg.message.content[0]
       if (content?.type !== 'text') continue
       if (!content.text.trim()) continue
 
-      triggeredIdsRef.current.add(msg.uuid)
-
       const text = content.text
-      const language = settings.voiceLanguage || settings.language
-      const voice = resolveEdgeTTSVoice(language, settings.voiceTTSVoice)
 
       const run = async () => {
         const result = await speakWithEdgeTTS(text, {
@@ -62,5 +82,5 @@ export function useAutoTTS(messages: RenderableMessage[]): void {
         pendingPlayRef.current = run().catch(() => {})
       }
     }
-  }, [messages])
+  }, [messages, isLoading])
 }
