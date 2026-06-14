@@ -11,6 +11,7 @@ import {
   OPENAI_OFFICIAL_PROVIDER_ID,
 } from '../constants/openaiOfficialProvider'
 import { saveTuiConfigPatch, clearConfigCache } from '../api/config'
+import { clearProviderModelCache } from '../api/providerModels'
 import type {
   SavedProvider,
   CreateProviderInput,
@@ -53,13 +54,27 @@ function providerModelIds(provider: SavedProvider): Set<string> {
 type TuiProviderMapping = { authProvider: string; apiKeyField: string; apiKey?: string } | null
 function mapSidecarToTuiProvider(provider: SavedProvider): TuiProviderMapping {
   const apiFormat = provider.apiFormat || 'anthropic'
+  const baseUrl = (provider.baseUrl || '').toLowerCase()
+  const name = (provider.name || '').toLowerCase()
+
+  // Detect local provider (Ollama, LM Studio, vLLM, etc.)
+  if (
+    apiFormat === 'openai' &&
+    (baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1') || baseUrl.includes('0.0.0.0') ||
+     name.includes('local') || name.includes('ollama'))
+  ) {
+    return {
+      authProvider: 'local',
+      apiKeyField: 'localBaseUrl',
+      // TUI's local config expects localBaseUrl + localModelName
+      apiKey: provider.baseUrl,
+    }
+  }
+
   switch (apiFormat) {
     case 'anthropic':
       return { authProvider: 'anthropic', apiKeyField: 'anthropicApiKey', apiKey: provider.apiKey }
     case 'openai': {
-      // Try to infer specific provider from base URL or name
-      const baseUrl = (provider.baseUrl || '').toLowerCase()
-      const name = (provider.name || '').toLowerCase()
       if (baseUrl.includes('nvidia') || name.includes('nvidia')) {
         return { authProvider: 'nvidia', apiKeyField: 'nvidiaApiKey', apiKey: provider.apiKey }
       }
@@ -176,28 +191,44 @@ export const useProviderStore = create<ProviderStore>((set, get) => ({
   activateProvider: async (id) => {
     await providersApi.activate(id)
     await get().fetchProviders()
-    // 同步 provider 信息到 ~/.claude.json，这样 fetchProviderModels() / tuiConversation
-    // 可以直接通过 TUI 方式来读取配置，无需依赖 sidecar。
-    const settings = useSettingsStore.getState()
-    if (id === OPENAI_OFFICIAL_PROVIDER_ID) {
-      await saveTuiConfigPatch({ authProvider: 'anthropic' })
-      await settings.setModel(OPENAI_OFFICIAL_DEFAULT_MODEL_ID)
-      await settings.fetchAll()
-      return
-    }
 
     const provider = get().providers.find((p) => p.id === id)
     if (!provider) return
 
-    // Map sidecar apiFormat to TUI authProvider
+    // Derive CLI authProvider from the sidecar provider
     const tuiProvider = mapSidecarToTuiProvider(provider)
+    const authProvider = tuiProvider?.authProvider ?? null
+    const cliProviderId = authProvider ? `cli-${authProvider}` : null
+    const CLI_PROVIDER_NAMES: Record<string, string> = {
+      nvidia: 'NVIDIA',
+      openrouter: 'OpenRouter',
+      opencode: 'OpenCode Zen',
+      openai: 'OpenAI',
+      local: 'Local',
+      anthropic: 'Anthropic',
+    }
+    const cliProviderName = authProvider ? (CLI_PROVIDER_NAMES[authProvider] ?? authProvider) : null
+
+    // Optimistically update settingsStore so the UI reflects the change immediately
+    const settings = useSettingsStore.getState()
+    const cliModels = Object.values(provider.models).filter(Boolean).map(id => ({
+      id, name: id, description: '', context: '',
+    }))
+    settings.setActiveProvider(cliProviderId, cliProviderName, cliModels)
+
+    // Sync provider info to ~/.claude.json
     const patch: Record<string, unknown> = {}
-    if (tuiProvider) {
-      patch.authProvider = tuiProvider.authProvider
-      if (tuiProvider.apiKey) patch[tuiProvider.apiKeyField] = tuiProvider.apiKey
+    if (authProvider) patch.authProvider = authProvider
+    if (tuiProvider?.authProvider === 'local') {
+      patch.localBaseUrl = provider.baseUrl
+      patch.localModelName = provider.models.main
+    } else if (tuiProvider?.apiKey) {
+      patch[tuiProvider.apiKeyField] = tuiProvider.apiKey
     }
     patch.model = provider.models.main
+
     await saveTuiConfigPatch(patch)
+    clearProviderModelCache()
     clearConfigCache()
 
     await settings.setModel(provider.models.main)
@@ -209,16 +240,8 @@ export const useProviderStore = create<ProviderStore>((set, get) => ({
     await get().fetchProviders()
     // 同步回 Anthropic first-party
     await saveTuiConfigPatch({ authProvider: 'anthropic' })
+    clearProviderModelCache()
     clearConfigCache()
-    const settings = useSettingsStore.getState()
-    await settings.setModel(OFFICIAL_DEFAULT_MODEL_ID)
-    await settings.fetchAll()
-  },
-
-  activateOfficial: async () => {
-    await providersApi.activateOfficial()
-    await get().fetchProviders()
-    // 切回官方默认时同样重置 currentModel，避免残留第三方 model id。
     const settings = useSettingsStore.getState()
     await settings.setModel(OFFICIAL_DEFAULT_MODEL_ID)
     await settings.fetchAll()

@@ -45,7 +45,9 @@ const CLI_PROVIDER_NAMES: Record<string, string> = {
   nvidia: 'NVIDIA',
   openrouter: 'OpenRouter',
   opencode: 'OpenCode Zen',
+  openai: 'OpenAI',
   local: 'Local',
+  anthropic: 'Anthropic',
 }
 
 const DROPDOWN_WIDTH = 360
@@ -59,7 +61,10 @@ function buildProviderChoices(
   availableModels: ModelInfo[],
   activeProviderId: string | null,
 ): ProviderChoice[] {
-  if (activeProviderId && availableModels.length > 0) {
+  if (!activeProviderId) return []
+
+  // First try: if we have availableModels from fetchProviderModels, use them
+  if (availableModels.length > 0) {
     const isCli = activeProviderId.startsWith('cli-')
 
     if (isCli) {
@@ -91,6 +96,48 @@ function buildProviderChoices(
         models: availableModels,
       }]
     }
+  }
+
+  // Fallback: if availableModels is empty (e.g. local provider, or fetch failed),
+  // build choices from the saved providers list
+  const isCli = activeProviderId.startsWith('cli-')
+  if (isCli) {
+    const cliProviderKey = activeProviderId.replace('cli-', '')
+    const cliProviderName = CLI_PROVIDER_NAMES[cliProviderKey] || activeProviderId
+    const provider = providers.find(p => p.id === activeProviderId)
+    const models = provider
+      ? Object.values(provider.models).filter(Boolean).map(id => ({
+          id,
+          name: id,
+          description: '',
+          context: '',
+        }))
+      : []
+    return [{
+      providerId: activeProviderId,
+      providerName: cliProviderName,
+      isDefault: true,
+      models,
+    }]
+  }
+
+  if (activeProviderId === OPENAI_OFFICIAL_PROVIDER_ID) {
+    return [{
+      providerId: OPENAI_OFFICIAL_PROVIDER_ID,
+      providerName: 'OpenAI',
+      isDefault: true,
+      models: availableModels,
+    }]
+  }
+
+  const provider = providers.find(p => p.id === activeProviderId)
+  if (provider) {
+    return [{
+      providerId: provider.id,
+      providerName: provider.name,
+      isDefault: true,
+      models: availableModels,
+    }]
   }
 
   return []

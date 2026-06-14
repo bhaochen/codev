@@ -184,12 +184,22 @@ async function* streamOpenAI(
   const decoder = new TextDecoder()
   const reader = res.body.getReader()
   let buffer = ''
+  let hasReceivedContent = false
+  const IDLE_TIMEOUT_MS = 3000
 
   yield { type: 'content_block_start', index: 0, blockType: 'text' }
 
   while (true) {
     if (signal?.aborted) break
-    const { done, value } = await reader.read()
+
+    // Race between read and idle timeout.  Some local providers (Ollama, LM Studio,
+    // etc.) never send [DONE] or close the SSE connection after the response is
+    // complete.  The timeout lets us detect this and finish cleanly.
+    const readPromise = reader.read()
+    const timeoutPromise = new Promise<{ done: true; value: undefined }>((resolve) =>
+      setTimeout(() => resolve({ done: true, value: undefined }), IDLE_TIMEOUT_MS),
+    )
+    const { done, value } = await Promise.race([readPromise, timeoutPromise])
     if (done) break
 
     buffer += decoder.decode(value, { stream: true })
@@ -201,6 +211,7 @@ async function* streamOpenAI(
       const raw = line.slice(6).trim()
       if (raw === '[DONE]') {
         yield { type: 'content_block_stop', index: 0 }
+        yield { type: 'message_stop' }
         yield { type: 'done' }
         return
       }

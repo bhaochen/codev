@@ -1,10 +1,9 @@
 import { create } from 'zustand'
 import { ApiError } from '../api/client'
 import { settingsApi } from '../api/settings'
-import { modelsApi } from '../api/models'
 import { h5AccessApi } from '../api/h5Access'
-import { fetchProviderModels } from '../api/providerModels'
-import { getTuiConfig, saveTuiConfigPatch } from '../api/config'
+import { fetchProviderModels, clearProviderModelCache } from '../api/providerModels'
+import { getTuiConfig, saveTuiConfigPatch, clearConfigCache } from '../api/config'
 import {
   isThemeMode,
   type AppMode,
@@ -79,6 +78,8 @@ type SettingsStore = {
   fetchH5Access: () => Promise<void>
   setPermissionMode: (mode: PermissionMode) => Promise<void>
   setModel: (modelId: string) => Promise<void>
+  setActiveProvider: (providerId: string | null, providerName: string | null, models: ModelInfo[]) => void
+  syncFromConfig: () => Promise<void>
   setEffort: (level: EffortLevel) => Promise<void>
   setThinkingEnabled: (enabled: boolean) => Promise<void>
   setLocale: (locale: Locale) => void
@@ -192,11 +193,22 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         activeProviderId = directModels.provider?.id ?? null
         activeProviderName = directModels.provider?.name ?? null
       } else {
-        const sidecarRes = await modelsApi.list().catch(() => null)
-        if (sidecarRes && sidecarRes.models.length > 0) {
-          availableModels = sidecarRes.models
-          activeProviderId = sidecarRes.provider?.id ?? null
-          activeProviderName = sidecarRes.provider?.name ?? null
+        // No direct models — always derive from ~/.claude.json authProvider.
+        // Never use sidecar's provider name: it may be stale and corrupted
+        // (e.g. "TUI: NVIDIA NIM" instead of "NVIDIA").
+        const authProvider = config.authProvider as string | undefined
+        if (authProvider) {
+          const CLI_PROVIDER_NAMES: Record<string, string> = {
+            nvidia: 'NVIDIA',
+            openrouter: 'OpenRouter',
+            opencode: 'OpenCode Zen',
+            openai: 'OpenAI',
+            local: 'Local',
+            anthropic: 'Anthropic',
+          }
+          availableModels = []
+          activeProviderId = `cli-${authProvider}`
+          activeProviderName = CLI_PROVIDER_NAMES[authProvider] ?? authProvider
         } else {
           availableModels = []
           activeProviderId = null
@@ -273,6 +285,49 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       context: '',
     }
     set({ currentModel })
+  },
+
+  setActiveProvider: (providerId, providerName, models) => {
+    set({
+      activeProviderId: providerId,
+      activeProviderName: providerName,
+      availableModels: models,
+      currentModel: models.length > 0
+        ? models[0]
+        : null,
+    })
+  },
+
+  syncFromConfig: async () => {
+    // Re-read ~/.claude.json and re-fetch the model list for the new provider.
+    // This keeps settingsStore in sync when cliAuthStore writes to the config file.
+    clearProviderModelCache()
+    clearConfigCache()
+    const config = await getTuiConfig().catch(() => ({}))
+    const authProvider = config?.authProvider as string | undefined
+    if (!authProvider) {
+      set({ activeProviderId: null, activeProviderName: null, availableModels: [], currentModel: null })
+      return
+    }
+    const CLI_NAMES: Record<string, string> = {
+      nvidia: 'NVIDIA',
+      openrouter: 'OpenRouter',
+      opencode: 'OpenCode Zen',
+      openai: 'OpenAI',
+      local: 'Local',
+      anthropic: 'Anthropic',
+    }
+    const cliProviderId = `cli-${authProvider}`
+    const cliProviderName = CLI_NAMES[authProvider] ?? authProvider
+
+    // Fetch fresh models for the new provider
+    const { models } = await fetchProviderModels().catch(() => ({ models: [] as ModelInfo[], provider: null }))
+    set({
+      activeProviderId: cliProviderId,
+      activeProviderName: cliProviderName,
+      availableModels: models,
+      currentModel: models.length > 0 ? models[0] : null,
+    })
   },
 
   setEffort: async (level) => {

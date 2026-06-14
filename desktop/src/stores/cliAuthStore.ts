@@ -6,6 +6,7 @@
  */
 import { create } from 'zustand'
 import { getTuiConfig, saveTuiConfigPatch, clearConfigCache } from '../api/config'
+import { useSettingsStore } from './settingsStore'
 
 type AuthProvider = 'anthropic' | 'openai' | 'openrouter' | 'local' | 'opencode' | 'nvidia'
 
@@ -71,6 +72,7 @@ export const useCliAuthStore = create<CliAuthStore>((set) => ({
     try {
       await saveTuiConfigPatch({ authProvider: provider })
       clearConfigCache()
+      await useSettingsStore.getState().syncFromConfig()
       set({ authProvider: provider, isLoading: false })
     } catch (err) {
       set({ isLoading: false, error: err instanceof Error ? err.message : String(err) })
@@ -85,6 +87,7 @@ export const useCliAuthStore = create<CliAuthStore>((set) => ({
         nvidiaApiKey: apiKey,
       })
       clearConfigCache()
+      await useSettingsStore.getState().syncFromConfig()
       set({ authProvider: 'nvidia', nvidiaApiKey: apiKey, isLoading: false })
     } catch (err) {
       set({ isLoading: false, error: err instanceof Error ? err.message : String(err) })
@@ -99,6 +102,7 @@ export const useCliAuthStore = create<CliAuthStore>((set) => ({
         openRouterApiKey: apiKey,
       })
       clearConfigCache()
+      await useSettingsStore.getState().syncFromConfig()
       set({ authProvider: 'openrouter', openRouterApiKey: apiKey, isLoading: false })
     } catch (err) {
       set({ isLoading: false, error: err instanceof Error ? err.message : String(err) })
@@ -114,6 +118,7 @@ export const useCliAuthStore = create<CliAuthStore>((set) => ({
         openAiAccessToken: undefined, // Clear OAuth token when switching to API key
       })
       clearConfigCache()
+      await useSettingsStore.getState().syncFromConfig()
       set({ authProvider: 'openai', openAiApiKey: apiKey, isLoading: false })
     } catch (err) {
       set({ isLoading: false, error: err instanceof Error ? err.message : String(err) })
@@ -129,6 +134,7 @@ export const useCliAuthStore = create<CliAuthStore>((set) => ({
         openCodeModelName: modelName || undefined,
       })
       clearConfigCache()
+      await useSettingsStore.getState().syncFromConfig()
       set({
         authProvider: 'opencode',
         openCodeApiKey: apiKey,
@@ -149,6 +155,7 @@ export const useCliAuthStore = create<CliAuthStore>((set) => ({
         localModelName: modelName,
       })
       clearConfigCache()
+      await useSettingsStore.getState().syncFromConfig()
       set({
         authProvider: 'local',
         localBaseUrl: baseUrl,
@@ -177,6 +184,7 @@ export const useCliAuthStore = create<CliAuthStore>((set) => ({
         localModelName: undefined,
       })
       clearConfigCache()
+      await useSettingsStore.getState().syncFromConfig()
       set({
         authProvider: null,
         nvidiaApiKey: null,
