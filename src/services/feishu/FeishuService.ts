@@ -537,7 +537,8 @@ class FeishuService {
 
         await new Promise<void>((resolve, reject) => {
           const child = spawn(
-            'voxcpm', ['clone', '--text', text, '--reference-audio', refAudio, '--denoise', '--output', `${rawBase}.wav`],
+            '/home/yuki/Code/Agent/VersperClaw/.venv/bin/voxcpm',
+            ['clone', '--text', text, '--reference-audio', refAudio, '--denoise', '--output', `${rawBase}.wav`],
             { shell: false },
           )
           let stdout = ''
