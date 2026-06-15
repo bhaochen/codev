@@ -8,17 +8,17 @@ const MAX_OBJECTIVE_CHARS = 40
 export function goalStatusColor(status: GoalStatus): string {
   switch (status) {
     case 'pursuing':
-      return 'yellow'
+      return 'ansi:yellow'
     case 'paused':
-      return 'gray'
+      return 'ansi:gray'
     case 'achieved':
-      return 'green'
+      return 'ansi:green'
     case 'blocked':
-      return 'red'
+      return 'ansi:red'
     case 'usage-limited':
-      return 'gray'
+      return 'ansi:gray'
     case 'budget-limited':
-      return 'magenta'
+      return 'ansi:magenta'
   }
 }
 

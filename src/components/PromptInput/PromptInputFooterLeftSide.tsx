@@ -26,7 +26,7 @@ import { isInProcessEnabled } from '../../utils/swarm/backends/registry.js';
 import { useAppState, useAppStateStore } from 'src/state/AppState.js';
 import { getIsRemoteMode } from '../../bootstrap/state.js';
 import HistorySearchInput from './HistorySearchInput.js';
-import { GoalIndicator } from './GoalIndicator.js';
+import { goalStatusColor } from './GoalIndicator.js';
 import { usePrStatus } from '../../hooks/usePrStatus.js';
 import { KeyboardShortcutHint } from '../design-system/KeyboardShortcutHint.js';
 import { Byline } from '../design-system/Byline.js';
@@ -261,6 +261,8 @@ function ModeIndicator({
   const expandedView = useAppState(s_3 => s_3.expandedView);
   const showSpinnerTree = expandedView === 'teammates';
   const prStatus = usePrStatus(isLoading, isPrStatusEnabled());
+  const goal = useAppState(s => s.goal);
+  const goalMode = useAppState(s => s.toolPermissionContext.mode);
   const hasTmuxSession = useAppState(s_4 => "external" === 'ant' && s_4.tungstenActiveSession !== undefined);
   const nextTickAt = useSyncExternalStore(proactiveModule?.subscribeToProactiveChanges ?? NO_OP_SUBSCRIBE, proactiveModule?.getNextTickAt ?? NULL, NULL);
   // biome-ignore lint/correctness/useHookAtTopLevel: feature() is a compile-time constant
@@ -355,6 +357,19 @@ function ModeIndicator({
           </Text>}
       </Text> : null;
 
+  // Inline goal indicator — reads goal state directly to avoid React compiler
+  // caching the dot color across status changes.
+  const GOAL_MAX_CHARS = 40;
+  const goalTruncated = goal && goal.objective.length > GOAL_MAX_CHARS
+    ? goal.objective.slice(0, GOAL_MAX_CHARS - 1) + '…'
+    : goal?.objective;
+  const goalPlanSuppressed = goal?.status === 'pursuing' && goalMode === 'plan';
+  const goalLabel = goalPlanSuppressed ? 'paused: plan mode' : goal?.status;
+  const goalDotColor = goalPlanSuppressed ? 'yellow' : goal ? goalStatusColor(goal.status) : undefined;
+  const goalInline = goal
+    ? <Text><Text color={goalDotColor}>●</Text><Text dimColor> goal: </Text><Text>{goalTruncated}</Text><Text dimColor> [{goalLabel}]</Text></Text>
+    : null;
+
   // Build parts array - exclude BackgroundTaskStatus when we have teammate pills
   // (teammate pills get their own row)
   const parts = [
@@ -366,18 +381,18 @@ function ModeIndicator({
   // its click-target Box isn't nested inside the <Text wrap="truncate">
   // wrapper (reconciler throws on Box-in-Text).
   // Tmux pill (ant-only) — appears right after tasks in nav order
-  ...("external" === 'ant' && hasTmuxSession ? [<TungstenPill key="tmux" selected={tmuxSelected} />] : []), ...(isAgentSwarmsEnabled() && hasTeams ? [<TeamStatus key="teams" teamsSelected={teamsSelected} showHint={showHint && !hasBackgroundTasks} />] : []), ...(shouldShowPrStatus ? [<PrBadge key="pr-status" number={prStatus.number!} url={prStatus.url!} reviewState={prStatus.reviewState!} />] : [])];
-
-  // Goal indicator renders on its own row at the bottom — not mixed into the
-  // main parts line so it doesn't get truncated when the terminal is narrow.
-  const goalPart = <GoalIndicator key="goal" />;
+  ...("external" === 'ant' && hasTmuxSession ? [<TungstenPill key="tmux" selected={tmuxSelected} />] : []),
+  ...(isAgentSwarmsEnabled() && hasTeams ? [<TeamStatus key="teams" teamsSelected={teamsSelected} showHint={showHint && !hasBackgroundTasks} />] : []),
+  ...(shouldShowPrStatus ? [<PrBadge key="pr-status" number={prStatus.number} url={prStatus.url} reviewState={prStatus.reviewState!} />] : []),
+  ]
 
   // Check if any in-process teammates exist (for hint text cycling)
-  const hasAnyInProcessTeammates = Object.values(tasks).some(t_2 => t_2.type === 'in_process_teammate' && t_2.status === 'running');
-  const hasRunningAgentTasks = Object.values(tasks).some(t_3 => t_3.type === 'local_agent' && t_3.status === 'running');
+  const hasAnyInProcessTeammates = Object.values(tasks).some(t => t.type === 'in_process_teammate' && t.status === 'running');
+  const hasRunningAgentTasks = Object.values(tasks).some(t => t.type === 'local_agent' && t.status === 'running');
 
   // Get hint parts separately for potential second-line rendering
   const hintParts = showHint ? getSpinnerHintParts(isLoading, escShortcut, todosShortcut, killAgentsShortcut, hasTaskItems, expandedView, hasAnyInProcessTeammates, hasRunningAgentTasks, isKillAgentsConfirmShowing) : [];
+
   if (isViewingCompletedTeammate) {
     parts.push(<Text dimColor key="esc-return">
         <KeyboardShortcutHint shortcut={escShortcut} action="return to team lead" />
@@ -386,22 +401,6 @@ function ModeIndicator({
     parts.push(<ProactiveCountdown key="proactive" />);
   } else if (!hasTeammatePills && showHint) {
     parts.push(...hintParts);
-  }
-
-  // When we have teammate pills, always render them on their own line above other parts
-  if (hasTeammatePills) {
-    // Don't append spinner hints when viewing a completed teammate —
-    // the "esc to return to team lead" hint already replaces "esc to interrupt"
-    const otherParts = [...(modePart ? [modePart] : []), ...parts, ...(isViewingCompletedTeammate ? [] : hintParts)];
-    return <Box flexDirection="column">
-        <Box>
-          <BackgroundTaskStatus tasksSelected={tasksSelected} isViewingTeammate={isViewingTeammate} teammateFooterIndex={teammateFooterIndex} isLeaderIdle={!isLoading} onOpenDialog={onOpenTasksDialog} />
-        </Box>
-        {otherParts.length > 0 && <Box>
-            <Byline>{otherParts}</Byline>
-          </Box>}
-        {goalPart && <Box><Byline>{goalPart}</Byline></Box>}
-      </Box>;
   }
 
   // Add "↓ to manage tasks" hint when panel has visible rows
@@ -468,7 +467,7 @@ function ModeIndicator({
   // from 0→1 row. Always render 1 row in fullscreen; return a space when
   // empty so Yoga reserves the row without painting anything visible.
   const hasMainRowContent = modePart || tasksPart || parts.length > 0;
-  if (!hasMainRowContent && !goalPart) {
+  if (!hasMainRowContent && !goalInline) {
     return isFullscreenEnvEnabled() ? <Text> </Text> : null;
   }
   // When there IS a goal but no other main content, we still need to render
@@ -483,19 +482,19 @@ function ModeIndicator({
       <Box height={1} overflow="hidden">
         {modePart && <Box flexShrink={0}>
             {modePart}
-            {(tasksPart || parts.length > 0 || goalPart) && <Text dimColor> · </Text>}
+            {(tasksPart || parts.length > 0 || goalInline) && <Text dimColor> · </Text>}
           </Box>}
         {tasksPart && <Box flexShrink={0}>
             {tasksPart}
-            {(parts.length > 0 || goalPart) && <Text dimColor> · </Text>}
+            {(parts.length > 0 || goalInline) && <Text dimColor> · </Text>}
           </Box>}
         {parts.length > 0 && <Text wrap="truncate">
             <Byline>{parts}</Byline>
           </Text>}
-        {parts.length === 0 && !tasksPart && !modePart && !goalPart && isFullscreenEnvEnabled() && <Text> </Text>}
-        {parts.length === 0 && !tasksPart && !modePart && !goalPart && !isFullscreenEnvEnabled() && null}
+        {parts.length === 0 && !tasksPart && !modePart && !goalInline && isFullscreenEnvEnabled() && <Text> </Text>}
+        {parts.length === 0 && !tasksPart && !modePart && !goalInline && !isFullscreenEnvEnabled() && null}
       </Box>
-      {goalPart && <Box height={1}><Byline>{goalPart}</Byline></Box>}
+      {goalInline && <Box height={1}><Byline>{goalInline}</Byline></Box>}
     </Box>;
 }
 function getSpinnerHintParts(isLoading: boolean, escShortcut: string, todosShortcut: string, killAgentsShortcut: string, hasTaskItems: boolean, expandedView: 'none' | 'tasks' | 'teammates', hasTeammates: boolean, hasRunningAgentTasks: boolean, isKillAgentsConfirmShowing: boolean): React.ReactElement[] {
