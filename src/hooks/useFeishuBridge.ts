@@ -25,24 +25,10 @@ type ActiveFeishuTurn = {
 const FEISHU_CHANNEL_SERVER = 'feishu'
 
 export function useFeishuBridge({ messages, isLoading }: Props): void {
-  const autoStartAttemptedRef = useRef(false)
   const pendingInboundRef = useRef<{ chatId: string }[]>([])
   const activeTurnRef = useRef<ActiveFeishuTurn | null>(null)
   const lastProcessedMessageCountRef = useRef(messages.length)
   const previousLoadingRef = useRef(isLoading)
-
-  // Auto-start if configured
-  useEffect(() => {
-    if (autoStartAttemptedRef.current) return
-    autoStartAttemptedRef.current = true
-
-    const config = getFeishuConfig()
-    if (!config.appId || !config.appSecret) return
-
-    void feishuService.startFromSavedConfig().catch(e => {
-      console.warn('[feishu] auto-start failed:', e instanceof Error ? e.message : String(e))
-    })
-  }, [])
 
   // Subscribe to inbound events (stores chatId for turn tracking)
   useEffect(() => {
