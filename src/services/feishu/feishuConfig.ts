@@ -12,13 +12,32 @@ export type PairedUser = {
   pairedAt: number
 }
 
+export type AuthorizedUser = {
+  userId: string
+  displayName: string
+  authorizedAt: number
+}
+
 export type FeishuRuntimeConfig = {
   appId?: string
   appSecret?: string
+  /** 'feishu' | 'lark' — saved from registerApp result.user_info?.tenant_brand */
+  tenant?: string
   encryptKey?: string
   verificationToken?: string
+  /** DM 白名单用户 open_id 列表（空 = 所有人可私聊） */
   allowedUsers?: string[]
+  /** 管理员 open_id 列表 */
+  admins?: string[]
+  /** 允许响应的群聊 chat_id 列表（空 = 所有群都不响应） */
+  allowedChats?: string[]
+  /** 群聊中是否要求 @bot 才响应（默认 true） */
+  requireMentionInGroup?: boolean
+  /** 已配对的用户 */
   pairedUsers?: PairedUser[]
+  /** 已授权的用户 */
+  authorizedUsers?: AuthorizedUser[]
+  /** 是否使用卡片回复模式 */
   streamingCard?: boolean
 }
 

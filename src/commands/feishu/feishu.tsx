@@ -12,6 +12,7 @@ import {
   maskFeishuAppSecret,
   saveFeishuConfig,
 } from '../../services/feishu/feishuConfig.js'
+import QRCode from 'qrcode'
 
 type Step =
   | { type: 'menu' }
@@ -20,7 +21,11 @@ type Step =
   | { type: 'edit-encrypt-key' }
   | { type: 'edit-verification-token' }
   | { type: 'edit-allowed-users' }
+  | { type: 'edit-admins' }
+  | { type: 'edit-allowed-chats' }
+  | { type: 'edit-mention-policy' }
   | { type: 'confirm-clear' }
+  | { type: 'scanning' }
 
 type Notice = {
   text: string
@@ -178,6 +183,18 @@ function FeishuDialog({
         action: () => setStep({ type: 'edit-allowed-users' }),
       },
       {
+        label: '设置管理员',
+        action: () => setStep({ type: 'edit-admins' }),
+      },
+      {
+        label: '设置允许响应的群',
+        action: () => setStep({ type: 'edit-allowed-chats' }),
+      },
+      {
+        label: `@提及要求: ${config?.requireMentionInGroup !== false ? '需 @bot' : '所有消息'}`,
+        action: () => setStep({ type: 'edit-mention-policy' }),
+      },
+      {
         label:
           serviceState.status === 'running' ? '停止当前飞书 Bot' : '启动当前飞书 Bot',
         action: async () => {
@@ -206,6 +223,10 @@ function FeishuDialog({
       {
         label: '清空飞书配置',
         action: () => setStep({ type: 'confirm-clear' }),
+      },
+      {
+        label: '扫码登录（创建应用）',
+        action: () => setStep({ type: 'scanning' }),
       },
       {
         label: '关闭',
@@ -353,6 +374,75 @@ function FeishuDialog({
     [refreshConfig],
   )
 
+  const saveAdmins = React.useCallback(
+    async (value: string) => {
+      const users = value.split(/[,\s]+/).map(s => s.trim()).filter(Boolean)
+      setBusy(true)
+      try {
+        const current = getFeishuConfig()
+        saveFeishuConfig({ ...current, admins: users.length > 0 ? users : undefined })
+        refreshConfig()
+        setNotice({ text: '管理员列表已保存。', tone: 'success' })
+      } catch (error) {
+        setNotice({
+          text: error instanceof Error ? error.message : '保存失败',
+          tone: 'error',
+        })
+      } finally {
+        setBusy(false)
+        setStep({ type: 'menu' })
+      }
+    },
+    [refreshConfig],
+  )
+
+  const saveAllowedChats = React.useCallback(
+    async (value: string) => {
+      const chats = value.split(/[,\s]+/).map(s => s.trim()).filter(Boolean)
+      setBusy(true)
+      try {
+        const current = getFeishuConfig()
+        saveFeishuConfig({ ...current, allowedChats: chats.length > 0 ? chats : undefined })
+        refreshConfig()
+        setNotice({ text: '允许响应的群列表已保存。', tone: 'success' })
+      } catch (error) {
+        setNotice({
+          text: error instanceof Error ? error.message : '保存失败',
+          tone: 'error',
+        })
+      } finally {
+        setBusy(false)
+        setStep({ type: 'menu' })
+      }
+    },
+    [refreshConfig],
+  )
+
+  const toggleMentionPolicy = React.useCallback(
+    async () => {
+      setBusy(true)
+      try {
+        const current = getFeishuConfig()
+        const next = current.requireMentionInGroup !== false ? false : true
+        saveFeishuConfig({ ...current, requireMentionInGroup: next })
+        refreshConfig()
+        setNotice({
+          text: next ? '群聊已设为需 @bot 才响应。' : '群聊已设为响应所有消息。',
+          tone: 'success',
+        })
+      } catch (error) {
+        setNotice({
+          text: error instanceof Error ? error.message : '保存失败',
+          tone: 'error',
+        })
+      } finally {
+        setBusy(false)
+        setStep({ type: 'menu' })
+      }
+    },
+    [refreshConfig],
+  )
+
   const clearConfigAndStop = React.useCallback(async () => {
     setBusy(true)
     try {
@@ -372,6 +462,18 @@ function FeishuDialog({
   }, [refreshConfig])
 
   useInput((_, key) => {
+    if (step.type === 'edit-mention-policy') {
+      if (key.escape) {
+        setStep({ type: 'menu' })
+        return
+      }
+      if (key.return) {
+        void toggleMentionPolicy()
+        return
+      }
+      return
+    }
+
     if (step.type !== 'menu' || busy) return
 
     if (key.escape) {
@@ -475,6 +577,55 @@ function FeishuDialog({
     )
   }
 
+  if (step.type === 'edit-admins') {
+    return (
+      <Dialog title="管理员" onCancel={() => setStep({ type: 'menu' })}>
+        <TextInput
+          title="管理员 open_id"
+          hint="管理员拥有全部权限，可执行 /stop、/config 等管理命令。输入 open_id，多个以空格或逗号分隔。"
+          initialValue={config?.admins?.join(', ')}
+          onSubmit={value => { void saveAdmins(value) }}
+          onCancel={() => setStep({ type: 'menu' })}
+        />
+      </Dialog>
+    )
+  }
+
+  if (step.type === 'edit-allowed-chats') {
+    return (
+      <Dialog title="允许响应的群聊" onCancel={() => setStep({ type: 'menu' })}>
+        <TextInput
+          title="群聊 chat_id"
+          hint="输入群聊 chat_id，多个以空格或逗号分隔。仅在白名单中的群聊 bot 才会响应。"
+          initialValue={config?.allowedChats?.join(', ')}
+          onSubmit={value => { void saveAllowedChats(value) }}
+          onCancel={() => setStep({ type: 'menu' })}
+        />
+      </Dialog>
+    )
+  }
+
+  if (step.type === 'edit-mention-policy') {
+    return (
+      <Dialog title="@提及要求" onCancel={() => setStep({ type: 'menu' })}>
+        <Box flexDirection="column" gap={1}>
+          <Text bold>群聊 @bot 要求</Text>
+          <Text dimColor>
+            当前: {config?.requireMentionInGroup !== false ? '需 @bot 才响应' : '响应所有群消息'}
+          </Text>
+          <Text dimColor marginTop={1}>
+            切换后：
+            {'\n'}- 需 @bot: 仅在群聊中被 @ 时才处理消息
+            {'\n'}- 响应所有: 群聊中所有消息都会处理
+          </Text>
+          <Box marginTop={1}>
+            <Text>按 Enter 切换，按 Esc 取消</Text>
+          </Box>
+        </Box>
+      </Dialog>
+    )
+  }
+
   if (step.type === 'confirm-clear') {
     return (
       <Dialog title="清空飞书配置" onCancel={() => setStep({ type: 'menu' })}>
@@ -484,6 +635,13 @@ function FeishuDialog({
         />
       </Dialog>
     )
+  }
+
+  if (step.type === 'scanning') {
+    return <ScanningDialog onCancel={() => setStep({ type: 'menu' })} onSuccess={() => {
+      refreshConfig()
+      setStep({ type: 'menu' })
+    }} />
   }
 
   return (
@@ -518,6 +676,23 @@ function FeishuDialog({
             ? config.allowedUsers.join(', ')
             : '未配置（使用配对码授权）'}
         </Text>
+        <Text>
+          管理员:
+          {' '}
+          {config?.admins?.length
+            ? config.admins.join(', ')
+            : '未配置'}
+        </Text>
+        <Text>
+          允许群聊:
+          {' '}
+          {config?.allowedChats?.length
+            ? `${config.allowedChats.length} 个`
+            : '未配置'}
+        </Text>
+        <Text>
+          群聊 @提及: {config?.requireMentionInGroup !== false ? '需 @bot' : '所有消息'}
+        </Text>
         {config?.pairedUsers?.length ? (
           <Text>
             已配对用户: {config.pairedUsers.map(u => u.displayName || u.userId).join(', ')}
@@ -536,6 +711,161 @@ function FeishuDialog({
           ))}
         </Box>
         <Text dimColor>上下箭头选择，Enter 执行，Esc 关闭</Text>
+      </Box>
+    </Dialog>
+  )
+}
+
+function ScanningDialog({
+  onCancel,
+  onSuccess,
+}: {
+  onCancel: () => void
+  onSuccess: () => void
+}) {
+  const [qrUrl, setQrUrl] = React.useState<string | null>(null)
+  const [expireIn, setExpireIn] = React.useState<number>(0)
+  const [status, setStatus] = React.useState<string>('正在连接飞书...')
+  const [error, setError] = React.useState<string | null>(null)
+  const [success, setSuccess] = React.useState(false)
+  const [completed, setCompleted] = React.useState(false)
+
+  // Refs to avoid re-triggering the effect when parent passes inline callbacks
+  const onSuccessRef = React.useRef(onSuccess)
+  onSuccessRef.current = onSuccess
+  const onCancelRef = React.useRef(onCancel)
+  onCancelRef.current = onCancel
+
+  React.useEffect(() => {
+    let cancelled = false
+
+    const run = async () => {
+      try {
+        const { registerApp } = await import('@larksuite/channel')
+
+        const result = await registerApp({
+          source: 'versperclaw',
+          onQRCodeReady: (info) => {
+            if (cancelled) return
+            setQrUrl(info.url)
+            setExpireIn(info.expireIn)
+            setStatus('请用飞书 App 扫描二维码，并在打开的页面中点击"授权"完成创建')
+          },
+          onStatusChange: (info) => {
+            if (cancelled) return
+            if (info.status === 'domain_switched') {
+              setStatus('已切换到国际版 (larksuite.com)，请继续...')
+            } else if (info.status === 'slow_down') {
+              setStatus('等待授权确认中...')
+            } else if (info.status === 'polling') {
+              setStatus('等待授权确认中，请确保已在飞书中点击了"授权"...')
+            }
+          },
+        })
+
+        if (cancelled) return
+
+        // Save credentials
+        saveFeishuConfig({
+          appId: result.client_id,
+          appSecret: result.client_secret,
+          tenant: (result as { user_info?: { tenant_brand?: string } }).user_info?.tenant_brand,
+        })
+
+        setSuccess(true)
+        setStatus('应用创建成功！正在启动 Bot...')
+        setCompleted(true)
+
+        // Start the bot
+        await feishuService.stop()
+        await feishuService.startFromSavedConfig()
+
+        if (!cancelled) {
+          setTimeout(() => onSuccessRef.current(), 1500)
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : '扫码登录失败')
+        }
+      }
+    }
+
+    run()
+
+    return () => {
+      cancelled = true
+    }
+  }, []) // Run once on mount only — refs avoid dep instability
+
+  useInput((_, key) => {
+    if (key.escape && !completed) {
+      onCancelRef.current()
+    }
+  })
+
+  const [qrAscii, setQrAscii] = React.useState<string>('')
+  const [qrError, setQrError] = React.useState<string | null>(null)
+
+  React.useEffect(() => {
+    if (!qrUrl) return
+
+    QRCode.toString(qrUrl, { type: 'terminal', small: true })
+      .then(ascii => {
+        setQrAscii(ascii)
+        setQrError(null)
+      })
+      .catch(err => {
+        console.error('[Feishu] QR generation error:', err)
+        setQrError('无法生成二维码，请使用下方链接')
+      })
+  }, [qrUrl])
+
+  return (
+    <Dialog title="扫码登录飞书" onCancel={completed ? undefined : onCancel}>
+      <Box flexDirection="column" gap={1}>
+        {error ? (
+          <>
+            <Text color="red">错误: {error}</Text>
+            <Text dimColor>按 Esc 返回</Text>
+          </>
+        ) : success ? (
+          <>
+            <Text color="green">✓ {status}</Text>
+          </>
+        ) : qrError ? (
+          <>
+            <Text bold color="yellow">二维码生成失败</Text>
+            <Text dimColor marginTop={1}>请使用下方链接完成授权：</Text>
+            <Box marginTop={1}>
+              <Text selectText>{qrUrl}</Text>
+            </Box>
+            <Text dimColor marginTop={1}>{status}</Text>
+            <Text dimColor marginTop={1}>按 Esc 取消</Text>
+          </>
+        ) : qrAscii ? (
+          <>
+            <Text bold>请用飞书 App 扫描下方二维码</Text>
+            <Text dimColor>扫描后，请在打开的页面中点击【授权】完成应用创建</Text>
+            <Box marginTop={1}>
+              <Text>{qrAscii}</Text>
+            </Box>
+            <Text dimColor marginTop={1}>
+              二维码有效期：约 {Math.max(1, Math.round(expireIn / 60))} 分钟
+            </Text>
+            {qrUrl && (
+              <Text dimColor marginTop={1}>
+                或打开链接：{qrUrl.slice(0, 70)}...
+              </Text>
+            )}
+            <Text color="cyan" marginTop={1}>{status}</Text>
+            <Text dimColor marginTop={1}>按 Esc 取消</Text>
+          </>
+        ) : (
+          <>
+            <Text>{status}</Text>
+            <Text dimColor>请稍候...</Text>
+          </>
+        )}
       </Box>
     </Dialog>
   )
