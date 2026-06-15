@@ -112,7 +112,20 @@ export function useFeishuBridge({ messages, isLoading }: Props): void {
         const reply =
           completedTurn.responseParts.join('\n\n').trim() ||
           '这一轮没有可回传的文本结果，请查看本地终端会话。'
-        await feishuService.sendText(completedTurn.chatId, reply)
+        await feishuService.sendMarkdown(completedTurn.chatId, reply)
+
+        // Also send TTS voice if enabled
+        const config = getFeishuConfig()
+        if (config.ttsEnabled) {
+          const plainText = completedTurn.responseParts
+            .join('\n')
+            .replace(/[#*`_~\[\]()>|\\]/g, '')
+            .replace(/{[^}]*}/g, '')
+            .trim()
+          if (plainText) {
+            await feishuService.sendVoice(completedTurn.chatId, plainText)
+          }
+        }
       } catch (error) {
         console.warn(
           '[feishu] failed to send outbound reply:',

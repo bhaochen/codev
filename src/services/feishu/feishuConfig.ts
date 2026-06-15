@@ -39,6 +39,10 @@ export type FeishuRuntimeConfig = {
   authorizedUsers?: AuthorizedUser[]
   /** 是否使用卡片回复模式 */
   streamingCard?: boolean
+  /** TTS 语音回复开关 — 发送消息时同时发送语音 */
+  ttsEnabled?: boolean
+  /** TTS 语音名称（edge-tts 格式，默认 zh-CN-XiaoxiaoNeural） */
+  ttsVoice?: string
 }
 
 function getConfigPath(): string {

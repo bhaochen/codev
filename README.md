@@ -151,10 +151,12 @@ mitmproxy -p 8888
 ```bash
 # /voice
 uv venv
-uv  uv pip install faster-whisper edge-tts
+uv pip install faster-whisper edge-tts voxcpm
 
 hf download Systran/faster-whisper-base \
   --local-dir ~/.cache/huggingface/hub/models--Systran--faster-whisper-base
+
+
 ```
 
 ## 🌐 Desktop

@@ -24,6 +24,7 @@ type Step =
   | { type: 'edit-admins' }
   | { type: 'edit-allowed-chats' }
   | { type: 'edit-mention-policy' }
+  | { type: 'edit-tts-settings' }
   | { type: 'confirm-clear' }
   | { type: 'scanning' }
 
@@ -193,6 +194,14 @@ function FeishuDialog({
       {
         label: `@提及要求: ${config?.requireMentionInGroup !== false ? '需 @bot' : '所有消息'}`,
         action: () => setStep({ type: 'edit-mention-policy' }),
+      },
+      {
+        label: `TTS 语音回复: ${config?.ttsEnabled ? '开' : '关'}`,
+        action: () => { void toggleTts() },
+      },
+      {
+        label: `TTS 语音: ${config?.ttsVoice || 'zh-CN-XiaoxiaoNeural (中文)'}`,
+        action: () => setStep({ type: 'edit-tts-settings' }),
       },
       {
         label:
@@ -443,6 +452,52 @@ function FeishuDialog({
     [refreshConfig],
   )
 
+  const toggleTts = React.useCallback(
+    async () => {
+      setBusy(true)
+      try {
+        const current = getFeishuConfig()
+        const next = !current.ttsEnabled
+        saveFeishuConfig({ ...current, ttsEnabled: next })
+        refreshConfig()
+        setNotice({
+          text: next ? 'TTS 语音回复已开启。' : 'TTS 语音回复已关闭。',
+          tone: 'success',
+        })
+      } catch (error) {
+        setNotice({
+          text: error instanceof Error ? error.message : '保存失败',
+          tone: 'error',
+        })
+      } finally {
+        setBusy(false)
+        setStep({ type: 'menu' })
+      }
+    },
+    [refreshConfig],
+  )
+
+  const saveTtsVoice = React.useCallback(
+    async (value: string) => {
+      setBusy(true)
+      try {
+        const current = getFeishuConfig()
+        saveFeishuConfig({ ...current, ttsVoice: value || undefined })
+        refreshConfig()
+        setNotice({ text: 'TTS 语音已保存。', tone: 'success' })
+      } catch (error) {
+        setNotice({
+          text: error instanceof Error ? error.message : '保存失败',
+          tone: 'error',
+        })
+      } finally {
+        setBusy(false)
+        setStep({ type: 'menu' })
+      }
+    },
+    [refreshConfig],
+  )
+
   const clearConfigAndStop = React.useCallback(async () => {
     setBusy(true)
     try {
@@ -622,6 +677,20 @@ function FeishuDialog({
             <Text>按 Enter 切换，按 Esc 取消</Text>
           </Box>
         </Box>
+      </Dialog>
+    )
+  }
+
+  if (step.type === 'edit-tts-settings') {
+    return (
+      <Dialog title="TTS 语音设置" onCancel={() => setStep({ type: 'menu' })}>
+        <TextInput
+          title="TTS 语音名称"
+          hint="Edge TTS 语音标识符，例如：zh-CN-XiaoxiaoNeural（中文女声）、zh-CN-YunxiNeural（中文男声）、en-US-JennyNeural（英文女声）。留空恢复默认。"
+          initialValue={config?.ttsVoice}
+          onSubmit={value => { void saveTtsVoice(value) }}
+          onCancel={() => setStep({ type: 'menu' })}
+        />
       </Dialog>
     )
   }

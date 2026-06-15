@@ -3,6 +3,8 @@
  * Refactored to use vendor modules from lark-coding-agent-bridge.
  */
 
+import * as path from 'node:path'
+import * as os from 'node:os'
 import {
   createLarkChannel,
   type LarkChannel,
@@ -495,6 +497,87 @@ class FeishuService {
       await this.channel.send(chatId, { text })
     } catch (err) {
       log.fail('send', err, { chatId, textLen: text.length })
+    }
+  }
+
+  async sendMarkdown(chatId: string, markdown: string): Promise<void> {
+    if (!this.channel) return
+    try {
+      const { optimizeMarkdownForFeishu } = await import(
+        '../../utils/feishuMarkdown.js'
+      )
+      const optimized = optimizeMarkdownForFeishu(markdown)
+      await this.channel.send(chatId, { markdown: optimized })
+    } catch (err) {
+      log.fail('send', err, { chatId, markdownLen: markdown.length })
+    }
+  }
+
+  async sendVoice(chatId: string, text: string): Promise<void> {
+    if (!this.channel) return
+    try {
+      const config = getFeishuConfig()
+      console.log('[feishu][tts] config.ttsEnabled:', config.ttsEnabled, 'voice:', config.ttsVoice)
+      if (!config.ttsEnabled) return
+
+      const { readFile, unlink } = await import('node:fs/promises')
+      const { spawn } = await import('node:child_process')
+
+      const voice = config.ttsVoice || 'zh-CN-XiaoxiaoNeural'
+      const mp3Path = path.join(os.tmpdir(), `feishu_tts_${Date.now()}.mp3`)
+      const oggPath = mp3Path.replace(/\.mp3$/, '.ogg')
+
+      console.log('[feishu][tts] generating MP3 with voice:', voice, 'text len:', text.length)
+
+      // Generate MP3 via edge-tts CLI
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn('edge-tts', [
+          '--voice', voice,
+          '--text', text,
+          '--write-media', mp3Path,
+        ])
+        let stderr = ''
+        child.stderr?.on('data', c => { stderr += String(c) })
+        child.on('close', code => {
+          console.log('[feishu][tts] edge-tts exit code:', code, 'stderr:', stderr.slice(0, 100))
+          if (code === 0) resolve()
+          else reject(new Error(`edge-tts exit ${code}: ${stderr.slice(0, 200)}`))
+        })
+        child.on('error', err => {
+          console.log('[feishu][tts] edge-tts spawn error:', err.message)
+          reject(err)
+        })
+      })
+
+      // Convert MP3 → OGG/Opus (Feishu voice requires opus format)
+      console.log('[feishu][tts] converting MP3 → OGG')
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn('ffmpeg', [
+          '-i', mp3Path,
+          '-c:a', 'libopus',
+          '-b:a', '128k',
+          '-y',
+          oggPath,
+        ])
+        child.on('close', code => {
+          console.log('[feishu][tts] ffmpeg exit code:', code)
+          if (code === 0) resolve()
+          else reject(new Error(`ffmpeg exit ${code}`))
+        })
+        child.on('error', reject)
+      })
+
+      const buffer = await readFile(oggPath)
+      console.log('[feishu][tts] sending audio buffer, size:', buffer.length)
+      await this.channel.send(chatId, { audio: { source: buffer } })
+      console.log('[feishu][tts] sent successfully')
+
+      // Clean up temp files
+      await unlink(mp3Path).catch(() => {})
+      await unlink(oggPath).catch(() => {})
+    } catch (err) {
+      // Don't let TTS failure break the main message flow
+      console.log('[feishu][tts] send-voice-failed:', err instanceof Error ? err.message : String(err))
     }
   }
 
