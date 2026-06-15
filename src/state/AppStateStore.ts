@@ -86,6 +86,27 @@ export type FooterItem =
   | 'bridge'
   | 'companion'
 
+// /goal — long-running autonomous objective. Set via `/goal <objective>`.
+export type GoalStatus =
+  | 'pursuing'
+  | 'paused'
+  | 'achieved'
+  | 'blocked'
+  | 'usage-limited'
+  | 'budget-limited'
+
+export type Goal = {
+  id: string
+  objective: string
+  status: GoalStatus
+  startedAt: number
+  startCostUSD: number
+  startTokensUsed: number
+  continuationCount: number
+  lastReason?: string
+  lastUpdatedAt: number
+}
+
 export type AppState = DeepImmutable<{
   settings: SettingsJson
   verbose: boolean
@@ -251,6 +272,8 @@ export type AppState = DeepImmutable<{
   bagelUrl?: string
   // WebBrowser tool: sticky panel visibility toggle
   bagelPanelVisible?: boolean
+  // /goal — long-running autonomous objective. Set via `/goal <objective>`.
+  goal: Goal | undefined
   // chicago MCP session state. Types inlined (not imported from
   // @ant/computer-use-mcp/types) so external typecheck passes without the
   // ant-scoped dep resolved. Shapes match `AppGrant`/`CuGrantFlags`
@@ -565,5 +588,6 @@ export function getDefaultAppState(): AppState {
     effortValue: undefined,
     activeOverlays: new Set<string>(),
     fastMode: false,
+    goal: undefined,
   }
 }

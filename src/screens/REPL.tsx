@@ -79,6 +79,7 @@ import {
 import { asSessionId, asAgentId } from '../types/ids.js'
 import { logForDebugging } from '../utils/debug.js'
 import { QueryGuard } from '../utils/QueryGuard.js'
+import { useGoalAutoContinue } from '../hooks/useGoalAutoContinue.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
 import { formatTokens, truncateToWidth } from '../utils/format.js'
 import { consumeEarlyInput } from '../utils/earlyInput.js'
@@ -1321,6 +1322,10 @@ export function REPL({
     queryGuard.subscribe,
     queryGuard.getSnapshot,
   )
+
+  // /goal auto-continuation: enqueues meta prompts when a goal is active and
+  // the query guard transitions from active -> idle.
+  useGoalAutoContinue(queryGuard)
 
   // Separate loading flag for operations outside the local query guard:
   // remote sessions (useRemoteSession / useDirectConnect) and foregrounded

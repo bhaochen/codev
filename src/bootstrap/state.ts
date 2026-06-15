@@ -709,6 +709,10 @@ export function getTotalOutputTokens(): number {
   return sumBy(Object.values(STATE.modelUsage), 'outputTokens')
 }
 
+export function getTotalTokensUsed(): number {
+  return getTotalInputTokens() + getTotalOutputTokens()
+}
+
 export function getTotalCacheReadInputTokens(): number {
   return sumBy(Object.values(STATE.modelUsage), 'cacheReadInputTokens')
 }

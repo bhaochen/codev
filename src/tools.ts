@@ -11,6 +11,9 @@ import { NotebookEditTool } from './tools/NotebookEditTool/NotebookEditTool.js'
 import { WebFetchTool } from './tools/WebFetchTool/WebFetchTool.js'
 import { TaskStopTool } from './tools/TaskStopTool/TaskStopTool.js'
 import { BriefTool } from './tools/BriefTool/BriefTool.js'
+import { GoalCreateTool } from './tools/GoalCreateTool/GoalCreateTool.js'
+import { GoalGetTool } from './tools/GoalGetTool/GoalGetTool.js'
+import { GoalUpdateTool } from './tools/GoalUpdateTool/GoalUpdateTool.js'
 // Dead code elimination: conditional import for ant-only tools
 /* eslint-disable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
 const REPLTool =
@@ -247,6 +250,9 @@ export function getAllBaseTools(): Tools {
     // Include ToolSearchTool when tool search might be enabled (optimistic check)
     // The actual decision to defer tools happens at request time in claude.ts
     ...(isToolSearchEnabledOptimistic() ? [ToolSearchTool] : []),
+    GoalCreateTool,
+    GoalGetTool,
+    GoalUpdateTool,
   ]
 }
 
