@@ -41,8 +41,12 @@ export type FeishuRuntimeConfig = {
   streamingCard?: boolean
   /** TTS 语音回复开关 — 发送消息时同时发送语音 */
   ttsEnabled?: boolean
+  /** TTS 引擎: 'edge' | 'voxcpm' */
+  ttsProvider?: 'edge' | 'voxcpm'
   /** TTS 语音名称（edge-tts 格式，默认 zh-CN-XiaoxiaoNeural） */
   ttsVoice?: string
+  /** VoxCPM 参考音频路径（用于 voxtts 模式） */
+  ttsReferenceAudio?: string
 }
 
 function getConfigPath(): string {

@@ -517,43 +517,69 @@ class FeishuService {
     if (!this.channel) return
     try {
       const config = getFeishuConfig()
-      console.log('[feishu][tts] config.ttsEnabled:', config.ttsEnabled, 'voice:', config.ttsVoice)
       if (!config.ttsEnabled) return
 
       const { readFile, unlink } = await import('node:fs/promises')
       const { spawn } = await import('node:child_process')
 
-      const voice = config.ttsVoice || 'zh-CN-XiaoxiaoNeural'
-      const mp3Path = path.join(os.tmpdir(), `feishu_tts_${Date.now()}.mp3`)
-      const oggPath = mp3Path.replace(/\.mp3$/, '.ogg')
+      const provider = config.ttsProvider || 'edge'
+      const timestamp = Date.now()
+      const rawBase = path.join(os.tmpdir(), `feishu_tts_raw_${timestamp}`)
+      const oggPath = path.join(os.tmpdir(), `feishu_tts_${timestamp}.ogg`)
 
-      console.log('[feishu][tts] generating MP3 with voice:', voice, 'text len:', text.length)
+      if (provider === 'voxcpm') {
+        const refAudio = config.ttsReferenceAudio
+        if (!refAudio) {
+          console.log('[feishu][tts] voxcpm: no ttsReferenceAudio configured')
+          return
+        }
+        console.log('[feishu][tts] voxcpm: synthesizing with ref:', refAudio, 'output base:', rawBase)
 
-      // Generate MP3 via edge-tts CLI
-      await new Promise<void>((resolve, reject) => {
-        const child = spawn('edge-tts', [
-          '--voice', voice,
-          '--text', text,
-          '--write-media', mp3Path,
-        ])
-        let stderr = ''
-        child.stderr?.on('data', c => { stderr += String(c) })
-        child.on('close', code => {
-          console.log('[feishu][tts] edge-tts exit code:', code, 'stderr:', stderr.slice(0, 100))
-          if (code === 0) resolve()
-          else reject(new Error(`edge-tts exit ${code}: ${stderr.slice(0, 200)}`))
+        await new Promise<void>((resolve, reject) => {
+          const child = spawn(
+            'voxcpm', ['clone', '--text', text, '--reference-audio', refAudio, '--denoise', '--output', `${rawBase}.wav`],
+            { shell: false },
+          )
+          let stdout = ''
+          let stderr = ''
+          child.stdout?.on('data', c => { stdout += String(c) })
+          child.stderr?.on('data', c => { stderr += String(c) })
+          child.on('close', code => {
+            console.log('[feishu][tts] voxcpm exit code:', code)
+            if (code === 0) resolve()
+            else reject(new Error(`voxcpm exit ${code}: ${stderr.slice(0, 200)}`))
+          })
+          child.on('error', reject)
         })
-        child.on('error', err => {
-          console.log('[feishu][tts] edge-tts spawn error:', err.message)
-          reject(err)
-        })
-      })
+      } else {
+        const voice = config.ttsVoice || 'zh-CN-XiaoxiaoNeural'
+        console.log('[feishu][tts] edge-tts: voice:', voice, 'text len:', text.length)
 
-      // Convert MP3 → OGG/Opus (Feishu voice requires opus format)
-      console.log('[feishu][tts] converting MP3 → OGG')
+        await new Promise<void>((resolve, reject) => {
+          const child = spawn('edge-tts', [
+            '--voice', voice,
+            '--text', text,
+            '--write-media', rawBase,
+          ])
+          let stderr = ''
+          child.stderr?.on('data', c => { stderr += String(c) })
+          child.on('close', code => {
+            console.log('[feishu][tts] edge-tts exit code:', code)
+            if (code === 0) resolve()
+            else reject(new Error(`edge-tts exit ${code}: ${stderr.slice(0, 200)}`))
+          })
+          child.on('error', reject)
+        })
+      }
+
+      const rawPath = provider === 'voxcpm' ? `${rawBase}.wav` : rawBase
+      console.log('[feishu][tts] raw audio at:', rawPath)
+
+      // Convert raw → OGG/Opus (Feishu voice requires opus format)
+      console.log('[feishu][tts] converting to OGG/Opus')
       await new Promise<void>((resolve, reject) => {
         const child = spawn('ffmpeg', [
-          '-i', mp3Path,
+          '-i', rawPath,
           '-c:a', 'libopus',
           '-b:a', '128k',
           '-y',
@@ -573,7 +599,7 @@ class FeishuService {
       console.log('[feishu][tts] sent successfully')
 
       // Clean up temp files
-      await unlink(mp3Path).catch(() => {})
+      await unlink(rawPath).catch(() => {})
       await unlink(oggPath).catch(() => {})
     } catch (err) {
       // Don't let TTS failure break the main message flow

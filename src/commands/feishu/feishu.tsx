@@ -25,6 +25,8 @@ type Step =
   | { type: 'edit-allowed-chats' }
   | { type: 'edit-mention-policy' }
   | { type: 'edit-tts-settings' }
+  | { type: 'edit-tts-provider' }
+  | { type: 'edit-tts-ref-audio' }
   | { type: 'confirm-clear' }
   | { type: 'scanning' }
 
@@ -200,8 +202,16 @@ function FeishuDialog({
         action: () => { void toggleTts() },
       },
       {
+        label: `TTS 引擎: ${config?.ttsProvider === 'voxcpm' ? 'VoxCPM' : 'Edge TTS'}`,
+        action: () => { void toggleTtsProvider() },
+      },
+      {
         label: `TTS 语音: ${config?.ttsVoice || 'zh-CN-XiaoxiaoNeural (中文)'}`,
         action: () => setStep({ type: 'edit-tts-settings' }),
+      },
+      {
+        label: `TTS 参考音频: ${config?.ttsReferenceAudio ? '已配置' : '未配置'}`,
+        action: () => setStep({ type: 'edit-tts-ref-audio' }),
       },
       {
         label:
@@ -498,6 +508,52 @@ function FeishuDialog({
     [refreshConfig],
   )
 
+  const toggleTtsProvider = React.useCallback(
+    async () => {
+      setBusy(true)
+      try {
+        const current = getFeishuConfig()
+        const next = current.ttsProvider === 'edge' ? 'voxcpm' : 'edge'
+        saveFeishuConfig({ ...current, ttsProvider: next })
+        refreshConfig()
+        setNotice({
+          text: `TTS 引擎已切换为 ${next === 'edge' ? 'Edge TTS' : 'VoxCPM'}。`,
+          tone: 'success',
+        })
+      } catch (error) {
+        setNotice({
+          text: error instanceof Error ? error.message : '保存失败',
+          tone: 'error',
+        })
+      } finally {
+        setBusy(false)
+        setStep({ type: 'menu' })
+      }
+    },
+    [refreshConfig],
+  )
+
+  const saveTtsRefAudio = React.useCallback(
+    async (value: string) => {
+      setBusy(true)
+      try {
+        const current = getFeishuConfig()
+        saveFeishuConfig({ ...current, ttsReferenceAudio: value || undefined })
+        refreshConfig()
+        setNotice({ text: '参考音频路径已保存。', tone: 'success' })
+      } catch (error) {
+        setNotice({
+          text: error instanceof Error ? error.message : '保存失败',
+          tone: 'error',
+        })
+      } finally {
+        setBusy(false)
+        setStep({ type: 'menu' })
+      }
+    },
+    [refreshConfig],
+  )
+
   const clearConfigAndStop = React.useCallback(async () => {
     setBusy(true)
     try {
@@ -689,6 +745,20 @@ function FeishuDialog({
           hint="Edge TTS 语音标识符，例如：zh-CN-XiaoxiaoNeural（中文女声）、zh-CN-YunxiNeural（中文男声）、en-US-JennyNeural（英文女声）。留空恢复默认。"
           initialValue={config?.ttsVoice}
           onSubmit={value => { void saveTtsVoice(value) }}
+          onCancel={() => setStep({ type: 'menu' })}
+        />
+      </Dialog>
+    )
+  }
+
+  if (step.type === 'edit-tts-ref-audio') {
+    return (
+      <Dialog title="VoxCPM 参考音频" onCancel={() => setStep({ type: 'menu' })}>
+        <TextInput
+          title="参考音频路径"
+          hint="VoxCPM 语音克隆的参考音频文件路径（支持 WAV/MP3）。留空清空配置。"
+          initialValue={config?.ttsReferenceAudio}
+          onSubmit={value => { void saveTtsRefAudio(value) }}
           onCancel={() => setStep({ type: 'menu' })}
         />
       </Dialog>
