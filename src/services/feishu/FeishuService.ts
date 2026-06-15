@@ -506,7 +506,7 @@ class FeishuService {
       const { optimizeMarkdownForFeishu } = await import(
         '../../utils/feishuMarkdown.js'
       )
-      const optimized = optimizeMarkdownForFeishu(markdown)
+      const optimized = optimizeMarkdownForFeishu(markdown).replace(/<br\s*\/?>/gi, '\n')
       await this.channel.send(chatId, { markdown: optimized })
     } catch (err) {
       log.fail('send', err, { chatId, markdownLen: markdown.length })
@@ -518,94 +518,124 @@ class FeishuService {
     try {
       const config = getFeishuConfig()
       if (!config.ttsEnabled) return
-
-      const { readFile, unlink } = await import('node:fs/promises')
+      const { readFile, unlink, writeFile } = await import('node:fs/promises')
       const { spawn } = await import('node:child_process')
-
       const provider = config.ttsProvider || 'edge'
-      const timestamp = Date.now()
-      const rawBase = path.join(os.tmpdir(), `feishu_tts_raw_${timestamp}`)
-      const oggPath = path.join(os.tmpdir(), `feishu_tts_${timestamp}.ogg`)
 
       if (provider === 'voxcpm') {
         const refAudio = config.ttsReferenceAudio
-        if (!refAudio) {
-          console.log('[feishu][tts] voxcpm: no ttsReferenceAudio configured')
+        if (!refAudio) return
+        const chunks = this.splitTextForVoxCpm(text)
+        console.log('[feishu][tts] voxcpm: splitting into', chunks.length, 'chunks')
+        const timestamp = Date.now()
+        const rawPaths: string[] = []
+        const oggPaths: string[] = []
+
+        // Generate each chunk
+        for (let i = 0; i < chunks.length; i++) {
+          const chunk = chunks[i]!.trim()
+          if (!chunk) continue
+          console.log('[feishu][tts] voxcpm: synthesizing chunk', i + 1, '/', chunks.length, 'len:', chunk.length)
+          const rawPath = path.join(os.tmpdir(), `feishu_vc_${timestamp}_${i}.wav`)
+          const oggPath = path.join(os.tmpdir(), `feishu_vc_${timestamp}_${i}.ogg`)
+          rawPaths.push(rawPath)
+          oggPaths.push(oggPath)
+          try {
+            await new Promise<void>((resolve, reject) => {
+              const child = spawn(
+                '/home/yuki/Code/Agent/VersperClaw/.venv/bin/voxcpm',
+                ['clone', '--text', chunk, '--reference-audio', refAudio, '--denoise', '--output', rawPath],
+                { shell: false },
+              )
+              child.on('close', code => { code === 0 ? resolve() : reject(new Error(`voxcpm exit ${code}`)) })
+              child.on('error', reject)
+            })
+            // Convert each chunk WAV → OGG (so concat can mix sample rates properly)
+            await new Promise<void>((resolve, reject) => {
+              const child = spawn('ffmpeg', ['-i', rawPath, '-c:a', 'libopus', '-b:a', '128k', '-y', oggPath])
+              child.on('close', code => { code === 0 ? resolve() : reject(new Error(`ffmpeg exit ${code}`)) })
+              child.on('error', reject)
+            })
+          } catch (err) {
+            console.log('[feishu][tts] voxcpm: chunk', i + 1, 'failed, skipping:', err instanceof Error ? err.message : String(err))
+            rawPaths.pop()
+            oggPaths.pop()
+          }
+        }
+
+        if (rawPaths.length === 0) {
+          console.log('[feishu][tts] voxcpm: no chunks succeeded')
           return
         }
-        console.log('[feishu][tts] voxcpm: synthesizing with ref:', refAudio, 'output base:', rawBase)
 
+        // Write concat list for ffmpeg
+        const listPath = path.join(os.tmpdir(), `feishu_vc_${timestamp}_list.txt`)
+        const listContent = oggPaths.map(p => `file '${p}'`).join('\n')
+        await writeFile(listPath, listContent)
+
+        // Concat all OGG chunks into one
+        const mergedOggPath = path.join(os.tmpdir(), `feishu_vc_${timestamp}_merged.ogg`)
         await new Promise<void>((resolve, reject) => {
-          const child = spawn(
-            '/home/yuki/Code/Agent/VersperClaw/.venv/bin/voxcpm',
-            ['clone', '--text', text, '--reference-audio', refAudio, '--denoise', '--output', `${rawBase}.wav`],
-            { shell: false },
-          )
-          let stdout = ''
-          let stderr = ''
-          child.stdout?.on('data', c => { stdout += String(c) })
-          child.stderr?.on('data', c => { stderr += String(c) })
-          child.on('close', code => {
-            console.log('[feishu][tts] voxcpm exit code:', code)
-            if (code === 0) resolve()
-            else reject(new Error(`voxcpm exit ${code}: ${stderr.slice(0, 200)}`))
-          })
+          const child = spawn('ffmpeg', ['-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', '-y', mergedOggPath])
+          child.on('close', code => { code === 0 ? resolve() : reject(new Error(`ffmpeg concat exit ${code}`)) })
           child.on('error', reject)
         })
-      } else {
-        const voice = config.ttsVoice || 'zh-CN-XiaoxiaoNeural'
-        console.log('[feishu][tts] edge-tts: voice:', voice, 'text len:', text.length)
 
-        await new Promise<void>((resolve, reject) => {
-          const child = spawn('edge-tts', [
-            '--voice', voice,
-            '--text', text,
-            '--write-media', rawBase,
-          ])
-          let stderr = ''
-          child.stderr?.on('data', c => { stderr += String(c) })
-          child.on('close', code => {
-            console.log('[feishu][tts] edge-tts exit code:', code)
-            if (code === 0) resolve()
-            else reject(new Error(`edge-tts exit ${code}: ${stderr.slice(0, 200)}`))
-          })
-          child.on('error', reject)
-        })
+        const buffer = await readFile(mergedOggPath)
+        await this.channel.send(chatId, { audio: { source: buffer } })
+        console.log('[feishu][tts] voxcpm: merged audio sent, size:', buffer.length)
+
+        // Clean up
+        for (const p of [...rawPaths, ...oggPaths, listPath, mergedOggPath]) {
+          await unlink(p).catch(() => {})
+        }
+        return
       }
 
-      const rawPath = provider === 'voxcpm' ? `${rawBase}.wav` : rawBase
-      console.log('[feishu][tts] raw audio at:', rawPath)
-
-      // Convert raw → OGG/Opus (Feishu voice requires opus format)
-      console.log('[feishu][tts] converting to OGG/Opus')
+      // Edge TTS — single shot
+      const voice = config.ttsVoice || 'zh-CN-XiaoxiaoNeural'
+      const timestamp = Date.now()
+      const rawPath = path.join(os.tmpdir(), `feishu_tts_${timestamp}`)
+      const oggPath = path.join(os.tmpdir(), `feishu_tts_${timestamp}.ogg`)
       await new Promise<void>((resolve, reject) => {
-        const child = spawn('ffmpeg', [
-          '-i', rawPath,
-          '-c:a', 'libopus',
-          '-b:a', '128k',
-          '-y',
-          oggPath,
-        ])
-        child.on('close', code => {
-          console.log('[feishu][tts] ffmpeg exit code:', code)
-          if (code === 0) resolve()
-          else reject(new Error(`ffmpeg exit ${code}`))
-        })
+        const child = spawn('edge-tts', ['--voice', voice, '--text', text, '--write-media', rawPath])
+        child.on('close', code => { code === 0 ? resolve() : reject(new Error(`edge-tts exit ${code}`)) })
         child.on('error', reject)
       })
-
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn('ffmpeg', ['-i', rawPath, '-c:a', 'libopus', '-b:a', '128k', '-y', oggPath])
+        child.on('close', code => { code === 0 ? resolve() : reject(new Error(`ffmpeg exit ${code}`)) })
+        child.on('error', reject)
+      })
       const buffer = await readFile(oggPath)
-      console.log('[feishu][tts] sending audio buffer, size:', buffer.length)
       await this.channel.send(chatId, { audio: { source: buffer } })
-      console.log('[feishu][tts] sent successfully')
-
-      // Clean up temp files
       await unlink(rawPath).catch(() => {})
       await unlink(oggPath).catch(() => {})
     } catch (err) {
-      // Don't let TTS failure break the main message flow
       console.log('[feishu][tts] send-voice-failed:', err instanceof Error ? err.message : String(err))
     }
+  }
+
+  /**
+   * Split text into VoxCPM-friendly chunks (max ~150 chars each).
+   * Split at Chinese/English sentence boundaries to keep grammar intact.
+   */
+  private splitTextForVoxCpm(text: string): string[] {
+    const sentences: string[] = []
+    const parts = text.split(/(?<=[。！？…\n])/)
+    let current = ''
+    for (const p of parts) {
+      const trimmed = p.trim()
+      if (!trimmed) continue
+      if (current.length + trimmed.length <= 150) {
+        current += (current ? ' ' : '') + trimmed
+      } else {
+        if (current) sentences.push(current)
+        current = trimmed
+      }
+    }
+    if (current) sentences.push(current)
+    return sentences
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars

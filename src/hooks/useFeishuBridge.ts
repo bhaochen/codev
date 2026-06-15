@@ -117,11 +117,29 @@ export function useFeishuBridge({ messages, isLoading }: Props): void {
         // Also send TTS voice if enabled
         const config = getFeishuConfig()
         if (config.ttsEnabled) {
-          const plainText = completedTurn.responseParts
-            .join('\n')
-            .replace(/[#*`_~\[\]()>|\\]/g, '')
-            .replace(/{[^}]*}/g, '')
-            .trim()
+          const rawText = completedTurn.responseParts.join('\n')
+
+          // Deep-clean text before sending to TTS
+          let plainText = rawText
+          // 去掉代码块标记 ``` ，但保留里面内容
+          plainText = plainText.replace(/```(\w*)\n?([\s\S]*?)```/g, '$2')
+          // 去掉行内代码标记 ` ，但保留内容
+          plainText = plainText.replace(/`([^`]+)`/g, '$1')
+          // 去掉 markdown 语法符号（# * _ ~ > | 等）
+          plainText = plainText.replace(/[#*_~>|^=\-\[\]()>|\\]/g, '')
+          // 去掉花括号内容
+          plainText = plainText.replace(/\{[^}]*\}/g, '')
+          // 去掉 emoji
+          plainText = plainText.replace(
+            /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{2300}-\u{23FF}\u{2B50}\u{FE0F}]/gu,
+            '',
+          )
+          // 合并多个换行/空行为单个换行
+          plainText = plainText.replace(/\n{2,}/g, '\n')
+          // 去掉行首尾空白
+          plainText = plainText.split('\n').map(l => l.trim()).join('\n')
+          plainText = plainText.trim()
+
           if (plainText) {
             await feishuService.sendVoice(completedTurn.chatId, plainText)
           }
