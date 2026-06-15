@@ -1,6 +1,5 @@
 /**
  * FeishuService — in-process Feishu bot using @larksuite/channel
- * Refactored to use vendor modules from lark-coding-agent-bridge.
  */
 
 import * as path from 'node:path'
@@ -17,7 +16,7 @@ import {
   type FeishuRuntimeConfig,
 } from './feishuConfig.js'
 
-// Vendor modules (from lark-coding-agent-bridge)
+// Vendor modules (self-contained implementations)
 import { log } from './vendor/core/logger.js'
 import { PendingQueue } from './vendor/bot/pending-queue.js'
 import { startKeepalive } from './vendor/bot/keepalive.js'
