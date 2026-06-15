@@ -25,6 +25,7 @@ const searchResultSchema = lazySchema(() => {
     title: z.string(),
     url: z.string(),
     snippet: z.string().optional(),
+    image: z.string().optional(),
   })
 
   return z.object({
@@ -53,7 +54,7 @@ import type { WebSearchProgress } from '../../types/tools.js'
  */
 async function searchSearXNG(
   query: string
-): Promise<Array<{ title: string; url: string; snippet?: string }>> {
+): Promise<Array<{ title: string; url: string; snippet?: string; image?: string }>> {
   try {
     const url = new URL('http://localhost:8080/search')
     url.searchParams.set('q', query)
@@ -85,6 +86,7 @@ async function searchSearXNG(
         title: r.title,
         url: r.url,
         snippet: r.content,
+        image: r.thumbnail || undefined,
       }))
   } catch (error) {
     logError('SearXNG search failed', error)
@@ -99,7 +101,7 @@ async function searchSearXNG(
  */
 async function searchTavily(
   query: string
-): Promise<Array<{ title: string; url: string; snippet?: string }>> {
+): Promise<Array<{ title: string; url: string; snippet?: string; image?: string }>> {
   try {
     const apiKey = process.env.TAVILY_API_KEY
     if (!apiKey) {
@@ -117,6 +119,7 @@ async function searchTavily(
       title: r.title,
       url: r.url,
       snippet: r.content,
+      image: r.img || r.image || undefined,
     }))
   } catch (error) {
     logError('Tavily search failed', error)
@@ -295,7 +298,8 @@ export const WebSearchTool = buildTool({
         text += r + '\n\n'
       } else {
         r.content.forEach((item: any, i: number) => {
-          text += `${i + 1}. ${item.title}\n${item.url}\n${item.snippet || ''}\n\n`
+          const imgLine = item.image ? `\n![${item.title}](${item.image})\n` : ''
+          text += `${i + 1}. ${item.title}\n${item.url}\n${item.snippet || ''}${imgLine}\n`
         })
       }
     }
