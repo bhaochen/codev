@@ -7,6 +7,14 @@
 
 ## 📢 News
 
+- **2026-06-15** 🎯 Goal Tracking — New `/goal` command with prompt input footsider and lastline display for real-time goal tracking.
+- **2026-06-15** 🖼️ WebSearch Image Preview — WebSearch markdown now displays inline image links natively.
+- **2026-06-15** 🔊 Feishu Voice — Feishu integration now supports both VoxCPM and Edge-TTS voice synthesis.
+- **2026-06-15** 📝 Feishu Markdown — Feishu bot messages render with full markdown styling.
+- **2026-06-15** 🤖 Feishu Connect — New Feishu (飞书) bot integration with message relay and voice TTS.
+- **2026-06-14** 📱 Desktop Provider Sync — Desktop now syncs provider config from TUI; model list uses sidecar proxy to avoid CORS.
+- **2026-06-14** 🛡️ NVIDIA Sidecar Fix — Use sidecar for NVIDIA, direct fetch for OpenRouter/OpenCode.
+- **2026-06-13** 🗣️ Voice CN/TW — Added Chinese (zh-CN) and Taiwanese (zh-TW) voice support for TTS.
 - **2026-06-02** 🤝 Agent Team — Multi-agent collaboration via Tmux backend with teammate layout manager, dynamic team scaling, and spawn utilities for coordinated task execution.
 - **2026-06-01** 🧩 SubAgent Swarm Topology — Dedicated Explore 🔍, Plan 📋, and Verification 🧪 subagents for autonomous multi-step task decomposition and execution.
 - **2026-05-25** 🤖 AI Friend on Desktop — Companion mode with `real-time audio/video`, avatar & background image upload, edge glow effect on transcript, and localStorage persistence.
