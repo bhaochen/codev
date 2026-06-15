@@ -3,16 +3,16 @@ import { Text } from '../../ink.js'
 import { useAppState } from '../../state/AppState.js'
 import type { GoalStatus } from '../../state/AppStateStore.js'
 
-const MAX_OBJECTIVE_CHARS = 30
+const MAX_OBJECTIVE_CHARS = 40
 
-function statusColor(status: GoalStatus): string {
+export function goalStatusColor(status: GoalStatus): string {
   switch (status) {
     case 'pursuing':
-      return 'green'
-    case 'paused':
       return 'yellow'
+    case 'paused':
+      return 'gray'
     case 'achieved':
-      return 'cyan'
+      return 'green'
     case 'blocked':
       return 'red'
     case 'usage-limited':
@@ -34,11 +34,11 @@ export function GoalIndicator(): React.ReactNode {
 
   const planSuppressed = goal.status === 'pursuing' && mode === 'plan'
   const label = planSuppressed ? 'paused: plan mode' : goal.status
-  const color = planSuppressed ? 'yellow' : statusColor(goal.status)
+  const dotColor = planSuppressed ? 'yellow' : goalStatusColor(goal.status)
 
   return (
     <Text>
-      <Text color={color}>●</Text>
+      <Text color={dotColor}>●</Text>
       <Text dimColor> goal: </Text>
       <Text>{truncated}</Text>
       <Text dimColor> [{label}]</Text>

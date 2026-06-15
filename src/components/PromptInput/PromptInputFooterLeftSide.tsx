@@ -366,9 +366,11 @@ function ModeIndicator({
   // its click-target Box isn't nested inside the <Text wrap="truncate">
   // wrapper (reconciler throws on Box-in-Text).
   // Tmux pill (ant-only) — appears right after tasks in nav order
-  ...("external" === 'ant' && hasTmuxSession ? [<TungstenPill key="tmux" selected={tmuxSelected} />] : []), ...(isAgentSwarmsEnabled() && hasTeams ? [<TeamStatus key="teams" teamsSelected={teamsSelected} showHint={showHint && !hasBackgroundTasks} />] : []), ...(shouldShowPrStatus ? [<PrBadge key="pr-status" number={prStatus.number!} url={prStatus.url!} reviewState={prStatus.reviewState!} />] : []),
-  // Goal indicator — only renders when an active goal exists
-  <GoalIndicator key="goal" />];
+  ...("external" === 'ant' && hasTmuxSession ? [<TungstenPill key="tmux" selected={tmuxSelected} />] : []), ...(isAgentSwarmsEnabled() && hasTeams ? [<TeamStatus key="teams" teamsSelected={teamsSelected} showHint={showHint && !hasBackgroundTasks} />] : []), ...(shouldShowPrStatus ? [<PrBadge key="pr-status" number={prStatus.number!} url={prStatus.url!} reviewState={prStatus.reviewState!} />] : [])];
+
+  // Goal indicator renders on its own row at the bottom — not mixed into the
+  // main parts line so it doesn't get truncated when the terminal is narrow.
+  const goalPart = <GoalIndicator key="goal" />;
 
   // Check if any in-process teammates exist (for hint text cycling)
   const hasAnyInProcessTeammates = Object.values(tasks).some(t_2 => t_2.type === 'in_process_teammate' && t_2.status === 'running');
@@ -398,6 +400,7 @@ function ModeIndicator({
         {otherParts.length > 0 && <Box>
             <Byline>{otherParts}</Byline>
           </Box>}
+        {goalPart && <Box><Byline>{goalPart}</Byline></Box>}
       </Box>;
   }
 
@@ -464,24 +467,35 @@ function ModeIndicator({
   // part (e.g. the selection copy/native-select hints) grow the column
   // from 0→1 row. Always render 1 row in fullscreen; return a space when
   // empty so Yoga reserves the row without painting anything visible.
-  if (parts.length === 0 && !tasksPart && !modePart) {
+  const hasMainRowContent = modePart || tasksPart || parts.length > 0;
+  if (!hasMainRowContent && !goalPart) {
     return isFullscreenEnvEnabled() ? <Text> </Text> : null;
   }
+  // When there IS a goal but no other main content, we still need to render
+  // the main row so that the goal part is below it — fall through to the
+  // main return below.
 
   // flexShrink=0 keeps mode + pill at natural width; the remaining parts
   // truncate at the tail as one string inside the Text wrapper.
-  return <Box height={1} overflow="hidden">
-      {modePart && <Box flexShrink={0}>
-          {modePart}
-          {(tasksPart || parts.length > 0) && <Text dimColor> · </Text>}
-        </Box>}
-      {tasksPart && <Box flexShrink={0}>
-          {tasksPart}
-          {parts.length > 0 && <Text dimColor> · </Text>}
-        </Box>}
-      {parts.length > 0 && <Text wrap="truncate">
-          <Byline>{parts}</Byline>
-        </Text>}
+  // Goal gets its own line to avoid truncation in narrow terminals.
+  // Main row first, goal indicator always at the bottom.
+  return <Box flexDirection="column">
+      <Box height={1} overflow="hidden">
+        {modePart && <Box flexShrink={0}>
+            {modePart}
+            {(tasksPart || parts.length > 0 || goalPart) && <Text dimColor> · </Text>}
+          </Box>}
+        {tasksPart && <Box flexShrink={0}>
+            {tasksPart}
+            {(parts.length > 0 || goalPart) && <Text dimColor> · </Text>}
+          </Box>}
+        {parts.length > 0 && <Text wrap="truncate">
+            <Byline>{parts}</Byline>
+          </Text>}
+        {parts.length === 0 && !tasksPart && !modePart && !goalPart && isFullscreenEnvEnabled() && <Text> </Text>}
+        {parts.length === 0 && !tasksPart && !modePart && !goalPart && !isFullscreenEnvEnabled() && null}
+      </Box>
+      {goalPart && <Box height={1}><Byline>{goalPart}</Byline></Box>}
     </Box>;
 }
 function getSpinnerHintParts(isLoading: boolean, escShortcut: string, todosShortcut: string, killAgentsShortcut: string, hasTaskItems: boolean, expandedView: 'none' | 'tasks' | 'teammates', hasTeammates: boolean, hasRunningAgentTasks: boolean, isKillAgentsConfirmShowing: boolean): React.ReactElement[] {
