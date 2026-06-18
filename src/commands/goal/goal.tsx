@@ -11,6 +11,7 @@ import {
   formatGoalStatus,
   isGoalContinuationPrompt,
 } from '../../utils/goal.js'
+import { clearGoal, saveGoal } from '../../utils/sessionStorage.js'
 import { enqueue, removeByFilter } from '../../utils/messageQueueManager.js'
 import { renderToString } from '../../utils/staticRender.js'
 
@@ -147,7 +148,15 @@ function setGoal(
   setAppState: LocalJSXCommandContext['setAppState'],
   updater: (prev: Goal | undefined) => Goal | undefined,
 ): void {
-  setAppState((prev: AppState) => ({ ...prev, goal: updater(prev.goal) } satisfies AppState))
+  setAppState((prev: AppState) => {
+    const newGoal = updater(prev.goal)
+    if (newGoal) {
+      saveGoal({ type: 'goal', ...newGoal })
+    } else {
+      clearGoal()
+    }
+    return { ...prev, goal: newGoal } satisfies AppState
+  })
 }
 
 function clearQueuedGoalContinuations(): void {

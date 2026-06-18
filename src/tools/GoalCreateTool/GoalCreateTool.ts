@@ -10,6 +10,9 @@ import {
   isGoalInactive,
 } from '../../utils/goal.js'
 import {
+  saveGoal,
+} from '../../utils/sessionStorage.js'
+import {
   CREATE_GOAL_TOOL_NAME,
   CREATE_GOAL_TOOL_PROMPT,
   DESCRIPTION,
@@ -103,6 +106,17 @@ export const GoalCreateTool = buildTool({
         lastUpdatedAt: now,
       },
     }))
+    saveGoal({
+      type: 'goal',
+      id: goalId,
+      objective: objective.trim(),
+      status: 'pursuing',
+      startedAt: now,
+      startCostUSD: getTotalCost(),
+      startTokensUsed: getTotalTokensUsed(),
+      continuationCount: 0,
+      lastUpdatedAt: now,
+    })
 
     return {
       data: {

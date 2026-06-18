@@ -41,7 +41,7 @@ import {
   asSessionId,
   type SessionId,
 } from '../types/ids.js'
-import type { AttributionSnapshotMessage } from '../types/logs.js'
+import type { AttributionSnapshotMessage, GoalEntry } from '../types/logs.js'
 import {
   type ContentReplacementEntry,
   type ContextCollapseCommitEntry,
@@ -545,6 +545,8 @@ class Project {
   currentSessionPrNumber: number | undefined
   currentSessionPrUrl: string | undefined
   currentSessionPrRepository: string | undefined
+  // /goal state — re-appended on exit so --resume restores it
+  currentSessionGoal: GoalEntry | undefined
 
   sessionFile: string | null = null
   // Entries buffered while sessionFile is null. Flushed by materializeSessionFile
@@ -834,6 +836,12 @@ class Project {
         prUrl: this.currentSessionPrUrl,
         prRepository: this.currentSessionPrRepository,
         timestamp: new Date().toISOString(),
+      })
+    }
+    if (this.currentSessionGoal) {
+      appendEntryToFile(this.sessionFile, {
+        ...this.currentSessionGoal,
+        sessionId,
       })
     }
   }
@@ -2307,6 +2315,7 @@ export async function loadTranscriptFromFile(
       leafUuids,
       contentReplacements,
       worktreeStates,
+      goal,
     } = await loadTranscriptFile(filePath)
 
     if (messages.size === 0) {
@@ -2352,6 +2361,7 @@ export async function loadTranscriptFromFile(
       worktreeSession: worktreeStates.has(sessionId)
         ? worktreeStates.get(sessionId)
         : undefined,
+      goal,
     }
   }
 
@@ -2766,6 +2776,7 @@ export function restoreSessionMetadata(meta: {
   prNumber?: number
   prUrl?: string
   prRepository?: string
+  goal?: GoalEntry
 }): void {
   const project = getProject()
   // ??= so --name (cacheSessionTitle) wins over the resumed
@@ -2782,6 +2793,7 @@ export function restoreSessionMetadata(meta: {
     project.currentSessionPrNumber = meta.prNumber
   if (meta.prUrl) project.currentSessionPrUrl = meta.prUrl
   if (meta.prRepository) project.currentSessionPrRepository = meta.prRepository
+  if (meta.goal) project.currentSessionGoal = meta.goal
 }
 
 /**
@@ -2920,6 +2932,34 @@ export function saveWorktreeState(
 }
 
 /**
+ * Persist /goal state to the transcript for --resume.
+ * Written eagerly on every goal change so the transcript always reflects
+ * the latest state. Last-wins on restore — the freshest entry wins.
+ */
+export function saveGoal(goal: GoalEntry): void {
+  const project = getProject()
+  project.currentSessionGoal = goal
+  // Write immediately so the transcript reflects the latest state at all times.
+  // reAppendSessionMetadata also re-appends on exit, but without an immediate
+  // write a crash after goal change but before exit would lose the update.
+  if (project.sessionFile) {
+    appendEntryToFile(project.sessionFile, {
+      ...goal,
+      sessionId: getSessionId(),
+    })
+  }
+}
+
+/**
+ * Clear the cached goal state. Called when /goal clear removes the goal,
+ * or when restoreSessionMetadata runs for a session that had no goal.
+ */
+export function clearGoal(): void {
+  const project = getProject()
+  project.currentSessionGoal = undefined
+}
+
+/**
  * Extracts the session ID from a log.
  * For lite logs, uses the sessionId field directly.
  * For full logs, extracts from the first message.
@@ -2978,6 +3018,7 @@ export async function loadFullLog(log: LogOption): Promise<LogOption> {
       contextCollapseCommits,
       contextCollapseSnapshot,
       leafUuids,
+      goal,
     } = await loadTranscriptFile(sessionFile)
 
     if (messages.size === 0) {
@@ -3048,6 +3089,7 @@ export async function loadFullLog(log: LogOption): Promise<LogOption> {
         sessionId && contextCollapseSnapshot?.sessionId === sessionId
           ? contextCollapseSnapshot
           : undefined,
+      goal,
     }
   } catch {
     // If loading fails, return the original log
@@ -3120,6 +3162,7 @@ const METADATA_TYPE_MARKERS = [
   '"type":"mode"',
   '"type":"worktree-state"',
   '"type":"pr-link"',
+  '"type":"goal"',
 ]
 const METADATA_MARKER_BUFS = METADATA_TYPE_MARKERS.map(m => Buffer.from(m))
 // Longest marker is 22 bytes; +1 for leading `{` = 23.
@@ -3492,6 +3535,8 @@ export async function loadTranscriptFile(
   contextCollapseCommits: ContextCollapseCommitEntry[]
   contextCollapseSnapshot: ContextCollapseSnapshotEntry | undefined
   leafUuids: Set<UUID>
+  /** Last-wins goal entry for this session */
+  goal?: GoalEntry
 }> {
   const messages = new Map<UUID, TranscriptMessage>()
   const summaries = new Map<UUID, string>()
@@ -3516,6 +3561,8 @@ export async function loadTranscriptFile(
   const contextCollapseCommits: ContextCollapseCommitEntry[] = []
   // Last-wins — later entries supersede.
   let contextCollapseSnapshot: ContextCollapseSnapshotEntry | undefined
+  // Last-wins — later goal entries supersede.
+  let goal: GoalEntry | undefined
 
   try {
     // For large transcripts, avoid materializing megabytes of stale content.
@@ -3607,6 +3654,8 @@ export async function loadTranscriptFile(
           prNumbers.set(entry.sessionId, entry.prNumber)
           prUrls.set(entry.sessionId, entry.prUrl)
           prRepositories.set(entry.sessionId, entry.prRepository)
+        } else if (entry.type === 'goal' && entry.sessionId) {
+          goal = entry
         }
       }
     }
@@ -3675,6 +3724,8 @@ export async function loadTranscriptFile(
         prNumbers.set(entry.sessionId, entry.prNumber)
         prUrls.set(entry.sessionId, entry.prUrl)
         prRepositories.set(entry.sessionId, entry.prRepository)
+      } else if (entry.type === 'goal' && entry.sessionId) {
+        goal = entry
       } else if (entry.type === 'file-history-snapshot') {
         fileHistorySnapshots.set(entry.messageId, entry)
       } else if (entry.type === 'attribution-snapshot') {
@@ -3809,6 +3860,7 @@ export async function loadTranscriptFile(
     contextCollapseCommits,
     contextCollapseSnapshot,
     leafUuids,
+    goal,
   }
 }
 
@@ -3827,6 +3879,7 @@ async function loadSessionFile(sessionId: UUID): Promise<{
   contentReplacements: Map<UUID, ContentReplacementRecord[]>
   contextCollapseCommits: ContextCollapseCommitEntry[]
   contextCollapseSnapshot: ContextCollapseSnapshotEntry | undefined
+  goal?: GoalEntry
 }> {
   const sessionFile = join(
     getSessionProjectDir() ?? getProjectDir(getOriginalCwd()),
@@ -3882,6 +3935,7 @@ export async function getLastSessionLog(
     contentReplacements,
     contextCollapseCommits,
     contextCollapseSnapshot,
+    goal,
   } = await loadSessionFile(sessionId)
   if (messages.size === 0) return null
   // Prime getSessionMessages cache so recordTranscript (called after REPL
@@ -3928,6 +3982,7 @@ export async function getLastSessionLog(
       contextCollapseSnapshot?.sessionId === sessionId
         ? contextCollapseSnapshot
         : undefined,
+    goal,
   }
 }
 
@@ -4615,6 +4670,7 @@ export async function loadAllLogsFromSessionFile(
     attributionSnapshots,
     contentReplacements,
     leafUuids,
+    goal,
   } = await loadTranscriptFile(sessionFile, { keepAllLeaves: true })
 
   if (messages.size === 0) return []
@@ -4687,6 +4743,7 @@ export async function loadAllLogsFromSessionFile(
         chain,
       ),
       contentReplacements: contentReplacements.get(sessionId) ?? [],
+      goal,
     })
   }
 

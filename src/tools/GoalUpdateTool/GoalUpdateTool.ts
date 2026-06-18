@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { buildTool, type ToolDef } from '../../Tool.js'
 import { lazySchema } from '../../utils/lazySchema.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
+import { saveGoal } from '../../utils/sessionStorage.js'
 import {
   DESCRIPTION,
   UPDATE_GOAL_TOOL_NAME,
@@ -103,13 +104,13 @@ export const GoalUpdateTool = buildTool({
     }
 
     const now = Date.now()
-    let updated = false
 
     const internalStatus =
       status === 'complete'
         ? ('achieved' as const)
         : ('blocked' as const)
 
+    let updatedGoal: typeof goal | null = null
     setAppState(prev => {
       const current = prev.goal
       if (
@@ -119,19 +120,19 @@ export const GoalUpdateTool = buildTool({
       ) {
         return prev
       }
-      updated = true
+      updatedGoal = {
+        ...current,
+        status: internalStatus,
+        lastReason: reason,
+        lastUpdatedAt: now,
+      }
       return {
         ...prev,
-        goal: {
-          ...current,
-          status: internalStatus,
-          lastReason: reason,
-          lastUpdatedAt: now,
-        },
+        goal: updatedGoal,
       }
     })
 
-    if (!updated) {
+    if (!updatedGoal) {
       return {
         data: {
           status: 'stale-goal' as const,
@@ -141,6 +142,11 @@ export const GoalUpdateTool = buildTool({
         },
       }
     }
+
+    saveGoal({
+      type: 'goal',
+      ...updatedGoal,
+    })
 
     return {
       data: {
