@@ -546,7 +546,9 @@ class Project {
   currentSessionPrUrl: string | undefined
   currentSessionPrRepository: string | undefined
   // /goal state — re-appended on exit so --resume restores it
-  currentSessionGoal: GoalEntry | undefined
+  // Tri-state: undefined = never touched, GoalEntry = active goal,
+  // null = cleared (write a tombstone so resume doesn't restore stale goal).
+  currentSessionGoal: GoalEntry | null | undefined
 
   sessionFile: string | null = null
   // Entries buffered while sessionFile is null. Flushed by materializeSessionFile
@@ -841,6 +843,21 @@ class Project {
     if (this.currentSessionGoal) {
       appendEntryToFile(this.sessionFile, {
         ...this.currentSessionGoal,
+        sessionId,
+      })
+    } else if (this.currentSessionGoal === null) {
+      // Goal was explicitly cleared — write a tombstone so resume
+      // doesn't restore a stale goal from an earlier entry.
+      appendEntryToFile(this.sessionFile, {
+        type: 'goal',
+        id: '__cleared__',
+        objective: '',
+        status: 'achieved',
+        startedAt: 0,
+        startCostUSD: 0,
+        startTokensUsed: 0,
+        continuationCount: 0,
+        lastUpdatedAt: 0,
         sessionId,
       })
     }
@@ -2951,12 +2968,27 @@ export function saveGoal(goal: GoalEntry): void {
 }
 
 /**
- * Clear the cached goal state. Called when /goal clear removes the goal,
- * or when restoreSessionMetadata runs for a session that had no goal.
+ * Clear the goal state and write a tombstone entry to the transcript.
+ * Without the tombstone, a stale goal entry from earlier in the session
+ * would be restored on --resume (last-wins, but no later entry to win).
  */
 export function clearGoal(): void {
   const project = getProject()
-  project.currentSessionGoal = undefined
+  project.currentSessionGoal = null
+  if (project.sessionFile) {
+    appendEntryToFile(project.sessionFile, {
+      type: 'goal',
+      id: '__cleared__',
+      objective: '',
+      status: 'achieved',
+      startedAt: 0,
+      startCostUSD: 0,
+      startTokensUsed: 0,
+      continuationCount: 0,
+      lastUpdatedAt: 0,
+      sessionId: getSessionId(),
+    })
+  }
 }
 
 /**
@@ -3655,7 +3687,7 @@ export async function loadTranscriptFile(
           prUrls.set(entry.sessionId, entry.prUrl)
           prRepositories.set(entry.sessionId, entry.prRepository)
         } else if (entry.type === 'goal' && entry.sessionId) {
-          goal = entry
+          goal = entry.id === '__cleared__' ? undefined : entry
         }
       }
     }
@@ -3725,7 +3757,7 @@ export async function loadTranscriptFile(
         prUrls.set(entry.sessionId, entry.prUrl)
         prRepositories.set(entry.sessionId, entry.prRepository)
       } else if (entry.type === 'goal' && entry.sessionId) {
-        goal = entry
+        goal = entry.id === '__cleared__' ? undefined : entry
       } else if (entry.type === 'file-history-snapshot') {
         fileHistorySnapshots.set(entry.messageId, entry)
       } else if (entry.type === 'attribution-snapshot') {
