@@ -64,7 +64,7 @@ export function Feed({ config, actualWidth }: FeedProps): React.ReactNode {
 
   return (
     <Box flexDirection="column" width={actualWidth}>
-      <Text bold color="claude">
+      <Text bold color="clawd_body">
         {title}
       </Text>
       {customContent ? (

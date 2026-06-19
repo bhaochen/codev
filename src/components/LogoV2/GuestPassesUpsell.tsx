@@ -63,10 +63,10 @@ export function GuestPassesUpsell(): React.ReactNode {
   const reward = getCachedReferrerReward()
   return (
     <Text dimColor>
-      <Text color="claude">[✻]</Text> <Text color="claude">[✻]</Text>{' '}
-      <Text color="claude">[✻]</Text> ·{' '}
+      <Text color="clawd_body">[✻]</Text> <Text color="clawd_body">[✻]</Text>{' '}
+      <Text color="clawd_body">[✻]</Text> ·{' '}
       {reward
-        ? `Share Claude Code and earn ${formatCreditAmount(reward)} of extra usage · /passes`
+        ? `Share Versper Claw and earn ${formatCreditAmount(reward)} of extra usage · /passes`
         : '3 guest passes at /passes'}
     </Text>
   )

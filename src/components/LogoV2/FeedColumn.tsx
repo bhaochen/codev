@@ -23,7 +23,7 @@ export function FeedColumn({
         <React.Fragment key={index}>
           <Feed config={feed} actualWidth={actualWidth} />
           {index < feeds.length - 1 && (
-            <Divider color="claude" width={actualWidth} />
+            <Divider color="clawd_body" width={actualWidth} />
           )}
         </React.Fragment>
       ))}

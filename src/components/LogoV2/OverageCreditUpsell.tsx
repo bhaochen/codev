@@ -102,7 +102,7 @@ export function OverageCreditUpsell({
     const title = getFeedTitle(amount)
     return (
       <>
-        <Text color="claude">
+        <Text color="clawd_body">
           {maxWidth ? truncate(title, maxWidth) : title}
         </Text>
         <Text dimColor>
@@ -118,7 +118,7 @@ export function OverageCreditUpsell({
 
   return (
     <Text dimColor>
-      <Text color="claude">{display.slice(0, highlightLen)}</Text>
+      <Text color="clawd_body">{display.slice(0, highlightLen)}</Text>
       {display.slice(highlightLen)}
     </Text>
   )

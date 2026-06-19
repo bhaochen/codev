@@ -250,8 +250,8 @@ export function LogoV2(): React.ReactNode {
   const layoutMode = getLayoutMode(columns)
 
   const userTheme = resolveThemeSetting(getGlobalConfig().theme)
-  const borderTitle = ` ${color('claude', userTheme)('Versper Claw')} ${color('inactive', userTheme)(`v${version}`)} `
-  const compactBorderTitle = color('claude', userTheme)(' Versper Claw ')
+  const borderTitle = ` ${color('clawd_body', userTheme)('Versper Claw')} ${color('inactive', userTheme)(`v${version}`)} `
+  const compactBorderTitle = color('clawd_body', userTheme)(' Versper Claw ')
 
   // Early return for compact mode
   if (layoutMode === 'compact') {
@@ -281,7 +281,7 @@ export function LogoV2(): React.ReactNode {
           <Box
             flexDirection="column"
             borderStyle="round"
-            borderColor="claude"
+            borderColor="clawd_body"
             borderText={{
               content: compactBorderTitle,
               position: 'top',
@@ -355,7 +355,7 @@ export function LogoV2(): React.ReactNode {
         <Box
           flexDirection="column"
           borderStyle="round"
-          borderColor="claude"
+          borderColor="clawd_body"
           borderText={{
             content: borderTitle,
             position: 'top',
@@ -394,7 +394,7 @@ export function LogoV2(): React.ReactNode {
               <Box
                 height="100%"
                 borderStyle="single"
-                borderColor="claude"
+                borderColor="clawd_body"
                 borderDimColor
                 borderTop={false}
                 borderBottom={false}
