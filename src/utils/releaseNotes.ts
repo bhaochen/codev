@@ -26,9 +26,9 @@ const MAX_RELEASE_NOTES_SHOWN = 5
  * 3. Next time the user starts Claude, the cached changelog is available immediately
  */
 export const CHANGELOG_URL =
-  'https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md'
+  'https://github.com/versperai/VersperClaw/releases'
 const RAW_CHANGELOG_URL =
-  'https://raw.githubusercontent.com/anthropics/claude-code/refs/heads/main/CHANGELOG.md'
+  'https://api.github.com/repos/versperai/VersperClaw/releases'
 
 /**
  * Get the path for the cached changelog file.
@@ -90,9 +90,29 @@ export async function fetchAndStoreChangelog(): Promise<void> {
     return
   }
 
-  const response = await axios.get(RAW_CHANGELOG_URL)
+  const response = await axios.get(RAW_CHANGELOG_URL, {
+    headers: { 'User-Agent': 'VersperClaw' },
+  })
   if (response.status === 200) {
-    const changelogContent = response.data
+    const releases = response.data as Array<{
+      tag_name: string
+      name: string
+    }>
+
+    // Transform releases into markdown format that parseChangelog expects:
+    // ## version
+    // - description
+    const changelogContent = releases
+      .map(release => {
+        const version = release.tag_name.replace(/^v/, '')
+        const lines = [`## ${version}`]
+        if (release.name) {
+          lines.push(`- ${release.name}`)
+        }
+        return lines.length > 1 ? lines.join('\n') : ''
+      })
+      .filter(Boolean)
+      .join('\n\n')
 
     // Skip write if content unchanged — writing Date.now() defeats the
     // dirty-check in saveGlobalConfig since the timestamp always differs.
@@ -244,12 +264,13 @@ export function getRecentReleaseNoteGroups(
 
     if (
       basePreviousVersion &&
-      !gt(baseCurrentVersion.version, basePreviousVersion.version)
+      !gt(baseCurrentVersion.version, basePreviousVersion.version) &&
+      Object.keys(releaseNotes).length === 0
     ) {
       return []
     }
 
-    return Object.entries(releaseNotes)
+    const filtered = Object.entries(releaseNotes)
       .filter(
         ([version]) =>
           !basePreviousVersion || gt(version, basePreviousVersion.version),
@@ -258,6 +279,18 @@ export function getRecentReleaseNoteGroups(
       .slice(0, maxVersions)
       .map(([version, notes]) => [version, notes.filter(Boolean)] as [string, string[]])
       .filter(([, notes]) => notes.length > 0)
+
+    // Fallback: if version-filter returns empty but releases exist
+    // (e.g., fork where app version exceeds all releases), show latest releases
+    if (filtered.length === 0 && Object.keys(releaseNotes).length > 0) {
+      return Object.entries(releaseNotes)
+        .sort(([versionA], [versionB]) => (gt(versionA, versionB) ? -1 : 1))
+        .slice(0, maxVersions)
+        .map(([version, notes]) => [version, notes.filter(Boolean)] as [string, string[]])
+        .filter(([, notes]) => notes.length > 0)
+    }
+
+    return filtered
   } catch (error) {
     logError(toError(error))
     return []

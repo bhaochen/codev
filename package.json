@@ -1,6 +1,6 @@
 {
   "name": "claude-code-source-snapshot",
-  "version": "2.1.87",
+  "version": "2.1.0",
   "private": true,
   "workspaces": [
     "packages/*"

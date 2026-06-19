@@ -58,7 +58,7 @@ export function CondensedLogo(): ReactNode {
   const textWidth = Math.max(columns - 15, 20)
 
   // Truncate version to fit within available width, accounting for "Claude Code v" prefix
-  const versionPrefix = 'Claude Code v'
+  const versionPrefix = 'Versper Claw v'
   const truncatedVersion = truncate(
     version,
     Math.max(textWidth - versionPrefix.length, 6),
@@ -92,7 +92,7 @@ export function CondensedLogo(): ReactNode {
       {/* Info */}
       <Box flexDirection="column">
         <Text>
-          <Text bold>Claude Code</Text>{' '}
+          <Text bold>Versper Claw</Text>{' '}
           <Text dimColor>v{truncatedVersion}</Text>
         </Text>
         {shouldSplit ? (
