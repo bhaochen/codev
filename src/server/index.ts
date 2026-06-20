@@ -19,7 +19,6 @@ import { handleFriendApi, setFriendServerInfo } from './api/friend.js'
 import { handleFriendStaticRequest } from './staticFriend.js'
 import { getPrefs } from '../friend/prefs.js'
 import { launchTauri, stopTauri } from '../friend/tauri-launcher.js'
-import { openBrowser } from '../utils/browser.js'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { OPENAI_CODEX_REDIRECT_PATH } from '../services/openaiAuth/client.js'
@@ -432,22 +431,15 @@ export function startServer(port = PORT, host = HOST) {
   // Register Friend server info so the chat service can construct SDK URLs
   setFriendServerInfo(host, port)
 
-  // ── Friend: launch Tauri desktop window or browser fallback when enabled ──
+  // ── Friend: launch Tauri desktop window when enabled ──
   if (getPrefs().enabled) {
     const friendUrl = `http://${localConnectHost}:${port}/friend/`
     console.log(`[Friend] VRM frontend available at ${friendUrl}`)
 
-    // Try launching Tauri desktop window first
-    const _srcDir = path.dirname(fileURLToPath(import.meta.url))
-    const friendFrontendDir = path.resolve(_srcDir, '..', '..', 'src', 'components', 'friend', 'frontend')
     launchTauri({
       info: (msg: string) => console.log(`[Friend] ${msg}`),
       warn: (msg: string) => console.warn(`[Friend] ${msg}`),
     })
-
-    // Fallback: open browser for the static frontend
-    // If Tauri launches successfully, this is redundant but harmless
-    openBrowser(friendUrl).catch(() => {})
   }
 
   return server
