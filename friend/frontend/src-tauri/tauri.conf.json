@@ -1,0 +1,40 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicedoc/tauri/dev/crates/tauri-config-schema/schema.json",
+  "productName": "VersperClaw Friend",
+  "version": "0.1.0",
+  "identifier": "com.versperclaw.friend",
+  "build": {
+    "devUrl": "http://127.0.0.1:3456/friend/",
+    "frontendDist": "../dist"
+  },
+  "bundle": {
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/256x256.png"
+    ],
+    "active": true
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "VersperClaw Friend",
+        "label": "main",
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "width": 400,
+        "height": 600,
+        "minWidth": 200,
+        "minHeight": 300,
+        "resizable": false,
+        "skipTaskbar": false,
+        "center": true,
+        "visible": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:3456 ws://127.0.0.1:3456; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' http://127.0.0.1:3456; font-src 'self' data:; script-src 'self' 'unsafe-inline';"
+    }
+  }
+}

@@ -8,11 +8,11 @@ VersperClaw
 # Prebuilt native binaries (tracked in claude-code/ reference)
 vendor/
 
-# Desktop (Tauri) build artifacts
-desktop/src-tauri/target/
-desktop/src-tauri/binaries/
-desktop/src-tauri/gen/
-desktop/pnpm-lock.yaml
+# Friend VRM desktop (Tauri) build artifacts
+friend/frontend/node_modules/
+friend/frontend/dist/
+friend/frontend/src-tauri/target/
+friend/frontend/src-tauri/gen/
 
 # Python cache
 __pycache__/

@@ -1,0 +1,9 @@
+{
+  "identifier": "default",
+  "description": "Default capabilities for VersperClaw Friend",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "opener:default"
+  ]
+}
