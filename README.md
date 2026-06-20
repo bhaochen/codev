@@ -1,9 +1,10 @@
 # VersperClaw: Not Only AI Assistant Code Agent
 
+<!--
 <div align="center">
   <img src="assets/Versper.png" alt="VersperAI" width="60%">
 </div>
-
+-->
 
 ## 📢 News
 
@@ -167,14 +168,6 @@ hf download Systran/faster-whisper-base \
 
 ```
 
-## 🌐 Desktop
-
-<table align="center">
-  <tr>
-    <td><img src="assets/desktop.png"></td>
-  </tr>
-</table>
-
 
 ## ✨ Features
 
@@ -215,13 +208,5 @@ hf download Systran/faster-whisper-base \
     <td><img src="assets/WebSearchTool.png"></td>
     <td><img src="assets/WebSearchTool2.png"></td>
     <td><img src="assets/WebSearchTool3.png"></td>
-  </tr>
-</table>
-
-### AI Friend via Omni model
-
-<table align="center">
-  <tr>
-    <td><img src="assets/ai_friend.png"></td>
   </tr>
 </table>
