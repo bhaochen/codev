@@ -39,7 +39,7 @@ export async function call(
   if (trimmed === 'stop') {
     updatePrefs({ enabled: false })
     stopTauri(logger())
-    return <Text>Friend companion stopped.</Text>
+    return <FriendStopView onDone={() => onDone?.()} />
   }
 
   if (trimmed === 'status') {
@@ -77,6 +77,28 @@ function FriendManager({ onDone }: { onDone: LocalJSXCommandOnDone }) {
         <Text dimColor>  /friend status  Quick status overview</Text>
       </Box>
 
+      <Box marginTop={1}>
+        <Text dimColor>Press Esc or Enter to close.</Text>
+      </Box>
+    </Box>
+  )
+}
+
+function FriendStopView({ onDone }: { onDone: () => void }) {
+  const [dismissed, setDismissed] = useState(false)
+
+  useInput((_input, key) => {
+    if (key.escape || key.return) setDismissed(true)
+  })
+
+  if (dismissed) {
+    onDone()
+    return null
+  }
+
+  return (
+    <Box flexDirection="column">
+      <Text>Stopping Friend companion...</Text>
       <Box marginTop={1}>
         <Text dimColor>Press Esc or Enter to close.</Text>
       </Box>
