@@ -440,7 +440,7 @@ export function startServer(port = PORT, host = HOST) {
     // Try launching Tauri desktop window first
     const _srcDir = path.dirname(fileURLToPath(import.meta.url))
     const friendFrontendDir = path.resolve(_srcDir, '..', '..', 'src', 'components', 'friend', 'frontend')
-    launchTauri(friendFrontendDir, {
+    launchTauri({
       info: (msg: string) => console.log(`[Friend] ${msg}`),
       warn: (msg: string) => console.warn(`[Friend] ${msg}`),
     })

@@ -14,15 +14,12 @@ import {
 } from '../../friend/tauri-launcher.js'
 import type { LocalJSXCommandOnDone, CommandResultDisplay } from '../../types/command.js'
 
-const FRIEND_FRONTEND_DIR = '../../components/friend/frontend'
 const FRIEND_URL = 'http://127.0.0.1:3456/friend/'
 
-function logger() {
-  return {
-    info: (msg: string) => console.log(`[Friend] ${msg}`),
-    warn: (msg: string) => console.warn(`[Friend] ${msg}`),
-  }
-}
+const logger = () => ({
+  info: (msg: string) => console.log(`[Friend] ${msg}`),
+  warn: (msg: string) => console.warn(`[Friend] ${msg}`),
+})
 
 type Page = 'status' | 'help'
 
@@ -44,7 +41,7 @@ export async function call(
         </Box>
       )
     }
-    launchTauri(FRIEND_FRONTEND_DIR, logger())
+    await launchTauri(logger())
     return (
       <Box flexDirection="column">
         <Text>Starting Friend VRM companion...</Text>

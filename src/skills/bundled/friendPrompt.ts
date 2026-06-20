@@ -26,20 +26,16 @@ function buildVrmSystemPrompt(): string {
 
 export function registerFriendPromptSkill(): void {
   registerBundledSkill({
-    name: 'friend',
+    name: 'friend-vrm',
     description:
-      'Enable VRM desktop companion mode — opens a 3D avatar window and adds avatar awareness, emotions, and screen observation to the conversation.',
-    userInvocable: true,
+      'Add VRM avatar context to the conversation — system prompt for avatar emotions and companion behavior. Called automatically when Friend is enabled.',
+    userInvocable: false,
     isEnabled: () => getPrefs().enabled ?? false,
     async getPromptForCommand() {
-      // Enable friend prefs when the skill is invoked
-      const prefs = updatePrefs({ enabled: true })
-      const moodIndex = (prefs as any)._moodIndex ?? 60
-
       return [
         {
           type: 'text' as const,
-          text: `[VRM avatar frontend launched at ${FRIEND_URL}. Tell the user the browser window is open and ready!]\n\n${buildVrmSystemPrompt()}`,
+          text: buildVrmSystemPrompt(),
         },
       ]
     },
