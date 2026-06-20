@@ -4,13 +4,12 @@
  * Ink-based terminal UI that shows status and controls for the
  * Friend desktop pet feature.
  */
-import React, { useState, useEffect } from 'react'
+import React, { useEffect } from 'react'
 import { Box, Text, useInput } from '../../ink.js'
 import { getPrefs, updatePrefs } from '../../friend/prefs.js'
 import {
   launchTauri,
   stopTauri,
-  getTauriProcess,
 } from '../../friend/tauri-launcher.js'
 import type { LocalJSXCommandOnDone, CommandResultDisplay } from '../../types/command.js'
 
@@ -20,8 +19,6 @@ const logger = () => ({
   info: (msg: string) => console.log(`[Friend] ${msg}`),
   warn: (msg: string) => console.warn(`[Friend] ${msg}`),
 })
-
-type Page = 'status' | 'help'
 
 export async function call(
   onDone: (result?: string, options?: { display?: CommandResultDisplay }) => void,
@@ -42,20 +39,13 @@ export async function call(
     return <FriendStopView onDone={onDone} />
   }
 
-  if (trimmed === 'status') {
-    const prefs = getPrefs()
-    return <FriendStatus prefs={prefs} compact />
-  }
-
   return <FriendManager onDone={onDone} />
 }
 
 function FriendManager({ onDone }: { onDone: LocalJSXCommandOnDone }) {
-  const [page, setPage] = useState<Page>('status')
-
   useInput((_input, key) => {
     if (key.escape || key.return) {
-      onDone()
+      onDone(undefined, { display: 'skip' })
     }
   })
 
@@ -67,14 +57,13 @@ function FriendManager({ onDone }: { onDone: LocalJSXCommandOnDone }) {
         </Text>
       </Box>
 
-      <FriendStatus prefs={getPrefs()} compact={false} />
+      <FriendStatus prefs={getPrefs()} />
 
       <Box marginTop={1} flexDirection="column">
         <Text dimColor>Usage:</Text>
         <Text dimColor>  /friend         Interactive status & controls</Text>
         <Text dimColor>  /friend start   Launch friend window</Text>
         <Text dimColor>  /friend stop    Stop friend window</Text>
-        <Text dimColor>  /friend status  Quick status overview</Text>
       </Box>
 
       <Box marginTop={1}>
@@ -114,14 +103,11 @@ function FriendStartView({ onDone }: { onDone: LocalJSXCommandOnDone }) {
 
 function FriendStatus({
   prefs,
-  compact,
 }: {
   prefs: ReturnType<typeof getPrefs>
-  compact: boolean
 }) {
   const statusDot = prefs.enabled ? '●' : '○'
   const statusColor = prefs.enabled ? 'green' : 'gray'
-  const running = !!getTauriProcess()
 
   return (
     <Box flexDirection="column">
@@ -131,32 +117,22 @@ function FriendStatus({
           {prefs.enabled ? 'Enabled' : 'Disabled'}
         </Text>
       </Box>
-      {!compact && (
-        <>
-          {running && (
-            <Box>
-              <Text>  Window: </Text>
-              <Text color="green">Running</Text>
-            </Box>
-          )}
-          <Box>
-            <Text>  URL: </Text>
-            <Text dimColor>{FRIEND_URL}</Text>
-          </Box>
-          <Box>
-            <Text>  Voice: </Text>
-            <Text dimColor>{prefs.voice ?? 'default'}</Text>
-          </Box>
-          <Box>
-            <Text>  TTS: </Text>
-            <Text dimColor>{prefs.ttsEnabled ? 'on' : 'off'}</Text>
-          </Box>
-          <Box>
-            <Text>  Tracking: </Text>
-            <Text dimColor>{prefs.tracking ?? 'mouse'}</Text>
-          </Box>
-        </>
-      )}
+      <Box>
+        <Text>  URL: </Text>
+        <Text dimColor>{FRIEND_URL}</Text>
+      </Box>
+      <Box>
+        <Text>  Voice: </Text>
+        <Text dimColor>{prefs.voice ?? 'default'}</Text>
+      </Box>
+      <Box>
+        <Text>  TTS: </Text>
+        <Text dimColor>{prefs.ttsEnabled ? 'on' : 'off'}</Text>
+      </Box>
+      <Box>
+        <Text>  Tracking: </Text>
+        <Text dimColor>{prefs.tracking ?? 'mouse'}</Text>
+      </Box>
     </Box>
   )
 }
