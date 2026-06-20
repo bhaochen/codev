@@ -110,9 +110,6 @@ cp VersperClaw ~/.local/bin
   # CN girl voice
   "voiceLanguage": "zh-CN",
   "voiceTTSVoice": "zh-CN-XiaoxiaoNeural"
-  
-  
-
 }
 ```
 
@@ -164,8 +161,6 @@ uv pip install faster-whisper edge-tts voxcpm
 
 hf download Systran/faster-whisper-base \
   --local-dir ~/.cache/huggingface/hub/models--Systran--faster-whisper-base
-
-
 ```
 
 
