@@ -4,7 +4,7 @@
  * Ink-based terminal UI that shows status and controls for the
  * Friend desktop pet feature.
  */
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Box, Text, useInput } from '../../ink.js'
 import { getPrefs, updatePrefs } from '../../friend/prefs.js'
 import {
@@ -85,47 +85,29 @@ function FriendManager({ onDone }: { onDone: LocalJSXCommandOnDone }) {
 }
 
 function FriendStopView({ onDone }: { onDone: () => void }) {
-  const [dismissed, setDismissed] = useState(false)
-
-  useInput((_input, key) => {
-    if (key.escape || key.return) setDismissed(true)
-  })
-
-  if (dismissed) {
-    onDone()
-    return null
-  }
+  useEffect(() => {
+    const t = setTimeout(onDone, 1500)
+    return () => clearTimeout(t)
+  }, [onDone])
 
   return (
     <Box flexDirection="column">
-      <Text>Stopping Friend companion...</Text>
-      <Box marginTop={1}>
-        <Text dimColor>Press Esc or Enter to close.</Text>
-      </Box>
+      <Text>Friend companion stopped.</Text>
     </Box>
   )
 }
 
 function FriendStartView({ onDone }: { onDone: () => void }) {
-  const [dismissed, setDismissed] = useState(false)
-
-  useInput((_input, key) => {
-    if (key.escape || key.return) setDismissed(true)
-  })
-
-  if (dismissed) {
-    onDone()
-    return null
-  }
+  useEffect(() => {
+    const t = setTimeout(onDone, 1500)
+    return () => clearTimeout(t)
+  }, [onDone])
 
   return (
     <Box flexDirection="column">
       <Text>Starting Friend VRM companion...</Text>
       <Text dimColor>A Tauri window will open.</Text>
       <Text dimColor>Also available at: {FRIEND_URL}</Text>
-      <Box marginTop={1}>
-        <Text dimColor>Press Esc or Enter to close.</Text>
-      </Box>
     </Box>
   )
 }
