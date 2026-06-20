@@ -109,4 +109,48 @@ export const FriendEmotionTool = buildTool({
       }],
     };
   },
+  mapToolResultToToolResultBlockParam(output: Output, toolUseID: string) {
+    // If the tool already returned a ToolResultBlockParam-like object, pass it through
+    if (output && (output as any).content) {
+      return {
+        tool_use_id: toolUseID,
+        type: 'tool_result' as const,
+        content: (output as any).content,
+      }
+    }
+
+    // Fallback: produce a simple text block summarizing the result
+    const text =
+      output && 'emotion' in output
+        ? `Avatar emotion set to ${(output as any).emotion}.${
+            (output as any).moodDelta !== undefined
+              ? ` Your mood ${(output as any).moodDelta > 0 ? '+' : ''}${(output as any).moodDelta} → ${(output as any).moodIndex}%`
+              : ''
+          }`
+        : JSON.stringify(output)
+
+    return {
+      tool_use_id: toolUseID,
+      type: 'tool_result' as const,
+      content: [{ type: 'text' as const, text }],
+    }
+  },
+  // Consistent with other tools: set a reasonable persistence threshold
+  maxResultSizeChars: 100_000,
+  renderToolUseMessage(input: Partial<Input>) {
+    const emotion = (input as any)?.emotion
+    return emotion ? `Set avatar emotion to ${emotion}` : 'Set avatar emotion'
+  },
+  renderToolResultMessage(output: Output) {
+    if (!output) return null
+    const mood = output.moodDelta !== undefined ? ` Your mood ${output.moodDelta > 0 ? '+' : ''}${output.moodDelta} → ${output.moodIndex}%` : ''
+    return `Avatar emotion set to ${output.emotion}.${mood}`
+  },
+  extractSearchText(output: Output) {
+    if (!output) return ''
+    return `Avatar emotion: ${output.emotion}${output.moodDelta !== undefined ? ` moodDelta:${output.moodDelta} moodIndex:${output.moodIndex}` : ''}`
+  },
+  isResultTruncated() {
+    return false
+  },
 } satisfies ToolDef<Input, Output>);

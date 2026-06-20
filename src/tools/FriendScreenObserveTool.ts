@@ -117,4 +117,51 @@ export const FriendScreenObserveTool = buildTool({
       }],
     };
   },
+  mapToolResultToToolResultBlockParam(output: Output | { content: unknown }, toolUseID: string) {
+    if (output && (output as any).content) {
+      return {
+        tool_use_id: toolUseID,
+        type: 'tool_result' as const,
+        content: (output as any).content,
+      }
+    }
+
+    const text = output && 'imagePath' in output && (output as any).imagePath
+      ? `Screenshot saved. Use the read tool to view: ${(output as any).imagePath}`
+      : JSON.stringify(output)
+
+    return {
+      tool_use_id: toolUseID,
+      type: 'tool_result' as const,
+      content: [{ type: 'text' as const, text }],
+    }
+  },
+  // Mirror common tool APIs
+  maxResultSizeChars: 100_000,
+  renderToolUseMessage() {
+    return 'Capture desktop screenshot'
+  },
+  renderToolResultMessage(output: Output | { content?: unknown }) {
+    if (!output) return null
+    if ((output as any).content) {
+      // If the mapped block was passed through, try to extract text
+      const content = (output as any).content
+      if (typeof content === 'string') return content
+      if (Array.isArray(content)) {
+        const t = content.find((b: any) => b?.type === 'text')
+        return t?.text ?? JSON.stringify(content)
+      }
+      return JSON.stringify(content)
+    }
+    if ('imagePath' in (output as any) && (output as any).imagePath) {
+      return `Screenshot saved: ${(output as any).imagePath}`
+    }
+    return JSON.stringify(output)
+  },
+  extractSearchText(output: Output) {
+    return output && output.imagePath ? `screenshot:${output.imagePath}` : ''
+  },
+  isResultTruncated() {
+    return false
+  },
 } satisfies ToolDef<Input, Output>);

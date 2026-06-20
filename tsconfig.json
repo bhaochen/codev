@@ -19,5 +19,6 @@
     "skipLibCheck": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "scripts", "env.d.ts"]
+  "include": ["src", "scripts", "env.d.ts"],
+  "exclude": ["**/src-tauri/target"]
 }

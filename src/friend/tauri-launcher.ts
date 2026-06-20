@@ -4,76 +4,77 @@
  * Builds and launches the VRM desktop pet as a native Tauri window
  * (transparent, always-on-top) instead of a browser tab.
  */
-import { spawn, execSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 
 let tauriProcess: ReturnType<typeof spawn> | null = null;
 
+/**
+ * Launch the Friend Tauri desktop window.
+ * Uses the release binary (built via `npx tauri build`).
+ * The binary loads the pre-built frontend from frontend/dist/.
+ */
 export function launchTauri(appDir: string, log: { info: (msg: string) => void; warn: (msg: string) => void }) {
-  const tauriDir = path.join(appDir, 'src-tauri');
-  const tauriConfPath = path.join(tauriDir, 'tauri.conf.json');
+  const releaseBinary = path.join(appDir, 'src-tauri', 'target', 'release', 'versperclaw-friend')
+  const debugBinary = path.join(appDir, 'src-tauri', 'target', 'debug', 'versperclaw-friend')
 
-  // Verify the Tauri project exists
-  if (!existsSync(tauriConfPath)) {
-    log.warn(`Friend: Tauri project not found at ${tauriDir}. Falling back to browser mode.`);
-    return;
+  const binary = existsSync(releaseBinary)
+    ? releaseBinary
+    : existsSync(debugBinary)
+    ? debugBinary
+    : null
+
+  if (!binary) {
+    log.warn(`Friend: Tauri binary not found. Run \`cd ${appDir} && npx tauri build\` first.`)
+    log.warn(`Looking for: ${releaseBinary}`)
+    return
   }
 
-  log.info(`Starting Friend Tauri desktop window from ${appDir}`);
+  log.info(`Starting Friend desktop window from ${binary}`)
 
-  // Run `npx tauri dev` — Bun's npx equivalent auto-fetches the CLI
-  tauriProcess = spawn('npx', ['tauri', 'dev'], {
+  tauriProcess = spawn(binary, [], {
     cwd: appDir,
     stdio: 'pipe',
-    shell: true,
-    env: {
-      ...process.env,
-      // Tell Tauri dev server to skip its own Vite and load from VersperClaw
-      TAURI_DEV_HOST: '127.0.0.1',
-      TAURI_DEV_PORT: '3456',
-    },
-  });
+    detached: true,
+  })
 
   tauriProcess.stdout?.on('data', (data: Buffer) => {
     for (const line of data.toString().split('\n').filter(Boolean)) {
-      log.info(line);
+      log.info(line)
     }
-  });
+  })
 
   tauriProcess.stderr?.on('data', (data: Buffer) => {
     for (const line of data.toString().split('\n').filter(Boolean)) {
-      log.info(line);
+      log.info(line)
     }
-  });
+  })
 
   tauriProcess.on('error', (err: Error) => {
-    log.warn(`Friend Tauri error: ${err.message}`);
-    tauriProcess = null;
-  });
+    log.warn(`Friend Tauri error: ${err.message}`)
+    tauriProcess = null
+  })
 
   tauriProcess.on('exit', (code: number | null) => {
-    log.info(`Friend Tauri exited (code: ${code})`);
-    tauriProcess = null;
-  });
+    log.info(`Friend Tauri exited (code: ${code})`)
+    tauriProcess = null
+  })
 }
 
 export function stopTauri(log: { info: (msg: string) => void }) {
   if (tauriProcess) {
-    log.info('Stopping Friend Tauri window...');
-    const proc = tauriProcess;
-    tauriProcess = null;
+    log.info('Stopping Friend Tauri window...')
+    const proc = tauriProcess
+    tauriProcess = null
 
-    // Send SIGTERM first
-    proc.kill('SIGTERM');
-
-    // Force kill after 3s if still alive
+    proc.kill('SIGTERM')
     setTimeout(() => {
-      try { if (proc && !proc.killed) proc.kill('SIGKILL'); } catch { /* ignore */ }
-    }, 3000);
+      try { if (!proc.killed) proc.kill('SIGKILL') } catch { /* ignore */ }
+    }, 3000)
   }
 }
 
 export function getTauriProcess(): ReturnType<typeof spawn> | null {
-  return tauriProcess;
+  return tauriProcess
 }

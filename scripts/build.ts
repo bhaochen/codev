@@ -118,6 +118,36 @@ const outfile = compile
   : dev
     ? './VersperClaw'
     : './cli'
+
+// ── Pre-step: build Friend VRM frontend ───────────────────────────────────────
+function buildFriendFrontend(): boolean {
+  const frontendDir = join(process.cwd(), 'src', 'components', 'friend', 'frontend')
+  const distIndex = join(frontendDir, 'dist', 'index.html')
+  if (existsSync(distIndex)) {
+    console.log('Friend frontend already built, skipping.')
+    return true
+  }
+  console.log('Building Friend VRM frontend...')
+  const proc = Bun.spawnSync({
+    cmd: ['npm', 'run', 'build'],
+    cwd: frontendDir,
+    stdout: 'inherit',
+    stderr: 'inherit',
+  })
+  if (proc.exitCode !== 0) {
+    console.error('Friend frontend build failed.')
+    return false
+  }
+  console.log('Friend frontend built.')
+  return true
+}
+
+if (!buildFriendFrontend()) {
+  process.exit(1)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 const buildTime = new Date().toISOString()
 const version = dev ? getDevVersion(pkg.version) : pkg.version
 

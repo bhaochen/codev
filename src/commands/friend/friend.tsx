@@ -4,12 +4,25 @@
  * Ink-based terminal UI that shows status and controls for the
  * Friend desktop pet feature.
  */
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import { Box, Text, useInput } from '../../ink.js'
 import { getPrefs, updatePrefs } from '../../friend/prefs.js'
-import type { LocalJSXCommandOnDone, CommandResultDisplay } from '../../commands.js'
+import {
+  launchTauri,
+  stopTauri,
+  getTauriProcess,
+} from '../../friend/tauri-launcher.js'
+import type { LocalJSXCommandOnDone, CommandResultDisplay } from '../../types/command.js'
 
+const FRIEND_FRONTEND_DIR = '../../components/friend/frontend'
 const FRIEND_URL = 'http://127.0.0.1:3456/friend/'
+
+function logger() {
+  return {
+    info: (msg: string) => console.log(`[Friend] ${msg}`),
+    warn: (msg: string) => console.warn(`[Friend] ${msg}`),
+  }
+}
 
 type Page = 'status' | 'help'
 
@@ -20,22 +33,31 @@ export async function call(
 ): Promise<React.ReactNode> {
   const trimmed = args?.trim().toLowerCase()
 
-  // Non-interactive modes
   if (trimmed === 'start') {
     updatePrefs({ enabled: true })
+    const alreadyRunning = !!getTauriProcess()
+    if (alreadyRunning) {
+      return (
+        <Box flexDirection="column">
+          <Text>Friend is already running.</Text>
+          <Text dimColor>Open {FRIEND_URL} in your browser.</Text>
+        </Box>
+      )
+    }
+    launchTauri(FRIEND_FRONTEND_DIR, logger())
     return (
       <Box flexDirection="column">
-        <Text>Friend companion enabled.</Text>
-        <Text>Start the server with:</Text>
-        <Text>  bun run src/server/index.ts --port 3456</Text>
-        <Text>Then open {FRIEND_URL} in a browser (or Tauri will launch automatically).</Text>
+        <Text>Starting Friend VRM companion...</Text>
+        <Text dimColor>A Tauri window will open.</Text>
+        <Text dimColor>Also available at: {FRIEND_URL}</Text>
       </Box>
     )
   }
 
   if (trimmed === 'stop') {
     updatePrefs({ enabled: false })
-    return <Text>Friend companion disabled.</Text>
+    stopTauri(logger())
+    return <Text>Friend companion stopped.</Text>
   }
 
   if (trimmed === 'status') {
@@ -43,7 +65,6 @@ export async function call(
     return <FriendStatus prefs={prefs} compact />
   }
 
-  // Interactive mode (no args or unrecognized)
   return <FriendManager onDone={onDone} />
 }
 
@@ -60,17 +81,17 @@ function FriendManager({ onDone }: { onDone: LocalJSXCommandOnDone }) {
     <Box flexDirection="column" padding={1}>
       <Box marginBottom={1}>
         <Text bold underline>
-          {page === 'status' ? '🄵 Friend VRM Desktop Pet' : 'Help'}
+          Friend VRM Desktop Pet
         </Text>
       </Box>
 
-      {page === 'status' && <FriendStatus prefs={getPrefs()} compact={false} />}
+      <FriendStatus prefs={getPrefs()} compact={false} />
 
       <Box marginTop={1} flexDirection="column">
         <Text dimColor>Usage:</Text>
-        <Text dimColor>  /friend         Interactive status &amp; controls</Text>
-        <Text dimColor>  /friend start   Enable &amp; launch friend</Text>
-        <Text dimColor>  /friend stop    Disable friend</Text>
+        <Text dimColor>  /friend         Interactive status & controls</Text>
+        <Text dimColor>  /friend start   Launch friend window</Text>
+        <Text dimColor>  /friend stop    Stop friend window</Text>
         <Text dimColor>  /friend status  Quick status overview</Text>
       </Box>
 
@@ -90,6 +111,7 @@ function FriendStatus({
 }) {
   const statusDot = prefs.enabled ? '●' : '○'
   const statusColor = prefs.enabled ? 'green' : 'gray'
+  const running = !!getTauriProcess()
 
   return (
     <Box flexDirection="column">
@@ -101,6 +123,12 @@ function FriendStatus({
       </Box>
       {!compact && (
         <>
+          {running && (
+            <Box>
+              <Text>  Window: </Text>
+              <Text color="green">Running</Text>
+            </Box>
+          )}
           <Box>
             <Text>  URL: </Text>
             <Text dimColor>{FRIEND_URL}</Text>

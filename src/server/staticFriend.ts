@@ -1,7 +1,7 @@
 /**
  * Static file serving for the Friend VRM frontend.
  *
- * Serves the built Vite/React frontend from friend/frontend/dist/ at /friend/*.
+ * Serves the built Vite/React frontend from src/components/friend/frontend/dist/ at /friend/*.
  * All asset files (VRM, FBX, VRMA, VMD, MP3) are in the dist root and served
  * under /friend/<filename>.
  */
@@ -70,8 +70,8 @@ export async function handleFriendStaticRequest(req: Request, url: URL): Promise
 
 async function resolveFriendDistDir(): Promise<string | null> {
   const _srcDir = path.dirname(fileURLToPath(import.meta.url))
-  // src/server/ -> ../../friend/frontend/dist
-  const candidate = path.resolve(_srcDir, '..', '..', 'friend', 'frontend', 'dist')
+  // src/server/ -> ../../src/components/friend/frontend/dist
+  const candidate = path.resolve(_srcDir, '..', '..', 'src', 'components', 'friend', 'frontend', 'dist')
   try {
     const stat = await fs.stat(path.join(candidate, 'index.html'))
     if (stat.isFile()) {
