@@ -624,6 +624,13 @@ export async function handleFriendApi(req: Request, url: URL): Promise<Response>
     }
   }
 
+  // ── Window close (POST /friend/api/window-close) — called by Tauri on close ──
+  if ((pathname === '/friend/api/window-close' || pathname === '/plugins/friend/api/window-close') && method === 'POST') {
+    // Emit a global event that tauri-launcher.ts can listen to
+    process.emit('friend:window-close' as any);
+    return jsonResponse({ ok: true });
+  }
+
   return jsonResponse({ error: 'Not Found' }, 404);
 }
 

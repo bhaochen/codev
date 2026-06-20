@@ -1,4 +1,4 @@
-use tauri::Manager;
+use tauri::{Manager, WindowEvent};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -10,6 +10,14 @@ pub fn run() {
             window.eval("window.location.replace('http://127.0.0.1:3456/friend/')")
                 .map_err(|e| eprintln!("Failed to set URL: {e}")).ok();
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { .. } = event {
+                // Notify backend that Friend window is closing
+                let _ = window.eval(
+                    "fetch('http://127.0.0.1:3456/friend/api/window-close', {method:'POST'})",
+                );
+            }
         });
 
     builder.run(tauri::generate_context!())

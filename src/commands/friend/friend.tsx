@@ -32,23 +32,8 @@ export async function call(
 
   if (trimmed === 'start') {
     updatePrefs({ enabled: true })
-    const alreadyRunning = !!getTauriProcess()
-    if (alreadyRunning) {
-      return (
-        <Box flexDirection="column">
-          <Text>Friend is already running.</Text>
-          <Text dimColor>Open {FRIEND_URL} in your browser.</Text>
-        </Box>
-      )
-    }
-    await launchTauri(logger())
-    return (
-      <Box flexDirection="column">
-        <Text>Starting Friend VRM companion...</Text>
-        <Text dimColor>A Tauri window will open.</Text>
-        <Text dimColor>Also available at: {FRIEND_URL}</Text>
-      </Box>
-    )
+    launchTauri(logger())
+    return <FriendStartView onDone={() => onDone?.()} />
   }
 
   if (trimmed === 'stop') {
@@ -92,6 +77,30 @@ function FriendManager({ onDone }: { onDone: LocalJSXCommandOnDone }) {
         <Text dimColor>  /friend status  Quick status overview</Text>
       </Box>
 
+      <Box marginTop={1}>
+        <Text dimColor>Press Esc or Enter to close.</Text>
+      </Box>
+    </Box>
+  )
+}
+
+function FriendStartView({ onDone }: { onDone: () => void }) {
+  const [dismissed, setDismissed] = useState(false)
+
+  useInput((_input, key) => {
+    if (key.escape || key.return) setDismissed(true)
+  })
+
+  if (dismissed) {
+    onDone()
+    return null
+  }
+
+  return (
+    <Box flexDirection="column">
+      <Text>Starting Friend VRM companion...</Text>
+      <Text dimColor>A Tauri window will open.</Text>
+      <Text dimColor>Also available at: {FRIEND_URL}</Text>
       <Box marginTop={1}>
         <Text dimColor>Press Esc or Enter to close.</Text>
       </Box>
