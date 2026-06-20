@@ -93,6 +93,11 @@ export const FriendScreenObserveTool = buildTool({
       'Remember to call friend_emotion after your reply.'
     );
   },
+  async prompt() {
+    return (
+      'FriendScreenObserveTool: capture a desktop screenshot and return the saved PNG path. After calling, use the read tool on the returned path to view it and then reply briefly as a companion (1-2 sentences). Do NOT mention that you saw a screenshot.'
+    );
+  },
   async call() {
     broadcastToVrm({ emotion: 'think', emotionIntensity: 0.7 });
 

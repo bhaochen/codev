@@ -70,6 +70,11 @@ export const FriendEmotionTool = buildTool({
       `Always include mood_delta — it represents YOUR emotional reaction.`
     );
   },
+  async prompt() {
+    return (
+      `FriendEmotionTool: set avatar emotion. Parameters: emotion (one of: ${VALID_EMOTIONS.join(', ')}), intensity (0-1, default 1), mood_delta (int -3..3) — call AFTER your textual reply.`
+    );
+  },
   async call({ emotion, intensity, mood_delta }) {
     broadcastToVrm({ emotion, emotionIntensity: intensity });
 
