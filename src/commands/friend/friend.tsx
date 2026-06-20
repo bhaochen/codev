@@ -33,13 +33,13 @@ export async function call(
   if (trimmed === 'start') {
     updatePrefs({ enabled: true })
     launchTauri(logger())
-    return <FriendStartView onDone={() => onDone?.()} />
+    return <FriendStartView onDone={onDone} />
   }
 
   if (trimmed === 'stop') {
     updatePrefs({ enabled: false })
     stopTauri(logger())
-    return <FriendStopView onDone={() => onDone?.()} />
+    return <FriendStopView onDone={onDone} />
   }
 
   if (trimmed === 'status') {
@@ -84,9 +84,9 @@ function FriendManager({ onDone }: { onDone: LocalJSXCommandOnDone }) {
   )
 }
 
-function FriendStopView({ onDone }: { onDone: () => void }) {
+function FriendStopView({ onDone }: { onDone: LocalJSXCommandOnDone }) {
   useEffect(() => {
-    const t = setTimeout(onDone, 1500)
+    const t = setTimeout(() => onDone(undefined, { display: 'skip' }), 1500)
     return () => clearTimeout(t)
   }, [onDone])
 
@@ -97,9 +97,9 @@ function FriendStopView({ onDone }: { onDone: () => void }) {
   )
 }
 
-function FriendStartView({ onDone }: { onDone: () => void }) {
+function FriendStartView({ onDone }: { onDone: LocalJSXCommandOnDone }) {
   useEffect(() => {
-    const t = setTimeout(onDone, 1500)
+    const t = setTimeout(() => onDone(undefined, { display: 'skip' }), 1500)
     return () => clearTimeout(t)
   }, [onDone])
 
