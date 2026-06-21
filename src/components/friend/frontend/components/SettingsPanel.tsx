@@ -12,7 +12,7 @@ interface DanceItem {
   builtin?: boolean
 }
 
-type SttProvider = 'browser' | 'anthropic' | 'local' | 'doubao'
+type SttProvider = 'browser' | 'groq' | 'anthropic' | 'local' | 'doubao'
 
 interface SettingsPanelProps {
   visible: boolean
@@ -495,7 +495,7 @@ export function SettingsPanel({
               <div style={{ marginTop: 8 }}>
                 <div style={labelStyle}>{t('语音识别 (STT)', 'Speech Recognition (STT)')}</div>
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                  {(['browser', 'anthropic', 'local', 'doubao'] as const).map((p) => (
+                  {(['browser', 'groq', 'anthropic', 'local', 'doubao'] as const).map((p) => (
                     <button
                       key={p}
                       onClick={() => onSttProviderChange?.(p)}
@@ -509,7 +509,7 @@ export function SettingsPanel({
                         borderColor: p === sttProvider ? 'rgba(100, 160, 255, 0.6)' : 'rgba(255, 255, 255, 0.15)',
                       }}
                     >
-                      {{ browser: t('浏览器', 'Browser'), anthropic: 'Anthropic', local: 'Whisper', doubao: 'Doubao' }[p]}
+                      {{ browser: t('浏览器', 'Browser'), groq: 'Groq', anthropic: 'Anthropic', local: 'Whisper', doubao: 'Doubao' }[p]}
                     </button>
                   ))}
                 </div>

@@ -14,7 +14,7 @@ import { useRef, useCallback, useState } from 'react'
 
 const FRIEND_API_BASE = 'http://127.0.0.1:3456/plugins/friend'
 
-export type SttProvider = 'browser' | 'anthropic' | 'local' | 'doubao'
+export type SttProvider = 'browser' | 'groq' | 'anthropic' | 'local' | 'doubao'
 
 export function useServerStt() {
   const [connected, setConnected] = useState(false)

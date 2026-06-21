@@ -235,12 +235,22 @@ class FriendService {
 
   /**
    * Auto-detect the first available STT provider.
-   * Tries: local Whisper → Anthropic Voice Stream → Doubao ASR
+   * Tries: Groq Whisper (cloud, API key) → local Whisper → Anthropic Voice Stream → Doubao ASR
    */
   private async detectAvailableSttProvider(): Promise<string> {
     console.log('[FriendService] detectAvailableSttProvider: checking available providers...');
 
-    // Check local Whisper first (no external API keys needed)
+    // Check Groq API key first (fastest — no Python, just a REST call)
+    // Keys are resolved from: prefs → process.env → ~/.claude/settings.json
+    try {
+      const { isGroqAvailable } = await import('../services/voice/groqSTT.js');
+      if (isGroqAvailable()) {
+        console.log('[FriendService] detectAvailableSttProvider: Groq API key found');
+        return 'groq';
+      }
+    } catch { /* ignore */ }
+
+    // Check local Whisper (no external API keys needed)
     try {
       const { checkLocalWhisperAvailable } = await import(
         '../services/voice/whisperSTT.js'
@@ -436,6 +446,13 @@ class FriendService {
       case 'doubao': {
         const { connectDoubaoStream } = await import('../services/doubaoSTT.js');
         return await connectDoubaoStream(callbacks, { language: language || 'zh' });
+      }
+
+      case 'groq': {
+        const { connectGroqStream } = await import(
+          '../services/voice/groqSTT.js'
+        );
+        return await connectGroqStream(callbacks, { language });
       }
 
       default:

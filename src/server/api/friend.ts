@@ -309,6 +309,7 @@ export async function handleFriendApi(req: Request, url: URL): Promise<Response>
       if (body.hideMood !== undefined) patch.hideMood = body.hideMood;
       if (body.sttProvider !== undefined) patch.sttProvider = body.sttProvider;
       if (body.sttLanguage !== undefined) patch.sttLanguage = body.sttLanguage;
+      if (body.groqApiKey !== undefined) patch.groqApiKey = body.groqApiKey;
       setPrefs(updatePrefs(patch));
       return jsonResponse({ ok: true });
     }

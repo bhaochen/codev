@@ -22,10 +22,12 @@ export interface FriendPrefs {
   language?: 'zh' | 'en';
   currentDance?: string;
   hideMood?: boolean;
-  /** STT provider: browser | anthropic | local | doubao */
-  sttProvider?: 'browser' | 'anthropic' | 'local' | 'doubao';
+  /** STT provider: browser | anthropic | local | doubao | groq */
+  sttProvider?: 'browser' | 'anthropic' | 'local' | 'doubao' | 'groq';
   /** STT language override (e.g. 'en', 'zh', 'ja') */
   sttLanguage?: string;
+  /** GROQ_API_KEY for Groq Whisper STT (cloud, fast, no Python needed) */
+  groqApiKey?: string;
 }
 
 const homeDir = process.env.HOME || process.env.USERPROFILE || '';
