@@ -12,6 +12,8 @@ interface DanceItem {
   builtin?: boolean
 }
 
+type SttProvider = 'browser' | 'anthropic' | 'local' | 'doubao'
+
 interface SettingsPanelProps {
   visible: boolean
   onClose: () => void
@@ -41,6 +43,8 @@ interface SettingsPanelProps {
   onLanguageChange: (v: 'zh' | 'en') => void
   currentDance: string
   onDanceChange: (id: string, preset?: DancePreset) => void
+  sttProvider?: SttProvider
+  onSttProviderChange?: (v: SttProvider) => void
 }
 
 type Tab = 'general' | 'voice' | 'model' | 'persona' | 'dance'
@@ -105,6 +109,7 @@ export function SettingsPanel({
   captureVrmScreenshot,
   language, onLanguageChange,
   currentDance, onDanceChange,
+  sttProvider = 'browser', onSttProviderChange,
 }: SettingsPanelProps) {
   const t = (zh: string, en: string) => language === 'en' ? en : zh
 
@@ -486,6 +491,34 @@ export function SettingsPanel({
                   </div>
                 </div>
               )}
+
+              <div style={{ marginTop: 8 }}>
+                <div style={labelStyle}>{t('语音识别 (STT)', 'Speech Recognition (STT)')}</div>
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  {(['browser', 'anthropic', 'local', 'doubao'] as const).map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => onSttProviderChange?.(p)}
+                      style={{
+                        ...smallBtnStyle,
+                        flex: 1,
+                        textAlign: 'center',
+                        padding: '6px 10px',
+                        fontSize: 12,
+                        background: p === sttProvider ? 'rgba(100, 160, 255, 0.4)' : 'rgba(255, 255, 255, 0.08)',
+                        borderColor: p === sttProvider ? 'rgba(100, 160, 255, 0.6)' : 'rgba(255, 255, 255, 0.15)',
+                      }}
+                    >
+                      {{ browser: t('浏览器', 'Browser'), anthropic: 'Anthropic', local: 'Whisper', doubao: 'Doubao' }[p]}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', marginTop: 4 }}>
+                  {sttProvider === 'browser'
+                    ? t('使用浏览器内置语音识别（Web Speech API）', 'Use browser built-in speech recognition (Web Speech API)')
+                    : t('使用服务端语音识别，需要登录对应服务', 'Use server-side speech recognition, requires corresponding service login')}
+                </div>
+              </div>
 
               <div style={{ marginTop: 8 }}>
                 <div style={labelStyle}>{currentProvider === 'qwen' ? t('千问语音', 'Qwen Voice') : t('Edge TTS 语音', 'Edge TTS Voice')}</div>

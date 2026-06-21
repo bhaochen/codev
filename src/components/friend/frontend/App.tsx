@@ -75,6 +75,7 @@ export default function App() {
   const [screenObserve, setScreenObserve] = useState(false)
   const [screenObserveInterval, setScreenObserveInterval] = useState(60)
   const [language, setLanguage] = useState<'zh' | 'en'>(() => navigator.language.startsWith('zh') ? 'zh' : 'en')
+  const [sttProvider, setSttProvider] = useState<'browser' | 'anthropic' | 'local' | 'doubao'>('browser')
   const t = (zh: string, en: string) => language === 'en' ? en : zh
   usePassThrough(!settingsOpen && !historyOpen)
 
@@ -95,6 +96,7 @@ export default function App() {
         if (s.screenObserveInterval !== undefined) setScreenObserveInterval(s.screenObserveInterval)
         if (s.currentDance) setCurrentDance(s.currentDance)
         if (s.customDancePreset) setCustomDancePreset(s.customDancePreset)
+        if (s.sttProvider) setSttProvider(s.sttProvider)
         if (s.language) {
           setLanguage(s.language)
         } else {
@@ -369,7 +371,7 @@ export default function App() {
       <VRMScene ref={sceneRef} modelPath={modelPath} onTouch={handleTouch} onModelLoaded={uploadVrmScreenshot} />
       {!hideMood && <MoodIndicator uiAlign={uiAlign} />}
       <TextBubble onMessage={handleVrmMessageWithActivity} enabled={showText} ttsEnabled={ttsEnabled} />
-      {!hideUI && <ChatInput uiAlign={uiAlign} onHistoryOpen={() => setHistoryOpen(true)} onNewSession={clearContext} language={language} />}
+      {!hideUI && <ChatInput uiAlign={uiAlign} onHistoryOpen={() => setHistoryOpen(true)} onNewSession={clearContext} language={language} sttProvider={sttProvider} />}
       <HistoryPanel
         visible={historyOpen}
         onClose={() => setHistoryOpen(false)}
@@ -401,6 +403,8 @@ export default function App() {
         captureVrmScreenshot={() => sceneRef.current?.captureScreenshot() ?? null}
         language={language}
         onLanguageChange={(v) => { setLanguage(v); saveSettings({ language: v }) }}
+        sttProvider={sttProvider}
+        onSttProviderChange={(v) => { setSttProvider(v); saveSettings({ sttProvider: v }) }}
         currentDance={currentDance}
         onDanceChange={(id, preset) => {
           setCurrentDance(id)

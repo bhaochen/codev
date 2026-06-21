@@ -11,6 +11,8 @@ import {
   launchTauri,
   stopTauri,
 } from '../../friend/tauri-launcher.js'
+import { startFriendServer, stopFriendServer, getServerPort } from '../../friend/server.js'
+import { friendService } from '../../friend/FriendService.js'
 import type { LocalJSXCommandOnDone, CommandResultDisplay } from '../../types/command.js'
 
 const FRIEND_URL = 'http://127.0.0.1:3456/friend/'
@@ -29,12 +31,26 @@ export async function call(
 
   if (trimmed === 'start') {
     updatePrefs({ enabled: true })
+    // Start in-process HTTP server for friend API and SSE
+    try {
+      startFriendServer(3456, '127.0.0.1')
+    } catch (err) {
+      console.warn(`[Friend] HTTP server start failed: ${err}`)
+      console.warn('[Friend] The Tauri app may need the main server on port 3456.')
+    }
+    // FriendService runs in-process; messages enqueue into the CLI queue
+    await friendService.start().catch((err) => {
+      console.warn(`[Friend] Service start failed: ${err}`)
+    })
+    // Launch Tauri display window (thin client)
     launchTauri(logger())
     return <FriendStartView onDone={onDone} />
   }
 
   if (trimmed === 'stop') {
     updatePrefs({ enabled: false })
+    await friendService.stop().catch(() => {})
+    stopFriendServer()
     stopTauri(logger())
     return <FriendStopView onDone={onDone} />
   }

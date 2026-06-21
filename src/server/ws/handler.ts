@@ -29,7 +29,6 @@ import {
   LOCAL_COMMAND_STDOUT_TAG,
 } from '../../constants/xml.js'
 import { shouldCreateWorktreeForSessionLaunch } from '../services/repositoryLaunchService.js'
-
 const settingsService = new SettingsService()
 const providerService = new ProviderService()
 

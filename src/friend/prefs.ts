@@ -22,6 +22,10 @@ export interface FriendPrefs {
   language?: 'zh' | 'en';
   currentDance?: string;
   hideMood?: boolean;
+  /** STT provider: browser | anthropic | local | doubao */
+  sttProvider?: 'browser' | 'anthropic' | 'local' | 'doubao';
+  /** STT language override (e.g. 'en', 'zh', 'ja') */
+  sttLanguage?: string;
 }
 
 const homeDir = process.env.HOME || process.env.USERPROFILE || '';

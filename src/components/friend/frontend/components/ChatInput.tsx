@@ -1,12 +1,11 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { MessageCircle, Send, Loader, Mic, ChevronDown, History, SquarePen, Plus, Phone, PhoneOff } from 'lucide-react'
 import { FRIEND_API } from '../api'
+import { useServerStt, type SttProvider } from '../hooks/useServerStt'
 
 // Keyframes (claw-input-slide-up, claw-input-slide-down, claw-pulse) are in index.html <style>
 
-const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-
-export function ChatInput({ visible = true, onActiveChange, uiAlign = 'right', onHistoryOpen, onNewSession, language = 'zh' }: { visible?: boolean; onActiveChange?: (hasText: boolean) => void; uiAlign?: 'left' | 'right'; onHistoryOpen?: () => void; onNewSession?: () => void; language?: 'zh' | 'en' }) {
+export function ChatInput({ visible = true, onActiveChange, uiAlign = 'right', onHistoryOpen, onNewSession, language = 'zh', sttProvider = 'browser' }: { visible?: boolean; onActiveChange?: (hasText: boolean) => void; uiAlign?: 'left' | 'right'; onHistoryOpen?: () => void; onNewSession?: () => void; language?: 'zh' | 'en'; sttProvider?: SttProvider }) {
   const t = (zh: string, en: string) => language === 'en' ? en : zh
   const [open, setOpen] = useState(false)
   const [text, setText] = useState('')
@@ -16,10 +15,11 @@ export function ChatInput({ visible = true, onActiveChange, uiAlign = 'right', o
   const [menuOpen, setMenuOpen] = useState(false)
   const [voiceCallActive, setVoiceCallActive] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
-  const recognitionRef = useRef<any>(null)
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSentIndexRef = useRef(0)
   const voiceCallActiveRef = useRef(false)
+  const endVoiceCallRef = useRef<() => void>(() => {})
+  const serverStt = useServerStt()
 
   const closeBar = useCallback(() => {
     if (closing) return
@@ -48,68 +48,48 @@ export function ChatInput({ visible = true, onActiveChange, uiAlign = 'right', o
   }, [text, sending])
 
   const startRecording = useCallback(async () => {
-    // Web Speech API (Tauri native STT not available in web mode)
-    if (!SpeechRecognition) {
-      console.error('SpeechRecognition not supported')
+    // All voice capture is server-side via cpal (no getUserMedia needed)
+    try {
+      await serverStt.startPushToTalk(sttProvider, language === 'en' ? 'en' : 'zh')
+      setRecording(true)
+      setOpen(true)
+    } catch (err) {
+      console.error('Server STT start error:', err)
+      setRecording(false)
+    }
+  }, [sttProvider, serverStt, language])
+
+  const stopRecording = useCallback(async () => {
+    if (sttProvider === 'browser') {
+      // Browser STT may not be available, just stop
+      setRecording(false)
       return
     }
-
-    const recognition = new SpeechRecognition()
-    recognition.lang = 'zh-CN'
-    recognition.interimResults = true
-    recognition.continuous = true
-
-    recognition.onresult = (event: any) => {
-      let transcript = ''
-      for (let i = 0; i < event.results.length; i++) {
-        transcript += event.results[i][0].transcript
-      }
-      setText(transcript)
-      onActiveChange?.(transcript.length > 0)
-    }
-
-    recognition.onerror = (event: any) => {
-      console.error('Speech recognition error:', event.error)
-      setRecording(false)
-    }
-
-    recognition.onend = () => {
-      setRecording(false)
-      setTimeout(() => inputRef.current?.focus(), 50)
-    }
-
-    recognition.start()
-    recognitionRef.current = recognition
-    setRecording(true)
-    setOpen(true)
-  }, [])
-
-  const stopRecording = useCallback(() => {
-    if (recognitionRef.current) {
-      recognitionRef.current.stop()
-      recognitionRef.current = null
-    }
     setRecording(false)
-  }, [])
+    try {
+      const text = await serverStt.stopPushToTalk()
+      setText(text)
+      onActiveChange?.(text.length > 0)
+    } catch (err) {
+      console.error('Server STT stop error:', err)
+    }
+  }, [serverStt, sttProvider, onActiveChange])
 
-  // 鼠标移出按钮时也停止录音
   const handleMouseLeave = useCallback(() => {
     if (recording) stopRecording()
   }, [recording, stopRecording])
 
   // --- Voice Call: constants ---
-  const HARD_PUNCT = /[。！？\.\!\?]$/        // immediate send
-  const SOFT_PUNCT = /[，、；,;：:]$/           // send if long enough
-  const SOFT_PUNCT_MIN_LEN = 10               // min chars before soft punct triggers send
-  const MAX_UNSENT_LEN = 30                   // force send when accumulated text is this long
-  const SILENCE_SEND_MS = 1200                // silence fallback timeout
-  const VAD_RMS_THRESHOLD = 0.015             // RMS below this = silence
-  const VAD_SILENCE_TIMEOUT_MS = 15_000       // stop STT after 15s silence
+  const HARD_PUNCT = /[。！？\.\!\?]$/
+  const SOFT_PUNCT = /[，、；,;：:]$/
+  const SOFT_PUNCT_MIN_LEN = 10
+  const MAX_UNSENT_LEN = 30
+  const SILENCE_SEND_MS = 1200
 
   // --- Voice Call: delayed TTS interrupt ---
   const interruptTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const scheduleInterrupt = useCallback(() => {
-    if (interruptTimerRef.current) return // already scheduled
+    if (interruptTimerRef.current) return
     interruptTimerRef.current = setTimeout(() => {
       interruptTimerRef.current = null
       ;(window as any).__clawInterruptAudio?.()
@@ -118,15 +98,6 @@ export function ChatInput({ visible = true, onActiveChange, uiAlign = 'right', o
   const cancelInterrupt = useCallback(() => {
     if (interruptTimerRef.current) { clearTimeout(interruptTimerRef.current); interruptTimerRef.current = null }
   }, [])
-
-  // --- Voice Call: refs ---
-  const vadStreamRef = useRef<MediaStream | null>(null)
-  const vadContextRef = useRef<AudioContext | null>(null)
-  const vadAnalyserRef = useRef<AnalyserNode | null>(null)
-  const vadRafRef = useRef<number>(0)
-  const vadSpeakingRef = useRef(false)
-  const vadSilenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [vadSpeaking, setVadSpeaking] = useState(false)
 
   // --- Voice Call: send + mute capture for 3s after send ---
   const VOICE_MUTE_AFTER_SEND_MS = 2000
@@ -151,7 +122,6 @@ export function ChatInput({ visible = true, onActiveChange, uiAlign = 'right', o
 
   // --- Voice Call: smart sentence segmentation ---
   const handleVoiceCallResult = useCallback((fullTranscript: string, isFinal: boolean) => {
-    // Ignore STT results during post-send mute period
     if (Date.now() < mutedUntilRef.current) {
       lastSentIndexRef.current = fullTranscript.length
       return
@@ -161,14 +131,13 @@ export function ChatInput({ visible = true, onActiveChange, uiAlign = 'right', o
     setText(unsent)
     onActiveChange?.(unsent.length > 0)
 
-    // Reset silence send timer on any result
     if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null }
 
     if (isFinal) {
       const shouldSend =
-        HARD_PUNCT.test(unsent) ||                                       // hard punctuation
-        (SOFT_PUNCT.test(unsent) && unsent.length >= SOFT_PUNCT_MIN_LEN) || // soft punct + long enough
-        unsent.length >= MAX_UNSENT_LEN                                  // word count overflow
+        HARD_PUNCT.test(unsent) ||
+        (SOFT_PUNCT.test(unsent) && unsent.length >= SOFT_PUNCT_MIN_LEN) ||
+        unsent.length >= MAX_UNSENT_LEN
 
       if (shouldSend) {
         voiceCallSend(unsent)
@@ -179,7 +148,6 @@ export function ChatInput({ visible = true, onActiveChange, uiAlign = 'right', o
       }
     }
 
-    // Silence fallback: start timer on both partial and final results
     if (unsent.trim()) {
       silenceTimerRef.current = setTimeout(() => {
         if (!voiceCallActiveRef.current) return
@@ -194,67 +162,7 @@ export function ChatInput({ visible = true, onActiveChange, uiAlign = 'right', o
     }
   }, [voiceCallSend, onActiveChange])
 
-  // --- Voice Call: VAD using AnalyserNode ---
-  const startVad = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      })
-      vadStreamRef.current = stream
-      const ctx = new AudioContext()
-      vadContextRef.current = ctx
-      const source = ctx.createMediaStreamSource(stream)
-      const analyser = ctx.createAnalyser()
-      analyser.fftSize = 512
-      source.connect(analyser)
-      vadAnalyserRef.current = analyser
-
-      const dataArray = new Float32Array(analyser.fftSize)
-      let lastSpeechTime = performance.now()
-
-      const check = () => {
-        if (!voiceCallActiveRef.current) return
-        analyser.getFloatTimeDomainData(dataArray)
-        let sum = 0
-        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i] * dataArray[i]
-        const rms = Math.sqrt(sum / dataArray.length)
-
-        const speaking = rms > VAD_RMS_THRESHOLD
-        if (speaking) {
-          lastSpeechTime = performance.now()
-          if (!vadSpeakingRef.current) {
-            vadSpeakingRef.current = true
-            setVadSpeaking(true)
-            // Interrupt TTS after 1s delay when user starts speaking
-            scheduleInterrupt()
-          }
-        } else if (vadSpeakingRef.current && performance.now() - lastSpeechTime > 500) {
-          vadSpeakingRef.current = false
-          cancelInterrupt()
-          setVadSpeaking(false)
-        }
-
-        vadRafRef.current = requestAnimationFrame(check)
-      }
-      vadRafRef.current = requestAnimationFrame(check)
-    } catch (err) {
-      console.error('VAD start failed:', err)
-    }
-  }, [])
-
-  const stopVad = useCallback(() => {
-    if (vadRafRef.current) { cancelAnimationFrame(vadRafRef.current); vadRafRef.current = 0 }
-    vadStreamRef.current?.getTracks().forEach((t) => t.stop())
-    vadStreamRef.current = null
-    vadContextRef.current?.close()
-    vadContextRef.current = null
-    vadAnalyserRef.current = null
-    vadSpeakingRef.current = false
-    setVadSpeaking(false)
-    if (vadSilenceTimerRef.current) { clearTimeout(vadSilenceTimerRef.current); vadSilenceTimerRef.current = null }
-  }, [])
-
-  // --- Voice Call: start ---
+  // --- Voice Call: start (always server-side, no getUserMedia) ---
   const startVoiceCall = useCallback(async () => {
     setVoiceCallActive(true)
     voiceCallActiveRef.current = true
@@ -262,73 +170,38 @@ export function ChatInput({ visible = true, onActiveChange, uiAlign = 'right', o
     setText('')
     setOpen(true)
 
-    // Start VAD
-    await startVad()
-
-    if (!SpeechRecognition) {
-      console.error('SpeechRecognition not supported')
-      setVoiceCallActive(false)
-      voiceCallActiveRef.current = false
-      stopVad()
+    // Server STT streaming via HTTP polling
+    if (sttProvider !== 'browser') {
+      serverStt.startStreaming(
+        sttProvider,
+        (text, isFinal) => {
+          handleVoiceCallResult(text, isFinal)
+        },
+        (err) => {
+          console.error('Server STT error:', err)
+          if (voiceCallActiveRef.current) {
+            endVoiceCallRef.current()
+          }
+        },
+        language === 'en' ? 'en' : 'zh',
+      )
+      setRecording(true)
       return
     }
 
-    const startWebSTT = () => {
-      const recognition = new SpeechRecognition()
-      recognition.lang = 'zh-CN'
-      recognition.interimResults = true
-      recognition.continuous = true
-      recognitionRef.current = recognition
-
-      recognition.onresult = (event: any) => {
-        let transcript = ''
-        let latestFinalEnd = 0
-        for (let i = 0; i < event.results.length; i++) {
-          transcript += event.results[i][0].transcript
-          if (event.results[i].isFinal) latestFinalEnd = transcript.length
-        }
-        const hasFinal = latestFinalEnd > lastSentIndexRef.current
-        handleVoiceCallResult(transcript, hasFinal)
-      }
-
-      recognition.onerror = (event: any) => {
-        console.error('Voice call STT error:', event.error)
-        if (event.error === 'no-speech' || event.error === 'aborted') return
-      }
-
-      recognition.onend = () => {
-        // Auto-restart if call is still active
-        if (voiceCallActiveRef.current) {
-          lastSentIndexRef.current = 0
-          setTimeout(() => {
-            if (voiceCallActiveRef.current) startWebSTT()
-          }, 300)
-        }
-      }
-
-      recognition.start()
-      setRecording(true)
-    }
-
-    startWebSTT()
-  }, [handleVoiceCallResult, startVad, stopVad])
+    // Browser STT not available on WebKitGTK — use server STT as fallback
+    console.warn('Browser STT not supported, falling back to server STT')
+    setVoiceCallActive(false)
+    voiceCallActiveRef.current = false
+  }, [handleVoiceCallResult, sttProvider, serverStt, language])
 
   // --- Voice Call: end ---
   const endVoiceCall = useCallback(() => {
     voiceCallActiveRef.current = false
     setVoiceCallActive(false)
-
-    // Stop VAD
-    stopVad()
-
-    // Stop STT
-    if (recognitionRef.current) {
-      recognitionRef.current.stop()
-      recognitionRef.current = null
-    }
+    serverStt.stopStreaming()
     setRecording(false)
 
-    // Clear timers
     if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null }
     cancelInterrupt()
     mutedUntilRef.current = 0
@@ -336,7 +209,9 @@ export function ChatInput({ visible = true, onActiveChange, uiAlign = 'right', o
     setText('')
     setOpen(false)
     onActiveChange?.(false)
-  }, [onActiveChange, stopVad, cancelInterrupt])
+  }, [onActiveChange, cancelInterrupt, serverStt])
+
+  endVoiceCallRef.current = endVoiceCall
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -351,16 +226,14 @@ export function ChatInput({ visible = true, onActiveChange, uiAlign = 'right', o
       setText('')
       onActiveChange?.(false)
     }
-
   }
 
-  // 全局快捷键
+  // Global keyboard shortcuts
   useEffect(() => {
     const onGlobalKeyDown = (e: KeyboardEvent) => {
       if (!visible) return
       const inInput = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement
 
-      // Enter: 唤起输入框 / 聚焦输入框
       if (e.key === 'Enter' && !e.shiftKey && !inInput) {
         e.preventDefault()
         if (!open) {
@@ -370,13 +243,11 @@ export function ChatInput({ visible = true, onActiveChange, uiAlign = 'right', o
         setTimeout(() => inputRef.current?.focus(), 50)
       }
 
-      // Escape: 收起输入框
       if (e.key === 'Escape' && open && !inInput) {
         e.preventDefault()
         closeBar()
       }
 
-      // F2: 语音通话
       if (e.key === 'F2') {
         e.preventDefault()
         if (voiceCallActive) {
@@ -386,16 +257,9 @@ export function ChatInput({ visible = true, onActiveChange, uiAlign = 'right', o
         }
       }
     }
-    const onGlobalKeyUp = (_e: KeyboardEvent) => {
-      // F2 keyup no longer needed (voice call is toggle, not push-to-talk)
-    }
     window.addEventListener('keydown', onGlobalKeyDown)
-    window.addEventListener('keyup', onGlobalKeyUp)
-    return () => {
-      window.removeEventListener('keydown', onGlobalKeyDown)
-      window.removeEventListener('keyup', onGlobalKeyUp)
-    }
-  }, [open, visible, recording, voiceCallActive, startRecording, stopRecording, closeBar, startVoiceCall, endVoiceCall])
+    return () => window.removeEventListener('keydown', onGlobalKeyDown)
+  }, [open, visible, voiceCallActive, closeBar, startVoiceCall, endVoiceCall])
 
   if (!visible) return null
 
@@ -428,7 +292,6 @@ export function ChatInput({ visible = true, onActiveChange, uiAlign = 'right', o
     return (
       <div style={barStyle}>
         <div style={{ flex: 1, position: 'relative' }}>
-          {/* 左侧 + 号按钮 */}
           <button
             onClick={() => setMenuOpen((v) => !v)}
             style={{ ...inlineBtnLeft, color: menuOpen ? 'rgba(100, 160, 255, 0.9)' : 'rgba(255, 255, 255, 0.45)' }}
@@ -436,7 +299,6 @@ export function ChatInput({ visible = true, onActiveChange, uiAlign = 'right', o
           >
             <Plus size={22} />
           </button>
-          {/* 弹出菜单 */}
           {menuOpen && (
             <div style={popupMenuStyle}>
               <button onClick={() => { setMenuOpen(false); onHistoryOpen?.() }} style={popupItemStyle}>
@@ -456,22 +318,20 @@ export function ChatInput({ visible = true, onActiveChange, uiAlign = 'right', o
               paddingRight: 80,
               display: 'flex',
               alignItems: 'center',
-              borderColor: vadSpeaking ? 'rgba(255, 80, 80, 0.7)' : 'rgba(255, 80, 80, 0.25)',
+              borderColor: recording ? 'rgba(255, 80, 80, 0.7)' : 'rgba(255, 80, 80, 0.25)',
             }}
             data-no-passthrough
           >
             <span style={{ color: text ? '#fff' : 'rgba(255, 255, 255, 0.45)', fontSize: 18, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: '"Segoe UI", "Microsoft YaHei", sans-serif' }}>
-              {text || (vadSpeaking ? t('正在听...', 'Listening...') : t('等待说话...', 'Waiting to speak...'))}
-
+              {text || (recording ? t('正在听...', 'Listening...') : t('等待说话...', 'Waiting to speak...'))}
             </span>
           </div>
-          {/* 右侧：麦克风指示 + 挂断 */}
           <span
             style={{
               ...inlineBtnRight,
               right: 44,
-              color: vadSpeaking ? 'rgba(255, 80, 80, 0.9)' : 'rgba(80, 200, 120, 0.9)',
-              animation: vadSpeaking ? 'claw-pulse 0.8s ease-in-out infinite' : 'none',
+              color: recording ? 'rgba(255, 80, 80, 0.9)' : 'rgba(80, 200, 120, 0.9)',
+              animation: recording ? 'claw-pulse 0.8s ease-in-out infinite' : 'none',
               transition: 'color 0.2s',
               cursor: 'default',
             }}
@@ -502,7 +362,6 @@ export function ChatInput({ visible = true, onActiveChange, uiAlign = 'right', o
       }}
     >
       <div style={{ flex: 1, position: 'relative' }}>
-        {/* 左侧 + 号按钮 */}
         <button
           onClick={() => setMenuOpen((v) => !v)}
           style={{ ...inlineBtnLeft, color: menuOpen ? 'rgba(100, 160, 255, 0.9)' : 'rgba(255, 255, 255, 0.45)' }}
@@ -510,7 +369,6 @@ export function ChatInput({ visible = true, onActiveChange, uiAlign = 'right', o
         >
           <Plus size={22} />
         </button>
-        {/* 弹出菜单 */}
         {menuOpen && (
           <div style={popupMenuStyle}>
             <button onClick={() => { setMenuOpen(false); onHistoryOpen?.() }} style={popupItemStyle}>
@@ -536,7 +394,6 @@ export function ChatInput({ visible = true, onActiveChange, uiAlign = 'right', o
           style={{ ...inputStyle, paddingLeft: 48, paddingRight: 80 }}
           autoFocus
         />
-        {/* 右侧：发送/收起 */}
         <button
           onMouseDown={startRecording}
           onMouseUp={stopRecording}
@@ -669,4 +526,3 @@ const popupItemStyle: React.CSSProperties = {
   whiteSpace: 'nowrap',
   fontFamily: '"Segoe UI", "Microsoft YaHei", sans-serif',
 }
-

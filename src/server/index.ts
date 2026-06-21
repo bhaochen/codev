@@ -18,7 +18,6 @@ import { handleHahaOpenAIOAuthCallback } from './api/haha-openai-oauth.js'
 import { handleFriendApi, setFriendServerInfo } from './api/friend.js'
 import { handleFriendStaticRequest } from './staticFriend.js'
 import { getPrefs } from '../friend/prefs.js'
-import { launchTauri, stopTauri } from '../friend/tauri-launcher.js'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { OPENAI_CODEX_REDIRECT_PATH } from '../services/openaiAuth/client.js'
@@ -428,19 +427,12 @@ export function startServer(port = PORT, host = HOST) {
 
   console.log(`[Server] Claude Code API server running at http://${host}:${port}`)
 
-  // Register Friend server info so the chat service can construct SDK URLs
+  // Register Friend server info so API routes can construct URLs
   setFriendServerInfo(host, port)
 
-  // ── Friend: launch Tauri desktop window when enabled ──
-  if (getPrefs().enabled) {
-    const friendUrl = `http://${localConnectHost}:${port}/friend/`
-    console.log(`[Friend] VRM frontend available at ${friendUrl}`)
-
-    launchTauri({
-      info: (msg: string) => console.log(`[Friend] ${msg}`),
-      warn: (msg: string) => console.warn(`[Friend] ${msg}`),
-    })
-  }
+  // Note: Friend Tauri window lifecycle is managed by the friend module
+  // (FriendService + friend/server.ts), not by the desktop server.
+  // Use `/friend start` in the CLI to launch the window.
 
   return server
 }
@@ -458,29 +450,20 @@ function cleanupAllSessions() {
   }
 }
 
-function cleanupFriend() {
-  stopTauri({
-    info: (msg: string) => console.log(`[Friend] ${msg}`),
-  })
-}
-
 process.on('SIGTERM', () => {
   console.log('[Server] Received SIGTERM')
   cleanupAllSessions()
-  cleanupFriend()
   process.exit(0)
 })
 
 process.on('SIGINT', () => {
   console.log('[Server] Received SIGINT')
   cleanupAllSessions()
-  cleanupFriend()
   process.exit(0)
 })
 
 process.on('exit', () => {
   cleanupAllSessions()
-  cleanupFriend()
 })
 
 // Direct execution

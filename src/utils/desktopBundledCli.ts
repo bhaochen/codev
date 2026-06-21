@@ -24,7 +24,21 @@ export function resolveBundledCliPathFromExecPath(
     return fs.existsSync(bundledCliPath) ? bundledCliPath : null
   }
 
+  // If execPath points to an existing regular file, it IS the CLI binary
+  // (handles standalone compiled binaries like VersperClaw, cli, etc.)
+  if (existsAndIsFile(execPath)) {
+    return execPath
+  }
+
   return null
+}
+
+function existsAndIsFile(p: string): boolean {
+  try {
+    return fs.statSync(p).isFile()
+  } catch {
+    return false
+  }
 }
 
 export function resolveClaudeCliLauncher(options?: {

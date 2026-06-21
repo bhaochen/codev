@@ -69,17 +69,25 @@ export async function handleFriendStaticRequest(req: Request, url: URL): Promise
 }
 
 async function resolveFriendDistDir(): Promise<string | null> {
+  // Method 1: relative to source file (works in dev mode / server subprocess)
   const _srcDir = path.dirname(fileURLToPath(import.meta.url))
-  // src/server/ -> ../../src/components/friend/frontend/dist
-  const candidate = path.resolve(_srcDir, '..', '..', 'src', 'components', 'friend', 'frontend', 'dist')
+  const candidate1 = path.resolve(_srcDir, '..', '..', 'src', 'components', 'friend', 'frontend', 'dist')
   try {
-    const stat = await fs.stat(path.join(candidate, 'index.html'))
-    if (stat.isFile()) {
-      return candidate
-    }
+    const stat = await fs.stat(path.join(candidate1, 'index.html'))
+    if (stat.isFile()) return candidate1
   } catch {
     // Not found
   }
+
+  // Method 2: relative to cwd (works in compiled binary where import.meta.url is virtual)
+  const candidate2 = path.resolve(process.cwd(), 'src', 'components', 'friend', 'frontend', 'dist')
+  try {
+    const stat = await fs.stat(path.join(candidate2, 'index.html'))
+    if (stat.isFile()) return candidate2
+  } catch {
+    // Not found
+  }
+
   return null
 }
 

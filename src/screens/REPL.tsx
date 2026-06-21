@@ -113,6 +113,7 @@ import {
 import { endInteractionSpan } from '../utils/telemetry/sessionTracing.js'
 import { useLogMessages } from '../hooks/useLogMessages.js'
 import { useFeishuBridge } from '../hooks/useFeishuBridge.js'
+import { useFriendBridge } from '../hooks/useFriendBridge.js'
 import { useReplBridge } from '../hooks/useReplBridge.js'
 import {
   type Command,
@@ -5403,6 +5404,7 @@ export function REPL({
   useMailboxBridge({ isLoading, onSubmitMessage: handleIncomingPrompt })
 
   useFeishuBridge({ messages, isLoading })
+  useFriendBridge({ messages, isLoading })
 
   // Scheduled tasks from .claude/scheduled_tasks.json (CronCreate/Delete/List)
   if (feature('AGENT_TRIGGERS')) {

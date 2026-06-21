@@ -13,7 +13,8 @@ import {
 import { getPrefs, setPrefs, updatePrefs, type FriendPrefs } from '../../friend/prefs.js';
 import { edgeTts, qwenTts, registerAudioFile, getAudioFile } from '../../friend/tts.js';
 import { stripForTts } from '../../friend/text-utils.js';
-import { friendChatService } from '../../friend/chat-service.js';
+import { friendService } from '../../friend/FriendService.js';
+import { transcribeAudioFile } from '../../friend/stt-service.js';
 
 const GATEWAY_URL = `http://127.0.0.1:3456`;
 
@@ -132,22 +133,44 @@ export async function handleFriendApi(req: Request, url: URL): Promise<Response>
     const message = body?.message;
     if (!message) return jsonResponse({ error: 'message required' }, 400);
 
-    // Ensure the Friend CLI session is running (lazy start on first chat).
-    // The response comes back asynchronously via SSE.
-    (async () => {
-      try {
-        await friendChatService.ensureSession(serverHost, serverPort);
-        friendChatService.sendMessage(message);
-      } catch (err) {
-        console.error('[Friend] chat dispatch error:', err);
-        broadcastToVrm({
-          text: `Connection error: ${err instanceof Error ? err.message : String(err)}`,
-        });
-        broadcastToVrm({ replyDone: true });
-      }
-    })();
+    // Enqueue the message into the main CLI conversation via FriendService.
+    // The AI response is tracked by useFriendBridge in the REPL and
+    // broadcast back to the VRM display via SSE automatically.
+    try {
+      await friendService.start();
+      friendService.sendText(message);
+    } catch (err) {
+      console.error('[Friend] chat dispatch error:', err);
+      broadcastToVrm({
+        text: `Connection error: ${err instanceof Error ? err.message : String(err)}`,
+      });
+      broadcastToVrm({ replyDone: true });
+    }
 
     return jsonResponse({ ok: true });
+  }
+
+  // ── Voice capture (POST /plugins/friend/voice/start, /stop, /status) ──
+  if (pathname === '/plugins/friend/voice/start' && method === 'POST') {
+    try {
+      await friendService.startVoiceCapture();
+      return jsonResponse({ ok: true });
+    } catch (err) {
+      return jsonResponse({ error: String(err) }, 500);
+    }
+  }
+
+  if (pathname === '/plugins/friend/voice/stop' && method === 'POST') {
+    try {
+      const text = await friendService.stopVoiceCapture();
+      return jsonResponse({ ok: true, text });
+    } catch (err) {
+      return jsonResponse({ error: String(err) }, 500);
+    }
+  }
+
+  if (pathname === '/plugins/friend/voice/status' && method === 'POST') {
+    return jsonResponse(friendService.getCaptureStatus());
   }
 
   // ── Touch endpoint (POST /plugins/friend/touch) ──
@@ -188,6 +211,31 @@ export async function handleFriendApi(req: Request, url: URL): Promise<Response>
     }
 
     return new Response(null, { status: 405 });
+  }
+
+  // ── STT config (GET /plugins/friend/stt/config) ──
+  if (pathname === '/plugins/friend/stt/config' && method === 'GET') {
+    const prefs = getPrefs();
+    return jsonResponse({
+      sttProvider: prefs.sttProvider || 'browser',
+      sttLanguage: prefs.sttLanguage || 'zh',
+    });
+  }
+
+  // ── STT file transcription (POST /plugins/friend/stt/file) ──
+  if (pathname === '/plugins/friend/stt/file' && method === 'POST') {
+    try {
+      const formData = await req.formData();
+      const audioFile = formData.get('audio') as File | null;
+      if (!audioFile) return jsonResponse({ error: 'audio file required' }, 400);
+
+      const buffer = Buffer.from(await audioFile.arrayBuffer());
+      const prefs = getPrefs();
+      const result = await transcribeAudioFile(buffer, prefs);
+      return jsonResponse(result);
+    } catch (err) {
+      return jsonResponse({ error: String(err) }, 500);
+    }
   }
 
   // ── TTS Preview (POST /plugins/friend/preview) ──
@@ -239,6 +287,8 @@ export async function handleFriendApi(req: Request, url: URL): Promise<Response>
         currentDance: prefs.currentDance,
         language: prefs.language,
         hideMood: prefs.hideMood,
+        sttProvider: prefs.sttProvider || 'browser',
+        sttLanguage: prefs.sttLanguage || 'zh',
       });
     }
 
@@ -257,6 +307,8 @@ export async function handleFriendApi(req: Request, url: URL): Promise<Response>
       if (body.currentDance !== undefined) patch.currentDance = body.currentDance;
       if (body.language !== undefined) patch.language = body.language;
       if (body.hideMood !== undefined) patch.hideMood = body.hideMood;
+      if (body.sttProvider !== undefined) patch.sttProvider = body.sttProvider;
+      if (body.sttLanguage !== undefined) patch.sttLanguage = body.sttLanguage;
       setPrefs(updatePrefs(patch));
       return jsonResponse({ ok: true });
     }
@@ -380,7 +432,7 @@ export async function handleFriendApi(req: Request, url: URL): Promise<Response>
   // ── Clear context (POST /plugins/friend/context/clear) ──
   if (pathname === '/plugins/friend/context/clear' && method === 'POST') {
     broadcastToVrm({ clearText: true });
-    friendChatService.clearContext();
+    friendService.sendText('/new');
     return jsonResponse({ ok: true });
   }
 
