@@ -8,6 +8,12 @@
 
 ## 📢 News
 
+- **2026-06-22** 🔊 Groq Whisper STT — CLI `/voice` now uses Groq Whisper API (cloud whisper-large-v3, no Python needed) and `node-edge-tts` for TTS, matching Friend's stack.
+- **2026-06-21** 🎙️ Groq Free STT — Friend voice input now supports Groq Whisper API as STT provider; TypeScript-only, no Python subprocess required.
+- **2026-06-21** 🖥️ Friend Desktop — `/friend start` launches a Tauri desktop VRM companion app with full-screen mode, real-time TTS/STT, and inter-process communication.
+- **2026-06-21** 🎤 Microphone Fix — Resolved Microphone access denied in WebKitGTK; switched to arecord/parecord subprocess audio capture.
+- **2026-06-20** 🤖 /friend Command — In-process VRM companion service: SSE broadcast, voice capture (push-to-talk + streaming), Edge TTS / Qwen TTS, and persona generation from VRM screenshot.
+- **2026-06-19** 📋 /release-notes — New command to display version release notes and what's new.
 - **2026-06-15** 🎯 Goal Tracking — New `/goal` command with prompt input footsider and lastline display for real-time goal tracking.
 - **2026-06-15** 🖼️ WebSearch Image Preview — WebSearch markdown now displays inline image links natively.
 - **2026-06-15** 🔊 Feishu Voice — Feishu integration now supports both VoxCPM and Edge-TTS voice synthesis.
