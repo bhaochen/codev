@@ -196,11 +196,19 @@ export function ChatInput({ visible = true, onActiveChange, uiAlign = 'right', o
   }, [handleVoiceCallResult, sttProvider, serverStt, language])
 
   // --- Voice Call: end ---
-  const endVoiceCall = useCallback(() => {
+  const endVoiceCall = useCallback(async () => {
+    if (!voiceCallActiveRef.current) return // guard against double-invocation
     voiceCallActiveRef.current = false
     setVoiceCallActive(false)
-    serverStt.stopStreaming()
     setRecording(false)
+
+    // Stop capture and get the final transcript
+    const text = await serverStt.stopStreaming()
+
+    // Send any remaining transcript as a message (no-op if empty)
+    if (text.trim()) {
+      voiceCallSend(text)
+    }
 
     if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null }
     cancelInterrupt()
@@ -209,7 +217,7 @@ export function ChatInput({ visible = true, onActiveChange, uiAlign = 'right', o
     setText('')
     setOpen(false)
     onActiveChange?.(false)
-  }, [onActiveChange, cancelInterrupt, serverStt])
+  }, [onActiveChange, cancelInterrupt, serverStt, voiceCallSend])
 
   endVoiceCallRef.current = endVoiceCall
 

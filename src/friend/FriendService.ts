@@ -369,9 +369,10 @@ class FriendService {
     // Generate TTS for the full response if enabled
     if (prefs.ttsEnabled) {
       try {
-        const audioUrl = await this.generateTts(text);
-        if (audioUrl) {
-          broadcastToVrm({ audioUrl, sendFirstTts: true });
+        const audioId = await this.generateTts(text);
+        if (audioId) {
+          const fullUrl = `http://127.0.0.1:3456/plugins/friend/audio/${audioId}`;
+          broadcastToVrm({ audioUrl: fullUrl, sendFirstTts: true });
         }
       } catch (err) {
         console.warn('[FriendService] TTS generation failed:', err);
@@ -460,7 +461,7 @@ class FriendService {
           try {
             const args = tool === 'parecord'
               ? ['--raw', '--rate=16000', '--format=s16le', '--channels=1', '--latency-msec=20']
-              : ['-r', '16000', '-f', 'S16_LE', '-c', '1', '-t', 'raw', '-q'];
+              : ['-D', 'default', '-r', '16000', '-f', 'S16_LE', '-c', '1', '-t', 'raw', '-q'];
             const proc = spawn(tool, args, { stdio: ['pipe', 'pipe', 'pipe'] });
             if (proc.pid !== undefined) {
               captureProc = proc;

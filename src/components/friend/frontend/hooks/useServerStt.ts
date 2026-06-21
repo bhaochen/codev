@@ -95,8 +95,11 @@ export function useServerStt() {
     [],
   )
 
-  /** Stop streaming STT. */
-  const stopStreaming = useCallback(() => {
+  /**
+   * Stop streaming STT.
+   * Returns the final transcript text from the server.
+   */
+  const stopStreaming = useCallback(async (): Promise<string> => {
     // Stop polling
     const pollId = (window as any).__friendSttPollId
     if (pollId) {
@@ -104,12 +107,12 @@ export function useServerStt() {
       delete (window as any).__friendSttPollId
     }
 
-    // Stop capture
-    fetch(`${FRIEND_API_BASE}/voice/stop`, { method: 'POST' })
-      .catch(() => {})
-      .finally(() => {
-        setConnected(false)
-      })
+    // Stop capture and get final transcript
+    const res = await fetch(`${FRIEND_API_BASE}/voice/stop`, { method: 'POST' })
+    setConnected(false)
+    if (!res.ok) return ''
+    const data = await res.json()
+    return data.text || ''
   }, [])
 
   return {
