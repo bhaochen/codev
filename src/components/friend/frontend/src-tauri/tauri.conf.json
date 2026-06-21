@@ -34,7 +34,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' http://127.0.0.1:3456; connect-src 'self' http://127.0.0.1:3456 ws://127.0.0.1:3456; style-src 'self' 'unsafe-inline'; img-src 'self' data: http://127.0.0.1:3456; media-src 'self' http://127.0.0.1:3456; font-src 'self' data:; script-src 'self' 'unsafe-inline'"
+      "csp": null
     }
   }
 }
