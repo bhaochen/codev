@@ -95,7 +95,8 @@ cp VersperClaw ~/.local/bin
     "ENABLE_TOOL_SEARCH": "true",
     "TAVILY_API_KEY": "",
   # "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "0", default 1 
-    "teammateMode": "tmux" # or in-process
+    "teammateMode": "tmux", # or in-process
+    "groqApiKey": "gsk_" # https://console.groq.com
   }
 
   # set auto-dream config
@@ -154,6 +155,8 @@ mitmproxy -p 8888
 
 ```bash
 # /voice
+# node-edge-tts
+# local whisper-stt
 uv venv
 uv pip install faster-whisper edge-tts voxcpm
 

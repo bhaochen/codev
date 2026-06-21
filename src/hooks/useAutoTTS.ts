@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
-import { speakWithEdgeTTS, playAudioFile } from '../services/voice/edgeTTS.js'
+import { playAudioFile } from '../services/voice/edgeTTS.js'
+import { edgeTts } from '../friend/tts.js'
 import { getInitialSettings } from '../utils/settings/settings.js'
 import type { RenderableMessage } from '../types/message.js'
 
@@ -67,10 +68,7 @@ export function useAutoTTS(messages: RenderableMessage[], isLoading?: boolean): 
       const text = content.text
 
       const run = async () => {
-        const result = await speakWithEdgeTTS(text, {
-          voice,
-          pythonPath: settings.voiceTTSCommand || undefined,
-        })
+        const result = await edgeTts({ text, voice })
         if (result.success && result.audioPath) {
           await playAudioFile(result.audioPath)
         }

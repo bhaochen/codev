@@ -22,6 +22,7 @@ import {
   type VoiceStreamConnection,
 } from '../services/voiceStreamSTT.js'
 import { connectDoubaoStream } from '../services/doubaoSTT.js'
+import { connectGroqStream } from '../services/voice/groqSTT.js'
 import { connectLocalWhisperStream, preloadWhisperModel } from '../services/voice/whisperSTT.js'
 import { logForDebugging } from '../utils/debug.js'
 import { toError } from '../utils/errors.js'
@@ -146,6 +147,10 @@ function isDoubaoProvider(): boolean {
 
 function isLocalProvider(): boolean {
   return getInitialSettings().voiceProvider === 'local'
+}
+
+function isGroqProvider(): boolean {
+  return getInitialSettings().voiceProvider === 'groq'
 }
 
 // Lazy-loaded voice module. We defer importing voice.ts (and its native
@@ -401,8 +406,8 @@ export function useVoice({
           !silentDropRetriedRef.current &&
           fullAudioRef.current.length > 0
         ) {
-// Local whisper doesn't support silent-drop replay (different backend)
-        if (isLocalProvider()) {
+// Local whisper & groq don't support silent-drop replay (batch backends)
+        if (isLocalProvider() || isGroqProvider()) {
           callbacks.onClose()
           return
         }
@@ -595,7 +600,7 @@ export function useVoice({
   // stop when it loses focus. This enables a "multi-clauding army"
   // workflow where voice input follows window focus.
   useEffect(() => {
-    if (!enabled || !focusMode || isDoubaoProvider() || isLocalProvider()) {
+    if (!enabled || !focusMode || isDoubaoProvider() || isLocalProvider() || isGroqProvider()) {
       // Focus mode was disabled while a focus-driven recording was active —
       // stop the recording so it doesn't linger until the silence timer fires.
       if (focusTriggeredRef.current && stateRef.current === 'recording') {
@@ -810,6 +815,9 @@ export function useVoice({
           connectLocalWhisperStream(cbs, { language: stt.code })
       } else if (isDoubaoProvider()) {
         connectFn = (cbs, opts) => connectDoubaoStream(cbs, opts)
+      } else if (isGroqProvider()) {
+        connectFn = (cbs, opts) =>
+          connectGroqStream(cbs, { language: opts.language })
       } else {
         connectFn = (cbs, opts) => connectVoiceStream(cbs, opts)
       }
@@ -1026,6 +1034,13 @@ export function useVoice({
             onErrorRef.current?.(
               'Local voice mode failed. Ensure Python with faster-whisper is installed.',
             )
+          } else if (isGroqProvider()) {
+            logForDebugging(
+              '[voice] Groq STT failed to initialize',
+            )
+            onErrorRef.current?.(
+              'Groq STT failed. Check your GROQ_API_KEY.',
+            )
           } else {
             logForDebugging(
               '[voice] Failed to connect to voice_stream (no OAuth token?)',
@@ -1051,8 +1066,8 @@ export function useVoice({
       })
     }
 
-    // Doubao and local backends don't use keyterms — skip the async fetch
-    if (isDoubaoProvider() || isLocalProvider()) {
+    // Doubao, local, and groq backends don't use keyterms — skip the async fetch
+    if (isDoubaoProvider() || isLocalProvider() || isGroqProvider()) {
       attemptConnect([])
     } else {
       void getVoiceKeyterms().then(attemptConnect)
@@ -1070,7 +1085,7 @@ export function useVoice({
   // delay of ~500ms on macOS).
   const handleKeyEvent = useCallback(
     (fallbackMs = REPEAT_FALLBACK_MS): void => {
-      const sttAvailable = isLocalProvider()
+      const sttAvailable = isLocalProvider() || isGroqProvider()
         ? true
         : isDoubaoProvider()
           ? isDoubaoAvailableSync()

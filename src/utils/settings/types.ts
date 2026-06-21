@@ -868,10 +868,11 @@ export const SettingsSchema = lazySchema(() =>
               .optional()
               .describe('Enable voice mode (hold-to-talk dictation)'),
             voiceProvider: z
-              .enum(['local', 'doubao', 'anthropic'])
+              .enum(['local', 'doubao', 'anthropic', 'groq'])
               .optional()
               .describe(
-                'Voice STT backend: "local" (whisper/whisper.cpp / faster-whisper) or "doubao" (Doubao ASR).'
+                'Voice STT backend: "local" (whisper/whisper.cpp / faster-whisper),'
+                  + ' "doubao" (Doubao ASR), or "groq" (Groq Whisper API).'
                   + ' "anthropic" is a client-side compatibility alias.',
               ),
             voiceAutoTTS: z

@@ -88,10 +88,10 @@ export const call: LocalCommandCall = async () => {
     }
   }
 
-  // Enable voice with local provider
+  // Enable voice with Groq provider (cloud Whisper API, no Python needed)
   const result = updateSettingsForSource('userSettings', {
     voiceEnabled: true,
-    voiceProvider: 'local' as const,
+    voiceProvider: 'groq' as const,
     voiceAutoTTS: true,
   })
   if (result.error) {
@@ -124,6 +124,6 @@ export const call: LocalCommandCall = async () => {
   }
   return {
     type: 'text' as const,
-    value: `Voice mode enabled (local whisper). Hold ${key} to record.${langNote}`,
+    value: `Voice mode enabled (Groq Whisper). Hold ${key} to record.${langNote}`,
   }
 }
