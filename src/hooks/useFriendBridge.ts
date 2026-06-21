@@ -24,6 +24,9 @@ const FRIEND_CHANNEL_SERVER = 'friend'
 
 type ActiveFriendTurn = {
   responseParts: string[]
+  /** True if the last collected assistant message contained a tool_use block.
+   *  When true, the turn is not complete — more messages expected. */
+  hasToolUse: boolean
 }
 
 export function useFriendBridge({ messages, isLoading }: Props): void {
@@ -57,16 +60,21 @@ export function useFriendBridge({ messages, isLoading }: Props): void {
           pendingInboundRef.current--
           activeTurnRef.current = {
             responseParts: [],
+            hasToolUse: false,
           }
         }
         continue
       }
 
       if (message.type === 'assistant' && activeTurnRef.current) {
-        const text = getContentText(message.message.content)
+        const content = message.message.content
+        const text = getContentText(content)
         if (text) {
           activeTurnRef.current.responseParts.push(text)
         }
+        // Check if this message contains tool_use → turn continues
+        activeTurnRef.current.hasToolUse = Array.isArray(content) &&
+          content.some((b: any) => b.type === 'tool_use')
         continue
       }
 
@@ -91,6 +99,10 @@ export function useFriendBridge({ messages, isLoading }: Props): void {
     previousLoadingRef.current = isLoading
 
     if (!wasLoading || isLoading || !activeTurnRef.current) return
+
+    // If the last assistant message had a tool_use, the turn is not complete —
+    // more messages are expected after tool results resolve. Wait.
+    if (activeTurnRef.current.hasToolUse) return
 
     const completedTurn = activeTurnRef.current
     activeTurnRef.current = null
