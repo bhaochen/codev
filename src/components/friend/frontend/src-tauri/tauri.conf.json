@@ -4,8 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.versperclaw.friend",
   "build": {
-    "devUrl": "http://127.0.0.1:3456/friend/",
-    "frontendDist": "../dist"
+    "devUrl": "http://127.0.0.1:3456/friend/"
   },
   "bundle": {
     "icon": [
@@ -20,6 +19,7 @@
       {
         "title": "VersperClaw Friend",
         "label": "main",
+        "url": "http://127.0.0.1:3456/friend/",
         "transparent": true,
         "decorations": false,
         "alwaysOnTop": true,
@@ -27,14 +27,14 @@
         "height": 600,
         "minWidth": 200,
         "minHeight": 300,
-        "resizable": false,
+        "resizable": true,
         "skipTaskbar": false,
         "center": true,
         "visible": true
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:3456 ws://127.0.0.1:3456; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' http://127.0.0.1:3456; font-src 'self' data:; script-src 'self' 'unsafe-inline';"
+      "csp": "default-src 'self' http://127.0.0.1:3456; connect-src 'self' http://127.0.0.1:3456 ws://127.0.0.1:3456; style-src 'self' 'unsafe-inline'; img-src 'self' data: http://127.0.0.1:3456; media-src 'self' http://127.0.0.1:3456; font-src 'self' data:; script-src 'self' 'unsafe-inline'"
     }
   }
 }

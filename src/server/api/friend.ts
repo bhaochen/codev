@@ -12,7 +12,7 @@ import {
 } from '../../friend/sse.js';
 import { getPrefs, setPrefs, updatePrefs, type FriendPrefs } from '../../friend/prefs.js';
 import { edgeTts, qwenTts, registerAudioFile, getAudioFile } from '../../friend/tts.js';
-import { stripForTts, VALID_EMOTIONS } from '../../friend/text-utils.js';
+import { stripForTts } from '../../friend/text-utils.js';
 import { friendChatService } from '../../friend/chat-service.js';
 
 const GATEWAY_URL = `http://127.0.0.1:3456`;
