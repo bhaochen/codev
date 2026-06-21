@@ -86,6 +86,7 @@ export function startFriendServer(port = 3456, host = '127.0.0.1'): ReturnType<t
   server = Bun.serve<undefined>({
     port,
     hostname: host,
+    idleTimeout: 60, // seconds — allow slow STT provider init (Python/PyTorch imports)
     async fetch(req) {
       const url = new URL(req.url);
 

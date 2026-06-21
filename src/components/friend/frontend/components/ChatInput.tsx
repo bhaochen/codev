@@ -170,29 +170,29 @@ export function ChatInput({ visible = true, onActiveChange, uiAlign = 'right', o
     setText('')
     setOpen(true)
 
-    // Server STT streaming via HTTP polling
-    if (sttProvider !== 'browser') {
-      serverStt.startStreaming(
-        sttProvider,
-        (text, isFinal) => {
-          handleVoiceCallResult(text, isFinal)
-        },
-        (err) => {
-          console.error('Server STT error:', err)
-          if (voiceCallActiveRef.current) {
+    // Always use server-side STT via HTTP polling.
+    // Audio capture is done server-side via cpal (in-process native addon)
+    // so no getUserMedia call is needed on the frontend — this avoids
+    // WebKitGTK permission issues on Linux.
+    serverStt.startStreaming(
+      sttProvider,
+      (text, isFinal) => {
+        handleVoiceCallResult(text, isFinal)
+      },
+      (err) => {
+        console.error('Server STT error:', err)
+        if (voiceCallActiveRef.current) {
+          // Show error text in the input bar, then end call after 3s
+          setText(`语音启动失败: ${err}`)
+          setTimeout(() => {
+            setText('')
             endVoiceCallRef.current()
-          }
-        },
-        language === 'en' ? 'en' : 'zh',
-      )
-      setRecording(true)
-      return
-    }
-
-    // Browser STT not available on WebKitGTK — use server STT as fallback
-    console.warn('Browser STT not supported, falling back to server STT')
-    setVoiceCallActive(false)
-    voiceCallActiveRef.current = false
+          }, 3000)
+        }
+      },
+      language === 'en' ? 'en' : 'zh',
+    )
+    setRecording(true)
   }, [handleVoiceCallResult, sttProvider, serverStt, language])
 
   // --- Voice Call: end ---

@@ -217,16 +217,23 @@ export function connectLocalWhisperStream(
   })
 }
 
+/**
+ * Fast check for local whisper availability using `find_spec` (no actual
+ * module import, avoiding the slow PyTorch/numpy import chain).
+ */
 export async function checkLocalWhisperAvailable(): Promise<boolean> {
   try {
     const python = resolvePythonPath()
     return await new Promise(resolve => {
-      const proc = spawn(python, ['-c', 'import whisper; print("ok")'], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-      })
-      let out = ''
-      proc.stdout.on('data', d => { out += d.toString() })
-      proc.on('close', () => { resolve(out.trim() === 'ok') })
+      const proc = spawn(
+        python,
+        [
+          '-c',
+          'import importlib.util,sys; sys.exit(0 if importlib.util.find_spec("whisper") else 1)',
+        ],
+        { stdio: ['ignore', 'pipe', 'pipe'] },
+      )
+      proc.on('close', code => resolve(code === 0))
     })
   } catch {
     return false

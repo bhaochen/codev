@@ -154,48 +154,161 @@ class FriendService {
   /**
    * Start in-process voice capture using cpal.
    * Audio is forwarded to the configured STT provider.
-   * Returns when capture-started confirmation is received.
+   * Wraps initialization in a timeout (12s) to prevent hanging
+   * when STT provider or audio device is unavailable.
    */
   async startVoiceCapture(): Promise<void> {
     if (this.capturing) return;
 
     const prefs = getPrefs();
-    const provider = prefs.sttProvider || 'browser';
+    let provider = prefs.sttProvider;
     const language = prefs.sttLanguage || 'zh';
+
+    // Auto-detect STT provider if not configured or set to 'browser' (not available in WebKitGTK)
+    if (!provider || provider === 'browser') {
+      provider = await this.detectAvailableSttProvider();
+    }
 
     this.captureTranscripts = [];
     this.captureInterimText = '';
     this.capturing = true;
 
     try {
-      // 1. Start STT provider connection
-      const conn = await this.startSttConnection(provider, language);
-      this.sttConnection = conn;
-
-      // 2. Load audio capture module (cpal)
-      const audio = await this.loadAudioCapture();
-
-      // 3. Start cpal recording — chunks go to STT
-      const ok = await audio.startRecording(
-        (chunk: Buffer) => {
-          this.sttConnection?.send(chunk);
-        },
-        () => {
-          // Capture ended (user stop or silence detection)
-        },
+      // Wrap the whole initialization in a 12s timeout to avoid hanging
+      // when STT provider or audio device is unavailable.
+      await this.withTimeout(
+        this._initVoiceCapture(provider, language),
+        12000,
+        `Voice initialization timed out. Check that your microphone is accessible and STT provider "${provider}" is configured correctly.`,
       );
-
-      if (!ok) {
-        // Fallback: try arecord as subprocess
-        this.capturing = false;
-        throw new Error('Native audio capture unavailable');
-      }
     } catch (err) {
       this.capturing = false;
       this.sttConnection?.close();
       this.sttConnection = null;
       throw err;
     }
+  }
+
+  /**
+   * Internal voice capture initialization (STT connection + audio capture).
+   * Separated so startVoiceCapture() can wrap it with a timeout.
+   */
+  private async _initVoiceCapture(
+    provider: string,
+    language: string,
+  ): Promise<void> {
+    // 1. Start STT provider connection (with inner 8s timeout)
+    const conn = await this.startSttConnectionWithTimeout(provider, language);
+    this.sttConnection = conn;
+
+    // 2. Load audio capture module (cpal)
+    const audio = await this.loadAudioCapture();
+
+    // 3. Start cpal recording — chunks go to STT
+    const ok = await audio.startRecording(
+      (chunk: Buffer) => {
+        this.sttConnection?.send(chunk);
+      },
+      () => {
+        // Capture ended (user stop or silence detection)
+      },
+    );
+
+    if (!ok) {
+      throw new Error('Native audio capture unavailable');
+    }
+  }
+
+  /** Race a promise against a timeout */
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    ms: number,
+    message: string,
+  ): Promise<T> {
+    return Promise.race([
+      promise,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(message)), ms),
+      ),
+    ]);
+  }
+
+  /**
+   * Auto-detect the first available STT provider.
+   * Tries: local Whisper → Anthropic Voice Stream → Doubao ASR
+   */
+  private async detectAvailableSttProvider(): Promise<string> {
+    console.log('[FriendService] detectAvailableSttProvider: checking available providers...');
+
+    // Check local Whisper first (no external API keys needed)
+    try {
+      const { checkLocalWhisperAvailable } = await import(
+        '../services/voice/whisperSTT.js'
+      );
+      const avail = await checkLocalWhisperAvailable();
+      console.log('[FriendService] detectAvailableSttProvider: local Whisper available:', avail);
+      if (avail) {
+        return 'local';
+      }
+    } catch (e) {
+      console.warn('[FriendService] detectAvailableSttProvider: local whisper check failed:', e);
+    }
+
+    // Check Anthropic Voice Stream
+    try {
+      const { isVoiceStreamAvailable } = await import(
+        '../services/voiceStreamSTT.js'
+      );
+      if (isVoiceStreamAvailable()) {
+        return 'anthropic';
+      }
+    } catch { /* skip */ }
+
+    // Check Doubao credentials file
+    try {
+      const path = await import('node:path');
+      const fs = await import('node:fs');
+      const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+      const credsPath = path.join(homeDir, '.claude', 'tts', 'doubao', 'credentials.json');
+      if (fs.existsSync(credsPath)) {
+        return 'doubao';
+      }
+    } catch { /* skip */ }
+
+    throw new Error(
+      'No STT provider available. Install local Whisper:\n' +
+      '  pip install openai-whisper\n\n' +
+      'Or configure an STT provider in Friend settings (Settings → STT Provider).',
+    );
+  }
+
+  /**
+   * Start STT connection with a timeout to prevent hanging
+   * when the provider is unavailable (e.g. Python Whisper not installed).
+   */
+  private async startSttConnectionWithTimeout(
+    provider: string,
+    language: string,
+  ): Promise<{ send: (chunk: Buffer) => void; finalize: () => Promise<void>; close: () => void }> {
+    const timeoutMs = 8000;
+    const result = await Promise.race([
+      this.startSttConnection(provider, language),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () =>
+            reject(
+              new Error(
+                `STT provider "${provider}" timed out after ${timeoutMs / 1000}s.` +
+                  (provider === 'local'
+                    ? '\nInstall local Whisper: pip install openai-whisper'
+                    : ''),
+              ),
+            ),
+          timeoutMs,
+        ),
+      ),
+    ]);
+    return result;
   }
 
   /**
@@ -329,40 +442,15 @@ class FriendService {
     }
   }
 
-  // ── Private: Audio capture (cpal wrapper) ────────────────────────────
+  // ── Private: Audio capture (arecord/parecord subprocess) ──────────────
 
   private async loadAudioCapture(): Promise<AudioCaptureProvider> {
     if (this.audioCapture) return this.audioCapture;
 
-    // Try native cpal module first
-    try {
-      const mod = await import('audio-capture-napi').catch(() => null);
-      if (mod && typeof mod.startNativeRecording === 'function') {
-        this.audioCapture = {
-          startRecording: async (onData, onEnd) => {
-            try {
-              return mod.startNativeRecording(
-                (data: Buffer) => onData(data),
-                () => onEnd(),
-              ) as boolean;
-            } catch {
-              return false;
-            }
-          },
-          stopRecording: async () => {
-            if (mod.isNativeRecordingActive()) {
-              mod.stopNativeRecording();
-            }
-          },
-          isRecording: () => mod.isNativeRecordingActive() as boolean,
-        };
-        return this.audioCapture;
-      }
-    } catch {
-      // cpal unavailable, fall through
-    }
-
-    // Fallback: spawn arecord/parecord as subprocess
+    // Use subprocess-based capture (arecord/parecord) on all platforms.
+    // Skipping the native cpal module because its synchronous NAPI call
+    // can block the event loop if ALSA initialization hangs, and there
+    // is no way to timeout a native binding call from JS.
     const { spawn } = await import('node:child_process');
     let captureProc: import('node:child_process').ChildProcess | null = null;
 
@@ -372,7 +460,7 @@ class FriendService {
           try {
             const args = tool === 'parecord'
               ? ['--raw', '--rate=16000', '--format=s16le', '--channels=1', '--latency-msec=20']
-              : ['-r', '16000', '-f', 'S16_LE', '-c', '1', '-t', 'raw', '-q', '-'];
+              : ['-r', '16000', '-f', 'S16_LE', '-c', '1', '-t', 'raw', '-q'];
             const proc = spawn(tool, args, { stdio: ['pipe', 'pipe', 'pipe'] });
             if (proc.pid !== undefined) {
               captureProc = proc;

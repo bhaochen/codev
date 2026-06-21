@@ -62,8 +62,11 @@ export function useServerStt() {
     ) => {
       // Start capture
       fetch(`${FRIEND_API_BASE}/voice/start`, { method: 'POST' })
-        .then((res) => {
-          if (!res.ok) throw new Error('STT start failed')
+        .then(async (res) => {
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}))
+            throw new Error(body.error || 'STT start failed')
+          }
           setConnected(true)
 
           // Poll for interim results every 500ms
