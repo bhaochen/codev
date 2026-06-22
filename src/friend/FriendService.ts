@@ -69,6 +69,14 @@ class FriendService {
   private audioCapture: AudioCaptureProvider | null = null;
   /** Active STT connection (Anthropic/Doubao/Whisper) during capture */
   private sttConnection: { send: (chunk: Buffer) => void; finalize: () => Promise<void>; close: () => void } | null = null;
+  /** Periodic timer for server-side voice segmentation (~5s intervals) */
+  private captureTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly SEGMENT_MS = 5000;
+  /** STT provider/language cached for connection re-creation during segmentation */
+  private captureProvider = '';
+  private captureLanguage = '';
+  /** Guard against concurrent _flushSegment calls */
+  private _flushing = false;
 
   // ── React sync external store interface ──────────────────────────────
 
@@ -197,6 +205,9 @@ class FriendService {
     provider: string,
     language: string,
   ): Promise<void> {
+    this.captureProvider = provider;
+    this.captureLanguage = language;
+
     // 1. Start STT provider connection (with inner 8s timeout)
     const conn = await this.startSttConnectionWithTimeout(provider, language);
     this.sttConnection = conn;
@@ -216,6 +227,63 @@ class FriendService {
 
     if (!ok) {
       throw new Error('Native audio capture unavailable');
+    }
+
+    // 4. Start periodic segmentation timer (voice call auto-send)
+    this._startSegmentTimer();
+  }
+
+  /**
+   * Periodically finalize the current STT segment and start a new one,
+   * sending the transcript to the CLI conversation in real-time.
+   *
+   * This replaces browser-based VAD with server-side timer segmentation.
+   * Without it, voice call text only appears when the user presses F2.
+   */
+  private async _flushSegment(): Promise<void> {
+    if (this._flushing || !this.capturing) return;
+    this._flushing = true;
+    try {
+      const oldConn = this.sttConnection;
+      if (!oldConn) return;
+
+      // 1. Create a new STT connection for ongoing audio first
+      const newConn = await this.startSttConnectionWithTimeout(
+        this.captureProvider,
+        this.captureLanguage,
+      );
+      this.sttConnection = newConn;
+
+      // 2. Finalize old connection (sends buffered audio to Groq)
+      await oldConn.finalize().catch(() => {});
+      oldConn.close();
+
+      // 3. Send any accumulated transcript to the CLI conversation
+      const transcript = this.captureTranscripts.join('').trim();
+      if (transcript) {
+        this.captureTranscripts = [];
+        this.sendText(transcript);
+      }
+    } catch (err) {
+      console.error('[FriendService] _flushSegment error:', err);
+    } finally {
+      this._flushing = false;
+    }
+  }
+
+  private _startSegmentTimer(): void {
+    this._clearSegmentTimer();
+    this.captureTimer = setInterval(() => {
+      this._flushSegment().catch((err) => {
+        console.error('[FriendService] segment timer error:', err);
+      });
+    }, this.SEGMENT_MS);
+  }
+
+  private _clearSegmentTimer(): void {
+    if (this.captureTimer) {
+      clearInterval(this.captureTimer);
+      this.captureTimer = null;
     }
   }
 
@@ -337,6 +405,9 @@ class FriendService {
 
     this.capturing = false;
 
+    // Stop segment timer first
+    this._clearSegmentTimer();
+
     // Stop cpal recording
     if (this.audioCapture) {
       await this.audioCapture.stopRecording().catch(() => {});
@@ -353,6 +424,12 @@ class FriendService {
       } catch {
         // ignore finalization errors
       }
+    }
+
+    // Send any remaining transcript to CLI before returning
+    const remaining = this.captureTranscripts.join('').trim();
+    if (remaining) {
+      this.sendText(remaining);
     }
 
     const transcript = this.captureTranscripts.join('');

@@ -18,6 +18,7 @@ const MIME_TYPES: Record<string, string> = {
   '.mp3': 'audio/mpeg',
   '.css': 'text/css; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
   '.html': 'text/html; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.png': 'image/png',
@@ -60,6 +61,13 @@ export async function handleFriendStaticRequest(req: Request, url: URL): Promise
       ? 'public, max-age=31536000, immutable'
       : 'no-store',
   })
+
+  // Enable cross-origin isolation for SharedArrayBuffer support,
+  // needed by onnxruntime-web WASM threading (used by @ricky0123/vad-web).
+  if (relativePath === 'index.html') {
+    headers.set('Cross-Origin-Opener-Policy', 'same-origin')
+    headers.set('Cross-Origin-Embedder-Policy', 'require-corp')
+  }
 
   if (req.method === 'HEAD') {
     const stat = await fs.stat(filePath)

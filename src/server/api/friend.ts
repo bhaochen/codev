@@ -186,15 +186,6 @@ export async function handleFriendApi(req: Request, url: URL): Promise<Response>
     }
   }
 
-  if (pathname === '/plugins/friend/voice/start-vad' && method === 'POST') {
-    try {
-      await friendService.startVadVoiceCapture();
-      return jsonResponse({ ok: true });
-    } catch (err) {
-      return jsonResponse({ error: String(err) }, 500);
-    }
-  }
-
   if (pathname === '/plugins/friend/voice/stop' && method === 'POST') {
     try {
       const text = await friendService.stopVoiceCapture();
