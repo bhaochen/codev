@@ -24,18 +24,22 @@ export interface VadCallbacks {
 }
 
 export interface VadOptions {
-  /** Threshold above which a frame is considered speech (0-1). Default: 0.5 */
+  /** Threshold above which a frame is considered speech (0-1). Default: 0.75 */
   positiveSpeechThreshold?: number;
-  /** Threshold below which a frame is considered silence (0-1). Default: 0.35 */
+  /** Threshold below which a frame is considered silence (0-1). Default: 0.50 */
   negativeSpeechThreshold?: number;
-  /** Consecutive silence frames before onSpeechEnd fires. Default: 8 (~256ms) */
+  /** Consecutive silence frames before onSpeechEnd fires. Default: 20 (~640ms) */
   redemptionFrames?: number;
-  /** Minimum speech frames to avoid misfire. Default: 3 (~96ms) */
+  /** Minimum confirmed speech frames to avoid misfire. Default: 6 (~192ms) */
   minSpeechFrames?: number;
   /** Frames of pre-speech audio to include in onSpeechEnd segment. Default: 10 */
   preSpeechPadFrames?: number;
   /** Sample rate of input audio (must be 16000). Default: 16000 */
   sampleRate?: number;
+  /** RMS energy threshold (0-1). Frames below this are treated as silence without inference. Default: 0.004 (~-48dBFS) */
+  rmsThreshold?: number;
+  /** Consecutive speech frames required to trigger speech start. Default: 10 (~320ms) — filters short noise bursts */
+  preSpeechTriggerFrames?: number;
 }
 
 export class SileroVad {
@@ -57,6 +61,8 @@ export class SileroVad {
   private speaking = false;
   private redemptionCounter = 0;
   private speechFrameCount = 0;
+  /** Consecutive speech frame count in pre-speech phase (fires speech on threshold) */
+  private preSpeechCount = 0;
   private frameHistory: Array<{ frame: Float32Array; isSpeech: boolean }> = [];
 
   constructor(callbacks: VadCallbacks, opts?: VadOptions) {
@@ -67,12 +73,14 @@ export class SileroVad {
       onFrameProcessed: callbacks.onFrameProcessed ?? (() => {}),
     };
     this.opts = {
-      positiveSpeechThreshold: opts?.positiveSpeechThreshold ?? 0.5,
-      negativeSpeechThreshold: opts?.negativeSpeechThreshold ?? 0.35,
-      redemptionFrames: opts?.redemptionFrames ?? 8,
-      minSpeechFrames: opts?.minSpeechFrames ?? 3,
+      positiveSpeechThreshold: opts?.positiveSpeechThreshold ?? 0.75,
+      negativeSpeechThreshold: opts?.negativeSpeechThreshold ?? 0.50,
+      redemptionFrames: opts?.redemptionFrames ?? 20,
+      minSpeechFrames: opts?.minSpeechFrames ?? 6,
       preSpeechPadFrames: opts?.preSpeechPadFrames ?? 10,
       sampleRate: opts?.sampleRate ?? 16000,
+      rmsThreshold: opts?.rmsThreshold ?? 0.004,
+      preSpeechTriggerFrames: opts?.preSpeechTriggerFrames ?? 10,
     };
   }
 
@@ -153,6 +161,7 @@ export class SileroVad {
     this.speaking = false;
     this.redemptionCounter = 0;
     this.speechFrameCount = 0;
+    this.preSpeechCount = 0;
     this.stateH = new ort.Tensor('float32', new Float32Array(2 * 64), [2, 1, 64]);
     this.stateC = new ort.Tensor('float32', new Float32Array(2 * 64), [2, 1, 64]);
   }
@@ -173,49 +182,71 @@ export class SileroVad {
   private async processFrame(frame: Float32Array): Promise<void> {
     if (!this.session || !this.stateH || !this.stateC || !this.sr) return;
 
-    try {
-      const result = await this.session.run({
-        input: new ort.Tensor('float32', frame, [1, this.frameSize]),
-        sr: this.sr,
-        h: this.stateH,
-        c: this.stateC,
-      });
+    // ── 1. Energy pre-filter: compute RMS — skip Silero for low-energy noise ──
+    let sumSq = 0;
+    for (let i = 0; i < frame.length; i++) {
+      sumSq += frame[i] * frame[i];
+    }
+    const rms = Math.sqrt(sumSq / frame.length);
 
-      // Update LSTM state for next frame
-      this.stateH = result.hn as ort.Tensor<onnxruntime.TensorType>;
-      this.stateC = result.cn as ort.Tensor<onnxruntime.TensorType>;
+    let prob: number;
+    if (rms < this.opts.rmsThreshold) {
+      prob = 0; // Below noise floor — mechanical noise, mic bump, room silence
+    } else {
+      // ── 2. Silero inference for speech probability ──
+      try {
+        const result = await this.session.run({
+          input: new ort.Tensor('float32', frame, [1, this.frameSize]),
+          sr: this.sr,
+          h: this.stateH,
+          c: this.stateC,
+        });
 
-      const prob = (result.output as ort.Tensor<onnxruntime.TensorType>).data[0] as number;
-      const isSpeech = prob >= this.opts.positiveSpeechThreshold;
-      const isSilence = prob < this.opts.negativeSpeechThreshold;
+        // Update LSTM state for next frame
+        this.stateH = result.hn as ort.Tensor<onnxruntime.TensorType>;
+        this.stateC = result.cn as ort.Tensor<onnxruntime.TensorType>;
 
-      this.callbacks.onFrameProcessed(prob, isSpeech);
+        prob = (result.output as ort.Tensor<onnxruntime.TensorType>).data[0] as number;
+      } catch (err) {
+        console.error('[SileroVad] frame inference error:', err);
+        return;
+      }
+    }
 
-      // ── State machine ──────────────────────────────────────────────
-      if (this.speaking) {
-        // Currently in a speech segment
-        if (isSilence) {
-          this.redemptionCounter++;
-          if (this.redemptionCounter >= this.opts.redemptionFrames) {
-            this.endSpeech();
-          }
-        } else {
-          this.redemptionCounter = 0;
+    const isSpeech = prob >= this.opts.positiveSpeechThreshold;
+    const isSilence = prob < this.opts.negativeSpeechThreshold;
+
+    this.callbacks.onFrameProcessed(prob, isSpeech);
+
+    // ── 3. State machine ────────────────────────────────────────────
+    if (this.speaking) {
+      // In a confirmed speech segment
+      if (isSilence) {
+        this.redemptionCounter++;
+        if (this.redemptionCounter >= this.opts.redemptionFrames) {
+          this.endSpeech();
         }
-        this.speechFrameCount++;
-        this.frameHistory.push({ frame: frame.slice(), isSpeech });
-      } else if (isSpeech) {
-        // Transition: silence → speech
+      } else {
+        this.redemptionCounter = 0;
+      }
+      this.speechFrameCount++;
+      this.frameHistory.push({ frame: frame.slice(), isSpeech });
+    } else if (isSpeech) {
+      // Pre-speech phase: require consecutive speech frames to trigger
+      this.preSpeechCount++;
+
+      if (this.preSpeechCount >= this.opts.preSpeechTriggerFrames) {
+        // Transition: silence → confirmed speech (sustained above threshold)
         this.speaking = true;
         this.redemptionCounter = 0;
-        this.speechFrameCount = 1;
-
-        // Include pre-padding frames (audio just before speech start)
+        this.speechFrameCount = this.preSpeechCount;
+        this.preSpeechCount = 0;
         this.frameHistory.push({ frame: frame.slice(), isSpeech: true });
         this.callbacks.onSpeechStart();
       }
-    } catch (err) {
-      console.error('[SileroVad] frame inference error:', err);
+    } else {
+      // Not speech — discard any accumulated pre-speech frames
+      this.preSpeechCount = 0;
     }
   }
 

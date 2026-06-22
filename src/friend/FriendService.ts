@@ -116,6 +116,14 @@ class FriendService {
               console.error('[FriendService] VAD segment flush error:', e),
             );
           },
+        }, {
+          // Stricter thresholds to reduce false positives from non-speech noise
+          positiveSpeechThreshold: 0.75,    // need 75% confidence
+          negativeSpeechThreshold: 0.50,    // must drop below 50% to stop
+          preSpeechTriggerFrames: 10,        // require ~320ms sustained speech to trigger
+          minSpeechFrames: 6,               // ~192ms minimum confirmed speech
+          redemptionFrames: 20,              // ~640ms silence before segment ends
+          rmsThreshold: 0.004,              // -48dBFS noise floor
         });
         vad.init().then(() => {
           this.vadInstance = vad;
