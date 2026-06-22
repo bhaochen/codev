@@ -150,10 +150,45 @@ export async function handleFriendApi(req: Request, url: URL): Promise<Response>
     return jsonResponse({ ok: true });
   }
 
-  // ── Voice capture (POST /plugins/friend/voice/start, /stop, /status) ──
+  // ── STT segment from browser VAD (POST /plugins/friend/voice/stt-segment) ──
+  if (pathname === '/plugins/friend/voice/stt-segment' && method === 'POST') {
+    try {
+      const contentType = req.headers.get('content-type') || '';
+      let audioBuffer: Buffer;
+
+      if (contentType.includes('multipart/form-data') || contentType.includes('application/octet-stream')) {
+        const blob = await req.blob();
+        audioBuffer = Buffer.from(await blob.arrayBuffer());
+      } else {
+        // Accept raw PCM or WAV as binary body
+        audioBuffer = Buffer.from(await req.arrayBuffer());
+      }
+
+      if (audioBuffer.length < 100) {
+        return jsonResponse({ error: 'audio too short' }, 400);
+      }
+
+      const transcript = await friendService.transcribeAudioSegment(audioBuffer);
+      return jsonResponse({ ok: true, text: transcript });
+    } catch (err) {
+      console.error('[Friend] STT segment error:', err);
+      return jsonResponse({ error: String(err) }, 500);
+    }
+  }
+
+  // ── Voice capture (POST /plugins/friend/voice/start, /start-vad, /stop, /status) ──
   if (pathname === '/plugins/friend/voice/start' && method === 'POST') {
     try {
       await friendService.startVoiceCapture();
+      return jsonResponse({ ok: true });
+    } catch (err) {
+      return jsonResponse({ error: String(err) }, 500);
+    }
+  }
+
+  if (pathname === '/plugins/friend/voice/start-vad' && method === 'POST') {
+    try {
+      await friendService.startVadVoiceCapture();
       return jsonResponse({ ok: true });
     } catch (err) {
       return jsonResponse({ error: String(err) }, 500);

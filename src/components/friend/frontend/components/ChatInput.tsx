@@ -15,8 +15,6 @@ export function ChatInput({ visible = true, onActiveChange, uiAlign = 'right', o
   const [menuOpen, setMenuOpen] = useState(false)
   const [voiceCallActive, setVoiceCallActive] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
-  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const lastSentIndexRef = useRef(0)
   const voiceCallActiveRef = useRef(false)
   const endVoiceCallRef = useRef<() => void>(() => {})
   const serverStt = useServerStt()
@@ -79,13 +77,6 @@ export function ChatInput({ visible = true, onActiveChange, uiAlign = 'right', o
     if (recording) stopRecording()
   }, [recording, stopRecording])
 
-  // --- Voice Call: constants ---
-  const HARD_PUNCT = /[。！？\.\!\?]$/
-  const SOFT_PUNCT = /[，、；,;：:]$/
-  const SOFT_PUNCT_MIN_LEN = 10
-  const MAX_UNSENT_LEN = 30
-  const SILENCE_SEND_MS = 1200
-
   // --- Voice Call: delayed TTS interrupt ---
   const interruptTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const scheduleInterrupt = useCallback(() => {
@@ -99,90 +90,38 @@ export function ChatInput({ visible = true, onActiveChange, uiAlign = 'right', o
     if (interruptTimerRef.current) { clearTimeout(interruptTimerRef.current); interruptTimerRef.current = null }
   }, [])
 
-  // --- Voice Call: send + mute capture for 3s after send ---
-  const VOICE_MUTE_AFTER_SEND_MS = 2000
-  const mutedUntilRef = useRef(0)
+  // Voice call display timer — clear text after 3s
+  const displayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const voiceCallSend = useCallback(async (msg: string) => {
-    const trimmed = msg.trim()
-    if (!trimmed) return
-    mutedUntilRef.current = Date.now() + VOICE_MUTE_AFTER_SEND_MS
-    cancelInterrupt()
-    ;(window as any).__clawInterruptAudio?.()
-    try {
-      await fetch(`${FRIEND_API}/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: trimmed }),
-      })
-    } catch (err) {
-      console.error('Voice call send failed:', err)
-    }
-  }, [cancelInterrupt])
-
-  // --- Voice Call: smart sentence segmentation ---
-  const handleVoiceCallResult = useCallback((fullTranscript: string, isFinal: boolean) => {
-    if (Date.now() < mutedUntilRef.current) {
-      lastSentIndexRef.current = fullTranscript.length
-      return
-    }
-
-    const unsent = fullTranscript.slice(lastSentIndexRef.current)
-    setText(unsent)
-    onActiveChange?.(unsent.length > 0)
-
-    if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null }
-
-    if (isFinal) {
-      const shouldSend =
-        HARD_PUNCT.test(unsent) ||
-        (SOFT_PUNCT.test(unsent) && unsent.length >= SOFT_PUNCT_MIN_LEN) ||
-        unsent.length >= MAX_UNSENT_LEN
-
-      if (shouldSend) {
-        voiceCallSend(unsent)
-        lastSentIndexRef.current = fullTranscript.length
-        setText('')
-        onActiveChange?.(false)
-        return
-      }
-    }
-
-    if (unsent.trim()) {
-      silenceTimerRef.current = setTimeout(() => {
-        if (!voiceCallActiveRef.current) return
-        const chunk = unsent.trim()
-        if (chunk) {
-          voiceCallSend(chunk)
-          lastSentIndexRef.current = fullTranscript.length
-          setText('')
-          onActiveChange?.(false)
-        }
-      }, SILENCE_SEND_MS)
-    }
-  }, [voiceCallSend, onActiveChange])
-
-  // --- Voice Call: start (always server-side, no getUserMedia) ---
+  // --- Voice Call: start (browser VAD with @ricky0123/vad-web) ---
   const startVoiceCall = useCallback(async () => {
     setVoiceCallActive(true)
     voiceCallActiveRef.current = true
-    lastSentIndexRef.current = 0
     setText('')
     setOpen(true)
 
-    // Always use server-side STT via HTTP polling.
-    // Audio capture is done server-side via cpal (in-process native addon)
-    // so no getUserMedia call is needed on the frontend — this avoids
-    // WebKitGTK permission issues on Linux.
     serverStt.startStreaming(
       sttProvider,
-      (text, isFinal) => {
-        handleVoiceCallResult(text, isFinal)
+      (text, _isFinal) => {
+        // Server-side transcribeAudioSegment() already calls sendText()
+        // to enqueue the message into the CLI conversation.
+        // We only need to display the transcript in the input bar briefly.
+        if (text.trim()) {
+          setText(text)
+          onActiveChange?.(true)
+          // Auto-clear after 3s
+          if (displayTimerRef.current) clearTimeout(displayTimerRef.current)
+          displayTimerRef.current = setTimeout(() => {
+            if (voiceCallActiveRef.current) {
+              setText('')
+              onActiveChange?.(false)
+            }
+          }, 3000)
+        }
       },
       (err) => {
-        console.error('Server STT error:', err)
+        console.error('Browser VAD error:', err)
         if (voiceCallActiveRef.current) {
-          // Show error text in the input bar, then end call after 3s
           setText(`语音启动失败: ${err}`)
           setTimeout(() => {
             setText('')
@@ -193,7 +132,7 @@ export function ChatInput({ visible = true, onActiveChange, uiAlign = 'right', o
       language === 'en' ? 'en' : 'zh',
     )
     setRecording(true)
-  }, [handleVoiceCallResult, sttProvider, serverStt, language])
+  }, [sttProvider, serverStt, language, onActiveChange])
 
   // --- Voice Call: end ---
   const endVoiceCall = useCallback(async () => {
@@ -202,22 +141,21 @@ export function ChatInput({ visible = true, onActiveChange, uiAlign = 'right', o
     setVoiceCallActive(false)
     setRecording(false)
 
-    // Stop capture and get the final transcript
-    const text = await serverStt.stopStreaming()
+    // Stop VAD and clean up
+    const finalText = await serverStt.stopStreaming()
 
-    // Send any remaining transcript as a message (no-op if empty)
-    if (text.trim()) {
-      voiceCallSend(text)
+    // Send any remaining transcript (no-op if empty — segments were already
+    // sent to CLI by transcribeAudioSegment() during the call).
+    if (finalText.trim()) {
+      send(finalText)
     }
 
-    if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null }
     cancelInterrupt()
-    mutedUntilRef.current = 0
 
     setText('')
     setOpen(false)
     onActiveChange?.(false)
-  }, [onActiveChange, cancelInterrupt, serverStt, voiceCallSend])
+  }, [onActiveChange, cancelInterrupt, serverStt, send])
 
   endVoiceCallRef.current = endVoiceCall
 

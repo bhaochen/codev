@@ -25,6 +25,8 @@ const MIME_TYPES: Record<string, string> = {
   '.ico': 'image/x-icon',
   '.woff': 'font/woff',
   '.woff2': 'font/woff2',
+  '.onnx': 'application/octet-stream',
+  '.wasm': 'application/wasm',
 }
 
 export async function handleFriendStaticRequest(req: Request, url: URL): Promise<Response | null> {

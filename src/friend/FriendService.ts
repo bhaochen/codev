@@ -325,6 +325,14 @@ class FriendService {
    * Stop voice capture and return the accumulated transcript.
    */
   async stopVoiceCapture(): Promise<string> {
+    return this._stopCapture();
+  }
+
+  /**
+   * Internal: stop audio capture + finalize STT, return transcript.
+   */
+  private async _stopCapture(): Promise<string> {
+    console.log(`[FriendService] _stopCapture: capturing=${this.capturing} sttConnection=${this.sttConnection ? 'exists' : 'null'}`);
     if (!this.capturing) return '';
 
     this.capturing = false;
@@ -348,6 +356,7 @@ class FriendService {
     }
 
     const transcript = this.captureTranscripts.join('');
+    console.log(`[FriendService] _stopCapture: transcript="${transcript}" (len=${transcript.length})`);
     this.captureTranscripts = [];
     this.captureInterimText = '';
     this.setState({ captureStatus: { capturing: false } });
@@ -355,10 +364,50 @@ class FriendService {
   }
 
   /**
-   * Get current capture status (for voice call interim polling).
+   * Get current capture status (for push-to-talk mode).
    */
   getCaptureStatus(): { capturing: boolean; interimText?: string } {
-    return this.state.captureStatus ?? { capturing: false };
+    const status = this.state.captureStatus ?? { capturing: false };
+    return { ...status };
+  }
+
+  /**
+   * Transcribe an audio buffer (PCM/WAV) using the configured STT provider
+   * and send the resulting text to the CLI conversation.
+   *
+   * Called by the HTTP endpoint when the browser VAD detects a speech segment.
+   */
+  async transcribeAudioSegment(audioBuffer: Buffer): Promise<string> {
+    const prefs = getPrefs();
+    let provider = prefs.sttProvider;
+    if (!provider || provider === 'browser') {
+      provider = await this.detectAvailableSttProvider();
+    }
+
+    // Create a temporary STT connection just for this segment
+    const conn = await this.startSttConnectionWithTimeout(
+      provider,
+      prefs.sttLanguage || 'zh',
+    );
+
+    try {
+      conn.send(audioBuffer);
+      await conn.finalize();
+      conn.close();
+    } catch (err) {
+      conn.close();
+      throw err;
+    }
+
+    // Get transcript from the finalization callback
+    const transcript = this.captureTranscripts.join('');
+    this.captureTranscripts = [];
+
+    if (transcript.trim()) {
+      this.sendText(transcript);
+    }
+
+    return transcript;
   }
 
   // ── Response broadcast (called by useFriendBridge) ───────────────────
@@ -474,18 +523,54 @@ class FriendService {
 
     this.audioCapture = {
       startRecording: async (onData, _onEnd) => {
-        for (const tool of ['parecord', 'arecord']) {
+        for (const tool of ['arecord', 'parecord']) {
           try {
-            const args = tool === 'parecord'
-              ? ['--raw', '--rate=16000', '--format=s16le', '--channels=1', '--latency-msec=20']
-              : ['-D', 'default', '-r', '16000', '-f', 'S16_LE', '-c', '1', '-t', 'raw', '-q'];
+            const args = tool === 'arecord'
+              ? ['-D', 'default', '-r', '16000', '-f', 'S16_LE', '-c', '1', '-t', 'raw', '-q']
+              : ['--raw', '--rate=16000', '--format=s16le', '--channels=1', '--latency-msec=20'];
             const proc = spawn(tool, args, { stdio: ['pipe', 'pipe', 'pipe'] });
-            if (proc.pid !== undefined) {
+            if (proc.pid === undefined) continue;
+
+            // Verify the tool actually produces audio data within 500ms.
+            // Some tools (e.g. parecord without PulseAudio) spawn successfully
+            // but exit immediately without any output — catch that here.
+            let dataArrived = false;
+            let verifyTimer: ReturnType<typeof setTimeout> | null = null;
+
+            const verified = await new Promise<boolean>((resolve) => {
+              const dataHandler = (chunk: Buffer) => {
+                dataArrived = true;
+                if (verifyTimer) { clearTimeout(verifyTimer); }
+                // Forward first chunk, then swap to the permanent handler
+                onData(chunk);
+                proc.stdout?.removeListener('data', dataHandler);
+                proc.stdout?.on('data', onData);
+                resolve(true);
+              };
+              proc.stdout?.on('data', dataHandler);
+
+              // Process exited before producing data — mark as failed
+              proc.on('exit', () => {
+                if (!dataArrived) {
+                  if (verifyTimer) { clearTimeout(verifyTimer); }
+                  resolve(false);
+                }
+              });
+
+              // No data within 500ms — assume failure
+              verifyTimer = setTimeout(() => {
+                if (!dataArrived) resolve(false);
+              }, 500);
+            });
+
+            if (verified) {
               captureProc = proc;
-              proc.stdout?.on('data', onData);
               proc.on('exit', () => { captureProc = null; });
               return true;
             }
+
+            // Verification failed — kill and try next tool
+            proc.kill('SIGTERM');
           } catch {
             continue;
           }

@@ -11,6 +11,7 @@
     "@pixiv/three-vrm": "^3.4.0",
     "@pixiv/three-vrm-animation": "^3.5.0",
     "@pixiv/three-vrm-core": "^3.5.1",
+    "@tauri-apps/api": "^2.11.1",
     "lucide-react": "^0.577.0",
     "marked": "^18.0.5",
     "mmd-parser": "^1.0.4",
