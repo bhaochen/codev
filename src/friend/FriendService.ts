@@ -19,6 +19,7 @@ import { getPrefs } from './prefs.js';
 import { stripForTts } from './text-utils.js';
 import { edgeTts, qwenTts, registerAudioFile } from './tts.js';
 import { splitSentences } from './text-utils.js';
+import { SileroVad } from './voice/vad-service.js';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -69,14 +70,13 @@ class FriendService {
   private audioCapture: AudioCaptureProvider | null = null;
   /** Active STT connection (Anthropic/Doubao/Whisper) during capture */
   private sttConnection: { send: (chunk: Buffer) => void; finalize: () => Promise<void>; close: () => void } | null = null;
-  /** Periodic timer for server-side voice segmentation (~5s intervals) */
-  private captureTimer: ReturnType<typeof setInterval> | null = null;
-  private readonly SEGMENT_MS = 5000;
   /** STT provider/language cached for connection re-creation during segmentation */
   private captureProvider = '';
   private captureLanguage = '';
-  /** Guard against concurrent _flushSegment calls */
+  /** Guard against concurrent flush calls */
   private _flushing = false;
+  /** Silero VAD instance (real ML-based voice activity detection) */
+  private vadInstance: SileroVad | null = null;
 
   // ── React sync external store interface ──────────────────────────────
 
@@ -102,9 +102,22 @@ class FriendService {
     this.setState({ status: 'starting', lastError: undefined });
 
     try {
-      // Pre-warm cpal audio module (loaded on first use)
-      // The voice service lazy-loads audio-capture-napi, so the first
-      // capture will incur the ~1s dlopen penalty regardless.
+      // Pre-warm Silero VAD (loads ONNX model + onnxruntime-web WASM)
+      if (!this.vadInstance) {
+        const vad = new SileroVad({
+          onSpeechStart: () => {},
+          onSpeechEnd: (_audio) => {
+            this._flushVadSegment().catch((e) =>
+              console.error('[FriendService] VAD segment flush error:', e),
+            );
+          },
+        });
+        vad.init().then(() => {
+          this.vadInstance = vad;
+        }).catch((e) => {
+          console.warn('[FriendService] VAD init failed (non-fatal, voice capture falls back to F2-only):', e);
+        });
+      }
 
       this.setState({ status: 'running' });
     } catch (err) {
@@ -229,61 +242,53 @@ class FriendService {
       throw new Error('Native audio capture unavailable');
     }
 
-    // 4. Start periodic segmentation timer (voice call auto-send)
-    this._startSegmentTimer();
+    // 4. Start Silero VAD for real-time speech-end detection
+    // audio chunks flow to VAD via the arecord data callback (see loadAudioCapture)
+    if (this.vadInstance) {
+      try {
+        this.vadInstance.start();
+      } catch (e) {
+        console.warn('[FriendService] VAD start error (non-fatal):', e);
+      }
+    }
   }
 
   /**
-   * Periodically finalize the current STT segment and start a new one,
-   * sending the transcript to the CLI conversation in real-time.
+   * Flush the current STT segment and start a new one, triggered by
+   * Silero VAD's onSpeechEnd callback.
    *
-   * This replaces browser-based VAD with server-side timer segmentation.
-   * Without it, voice call text only appears when the user presses F2.
+   * The audio from the just-ended speech segment has already been sent
+   * to the STT connection. We swap to a fresh connection so the next
+   * speech segment starts clean.
    */
-  private async _flushSegment(): Promise<void> {
+  private async _flushVadSegment(): Promise<void> {
     if (this._flushing || !this.capturing) return;
     this._flushing = true;
     try {
       const oldConn = this.sttConnection;
       if (!oldConn) return;
 
-      // 1. Create a new STT connection for ongoing audio first
+      // 1. Create a new STT connection for ongoing audio
       const newConn = await this.startSttConnectionWithTimeout(
         this.captureProvider,
         this.captureLanguage,
       );
       this.sttConnection = newConn;
 
-      // 2. Finalize old connection (sends buffered audio to Groq)
+      // 2. Finalize old connection (sends buffered audio to STT provider)
       await oldConn.finalize().catch(() => {});
       oldConn.close();
 
-      // 3. Send any accumulated transcript to the CLI conversation
+      // 3. Send accumulated transcript to the CLI conversation
       const transcript = this.captureTranscripts.join('').trim();
       if (transcript) {
         this.captureTranscripts = [];
         this.sendText(transcript);
       }
     } catch (err) {
-      console.error('[FriendService] _flushSegment error:', err);
+      console.error('[FriendService] _flushVadSegment error:', err);
     } finally {
       this._flushing = false;
-    }
-  }
-
-  private _startSegmentTimer(): void {
-    this._clearSegmentTimer();
-    this.captureTimer = setInterval(() => {
-      this._flushSegment().catch((err) => {
-        console.error('[FriendService] segment timer error:', err);
-      });
-    }, this.SEGMENT_MS);
-  }
-
-  private _clearSegmentTimer(): void {
-    if (this.captureTimer) {
-      clearInterval(this.captureTimer);
-      this.captureTimer = null;
     }
   }
 
@@ -403,14 +408,18 @@ class FriendService {
     console.log(`[FriendService] _stopCapture: capturing=${this.capturing} sttConnection=${this.sttConnection ? 'exists' : 'null'}`);
     if (!this.capturing) return '';
 
-    this.capturing = false;
-
-    // Stop segment timer first
-    this._clearSegmentTimer();
-
-    // Stop cpal recording
+    // Stop audio recording first (no more audio → no more STT/VAD input)
     if (this.audioCapture) {
       await this.audioCapture.stopRecording().catch(() => {});
+    }
+
+    this.capturing = false;
+
+    // Reset VAD state silently (don't fire onSpeechEnd — we're finalizing below)
+    if (this.vadInstance) {
+      try {
+        this.vadInstance.reset();
+      } catch { /* ignore */ }
     }
 
     // Finalize STT connection
@@ -615,13 +624,28 @@ class FriendService {
             let verifyTimer: ReturnType<typeof setTimeout> | null = null;
 
             const verified = await new Promise<boolean>((resolve) => {
+              const feedVad = (c: Buffer) => {
+                if (this.vadInstance) {
+                  const float32 = new Float32Array(c.length / 2);
+                  for (let i = 0; i < float32.length; i++) {
+                    float32[i] = c.readInt16LE(i * 2) / 32768;
+                  }
+                  this.vadInstance.processAudio(float32).catch(() => {});
+                }
+              };
+
               const dataHandler = (chunk: Buffer) => {
                 dataArrived = true;
                 if (verifyTimer) { clearTimeout(verifyTimer); }
-                // Forward first chunk, then swap to the permanent handler
+                // Forward first chunk to both STT and VAD
                 onData(chunk);
+                feedVad(chunk);
+                // Swap to the permanent handler for subsequent chunks
                 proc.stdout?.removeListener('data', dataHandler);
-                proc.stdout?.on('data', onData);
+                proc.stdout?.on('data', (c: Buffer) => {
+                  onData(c);
+                  feedVad(c);
+                });
                 resolve(true);
               };
               proc.stdout?.on('data', dataHandler);
