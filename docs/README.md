@@ -9,11 +9,17 @@
 |------|------|
 | [项目架构概览](architecture/overview.md) | 技术栈、入口流程、模块职责、架构亮点 |
 | [核心数据流](architecture/data-flow.md) | 5 大核心数据流：用户输入、语音捕获、远程桥接、Friend 表情、Provider 代理 |
+| [Agent 循环深度解析](architecture/agent-loop.md) | 663 行 | queryLoop 完整流程、StreamingToolExecutor、5 阶段 turn pipeline、恢复机制 |
+| [设计哲学与架构原则](architecture/design-philosophy.md) | 329 行 | 5 大价值、13 设计原则、与 Claude Code arXiv paper 的映射 |
+| [安全与权限系统](architecture/safety-and-permissions.md) | 867 行 | 7 种权限模式、Deny-first 规则引擎、Auto-mode ML 分类器、授权流水线 |
+| [Provider 多厂商认证](architecture/provider-auth.md) | 646 行 | OAuth PKCE、Fetch Override、Anthropic↔OpenAI 协议转换、NVIDIA NIM |
+| [跨切面关注点](architecture/cross-cutting.md) | 254 行 | 错误处理层次、遥测系统、性能优化策略 |
 
 ### CLI 与工具
 | 文档 | 说明 |
 |------|------|
 | [CLI 命令系统](cli/overview.md) | 命令注册、Slash 命令大全 (~75+)、Skill/工作流系统 |
+| [构建系统与功能标记](cli/build-system.md) | 676 行 | Bun 构建管道、48 个 feature flag、死代码消除、命令可用性门控 |
 | [AI 工具系统](tools/overview.md) | buildTool 框架、执行流程、权限系统、关键工具详解 |
 | [工具参考大全](tools/tool-reference.md) | 所有 ~60+ AI 工具的完整参考表 |
 
@@ -47,6 +53,7 @@
 | 文档 | 说明 |
 |------|------|
 | [服务总览](services/overview.md) | MCP、上下文压缩、Auto Dream、飞书/Telegram |
+| [上下文压缩深度解析](services/compact-deep-dive.md) | 906 行 | 5 层压缩管线、Budget Reduction、Snip、Microcompact、Context Collapse、Auto-compact |
 
 ### 协调与自动化
 | 文档 | 说明 |
@@ -64,3 +71,8 @@
 |------|------|
 | [自动记忆系统](memory-context/memory.md) | Memdir、4 种记忆类型、生命周期 |
 | [上下文管理](memory-context/context.md) | 系统/用户上下文构建、压缩策略、React Contexts |
+
+### 面试准备
+| 文档 | 说明 |
+|------|------|
+| [面试准备指南](interview-prep.md) | 714 行 | 高频面试题、源码级解析、架构对比、设计权衡 |
