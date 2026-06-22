@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
+import { marked } from 'marked'
 import { FRIEND_API } from '../api'
 import { LipSync } from '../lip-sync'
 
@@ -50,6 +51,7 @@ export function TextBubble({ onMessage, enabled = true, ttsEnabled = true }: { o
   const [thinking, setThinking] = useState(false)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [zoomedSrc, setZoomedSrc] = useState<string | null>(null)
+  const [renderedHtml, setRenderedHtml] = useState('')
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const typewriterRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -90,10 +92,25 @@ export function TextBubble({ onMessage, enabled = true, ttsEnabled = true }: { o
     }
   }, [charCount])
 
+  // Render markdown when all text is revealed (typewriter complete)
+  useEffect(() => {
+    if (charCount >= chars.current.length && chars.current.length > 0) {
+      try {
+        const html = marked.parse(fullTextRef.current)
+        setRenderedHtml(typeof html === 'string' ? html : String(html))
+      } catch {
+        setRenderedHtml('')
+      }
+    } else if (!text) {
+      setRenderedHtml('')
+    }
+  }, [charCount, text])
+
   const hideBubble = useCallback(() => {
     setVisible(false)
     setText('')
     setCharCount(0)
+    setRenderedHtml('')
     setImageUrl(null)
     setThinking(false)
     chars.current = []
@@ -443,11 +460,31 @@ export function TextBubble({ onMessage, enabled = true, ttsEnabled = true }: { o
             )}
             {text && (
               <div style={textStyle}>
-                {chars.current.map((ch, i) => (
-                  i < charCount ? (
-                    <span key={i} style={popCharStyle}>{ch === '\n' ? <br /> : ch}</span>
-                  ) : null
-                ))}
+                {renderedHtml && charCount >= chars.current.length ? (
+                  <>
+                    <style>{`
+                      .rendered-markdown p { margin: 0.3em 0; }
+                      .rendered-markdown ul, .rendered-markdown ol { margin: 0.3em 0; padding-left: 1.5em; }
+                      .rendered-markdown li { margin: 0.1em 0; }
+                      .rendered-markdown code { background: rgba(255,255,255,0.12); padding: 1px 5px; border-radius: 4px; font-size: 0.85em; }
+                      .rendered-markdown pre { background: rgba(0,0,0,0.35); padding: 10px; border-radius: 8px; overflow-x: auto; margin: 0.4em 0; }
+                      .rendered-markdown pre code { background: none; padding: 0; border-radius: 0; }
+                      .rendered-markdown strong { color: rgba(160,200,255,0.9); }
+                      .rendered-markdown em { color: rgba(200,200,255,0.8); }
+                      .rendered-markdown h1, .rendered-markdown h2, .rendered-markdown h3, .rendered-markdown h4 { margin: 0.4em 0 0.2em; }
+                      .rendered-markdown a { color: rgba(100,160,255,0.9); text-decoration: underline; }
+                      .rendered-markdown blockquote { border-left: 3px solid rgba(100,160,255,0.5); padding-left: 10px; margin: 0.4em 0; color: rgba(255,255,255,0.7); }
+                      .rendered-markdown hr { border: none; border-top: 1px solid rgba(255,255,255,0.15); margin: 0.5em 0; }
+                    `}</style>
+                    <div dangerouslySetInnerHTML={{ __html: renderedHtml }} className="rendered-markdown" />
+                  </>
+                ) : (
+                  chars.current.map((ch, i) => (
+                    i < charCount ? (
+                      <span key={i} style={popCharStyle}>{ch === '\n' ? <br /> : ch}</span>
+                    ) : null
+                  ))
+                )}
               </div>
             )}
           </div>

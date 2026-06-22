@@ -75,7 +75,7 @@ export default function App() {
   const [screenObserve, setScreenObserve] = useState(false)
   const [screenObserveInterval, setScreenObserveInterval] = useState(60)
   const [language, setLanguage] = useState<'zh' | 'en'>(() => navigator.language.startsWith('zh') ? 'zh' : 'en')
-  const [sttProvider, setSttProvider] = useState<'browser' | 'anthropic' | 'local' | 'doubao'>('browser')
+  const [sttProvider, setSttProvider] = useState<'browser' | 'groq' | 'anthropic' | 'local' | 'doubao'>('browser')
   const t = (zh: string, en: string) => language === 'en' ? en : zh
   usePassThrough(!settingsOpen && !historyOpen)
 
