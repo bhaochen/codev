@@ -1,10 +1,8 @@
 # VersperClaw: Not Only AI Assistant Code Agent
 
-<!--
 <div align="center">
-  <img src="assets/Versper.png" alt="VersperAI" width="60%">
+  <img src="assets/friend/friend_use.png" alt="VersperAI" width="80%">
 </div>
--->
 
 ## 📢 News
 
