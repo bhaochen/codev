@@ -17,9 +17,10 @@
 import { broadcastToVrm, type VrmBroadcastPayload } from './sse.js';
 import { getPrefs } from './prefs.js';
 import { stripForTts } from './text-utils.js';
-import { edgeTts, qwenTts, registerAudioFile } from './tts.js';
+import { edgeTts, qwenTts, registerAudioFile, getAudioFile } from './tts.js';
 import { splitSentences } from './text-utils.js';
 import { SileroVad } from './voice/vad-service.js';
+import { readFileSync } from 'node:fs';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -504,11 +505,11 @@ class FriendService {
   }
 
   /**
-   * Mute audio capture for an estimated duration to prevent TTS echo.
+   * Mute audio capture for the exact duration of the TTS audio file.
    * Audio from arecord will not be forwarded to STT or VAD while muted.
-   * Automatically unmutes after the estimated TTS playback duration.
+   * Automatically unmutes when the TTS audio would have finished playing.
    */
-  private muteForTts(text: string): void {
+  private muteForTts(audioId: string, text: string): void {
     if (!this.capturing) return;
 
     // Clear any existing mute timer
@@ -522,17 +523,96 @@ class FriendService {
     // Pause VAD so it doesn't accumulate stale audio
     this.vadInstance?.pause();
 
-    // Estimate TTS playback duration:
-    //   Chinese ~8 chars/sec (125ms/char), English ~12 chars/sec (83ms/char)
-    //   Avg ~100ms/char + 1s generation/network overhead + 0.5s margin
-    const estimatedMs = Math.max(3000, Math.round(text.length * 100) + 1500);
+    // Parse the actual MP3 duration for precise mute timing
+    let muteMs = this.getMp3DurationMs(audioId);
+    if (muteMs <= 0) {
+      // Fallback estimate if parsing fails
+      muteMs = Math.max(3000, Math.round(text.length * 100) + 1500);
+    }
 
     this.muteTimer = setTimeout(() => {
       this.muted = false;
       this.muteTimer = null;
       // Resume VAD with fresh state (buffer cleared by pause())
       this.vadInstance?.start();
-    }, estimatedMs);
+    }, muteMs);
+  }
+
+  /** Parse MP3 file to get exact audio duration in milliseconds.
+   *
+   * Finds the first two frame syncs to determine the real frame size,
+   * then counts frames using that stride. Works for CBR output (Edge TTS)
+   * without relying on error-prone bitrate lookup tables.
+   */
+  private getMp3DurationMs(audioId: string): number {
+    const filePath = getAudioFile(audioId);
+    if (!filePath) return 0;
+    let buf: Buffer;
+    try { buf = readFileSync(filePath); } catch { return 0; }
+    if (buf.length < 100) return 0;
+
+    const isSync = (p: number) =>
+      p + 1 < buf.length && buf[p] === 0xff && (buf[p + 1] & 0xe0) === 0xe0;
+
+    let offset = 0;
+
+    // Skip ID3v2 tag
+    if (buf[0] === 0x49 && buf[1] === 0x44 && buf[2] === 0x33) {
+      offset = 10 +
+        ((buf[6] & 0x7f) << 21) |
+        ((buf[7] & 0x7f) << 14) |
+        ((buf[8] & 0x7f) << 7) |
+        (buf[9] & 0x7f);
+    }
+
+    // Find first two syncs to measure actual frame stride
+    let firstSync = -1;
+    let secondSync = -1;
+    for (let i = offset; i < buf.length - 3; i++) {
+      if (isSync(i)) {
+        if (firstSync === -1) firstSync = i;
+        else { secondSync = i; break; }
+      }
+    }
+    if (firstSync === -1 || secondSync === -1) return 0;
+
+    const frameSize = secondSync - firstSync; // real stride (CBR)
+    if (frameSize < 20) return 0;
+
+    // Parse frame header for sample rate and samples-per-frame
+    const h =
+      (buf[firstSync] << 24) |
+      (buf[firstSync + 1] << 16) |
+      (buf[firstSync + 2] << 8) |
+      buf[firstSync + 3];
+    const version = (h >> 19) & 0x3;
+    const sampleRateIdx = (h >> 10) & 0x3;
+    if (sampleRateIdx === 3) return 0;
+
+    const srTable: Record<number, number> = {
+      3: [44100, 48000, 32000][sampleRateIdx],
+      2: [22050, 24000, 16000][sampleRateIdx],
+      0: [11025, 12000, 8000][sampleRateIdx],
+    };
+    const sampleRate = srTable[version];
+    if (!sampleRate) return 0;
+
+    const isMpeg1 = version === 3;
+    const spf = isMpeg1 ? 1152 : 576;
+
+    // Count frames using stride
+    let frames = 0;
+    for (let pos = firstSync; pos + 3 < buf.length; pos += frameSize) {
+      // Sanity check: verify sync word
+      if (!isSync(pos)) {
+        // Frame may have been corrupted; scan forward to next sync
+        while (pos < buf.length - 3 && !isSync(pos)) pos++;
+        if (pos >= buf.length - 3) break;
+      }
+      frames++;
+    }
+
+    return Math.round((frames * spf) / sampleRate * 1000);
   }
 
   /** Clear mute state immediately */
@@ -567,9 +647,9 @@ class FriendService {
           const fullUrl = `http://127.0.0.1:3456/plugins/friend/audio/${audioId}`;
           broadcastToVrm({ audioUrl: fullUrl, sendFirstTts: true });
 
-          // Mute capture during TTS playback to prevent echo loop
+          // Mute capture for the exact TTS audio duration
           if (this.capturing) {
-            this.muteForTts(text);
+            this.muteForTts(audioId, text);
           }
         }
       } catch (err) {
