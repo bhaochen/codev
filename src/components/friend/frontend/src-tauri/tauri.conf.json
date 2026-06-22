@@ -7,12 +7,16 @@
     "devUrl": "http://127.0.0.1:3456/friend/"
   },
   "bundle": {
+    "active": true,
+    "targets": [
+      "deb",
+      "rpm"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/256x256.png"
-    ],
-    "active": true
+    ]
   },
   "app": {
     "windows": [
