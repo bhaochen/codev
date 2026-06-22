@@ -1,0 +1,205 @@
+# Coordinator 多代理模式
+
+## 概述
+
+Coordinator 模式是 VersperClaw 的一种高级执行模式，允许一个协调者（Coordinator）LLM 通过 `AgentTool` 派生子代理（Worker）并行执行任务。通过 `CLAUDE_CODE_COORDINATOR_MODE` 环境变量激活。
+
+### 激活方式
+
+```bash
+export CLAUDE_CODE_COORDINATOR_MODE=1
+```
+
+检测逻辑位于 `src/coordinator/coordinatorMode.ts`：
+
+```typescript
+export function isCoordinatorMode(): boolean {
+  if (feature('COORDINATOR_MODE')) {
+    return isEnvTruthy(process.env.CLAUDE_CODE_COORDINATOR_MODE)
+  }
+  return false
+}
+```
+
+### 会话模式匹配
+
+`matchSessionMode()` 确保恢复的会话与当前 coordinator 模式一致。如果环境变量与会话存储的模式不匹配（例如在 coordinator 模式下创建会话，然后在 normal 模式下恢复），会自动翻转环境变量并记录事件。
+
+---
+
+## 工作模式
+
+### 核心架构
+
+```
+User → Coordinator LLM → AgentTool → Worker 1
+                                 → Worker 2
+                                 → Worker 3 (并行)
+```
+
+- **Coordinator LLM**：接收用户请求，制定计划，派发任务，综合结果
+- **Worker**：通过 `AgentTool` 派生的子代理，执行具体任务
+- **通信**：Worker 结果通过 `<task-notification>` XML 格式返回
+
+### Worker 通信格式
+
+Worker 完成时，结果以 `user-role` 消息形式送达 Coordinator：
+
+```xml
+<task-notification>
+  <task-id>{agentId}</task-id>
+  <status>completed|failed|killed</status>
+  <summary>{human-readable status summary}</summary>
+  <result>{agent's final text response}</result>
+  <usage>
+    <total_tokens>N</total_tokens>
+    <tool_uses>N</tool_uses>
+    <duration_ms>N</duration_ms>
+  </usage>
+</task-notification>
+```
+
+Coordinator 必须区分工作结果消息和真实用户消息：工作结果包含 `<task-notification>` 标签。
+
+---
+
+## 工作流：四阶段模型
+
+### Phase 1: Research（研究）
+- Coordinator 并行启动多个 Worker 进行独立研究
+- 每个 Worker 负责调查代码库的不同方面
+- 只读任务，可自由并行
+
+### Phase 2: Synthesis（综合）
+- Coordinator **亲自**阅读所有研究发现
+- 理解问题本质，编写具体的实现规格
+- **关键原则**：Coordinator 必须理解研究发现再分配任务，不能将理解工作委托给 Worker
+
+### Phase 3: Implementation（实现）
+- 根据综合后的规格派发实现任务
+- 按文件集串行处理写操作，避免冲突
+
+### Phase 4: Verification（验证）
+- 独立的 Worker 验证实现结果
+- 真正的验证意味着证明代码工作，而非确认代码存在
+- 测试、类型检查和边缘用例
+
+---
+
+## 并行策略
+
+### 只读任务全并行
+研究阶段的所有 Worker 可同时启动，互不影响。
+
+### 写任务按文件集串行
+实现阶段的写操作需谨慎：同一组文件的操作需要串行执行。
+
+### 验证与实现可部分并行
+实现的不同文件区域可同时进行验证。
+
+---
+
+## 工具集
+
+Coordinator 拥有以下专用工具（定义于 `src/tools/AgentTool/AgentTool.tsx`）：
+
+| 工具 | 用途 |
+|------|------|
+| `AgentTool`（`Agent`） | 创建新的 Worker |
+| `SendMessageTool` | 向已存在的 Worker 发送后续指令 |
+| `TaskStopTool` | 停止正在运行的 Worker |
+| `subscribe_pr_activity` | 订阅 GitHub PR 事件 |
+
+### AgentTool 的使用
+
+```typescript
+AgentTool({
+  description: "Investigate auth bug",
+  subagent_type: "worker",
+  prompt: "..."
+})
+```
+
+重要规则：
+- 不要用一个 Worker 去检查另一个 Worker 的状态——Worker 完成时会自动通知
+- 不要为简单的文件读取或命令执行创建 Worker
+- 不要设置 model 参数——Worker 使用默认模型
+- 已完成工作的 Worker 应通过 `SendMessageTool` 继续使用其加载的上下文
+
+---
+
+## Prompt 编写规则
+
+### Worker 看不到 Coordinator 的对话
+
+每个 Worker prompt 必须**自包含**，包含执行任务所需的全部信息。Coordinator 不能假设 Worker 知道对话中发生过什么。
+
+### 好的 Prompt 示例
+
+```typescript
+// 好的 prompt：包含具体路径、行号和精确指令
+AgentTool({
+  prompt: "Fix the null pointer in src/auth/validate.ts:42. " +
+    "The user field can be undefined when the session expires. " +
+    "Add a null check and return early with an appropriate error. " +
+    "Commit and report the hash."
+})
+```
+
+### 坏的 Prompt 示例（反模式）
+
+```typescript
+// 坏的 prompt：模糊、依赖上下文
+AgentTool({ prompt: "Fix the bug we discussed" }) // 错误：Worker 看不到讨论
+AgentTool({ prompt: "Based on your findings, implement the fix" }) // 错误：懒惰的委托
+```
+
+### 目的陈述
+
+为 Prompt 添加目的说明，帮助 Worker 校准深度和重点：
+
+- "This research will inform a PR description — focus on user-facing changes."
+- "I need this to plan an implementation — report file paths, line numbers, and type signatures."
+
+### continue vs spawn 的选择
+
+| 场景 | 策略 | 原因 |
+|------|------|------|
+| 研究恰好覆盖了需编辑的文件 | **Continue**（SendMessageTool） | Worker 已有文件在上下文中 |
+| 研究范围广，实现范围窄 | **Spawn fresh**（AgentTool） | 避免携带探索噪音 |
+| 纠正错误或扩展近期工作 | **Continue** | Worker 有错误上下文 |
+| 验证其他 Worker 的代码 | **Spawn fresh** | 验证者需以新视角查看代码 |
+| 完全不同的任务 | **Spawn fresh** | 无有用上下文可复用 |
+
+---
+
+## 实现细节
+
+### 核心文件
+
+| 文件 | 路径 | 用途 |
+|------|------|------|
+| coordinatorMode.ts | `src/coordinator/coordinatorMode.ts` | Coordinator 模式检测、会话匹配、用户上下文构建 |
+| AgentTool.tsx | `src/tools/AgentTool/AgentTool.tsx` | Agent 工具的实现 |
+| builtInAgents.ts | `src/tools/AgentTool/builtInAgents.ts` | 内置 Agent 定义 |
+
+### Worker 工具白名单
+
+内部 Worker 工具（由 `INTERNAL_WORKER_TOOLS` 定义的集合）对 Worker 不可见：
+
+- `TeamCreateTool`
+- `TeamDeleteTool`
+- `SendMessageTool`
+- `SyntheticOutputTool`
+
+在简单模式（`CLAUDE_CODE_SIMPLE`）下，Worker 仅有权访问：Bash、Read、Edit 工具，外加 MCP 工具。
+
+### Worker 错误处理
+
+当 Worker 报告失败时：
+- 使用 `SendMessageTool` 继续同一 Worker——它保留完整的错误上下文
+- 如果纠正尝试也失败，尝试不同方法或报告用户
+
+### 停止 Worker
+
+使用 `TaskStopTool` 停止方向错误的 Worker。已停止的 Worker 可通过 `SendMessageTool` 继续。
