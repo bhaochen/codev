@@ -289,6 +289,12 @@ class FriendService {
       if (transcript) {
         this.captureTranscripts = [];
         this.sendText(transcript);
+
+        // Mute the entire AI turn: from transcript submission → AI processing
+        // (tools, deep thinking) → response → TTS playback.
+        // This prevents both TTS echo AND capturing accidental speech during
+        // AI processing (e.g. "hmm", "ok").
+        this.startAiTurnMute();
       }
     } catch (err) {
       console.error('[FriendService] _flushVadSegment error:', err);
@@ -505,37 +511,52 @@ class FriendService {
   }
 
   /**
-   * Mute audio capture for the exact duration of the TTS audio file.
-   * Audio from arecord will not be forwarded to STT or VAD while muted.
-   * Automatically unmutes when the TTS audio would have finished playing.
+   * Start mute at the beginning of an AI turn (when user speech is submitted).
+   *
+   * Audio from arecord is blocked from STT/VAD during:
+   *   AI processing (tools, deep thinking) → response generation → TTS playback
+   *
+   * A long timeout (30s) covers the AI processing window without estimation.
+   * The timer is later refined by extendMuteForTts() when TTS audio is ready.
    */
-  private muteForTts(audioId: string, text: string): void {
+  private startAiTurnMute(): void {
     if (!this.capturing) return;
 
-    // Clear any existing mute timer
-    if (this.muteTimer) {
-      clearTimeout(this.muteTimer);
-      this.muteTimer = null;
-    }
+    // Clear any existing timer (from a previous turn)
+    if (this.muteTimer) clearTimeout(this.muteTimer);
 
     this.muted = true;
-
-    // Pause VAD so it doesn't accumulate stale audio
     this.vadInstance?.pause();
 
-    // Parse the actual MP3 duration for precise mute timing
-    let muteMs = this.getMp3DurationMs(audioId);
-    if (muteMs <= 0) {
-      // Fallback estimate if parsing fails
-      muteMs = Math.max(3000, Math.round(text.length * 100) + 1500);
-    }
+    // 30s covers almost all AI response cycles (tools, deep thinking, etc.).
+    // The timer is reset in extendMuteForTts() when TTS duration is known.
+    this.muteTimer = setTimeout(() => this.unmute(), 30_000);
+  }
 
-    this.muteTimer = setTimeout(() => {
-      this.muted = false;
-      this.muteTimer = null;
-      // Resume VAD with fresh state (buffer cleared by pause())
-      this.vadInstance?.start();
-    }, muteMs);
+  /**
+   * Refine the mute timer to match actual TTS audio duration once it's ready.
+   * Called from broadcastResponse() after TTS generation succeeds.
+   * Resets the timer to exactly the audio playback length.
+   */
+  private extendMuteForTts(audioId: string): void {
+    if (!this.capturing) return;
+    if (!this.muted) return; // turn already ended, don't re-mute
+
+    // Clear the generous timer from startAiTurnMute
+    if (this.muteTimer) clearTimeout(this.muteTimer);
+
+    // Parse exact audio duration from the MP3 file
+    let muteMs = this.getMp3DurationMs(audioId);
+    if (muteMs <= 0) muteMs = 3000; // safety fallback
+
+    this.muteTimer = setTimeout(() => this.unmute(), muteMs);
+  }
+
+  /** Unmute and resume VAD */
+  private unmute(): void {
+    this.muted = false;
+    this.muteTimer = null;
+    this.vadInstance?.start();
   }
 
   /** Parse MP3 file to get exact audio duration in milliseconds.
@@ -647,10 +668,8 @@ class FriendService {
           const fullUrl = `http://127.0.0.1:3456/plugins/friend/audio/${audioId}`;
           broadcastToVrm({ audioUrl: fullUrl, sendFirstTts: true });
 
-          // Mute capture for the exact TTS audio duration
-          if (this.capturing) {
-            this.muteForTts(audioId, text);
-          }
+          // Refine mute timer to exact TTS audio duration
+          this.extendMuteForTts(audioId);
         }
       } catch (err) {
         console.warn('[FriendService] TTS generation failed:', err);
