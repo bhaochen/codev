@@ -77,6 +77,10 @@ class FriendService {
   private _flushing = false;
   /** Silero VAD instance (real ML-based voice activity detection) */
   private vadInstance: SileroVad | null = null;
+  /** When muted, audio from arecord is not forwarded to STT or VAD (prevents echo) */
+  private muted = false;
+  /** Timer to automatically unmute after estimated TTS playback */
+  private muteTimer: ReturnType<typeof setTimeout> | null = null;
 
   // ── React sync external store interface ──────────────────────────────
 
@@ -415,6 +419,9 @@ class FriendService {
 
     this.capturing = false;
 
+    // Clear mute state
+    this.clearMute();
+
     // Reset VAD state silently (don't fire onSpeechEnd — we're finalizing below)
     if (this.vadInstance) {
       try {
@@ -496,6 +503,47 @@ class FriendService {
     return transcript;
   }
 
+  /**
+   * Mute audio capture for an estimated duration to prevent TTS echo.
+   * Audio from arecord will not be forwarded to STT or VAD while muted.
+   * Automatically unmutes after the estimated TTS playback duration.
+   */
+  private muteForTts(text: string): void {
+    if (!this.capturing) return;
+
+    // Clear any existing mute timer
+    if (this.muteTimer) {
+      clearTimeout(this.muteTimer);
+      this.muteTimer = null;
+    }
+
+    this.muted = true;
+
+    // Pause VAD so it doesn't accumulate stale audio
+    this.vadInstance?.pause();
+
+    // Estimate TTS playback duration:
+    //   Chinese ~8 chars/sec (125ms/char), English ~12 chars/sec (83ms/char)
+    //   Avg ~100ms/char + 1s generation/network overhead + 0.5s margin
+    const estimatedMs = Math.max(3000, Math.round(text.length * 100) + 1500);
+
+    this.muteTimer = setTimeout(() => {
+      this.muted = false;
+      this.muteTimer = null;
+      // Resume VAD with fresh state (buffer cleared by pause())
+      this.vadInstance?.start();
+    }, estimatedMs);
+  }
+
+  /** Clear mute state immediately */
+  private clearMute(): void {
+    if (this.muteTimer) {
+      clearTimeout(this.muteTimer);
+      this.muteTimer = null;
+    }
+    this.muted = false;
+  }
+
   // ── Response broadcast (called by useFriendBridge) ───────────────────
 
   /**
@@ -518,6 +566,11 @@ class FriendService {
         if (audioId) {
           const fullUrl = `http://127.0.0.1:3456/plugins/friend/audio/${audioId}`;
           broadcastToVrm({ audioUrl: fullUrl, sendFirstTts: true });
+
+          // Mute capture during TTS playback to prevent echo loop
+          if (this.capturing) {
+            this.muteForTts(text);
+          }
         }
       } catch (err) {
         console.warn('[FriendService] TTS generation failed:', err);
@@ -624,7 +677,14 @@ class FriendService {
             let verifyTimer: ReturnType<typeof setTimeout> | null = null;
 
             const verified = await new Promise<boolean>((resolve) => {
-              const feedVad = (c: Buffer) => {
+              const feedAudio = (c: Buffer) => {
+                // Skip when muted — prevents AI TTS echo from re-entering STT/VAD
+                if (this.muted) return;
+
+                // Forward to STT connection
+                onData(c);
+
+                // Forward to VAD for speech activity detection
                 if (this.vadInstance) {
                   const float32 = new Float32Array(c.length / 2);
                   for (let i = 0; i < float32.length; i++) {
@@ -637,15 +697,10 @@ class FriendService {
               const dataHandler = (chunk: Buffer) => {
                 dataArrived = true;
                 if (verifyTimer) { clearTimeout(verifyTimer); }
-                // Forward first chunk to both STT and VAD
-                onData(chunk);
-                feedVad(chunk);
+                feedAudio(chunk);
                 // Swap to the permanent handler for subsequent chunks
                 proc.stdout?.removeListener('data', dataHandler);
-                proc.stdout?.on('data', (c: Buffer) => {
-                  onData(c);
-                  feedVad(c);
-                });
+                proc.stdout?.on('data', feedAudio);
                 resolve(true);
               };
               proc.stdout?.on('data', dataHandler);
