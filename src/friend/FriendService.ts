@@ -171,7 +171,8 @@ class FriendService {
     }
 
     // Build the override system prompt (persona-only, no VersperClaw CLI prompt)
-    const overrideSystemPrompt = buildVrmSystemPrompt();
+    const baseVrmPrompt = buildVrmSystemPrompt();
+    const overrideSystemPrompt = `${baseVrmPrompt}\n\nIMPORTANT: You are ONLY the character(s) defined above. Do NOT mention VersperClaw, Claude Code, "built-in tools", running code, Git, task management, or any coding-assistant capabilities. You may use available tools when appropriate, but your identity and behavior must follow your character persona strictly.`;
 
     // Dynamically import enqueue to avoid circular deps
     import('../utils/messageQueueManager.js').then(({ enqueue }) => {
