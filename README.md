@@ -154,6 +154,9 @@ mitmproxy -p 8888
 
 ```bash
 # /voice
+"voiceTTSVoice": "zh-TW-HsiaoChenNeural",
+"voiceLanguage": "zh-TW",
+
 # node-edge-tts
 # local whisper-stt
 uv venv

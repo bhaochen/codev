@@ -68,7 +68,22 @@ export function useAutoTTS(messages: RenderableMessage[], isLoading?: boolean): 
         : null
       if (!textBlock?.text?.trim()) continue
 
+      // Strip formatting before TTS: URLs, code blocks, markdown syntax
       const text = textBlock.text
+        .replace(/https?:\/\/\S+/g, '')                    // URLs
+        .replace(/```[\s\S]*?```/g, '')                     // code blocks
+        .replace(/(?<=^|[^*])\*{1,2}(?!\*)(.*?)\*{1,2}(?=[^*]|$)/g, '$1')  // *italic* **bold**
+        .replace(/(?<=^|[^_])\_{1,2}(?!_)(.*?)\_{1,2}(?=[^_]|$)/g, '$1')  // _italic_ __bold__
+        .replace(/`([^`]+)`/g, '$1')                        // inline `code`
+        .replace(/~~(.*?)~~/g, '$1')                        // ~~strikethrough~~
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')            // [text](url)
+        .replace(/^#{1,6}\s+/gm, '')                        // # headings
+        .replace(/^[>\|]\s*/gm, '')                         // > blockquotes, | tables
+        .replace(/(?:^|\n)[-*+]\s+/g, ' ')                  // list markers
+        .replace(/\n{3,}/g, '\n\n')                         // collapse excess newlines
+        .trim()
+
+      if (!text) continue
 
       const run = async () => {
         const result = await edgeTts({ text, voice })
