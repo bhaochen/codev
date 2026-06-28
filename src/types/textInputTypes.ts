@@ -355,6 +355,12 @@ export type QueuedCommand = {
    * unified the queue but lost the isolation the dual-queue accidentally had).
    */
   agentId?: AgentId
+  /**
+   * When set, completely replaces the default system prompt for this query.
+   * Used by Friend mode to use ONLY the persona prompt instead of the full
+   * VersperClaw CLI system prompt.
+   */
+  overrideSystemPrompt?: string
 }
 
 /**

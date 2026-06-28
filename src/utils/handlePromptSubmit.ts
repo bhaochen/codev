@@ -69,6 +69,7 @@ type BaseExecutionParams = {
     onBeforeQuery?: (input: string, newMessages: Message[]) => Promise<boolean>,
     input?: string,
     effort?: EffortValue,
+    overrideSystemPrompt?: string,
   ) => Promise<void>
   setAppState: (updater: (prev: AppState) => AppState) => void
   onBeforeQuery?: (input: string, newMessages: Message[]) => Promise<boolean>
@@ -556,6 +557,7 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
           primaryCmd && typeof primaryCmd.value === 'string'
             ? primaryCmd.value
             : undefined
+        const overrideSystemPrompt = commands[0]?.overrideSystemPrompt
         const shouldCallBeforeQuery = primaryMode === 'prompt'
         await onQuery(
           newMessages,
@@ -568,6 +570,7 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
           shouldCallBeforeQuery ? onBeforeQuery : undefined,
           primaryInput,
           effort,
+          overrideSystemPrompt,
         )
       } else {
         // Local slash commands that skip messages (e.g., /model, /theme).

@@ -13,7 +13,7 @@ import path from 'node:path'
 
 const FRIEND_URL = 'http://127.0.0.1:3456/friend/'
 
-function loadPersona(): string {
+export function loadPersona(): string {
   const homeDir = process.env.HOME || process.env.USERPROFILE || ''
   const baseDir = path.join(homeDir, '.config', 'VersperClaw', 'friend')
   const parts: string[] = []
@@ -37,7 +37,7 @@ function loadPersona(): string {
   return parts.join('\n\n')
 }
 
-function buildVrmSystemPrompt(): string {
+export function buildVrmSystemPrompt(): string {
   const prefs = getPrefs()
   const moodIndex = (prefs as any)._moodIndex ?? 60
 

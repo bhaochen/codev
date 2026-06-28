@@ -3565,6 +3565,7 @@ export function REPL({
       additionalAllowedTools: string[],
       mainLoopModelParam: string,
       effort?: EffortValue,
+      overrideSystemPrompt?: string,
     ) => {
       // Prepare IDE integration for new prompt. Read mcpClients fresh from
       // store — useManageMCPConnections may have populated it since the
@@ -3753,6 +3754,7 @@ export function REPL({
         customSystemPrompt,
         defaultSystemPrompt,
         appendSystemPrompt,
+        overrideSystemPrompt,
       })
       toolUseContext.renderedSystemPrompt = systemPrompt
 
@@ -3867,6 +3869,7 @@ export function REPL({
       ) => Promise<boolean>,
       input?: string,
       effort?: EffortValue,
+      overrideSystemPrompt?: string,
     ): Promise<void> => {
       // If this is a teammate, mark them as active when starting a turn
       if (isAgentSwarmsEnabled()) {
@@ -3947,6 +3950,7 @@ export function REPL({
           additionalAllowedTools,
           mainLoopModelParam,
           effort,
+          overrideSystemPrompt,
         )
       } finally {
         // queryGuard.end() atomically checks generation and transitions

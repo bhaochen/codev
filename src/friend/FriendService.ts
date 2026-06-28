@@ -21,6 +21,7 @@ import { edgeTts, qwenTts, registerAudioFile, getAudioFile } from './tts.js';
 import { splitSentences } from './text-utils.js';
 import { SileroVad } from './voice/vad-service.js';
 import { readFileSync } from 'node:fs';
+import { buildVrmSystemPrompt } from '../skills/bundled/friendPrompt.js';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -169,6 +170,9 @@ class FriendService {
       listener({ text: trimmed });
     }
 
+    // Build the override system prompt (persona-only, no VersperClaw CLI prompt)
+    const overrideSystemPrompt = buildVrmSystemPrompt();
+
     // Dynamically import enqueue to avoid circular deps
     import('../utils/messageQueueManager.js').then(({ enqueue }) => {
       enqueue({
@@ -177,6 +181,7 @@ class FriendService {
         skipSlashCommands: true,
         bridgeOrigin: true,
         origin: { kind: 'channel', server: 'friend' },
+        overrideSystemPrompt,
       });
     }).catch((err) => {
       console.error('[FriendService] enqueue failed:', err);
