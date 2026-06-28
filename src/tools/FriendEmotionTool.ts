@@ -99,14 +99,12 @@ export const FriendEmotionTool = buildTool({
     }
 
     return {
-      content: [{
-        type: 'text' as const,
-        text: `Avatar emotion set to ${emotion}.${
-          moodDelta !== undefined
-            ? ` Your mood ${moodDelta > 0 ? '+' : ''}${moodDelta} → ${moodIndex}%`
-            : ''
-        }`,
-      }],
+      data: {
+        ok: true,
+        emotion,
+        moodDelta,
+        moodIndex,
+      },
     };
   },
   mapToolResultToToolResultBlockParam(output: Output, toolUseID: string) {
