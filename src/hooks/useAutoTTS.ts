@@ -61,11 +61,14 @@ export function useAutoTTS(messages: RenderableMessage[], isLoading?: boolean): 
       triggeredIdsRef.current.add(msg.uuid)
 
       if (msg.type !== 'assistant') continue
-      const content = msg.message.content[0]
-      if (content?.type !== 'text') continue
-      if (!content.text.trim()) continue
+      // Search all content blocks for text — tool calls (e.g. WebSearch)
+      // may appear as the first block with text following
+      const textBlock = Array.isArray(msg.message.content)
+        ? msg.message.content.find((b: any) => b?.type === 'text')
+        : null
+      if (!textBlock?.text?.trim()) continue
 
-      const text = content.text
+      const text = textBlock.text
 
       const run = async () => {
         const result = await edgeTts({ text, voice })

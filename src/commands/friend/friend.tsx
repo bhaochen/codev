@@ -29,7 +29,8 @@ export async function call(
 ): Promise<React.ReactNode> {
   const trimmed = args?.trim().toLowerCase()
 
-  if (trimmed === 'start') {
+  // /friend (no args) or /friend start → start the service
+  if (!trimmed || trimmed === 'start') {
     updatePrefs({ enabled: true })
     // Start in-process HTTP server for friend API and SSE
     try {
@@ -55,6 +56,7 @@ export async function call(
     return <FriendStopView onDone={onDone} />
   }
 
+  // /friend help → show manager/status view
   return <FriendManager onDone={onDone} />
 }
 
