@@ -60,7 +60,6 @@
 
 </details>
 
-
 ## 📦 Install
 
 ```bash
@@ -68,22 +67,21 @@
 curl -fsSL https://raw.githubusercontent.com/versperai/VersperClaw/main/install.sh | bash
 
 # source install
-git clone https://github.com/versperai/VersperClaw.git && cd VersperClaw && bun install && bun run build:dev:full && ./VersperClaw 
+git clone https://github.com/versperai/VersperClaw.git && cd VersperClaw && bun install && bun run build:dev:full &&  bun run friend:build && ./VersperClaw
 
 # if want global use bin file
 cp VersperClaw ~/.local/bin
 # then can use VersperClaw in everywhere after `/login`
 ```
 
-
 ## 🚀 Quick Start
 
 > [!IMPORTANT]
-> If you no need `auto-compact / dream / control context-window` 
+> If you no need `auto-compact / dream / control context-window`
 > and `websearch` feature. you can no configuration anything
 >
 > if you no need free `local-websearch` you can skip config `searxng``
-> and just set `TAVILY_API_KEY` in env 
+> and just set`TAVILY_API_KEY` in env
 
 ```bash
 # Maximum_Context_Window = min(CLAUDE_CODE_MAX_CONTEXT_TOKENS, CLAUDE_CODE_AUTO_COMPACT_WINDOW) - 20000
@@ -149,9 +147,6 @@ firefox http://localhost:8080
 ```
 
 ```bash
-# friend
-cd src/components/friend/frontend && npx tauri build
-
 # test
 HTTP_PROXY=http://127.0.0.1:8888 HTTPS_PROXY=http://127.0.0.1:8888 <commands>
 mitmproxy -p 8888
@@ -167,7 +162,6 @@ uv pip install faster-whisper edge-tts voxcpm
 hf download Systran/faster-whisper-base \
   --local-dir ~/.cache/huggingface/hub/models--Systran--faster-whisper-base
 ```
-
 
 ## ✨ Features
 

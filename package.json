@@ -20,7 +20,8 @@
     "build:dev": "bun run ./scripts/build.ts --dev",
     "build:dev:full": "bun run ./scripts/build.ts --dev --feature-set=dev-full",
     "compile": "bun run ./scripts/build.ts --compile",
-    "dev": "bun run ./src/entrypoints/cli.tsx"
+    "dev": "bun run ./src/entrypoints/cli.tsx",
+    "friend:build": "cd src/components/friend/frontend && npx tauri build"
   },
   "dependencies": {
     "@alcalzone/ansi-tokenize": "^0.3.0",
