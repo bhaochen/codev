@@ -244,8 +244,23 @@ LLM 请求工具调用
 
 ### WebSearch / WebFetch
 
-- **WebSearchTool**: 使用 Tavily API 或本地 SearXNG 进行网络搜索
-- **WebFetchTool**: 抓取 URL 内容并应用 prompt 处理（提取、总结）
+#### 双后端架构
+
+WebSearchTool 支持两个搜索后端：
+
+| 后端 | 类型 | 配置 | 特点 |
+|------|------|------|------|
+| **Tavily** | 云 API | `TAVILY_API_KEY` 环境变量 | 稳定、无需自托管 |
+| **SearXNG** | 自托管 | Docker 运行 `verspersearch` | 完全隐私、无 API 成本 |
+
+后端自动选择：若配置了 `TAVILY_API_KEY` 则使用 Tavily，否则回退到本地 SearXNG。
+
+#### WebFetch
+
+抓取 URL 内容并应用 prompt 处理（提取、总结）。支持将结果渲染为 Markdown 格式，包含图片链接。
+
+配置项：
+- `JINA_API_KEY` — 可选的 Jina AI API 密钥，用于增强型内容提取
 
 相关文件：
 - `/home/yuki/Code/Agent/VersperClaw/src/Tool.ts` — Tool 类型与 buildTool 框架

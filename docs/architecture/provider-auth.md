@@ -313,20 +313,23 @@ function shouldUseDeepSeekReasoningCompat(baseUrl: string): boolean {
 - **端点**: `{baseUrl}/v1/chat/completions` (默认 `https://integrate.api.nvidia.com/v1`)
 - **Model 列表**: 从 `/v1/models` 动态拉取，缓存于 `cachedNvidiaModels` 模块变量
 - **默认 Model**: `nvidia/llama-3.1-nemotron-70b-instruct` (可通过 `NVIDIA_MODEL` 环境变量覆盖)
+- **网络架构**: 通过 Sidecar 代理转发（`/api/proxy/nvidia`），适用于需要特殊头或 CORS 处理的 Provider。与之对比，OpenCode/OpenRouter 使用直接 Fetch Override 模式。
 
 ### 4.2 OpenCode Zen
 
 **文件**: `src/services/api/opencodeClient.ts`
 
 - **认证**: 支持 API Key 和匿名免费使用
-- **免费模式**: 当 `apiKey` 为 `undefined` 或 `'public'` 时，注入 billing 特征码 (x-anthropic-billing-header)
+- **免费模式**: 当 `apiKey` 为 `undefined` 或 `'public'` 时，注入 billing 特征码 (`x-anthropic-billing-header: cc_version=2.1.0-dev...`)，标记请求来源用于服务端路由
 - **端点**: `https://opencode.ai/zen/v1/chat/completions`
 - **Model 发现**: 
-  - 从 `https://models.dev/api.json` 动态获取模型元数据 (云端成本策略)
+  - 从 `https://models.dev/api.json` 动态获取模型元数据（云端成本策略）
   - 从 `https://api.github.com/repos/anomalyco/opencode/releases/latest` 获取版本信息
   - 缓存于 `cachedModels` 模块变量
+  - 支持免费模型列表过滤（life-free models）
 - **动态 UA**: 根据版本和运行时自动构建 `User-Agent`
 - **推理内容**: 支持 `reasoning_content` 到 `thinking` block 的转换
+- **网络架构**: 直连模式（Direct Fetch Override），无需 Sidecar 代理
 
 ### 4.3 OpenAI / Codex Official
 

@@ -20,7 +20,8 @@
 |------|------|
 | [CLI 命令系统](cli/overview.md) | 命令注册、Slash 命令大全 (~75+)、Skill/工作流系统 |
 | [构建系统与功能标记](cli/build-system.md) | 676 行 | Bun 构建管道、48 个 feature flag、死代码消除、命令可用性门控 |
-| [AI 工具系统](tools/overview.md) | buildTool 框架、执行流程、权限系统、关键工具详解 |
+| [调试系统](cli/debug-system.md) | `/debug` v2.0 DEBUG PROBE 工作流、会话调试日志 |
+| [AI 工具系统](tools/overview.md) | buildTool 框架、执行流程、权限系统、关键工具详解（含 Tavily/SearXNG） |
 | [工具参考大全](tools/tool-reference.md) | 所有 ~60+ AI 工具的完整参考表 |
 
 ### Friend VRM 伴侣
@@ -53,13 +54,14 @@
 | 文档 | 说明 |
 |------|------|
 | [服务总览](services/overview.md) | MCP、上下文压缩、Auto Dream、飞书/Telegram |
+| [飞书集成](services/feishu.md) | 飞书/Lark 机器人架构、访问控制、语音回复、配置 |
 | [上下文压缩深度解析](services/compact-deep-dive.md) | 906 行 | 5 层压缩管线、Budget Reduction、Snip、Microcompact、Context Collapse、Auto-compact |
 
 ### 协调与自动化
 | 文档 | 说明 |
 |------|------|
 | [目标与自动模式](coordinator/goals-auto-mode.md) | Goal 系统、Auto Mode、查询循环、Task 系统 |
-| [多代理协调](coordinator/multi-agent.md) | Coordinator 模式、Worker 派发、并行策略 |
+| [多代理协调](coordinator/multi-agent.md) | Coordinator 模式、Worker 派发、Agent Teams Swarm、Fork Subagent |
 
 ### 远程桥接
 | 文档 | 说明 |

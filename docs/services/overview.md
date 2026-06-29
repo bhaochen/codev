@@ -117,24 +117,19 @@ Auto Dream 是一个后台记忆整合系统，在对话间期自动运行，将
 
 **目录**: `src/services/feishu/`
 
-飞书机器人集成，基于 `@larksuite/channel` SDK。
+飞书（Feishu/Lark）机器人集成，基于 `@larksuite/channel` SDK 的 WebSocket 长连接机器人。
 
-### 核心文件
+详见 [飞书集成文档](feishu.md)。
 
-| 文件 | 描述 |
-|------|------|
-| `FeishuService.ts` | 飞书机器人服务 — 创建 LarkChannel、注册应用、处理消息事件、管理聊天模式、引用回复、保活机制 |
-| `feishuConfig.ts` | 配置管理 — 读写 `~/.claude/adapters.json` 中的飞书配置段；管理已配对用户、授权用户白名单、Group 模式设置 |
-| `vendor/` | 自包含的第三方实现模块（核心日志、机器人 pending 队列、保活、引用回复、访问策略） |
+### 功能速览
 
-### 功能
-
-- 应用注册与事件处理
-- DM 私聊白名单
-- Group 群聊模式
+- 应用注册（支持 QR 码一键创建）
+- DM 私聊 / Group 群聊模式
+- 访问控制（白名单 / 管理员 / 拥有者）
 - 引用上下文回复
-- 管理员权限控制
-- 自动保活（Keepalive）
+- Markdown 格式化输出
+- 语音回复（Edge TTS / VoxCPM 语音克隆）
+- Keepalive 自动保活
 
 ---
 

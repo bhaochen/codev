@@ -203,3 +203,141 @@ AgentTool({ prompt: "Based on your findings, implement the fix" }) // 错误：�
 ### 停止 Worker
 
 使用 `TaskStopTool` 停止方向错误的 Worker。已停止的 Worker 可通过 `SendMessageTool` 继续。
+
+---
+
+## Agent Teams（Swarm 拓扑）
+
+### 概述
+
+Agent Teams（Swarm 模式）是 VersperClaw 的多 Agent 拓扑模型，通过 `feature('AGENT_SWARMS')` 编译期标记门控。与 Coordinator/Worker 模式不同，Teams 采用**文件系统邮箱通信**，每个 Agent 在独立进程中运行（tmux split-pane / in-process）。
+
+### 激活方式
+
+```bash
+export CLAUDE_CODE_AGENT_SWARMS=1
+```
+
+### 核心架构
+
+```
+Team Lead (AgentTool team_name="my-team" name="lead")
+    │
+    ├── AgentTool(name="researcher", team_name="my-team") → tmux pane / in-process
+    │     └── 邮箱: ~/.claude/teams/my-team/mailbox/researcher/
+    │
+    ├── AgentTool(name="coder", team_name="my-team") → tmux pane / in-process
+    │     └── 邮箱: ~/.claude/teams/my-team/mailbox/coder/
+    │
+    └── AgentTool(name="reviewer", team_name="my-team") → tmux pane / in-process
+          └── 邮箱: ~/.claude/teams/my-team/mailbox/reviewer/
+```
+
+### 与 Coordinator/Worker 的区别
+
+| 维度 | Coordinator/Worker | Agent Teams (Swarm) |
+|------|-------------------|---------------------|
+| 通信 | `<task-notification>` XML 消息 | 文件系统邮箱（mailbox） |
+| 进程 | 同进程 | 独立 OS 进程（tmux / in-process） |
+| 生命周期 | 单次任务 | 持久化团队 |
+| 隔离度 | 共享上下文 | AsyncLocalStorage（in-process）或完全隔离 |
+| 工具白名单 | 统一限制 | 可配置 agent_type → 自定义工具集 |
+| 嵌套 | Coordinator 可 spawn worker | **禁止**团队成员 spawn 子代（仅 team lead 可） |
+
+### 团队创建流程
+
+1. **创建团队**: `TeamCreateTool({ name: "my-team" })` → 生成 `~/.claude/teams/my-team/config.json`
+2. **设置 Leader**: 当前会话自动成为 team-lead
+3. **派发成员**: `AgentTool({ name: "researcher", team_name: "my-team", prompt: "..." })`
+4. **后台抉择**:
+   - In-process（启用时）→ 同一进程 AsyncLocalStorage 隔离
+   - tmux split-pane（默认）→ 新 tmux 窗格
+   - tmux separate-window → 新 tmux 窗口
+   - iTerm2 native → macOS 原生分屏
+5. **通信**: 成员写入 `mailbox/{agent-name}/`，lead 轮询读取
+
+### 邮箱通信格式
+
+```json
+{
+  "from": "researcher",
+  "text": "研究发现...",
+  "timestamp": 1712345678000
+}
+```
+
+### 团队成员配置
+
+自定义 Agent 定义（`~/.claude/agents/`）：
+
+```json
+{
+  "name": "researcher",
+  "tools": ["BashTool", "ReadTool", "GrepTool", "GlobTool"],
+  "model": "claude-sonnet-4-20250514"
+}
+```
+
+### 关键文件
+
+| 文件 | 职责 |
+|------|------|
+| `src/tools/AgentTool/AgentTool.tsx` | 统一调度入口（Line 262-316 为团队路径） |
+| `src/tools/shared/spawnMultiAgent.ts` | 三种 spawn 后端实现（1105 行） |
+| `src/tools/TeamCreateTool/TeamCreateTool.ts` | 团队创建 + 任务列表重置 |
+| `src/tools/TeamDeleteTool/TeamDeleteTool.ts` | 团队清理 + 活跃成员验证 |
+| `src/utils/swarm/teamHelpers.ts` | TeamFile 类型、文件锁、清理 |
+| `src/utils/swarm/inProcessRunner.ts` | 同进程 teammate 生命周期（1553 行） |
+| `src/utils/swarm/teammateInit.ts` | Stop hook、路径白名单 |
+| `src/utils/swarm/constants.ts` | `TEAM_LEAD_NAME`, `SWARM_SESSION_NAME` |
+
+### Spawn 后端对比
+
+| 后端 | 隔离 | 优点 | 缺点 |
+|------|------|------|------|
+| tmux split-pane | 完整进程隔离 | 可视化管理，可独立 kill | 需要 tmux |
+| tmux separate-window | 完整进程隔离 | 传统方式 | UI 不够紧凑 |
+| iTerm2 native | 完整进程隔离 | macOS 原生集成 | 仅 macOS |
+| In-process | AsyncLocalStorage | 无需终端，快速 | 共享进程，有限隔离 |
+
+### 清理机制
+
+- `cleanupSessionTeams()` 在 SIGINT/SIGTERM 时自动执行
+- 终止所有团队成员窗格
+- 清理团队目录和任务目录
+- 文件锁防止并发竞争
+
+### Forbidden 规则
+
+Agent 工具过滤（`filterToolsForAgent()`）：
+
+1. MCP 工具（`mcp__*`）始终保留
+2. `ALL_AGENT_DISALLOWED_TOOLS` 从所有 Agent 移除
+3. `CUSTOM_AGENT_DISALLOWED_TOOLS` 额外从非内置 Agent 移除
+4. `ASYNC_AGENT_ALLOWED_TOOLS` 异步 Agent 仅允许白名单工具
+
+---
+
+## Fork Subagent（实验性）
+
+### 概述
+
+通过 `feature('FORK_SUBAGENT')` 门控，提供另一种 Agent 拓扑：子 Agent **继承父会话的全部上下文**。
+
+### 关键特性
+
+- **上下文继承**: 子 Agent 从父会话的完整历史开始
+- **字节级缓存优化**: 所有 fork 共享相同 API 前缀（字节一致），提高 prompt 缓存命中
+- **权限冒泡**: `permissionMode: 'bubble'` — 权限提示冒泡到父终端
+- **强制异步**: 所有 fork spawn 必须异步执行
+
+### 适用场景
+
+- 需要子 Agent 拥有完整对话上下文时
+- 希望复用父会话的 prompt 缓存
+
+### 核心文件
+
+| 文件 | 职责 |
+|------|------|
+| `src/tools/AgentTool/forkSubagent.ts` | `buildForkedMessages()` 构建字节相同前缀 |
