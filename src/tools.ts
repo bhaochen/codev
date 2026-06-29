@@ -78,6 +78,7 @@ import { LSPTool } from './tools/LSPTool/LSPTool.js'
 import { ListMcpResourcesTool } from './tools/ListMcpResourcesTool/ListMcpResourcesTool.js'
 import { ReadMcpResourceTool } from './tools/ReadMcpResourceTool/ReadMcpResourceTool.js'
 import { ToolSearchTool } from './tools/ToolSearchTool/ToolSearchTool.js'
+import { DebugSessionTool } from './tools/DebugSessionTool.js'
 import { FriendEmotionTool } from './tools/FriendEmotionTool.js'
 import { FriendScreenObserveTool } from './tools/FriendScreenObserveTool.js'
 import { EnterPlanModeTool } from './tools/EnterPlanModeTool/EnterPlanModeTool.js'
@@ -247,6 +248,8 @@ export function getAllBaseTools(): Tools {
     ...(getPowerShellTool() ? [getPowerShellTool()] : []),
     ...(SnipTool ? [SnipTool] : []),
     ...(process.env.NODE_ENV === 'test' ? [TestingPermissionTool] : []),
+    // Debug session tool — used by /debug for runtime probe debugging
+    DebugSessionTool,
     // Friend VRM desktop pet tools — enabled when the plugin is active
     FriendEmotionTool,
     FriendScreenObserveTool,
