@@ -17,10 +17,7 @@
   },
   "scripts": {
     "build": "bun run ./scripts/build.ts",
-    "build:dev": "bun run ./scripts/build.ts --dev",
-    "build:dev:full": "bun run ./scripts/build.ts --dev --feature-set=dev-full",
-    "compile": "bun run ./scripts/build.ts --compile",
-    "dev": "bun run ./src/entrypoints/cli.tsx",
+    "dev": "bun run ./scripts/dev.ts",
     "friend:build": "cd src/components/friend/frontend && npx tauri build"
   },
   "dependencies": {

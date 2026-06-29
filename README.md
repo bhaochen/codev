@@ -67,7 +67,7 @@
 curl -fsSL https://raw.githubusercontent.com/versperai/VersperClaw/main/install.sh | bash
 
 # source install
-git clone https://github.com/versperai/VersperClaw.git && cd VersperClaw && bun install && bun run build:dev:full &&  bun run friend:build && ./VersperClaw
+git clone https://github.com/versperai/VersperClaw.git && cd VersperClaw && bun install && bun run build &&  bun run friend:build && ./VersperClaw
 
 # if want global use bin file
 cp VersperClaw ~/.local/bin

@@ -1,55 +1,14 @@
-import { chmodSync, cpSync, existsSync, mkdirSync } from 'fs'
-import { dirname, join } from 'path'
+import { chmodSync, cpSync, existsSync, mkdirSync, symlinkSync, unlinkSync } from 'fs'
+import { dirname, join, relative } from 'path'
 
 const pkg = await Bun.file(new URL('../package.json', import.meta.url)).json() as {
   name: string
   version: string
 }
 
-const args = process.argv.slice(2)
-const compile = args.includes('--compile')
-const dev = args.includes('--dev')
+import { FULL_EXPERIMENTAL_FEATURES } from './features.ts'
 
-const fullExperimentalFeatures = [
-  'AGENT_MEMORY_SNAPSHOT',
-  'AGENT_TRIGGERS',
-  'AGENT_TRIGGERS_REMOTE',
-  'AWAY_SUMMARY',
-  'BASH_CLASSIFIER',
-  'BUDDY',
-  'BRIDGE_MODE',
-  'BUILTIN_EXPLORE_PLAN_AGENTS',
-  'CACHED_MICROCOMPACT',
-  'CCR_AUTO_CONNECT',
-  'CCR_MIRROR',
-  'CCR_REMOTE_SETUP',
-  'COMPACTION_REMINDERS',
-  'CONNECTOR_TEXT',
-  'EXTRACT_MEMORIES',
-  'HISTORY_PICKER',
-  'HOOK_PROMPTS',
-  'KAIROS_BRIEF',
-  'KAIROS_CHANNELS',
-  'LODESTONE',
-  'MCP_RICH_OUTPUT',
-  'MESSAGE_ACTIONS',
-  'NATIVE_CLIPBOARD_IMAGE',
-  'NEW_INIT',
-  'POWERSHELL_AUTO_MODE',
-  'PROMPT_CACHE_BREAK_DETECTION',
-  'QUICK_SEARCH',
-  'SHOT_STATS',
-  'TEAMMEM',
-  'TOKEN_BUDGET',
-  'TREE_SITTER_BASH',
-  'TREE_SITTER_BASH_SHADOW',
-  'TRANSCRIPT_CLASSIFIER',
-  'ULTRAPLAN',
-  'ULTRATHINK',
-  'UNATTENDED_RETRY',
-  'VERIFICATION_AGENT',
-  'VOICE_MODE',
-] as const
+const args = process.argv.slice(2)
 
 function runCommand(cmd: string[]): string | null {
   const proc = Bun.spawnSync({
@@ -58,11 +17,7 @@ function runCommand(cmd: string[]): string | null {
     stdout: 'pipe',
     stderr: 'pipe',
   })
-
-  if (proc.exitCode !== 0) {
-    return null
-  }
-
+  if (proc.exitCode !== 0) return null
   return new TextDecoder().decode(proc.stdout).trim() || null
 }
 
@@ -81,45 +36,22 @@ function getVersionChangelog(): string {
   )
 }
 
-const defaultFeatures = ['VOICE_MODE']
-const featureSet = new Set(defaultFeatures)
+// Collect feature flags (always all + any extras from args)
+const featureSet = new Set<string>(FULL_EXPERIMENTAL_FEATURES)
 for (let i = 0; i < args.length; i += 1) {
   const arg = args[i]
-  if (arg === '--feature-set' && args[i + 1]) {
-    if (args[i + 1] === 'dev-full') {
-      for (const feature of fullExperimentalFeatures) {
-        featureSet.add(feature)
-      }
-    }
-    i += 1
-    continue
-  }
-  if (arg === '--feature-set=dev-full') {
-    for (const feature of fullExperimentalFeatures) {
-      featureSet.add(feature)
-    }
-    continue
-  }
   if (arg === '--feature' && args[i + 1]) {
     featureSet.add(args[i + 1]!)
     i += 1
-    continue
-  }
-  if (arg.startsWith('--feature=')) {
+  } else if (arg.startsWith('--feature=')) {
     featureSet.add(arg.slice('--feature='.length))
   }
 }
 const features = [...featureSet]
 
-const outfile = compile
-  ? dev
-    ? './dist/VersperClaw'
-    : './dist/cli'
-  : dev
-    ? './VersperClaw'
-    : './cli'
+const outfile = join('dist', 'VersperClaw')
 
-// ── Pre-step: build Friend VRM frontend ───────────────────────────────────────
+// ── Pre-step: build Friend VRM frontend ──────────────────────────────────
 function buildFriendFrontend(): boolean {
   const frontendDir = join(process.cwd(), 'src', 'components', 'friend', 'frontend')
   const distIndex = join(frontendDir, 'dist', 'index.html')
@@ -146,17 +78,12 @@ if (!buildFriendFrontend()) {
   process.exit(1)
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────
 
 const buildTime = new Date().toISOString()
-const version = dev ? getDevVersion(pkg.version) : pkg.version
+const version = getDevVersion(pkg.version)
 
 mkdirSync(dirname(outfile), { recursive: true })
-
-// Merge defaultFeatures into features for consistent behavior
-for (const feature of defaultFeatures) {
-  featureSet.add(feature)
-}
 
 const externals = [
   '@ant/*',
@@ -169,14 +96,8 @@ const externals = [
 const defines = {
   'process.env.USER_TYPE': JSON.stringify('external'),
   'process.env.CLAUDE_CODE_FORCE_FULL_LOGO': JSON.stringify('true'),
-  ...(dev
-    ? { 'process.env.NODE_ENV': JSON.stringify('development') }
-    : {}),
-  ...(dev
-    ? {
-        'process.env.CLAUDE_CODE_EXPERIMENTAL_BUILD': JSON.stringify('true'),
-      }
-    : {}),
+  'process.env.NODE_ENV': JSON.stringify('development'),
+  'process.env.CLAUDE_CODE_EXPERIMENTAL_BUILD': JSON.stringify('true'),
   'process.env.CLAUDE_CODE_VERIFY_PLAN': JSON.stringify('false'),
   'process.env.CCR_FORCE_BUNDLE': JSON.stringify('true'),
   'MACRO.VERSION': JSON.stringify(version),
@@ -187,9 +108,7 @@ const defines = {
   'MACRO.ISSUES_EXPLAINER': JSON.stringify(
     'This reconstructed source snapshot does not include Anthropic internal issue routing.',
   ),
-  'MACRO.VERSION_CHANGELOG': JSON.stringify(
-    dev ? getVersionChangelog() : 'https://github.com/paoloanzn/claude-code',
-  ),
+  'MACRO.VERSION_CHANGELOG': JSON.stringify(getVersionChangelog()),
 } as const
 
 const cmd = [
@@ -214,11 +133,9 @@ const cmd = [
 for (const external of externals) {
   cmd.push('--external', external)
 }
-
 for (const feature of features) {
   cmd.push(`--feature=${feature}`)
 }
-
 for (const [key, value] of Object.entries(defines)) {
   cmd.push('--define', `${key}=${value}`)
 }
@@ -238,15 +155,19 @@ if (existsSync(outfile)) {
   chmodSync(outfile, 0o755)
 }
 
-// Copy vendor audio-capture binaries to dist/ for runtime resolution
-if (!compile) {
-  const distDir = dirname(outfile)
-  const vendorDir = join(distDir, 'vendor')
-  if (!existsSync(vendorDir)) {
-    cpSync('vendor', vendorDir, { recursive: true })
-    console.log(`Copied vendor/ → ${vendorDir}/`)
-  }
+// Copy vendor/ to dist/vendor/ for runtime audio-capture resolution
+const distDir = dirname(outfile)
+const vendorDir = join(distDir, 'vendor')
+if (!existsSync(vendorDir)) {
+  cpSync('vendor', vendorDir, { recursive: true })
+  console.log(`Copied vendor/ → ${vendorDir}/`)
 }
 
-console.log(`Built ${outfile}`)
+// Create symlink at project root for convenient access
+const symlink = join(process.cwd(), 'VersperClaw')
+const symlinkTarget = relative(process.cwd(), outfile)
+try { unlinkSync(symlink) } catch { /* ignore */ }
+try { symlinkSync(symlinkTarget, symlink) } catch { /* ignore */ }
 
+console.log(`Built ${outfile}`)
+console.log(`Symlink ${symlink} → ${symlinkTarget}`)
