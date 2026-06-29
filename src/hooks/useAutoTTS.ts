@@ -40,11 +40,34 @@ export function useAutoTTS(messages: RenderableMessage[], isLoading?: boolean): 
     const settings = getInitialSettings()
     if (!settings.voiceAutoTTS || !settings.voiceEnabled) return
 
-    // Capture history snapshot on the transition from idle → active.
-    // This fires once: when the user first submits a message in a fresh REPL,
-    // or (importantly) never during a resume where isLoading stays false.
-    if (!historyIdsRef.current && !wasLoadingRef.current && isLoading) {
-      historyIdsRef.current = new Set(messages.map(m => m.uuid))
+    // Detect session switch (mid-session /resume): if we already took a
+    // history snapshot for a previous session but the incoming messages are
+    // entirely different (no overlapping UUIDs), reset and re-snapshot so the
+    // resumed session's history isn't re-spoken.
+    if (historyIdsRef.current && messages.length > 0) {
+      const isSessionSwitch = messages.every(
+        m => !historyIdsRef.current!.has(m.uuid),
+      )
+      if (isSessionSwitch) {
+        historyIdsRef.current = null
+        wasLoadingRef.current = false
+      }
+    }
+
+    // Capture history snapshot on the transition from idle → active, or on
+    // first render with pre-loaded messages (resume path).
+    if (!historyIdsRef.current && !wasLoadingRef.current) {
+      if (isLoading || messages.length > 0) {
+        // Normal path (isLoading=true): user just submitted their first
+        // message in a fresh session. Snapshot current messages so pre-loaded
+        // tool-call results / system messages are excluded from TTS.
+        //
+        // Resume path (messages.length>0, isLoading=false): messages were
+        // pre-loaded without a loading transition (e.g. /resume,
+        // --resume-session). Treat all displayed messages as history so they
+        // are not re-spoken. Only subsequent real-time replies will be spoken.
+        historyIdsRef.current = new Set(messages.map(m => m.uuid))
+      }
     }
     wasLoadingRef.current = isLoading ?? false
 
