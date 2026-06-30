@@ -17,11 +17,7 @@ export interface FriendPrefs {
   tracking?: 'mouse' | 'camera';
   volume?: number;
   uiAlign?: 'left' | 'right';
-  screenObserve?: boolean;
-  screenObserveInterval?: number;
   language?: 'zh' | 'en';
-  currentDance?: string;
-  hideMood?: boolean;
   /** STT provider: browser | anthropic | local | doubao | groq */
   sttProvider?: 'browser' | 'anthropic' | 'local' | 'doubao' | 'groq';
   /** STT language override (e.g. 'en', 'zh', 'ja') */

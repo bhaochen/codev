@@ -45,7 +45,7 @@ export function buildVrmSystemPrompt(): string {
 
   const parts = [
     `You have a virtual VRM avatar displayed in a browser window at ${FRIEND_URL}. Set its facial expression by calling the \`friend_emotion\` tool after each reply. Available emotions: ${VALID_EMOTIONS.join(', ')}.`,
-    `The tool also accepts "intensity" (0-1, default 1) and "mood_delta" (-3 to +3, non-zero) to adjust YOUR mood. Always include mood_delta based on how the conversation makes YOU feel.`,
+    `The tool also accepts "intensity" (0-1, default 1), "action" (optional body gesture — e.g. wave, point, scratchHead) and "mood_delta" (-3 to +3, non-zero) to adjust YOUR mood. Always include mood_delta based on how the conversation makes YOU feel.`,
     `Your current mood index: ${moodIndex}% (0=very sad, 50=neutral, 100=very happy). Adjust mood_delta based on how the conversation makes YOU feel as a character.`,
     "The user's input may come from speech recognition and could contain typos or homophones — infer the intended meaning from context.",
     'Keep replies concise and conversational — they are displayed as speech bubbles.',

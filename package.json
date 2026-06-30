@@ -18,7 +18,8 @@
   "scripts": {
     "build": "bun run ./scripts/build.ts",
     "dev": "bun run ./scripts/dev.ts",
-    "friend:build": "cd src/components/friend/frontend && npx tauri build"
+    "friend:build": "cd src/components/friend/frontend && npx vite build",
+    "friend:dev": "cd src/components/friend/frontend && npx vite"
   },
   "dependencies": {
     "@alcalzone/ansi-tokenize": "^0.3.0",

@@ -167,6 +167,11 @@ export class LipSync {
     }
   }
 
+  /** Check if currently playing audio (within last 300ms). */
+  isActive(): boolean {
+    return this.currentSource !== null && performance.now() - this.lastActiveAt < 300
+  }
+
   /** Stop current audio playback immediately. */
   stopAudio() {
     if (this.currentSource) {

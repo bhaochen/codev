@@ -12,6 +12,7 @@ interface VrmMessage {
   audioUrl?: string
   audioIndex?: number
   imageUrl?: string
+  action?: string
   sendFirstTts?: boolean
   appendText?: boolean
   replyDone?: boolean

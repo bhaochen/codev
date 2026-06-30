@@ -20,6 +20,7 @@ import { stripForTts } from './text-utils.js';
 import { edgeTts, qwenTts, registerAudioFile, getAudioFile } from './tts.js';
 import { splitSentences } from './text-utils.js';
 import { SileroVad } from './voice/vad-service.js';
+import { HighPassFilter } from './voice/highpass-filter.js';
 import { readFileSync } from 'node:fs';
 import { buildVrmSystemPrompt } from '../skills/bundled/friendPrompt.js';
 
@@ -79,6 +80,8 @@ class FriendService {
   private _flushing = false;
   /** Silero VAD instance (real ML-based voice activity detection) */
   private vadInstance: SileroVad | null = null;
+  /** High-pass filter to remove low-frequency noise (fan/AC hum) before VAD */
+  private highpassFilter = new HighPassFilter(80);
   /** When muted, audio from arecord is not forwarded to STT or VAD (prevents echo) */
   private muted = false;
   /** Timer to automatically unmute after estimated TTS playback */
@@ -118,13 +121,13 @@ class FriendService {
             );
           },
         }, {
-          // Stricter thresholds to reduce false positives from non-speech noise
-          positiveSpeechThreshold: 0.80,    // need 80% confidence
-          negativeSpeechThreshold: 0.50,    // must drop below 50% to stop
-          preSpeechTriggerFrames: 15,        // require ~480ms sustained speech to trigger
-          minSpeechFrames: 6,               // ~192ms minimum confirmed speech
-          redemptionFrames: 20,              // ~640ms silence before segment ends
-          rmsThreshold: 0.01,               // -40dBFS noise floor
+          // Strict thresholds for near-field mic — rejects keyboard/ambient noise
+          positiveSpeechThreshold: 0.90,    // need 90% confidence (was 80%)
+          negativeSpeechThreshold: 0.40,    // drop below 40% to end (was 50%)
+          preSpeechTriggerFrames: 16,        // require ~512ms sustained speech (was 480ms)
+          minSpeechFrames: 8,               // ~256ms min speech (was 192ms)
+          redemptionFrames: 15,              // ~480ms silence before segment end (was 640ms)
+          rmsThreshold: 0.015,              // -36dBFS noise floor (was -40dBFS)
         });
         vad.init().then(() => {
           this.vadInstance = vad;
@@ -265,6 +268,7 @@ class FriendService {
     // audio chunks flow to VAD via the arecord data callback (see loadAudioCapture)
     if (this.vadInstance) {
       try {
+        this.highpassFilter.reset();  // reset filter state for new session
         this.vadInstance.start();
       } catch (e) {
         console.warn('[FriendService] VAD start error (non-fatal):', e);
@@ -803,6 +807,8 @@ class FriendService {
                   for (let i = 0; i < float32.length; i++) {
                     float32[i] = c.readInt16LE(i * 2) / 32768;
                   }
+                  // High-pass filter: remove sub-80Hz noise (fan/AC hum) before VAD
+                  this.highpassFilter.process(float32);
                   this.vadInstance.processAudio(float32).catch(() => {});
                 }
               };

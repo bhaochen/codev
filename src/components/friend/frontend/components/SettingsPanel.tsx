@@ -1,16 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { X, Play, Loader, Sparkles, Trash2, Upload, Music } from 'lucide-react'
+import { X, Play, Loader } from 'lucide-react'
 import { FRIEND_API } from '../api'
-import { dancePresets, type DancePreset } from '../motion-controller'
-import { pickFile } from '../web-file-picker'
-
-interface DanceItem {
-  id: string
-  label: string
-  vmdUrl: string
-  bgmUrl?: string
-  builtin?: boolean
-}
 
 type SttProvider = 'browser' | 'groq' | 'anthropic' | 'local' | 'doubao'
 
@@ -31,23 +21,13 @@ interface SettingsPanelProps {
   onVolumeChange: (v: number) => void
   uiAlign: 'left' | 'right'
   onUiAlignChange: (v: 'left' | 'right') => void
-  hideMood: boolean
-  onHideMoodChange: (v: boolean) => void
-  screenObserve: boolean
-  onScreenObserveChange: (v: boolean) => void
-  screenObserveInterval: number
-  onScreenObserveIntervalChange: (v: number) => void
-  /** Return a data URL screenshot of the current VRM canvas */
-  captureVrmScreenshot?: () => string | null
   language: 'zh' | 'en'
   onLanguageChange: (v: 'zh' | 'en') => void
-  currentDance: string
-  onDanceChange: (id: string, preset?: DancePreset) => void
   sttProvider?: SttProvider
   onSttProviderChange?: (v: SttProvider) => void
 }
 
-type Tab = 'general' | 'voice' | 'model' | 'persona' | 'dance'
+type Tab = 'general' | 'voice' | 'model'
 
 const BUILTIN_MODELS = ['/friend/model1.vrm', '/friend/model2.vrm', '/friend/model3.vrm', '/friend/model4.vrm', '/friend/model5.vrm']
 
@@ -103,32 +83,18 @@ export function SettingsPanel({
   tracking, onTrackingChange,
   volume, onVolumeChange,
   uiAlign, onUiAlignChange,
-  hideMood, onHideMoodChange,
-  screenObserve, onScreenObserveChange,
-  screenObserveInterval, onScreenObserveIntervalChange,
-  captureVrmScreenshot,
   language, onLanguageChange,
-  currentDance, onDanceChange,
   sttProvider = 'browser', onSttProviderChange,
 }: SettingsPanelProps) {
   const t = (zh: string, en: string) => language === 'en' ? en : zh
 
   const [tab, setTab] = useState<Tab>('general')
-  const [models, setModels] = useState<string[]>([])
-  const [soulContent, setSoulContent] = useState('')
-  const [identityContent, setIdentityContent] = useState('')
-  const [personaDirty, setPersonaDirty] = useState(false)
-  const [personaSaving, setPersonaSaving] = useState(false)
-  const [generating, setGenerating] = useState(false)
   const [currentVoice, setCurrentVoice] = useState('')
   const [currentProvider, setCurrentProvider] = useState<string>('edge')
   const [qwenKey, setQwenKey] = useState('')
   const [qwenModel, setQwenModel] = useState('qwen3-tts-flash')
   const [previewingId, setPreviewingId] = useState<string | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
-  const [customDances, setCustomDances] = useState<DanceItem[]>([])
-  const [importingDance, setImportingDance] = useState(false)
-
 
   // Drag state
   const [panelPos, setPanelPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
@@ -154,18 +120,12 @@ export function SettingsPanel({
     window.addEventListener('mouseup', onUp)
   }, [panelPos])
 
-  // Reset position when panel opens
   useEffect(() => {
     if (visible) setPanelPos({ x: 0, y: 0 })
   }, [visible])
 
   useEffect(() => {
     if (!visible) return
-    fetch(`${FRIEND_API}/model/list`)
-      .then((r) => r.json())
-      .then((data) => { if (data.models) setModels(data.models) })
-      .catch(() => setModels([]))
-    // Fetch current voice + provider
     fetch(`${FRIEND_API}/voice`)
       .then((r) => r.json())
       .then((data) => {
@@ -176,72 +136,6 @@ export function SettingsPanel({
       })
       .catch(() => {})
   }, [visible])
-
-  // Fetch persona files when model tab / persona sub-tab is active
-  useEffect(() => {
-    if (!visible || tab !== 'persona') return
-    fetch(`${FRIEND_API}/persona`)
-      .then((r) => r.json())
-      .then((data) => {
-        setSoulContent(data.soul || '')
-        setIdentityContent(data.identity || '')
-        setPersonaDirty(false)
-      })
-      .catch(() => {})
-  }, [visible, tab])
-
-  const fetchCustomDances = useCallback(() => {
-    fetch(`${FRIEND_API}/dance/list`)
-      .then((r) => r.json())
-      .then((data) => { if (data.dances) setCustomDances(data.dances) })
-      .catch(() => setCustomDances([]))
-  }, [])
-
-  useEffect(() => {
-    if (!visible || tab !== 'dance') return
-    fetchCustomDances()
-  }, [visible, tab, fetchCustomDances])
-
-  const savePersona = useCallback(() => {
-    setPersonaSaving(true)
-    fetch(`${FRIEND_API}/persona`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ soul: soulContent, identity: identityContent }),
-    })
-      .then(() => { setPersonaDirty(false) })
-      .catch(() => {})
-      .finally(() => setPersonaSaving(false))
-  }, [soulContent, identityContent])
-
-  const generatePersona = useCallback(async () => {
-    if (!captureVrmScreenshot) return
-    const dataUrl = captureVrmScreenshot()
-    if (!dataUrl) return
-    setGenerating(true)
-    try {
-      // Save screenshot to server first
-      const saveRes = await fetch(`${FRIEND_API}/persona/screenshot`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: dataUrl }),
-      })
-      const saveData = await saveRes.json()
-      if (!saveData.ok) throw new Error(saveData.error || 'save screenshot failed')
-      // Generate persona from saved screenshot
-      const genRes = await fetch(`${FRIEND_API}/persona/generate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      })
-      const genData = await genRes.json()
-      if (genData.soul || genData.identity) {
-        if (genData.soul) setSoulContent(genData.soul)
-        if (genData.identity) setIdentityContent(genData.identity)
-        setPersonaDirty(true)
-      }
-    } catch { /* ignore */ }
-    setGenerating(false)
-  }, [captureVrmScreenshot])
 
   const postVoiceSettings = (body: Record<string, string | undefined>) => {
     return fetch(`${FRIEND_API}/voice`, {
@@ -286,7 +180,6 @@ export function SettingsPanel({
   }, [])
 
   const preview = (voiceId: string) => {
-    // Stop any current preview first
     stopPreview()
     setPreviewingId(voiceId)
     fetch(`${FRIEND_API}/preview`, {
@@ -326,13 +219,13 @@ export function SettingsPanel({
 
         {/* Tabs */}
         <div style={tabBarStyle}>
-          {(['general', 'voice', 'model', 'persona', 'dance'] as const).map((tb) => (
+          {(['general', 'voice', 'model'] as const).map((tb) => (
             <button
               key={tb}
               onClick={() => setTab(tb)}
               style={{ ...tabStyle, ...(tab === tb ? activeTabStyle : {}) }}
             >
-              {{ general: t('常规', 'General'), voice: t('语音', 'Voice'), model: t('形象', 'Model'), persona: t('人设', 'Persona'), dance: t('舞蹈', 'Dance') }[tb]}
+              {{ general: t('常规', 'General'), voice: t('语音', 'Voice'), model: t('形象', 'Model') }[tb]}
             </button>
           ))}
         </div>
@@ -341,99 +234,13 @@ export function SettingsPanel({
         <div style={contentStyle}>
           {tab === 'general' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 14 }}>{t('语言', 'Language')}</span>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  {(['zh', 'en'] as const).map((l) => (
-                    <button
-                      key={l}
-                      onClick={() => onLanguageChange(l)}
-                      style={{
-                        ...smallBtnStyle,
-                        background: language === l ? 'rgba(100, 160, 255, 0.4)' : 'rgba(255, 255, 255, 0.08)',
-                        borderColor: language === l ? 'rgba(100, 160, 255, 0.6)' : 'rgba(255, 255, 255, 0.15)',
-                      }}
-                    >
-                      {l === 'zh' ? '中文' : 'English'}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <LangToggle language={language} onChange={onLanguageChange} t={t} />
               <ToggleRow label={t('显示字幕', 'Subtitles')} value={showText} onChange={onShowTextChange} />
               <ToggleRow label={t('语音播报', 'TTS')} value={ttsEnabled} onChange={onTtsEnabledChange} />
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 14 }}>{t('音量', 'Volume')}</span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    value={Math.round(volume * 100)}
-                    onChange={(e) => onVolumeChange(Number(e.target.value) / 100)}
-                    style={{ width: 100, accentColor: 'rgba(100, 160, 255, 0.8)' }}
-                  />
-                  <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', width: 28, textAlign: 'right' }}>{Math.round(volume * 100)}</span>
-                </div>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 14 }}>{t('视线跟随', 'Eye Tracking')}</span>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  {(['mouse', 'camera'] as const).map((m) => (
-                    <button
-                      key={m}
-                      onClick={() => onTrackingChange(m)}
-                      style={{
-                        ...smallBtnStyle,
-                        background: tracking === m ? 'rgba(100, 160, 255, 0.4)' : 'rgba(255, 255, 255, 0.08)',
-                        borderColor: tracking === m ? 'rgba(100, 160, 255, 0.6)' : 'rgba(255, 255, 255, 0.15)',
-                      }}
-                    >
-                      {m === 'mouse' ? t('鼠标', 'Mouse') : t('镜头', 'Camera')}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 14 }}>{t('UI位置', 'UI Position')}</span>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  {(['left', 'right'] as const).map((a) => (
-                    <button
-                      key={a}
-                      onClick={() => onUiAlignChange(a)}
-                      style={{
-                        ...smallBtnStyle,
-                        background: uiAlign === a ? 'rgba(100, 160, 255, 0.4)' : 'rgba(255, 255, 255, 0.08)',
-                        borderColor: uiAlign === a ? 'rgba(100, 160, 255, 0.6)' : 'rgba(255, 255, 255, 0.15)',
-                      }}
-                    >
-                      {a === 'left' ? t('靠左', 'Left') : t('靠右', 'Right')}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <VolumeControl volume={volume} onChange={onVolumeChange} t={t} />
+              <TrackingControl tracking={tracking} onChange={onTrackingChange} t={t} />
+              <UIAlignControl uiAlign={uiAlign} onChange={onUiAlignChange} t={t} />
               <ToggleRow label={t('隐藏UI', 'Hide UI')} value={hideUI} onChange={onHideUIChange} />
-              <ToggleRow label={t('隐藏心情条', 'Hide Mood Bar')} value={hideMood} onChange={onHideMoodChange} />
-              <ToggleRow label={t('屏幕观察', 'Screen Observe')} value={screenObserve} onChange={onScreenObserveChange} />
-              {screenObserve && (
-                <>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: -8 }}>
-                    <span style={{ fontSize: 14 }}>{t('观察间隔', 'Interval')}</span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <input
-                        type="range"
-                        min={15}
-                        max={300}
-                        step={15}
-                        value={screenObserveInterval}
-                        onChange={(e) => onScreenObserveIntervalChange(Number(e.target.value))}
-                        style={{ width: 100, accentColor: 'rgba(100, 160, 255, 0.8)' }}
-                      />
-                      <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', width: 36, textAlign: 'right' }}>{screenObserveInterval}s</span>
-                    </div>
-                  </div>
-
-                </>
-              )}
             </div>
           )}
 
@@ -513,11 +320,6 @@ export function SettingsPanel({
                     </button>
                   ))}
                 </div>
-                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', marginTop: 4 }}>
-                  {sttProvider === 'browser'
-                    ? t('使用浏览器内置语音识别（Web Speech API）', 'Use browser built-in speech recognition (Web Speech API)')
-                    : t('使用服务端语音识别，需要登录对应服务', 'Use server-side speech recognition, requires corresponding service login')}
-                </div>
               </div>
 
               <div style={{ marginTop: 8 }}>
@@ -555,7 +357,6 @@ export function SettingsPanel({
                           cursor: previewingId !== null ? 'default' : 'pointer',
                           flexShrink: 0,
                           opacity: previewingId !== null && previewingId !== v.id ? 0.3 : 0.7,
-                          transition: 'background 0.15s',
                         }}
                         title={t('试听', 'Preview')}
                       >
@@ -581,268 +382,97 @@ export function SettingsPanel({
                   <option key={m} value={m}>{m.replace(/^\//, '')}</option>
                 ))}
               </select>
-
-              {models.length > 0 && (
-                <div style={{ marginTop: 12 }}>
-                  <div style={labelStyle}>{t('自定义VRM模型', 'Custom VRM Models')}</div>
-                  <select
-                    value={!BUILTIN_MODELS.includes(currentModel) ? currentModel : ''}
-                    onChange={(e) => { onModelChange(e.target.value); saveModelPath(e.target.value) }}
-                    style={selectStyle}
-                  >
-                    {BUILTIN_MODELS.includes(currentModel) && <option value="" disabled>{t('未选择', 'Not selected')}</option>}
-                    {models.map((m) => (
-                      <option key={m} value={m}>{decodeURIComponent(m.split('/').pop() || m)}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              <div style={{ marginTop: 12 }}>
-                <div style={labelStyle}>{t('导入自定义模型', 'Import Custom Model')}</div>
-                <button
-                  onClick={async () => {
-                    const file = await pickFile('.vrm,.glb')
-                    if (!file) return
-                    try {
-                      const formData = new FormData()
-                      formData.append('file', file)
-                      const res = await fetch(`${FRIEND_API}/model/import`, {
-                        method: 'POST',
-                        body: formData,
-                      })
-                      const data = await res.json()
-                      if (data.url) {
-                        fetch(`${FRIEND_API}/model/list`)
-                          .then((r) => r.json())
-                          .then((d) => { if (d.models) setModels(d.models) })
-                          .catch(() => {})
-                        onModelChange(data.url)
-                        saveModelPath(data.url)
-                      }
-                    } catch (err) {
-                      console.warn('Import model failed:', err)
-                    }
-                  }}
-                  style={{ ...applyBtnStyle, width: '100%' }}
-                >
-                  {t('浏览本地文件…', 'Browse local files…')}
-                </button>
-                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', marginTop: 4 }}>
-                  {t('选择本地 .vrm 文件，将保存到工作区 models 目录', 'Select a .vrm file to save to workspace models directory')}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {tab === 'persona' && (
-            <div style={sectionStyle}>
-              <div style={labelStyle}>IDENTITY.md</div>
-              <textarea
-                value={identityContent}
-                onChange={(e) => { setIdentityContent(e.target.value); setPersonaDirty(true) }}
-                placeholder={t('角色身份信息（名字、种族、性格、emoji 等）…', 'Character identity (name, race, personality, emoji, etc.)…')}
-                style={textareaStyle}
-                rows={4}
-              />
-
-              <div style={{ ...labelStyle, marginTop: 4 }}>SOUL.md</div>
-              <textarea
-                value={soulContent}
-                onChange={(e) => { setSoulContent(e.target.value); setPersonaDirty(true) }}
-                placeholder={t('角色灵魂设定（说话风格、行为准则、背景故事等）…', 'Character soul (speaking style, behavior, backstory, etc.)…')}
-                style={textareaStyle}
-                rows={6}
-              />
-
-              <div style={{ display: 'flex', gap: 4, marginTop: 8 }}>
-                <button
-                  onClick={generatePersona}
-                  disabled={generating || !captureVrmScreenshot}
-                  style={{
-                    ...applyBtnStyle,
-                    flex: 1,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 4,
-                    background: generating ? 'rgba(100, 160, 255, 0.3)' : 'rgba(160, 120, 255, 0.5)',
-                  }}
-                  title={t('根据当前模型截图自动生成人设', 'Auto-generate persona from model screenshot')}
-                >
-                  {generating
-                    ? <Loader size={14} style={{ animation: 'spin 1s linear infinite' }} />
-                    : <Sparkles size={14} />}
-                  {generating ? t('生成中…', 'Generating…') : t('一键生成人设', 'Auto Generate')}
-                </button>
-                <button
-                  onClick={savePersona}
-                  disabled={!personaDirty || personaSaving}
-                  style={{
-                    ...applyBtnStyle,
-                    opacity: personaDirty ? 1 : 0.4,
-                  }}
-                >
-                  {personaSaving ? t('保存中…', 'Saving…') : t('保存', 'Save')}
-                </button>
-              </div>
-              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', marginTop: 4 }}>
-                {t('关联工作区根目录的 IDENTITY.md 和 SOUL.md', 'Linked to IDENTITY.md and SOUL.md in workspace root')}
-              </div>
-            </div>
-          )}
-
-          {tab === 'dance' && (
-            <div style={sectionStyle}>
-              <div style={labelStyle}>{t('内置舞蹈', 'Built-in Dances')}</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {Object.entries(dancePresets).map(([id, preset]) => (
-                  <div
-                    key={id}
-                    onClick={() => onDanceChange(id)}
-                    style={{
-                      ...modelBtnStyle,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '8px 12px',
-                      fontSize: 13,
-                      background: currentDance === id ? 'rgba(100, 160, 255, 0.4)' : 'rgba(255, 255, 255, 0.08)',
-                      borderColor: currentDance === id ? 'rgba(100, 160, 255, 0.6)' : 'rgba(255, 255, 255, 0.15)',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <Music size={14} style={{ opacity: 0.6 }} />
-                      <span>{preset.label}</span>
-                    </div>
-                    {preset.bgm && (
-                      <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>{t('含BGM', 'w/ BGM')}</span>
-                    )}
-                  </div>
-                ))}
-              </div>
-
-              {customDances.length > 0 && (
-                <div style={{ marginTop: 12 }}>
-                  <div style={labelStyle}>{t('自定义舞蹈', 'Custom Dances')}</div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    {customDances.map((dance) => (
-                      <div
-                        key={dance.id}
-                        onClick={() => onDanceChange(`custom:${dance.id}`, {
-                          label: dance.label,
-                          type: 'vmd',
-                          url: dance.vmdUrl,
-                          bgm: dance.bgmUrl,
-                        })}
-                        style={{
-                          ...modelBtnStyle,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          padding: '8px 10px',
-                          fontSize: 13,
-                          background: currentDance === `custom:${dance.id}` ? 'rgba(100, 160, 255, 0.4)' : 'rgba(255, 255, 255, 0.08)',
-                          borderColor: currentDance === `custom:${dance.id}` ? 'rgba(100, 160, 255, 0.6)' : 'rgba(255, 255, 255, 0.15)',
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <Music size={14} style={{ opacity: 0.6 }} />
-                          <div>
-                            <div>{dance.label}</div>
-                            {dance.bgmUrl && (
-                              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', marginTop: 1 }}>{t('含BGM', 'w/ BGM')}</div>
-                            )}
-                          </div>
-                        </div>
-                        <div
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            fetch(`${FRIEND_API}/dance/delete`, {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ id: dance.id }),
-                            })
-                              .then(() => {
-                                fetchCustomDances()
-                                if (currentDance === `custom:${dance.id}`) onDanceChange('love')
-                              })
-                              .catch(() => {})
-                          }}
-                          style={{
-                            width: 28,
-                            height: 28,
-                            borderRadius: 6,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            background: 'rgba(255, 255, 255, 0.08)',
-                            cursor: 'pointer',
-                            flexShrink: 0,
-                            opacity: 0.5,
-                          }}
-                          title={t('删除', 'Delete')}
-                        >
-                          <Trash2 size={13} />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div style={{ marginTop: 12 }}>
-                <div style={labelStyle}>{t('导入自定义舞蹈', 'Import Custom Dance')}</div>
-                <button
-                  disabled={importingDance}
-                  onClick={async () => {
-                    setImportingDance(true)
-                    try {
-                      // Pick VMD file
-                      const vmdFile = await pickFile('.vmd')
-                      if (!vmdFile) { setImportingDance(false); return }
-
-                      // Import VMD
-                      const vmdFormData = new FormData()
-                      vmdFormData.append('file', vmdFile)
-                      const vmdRes = await fetch(`${FRIEND_API}/dance/import`, {
-                        method: 'POST',
-                        body: vmdFormData,
-                      })
-                      const vmdData = await vmdRes.json()
-                      if (!vmdData.ok) throw new Error(vmdData.error)
-
-                      // Ask for optional BGM
-                      const mp3File = await pickFile('.mp3')
-                      if (mp3File) {
-                        const mp3FormData = new FormData()
-                        mp3FormData.append('file', mp3File)
-                        await fetch(`${FRIEND_API}/dance/import`, {
-                          method: 'POST',
-                          body: mp3FormData,
-                        })
-                      }
-
-                      fetchCustomDances()
-                    } catch (err) {
-                      console.warn('Import dance failed:', err)
-                    }
-                    setImportingDance(false)
-                  }}
-                  style={{ ...applyBtnStyle, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
-                >
-                  {importingDance
-                    ? <Loader size={14} style={{ animation: 'spin 1s linear infinite' }} />
-                    : <Upload size={14} />}
-                  {importingDance ? t('导入中…', 'Importing…') : t('选择 VMD 舞蹈文件…', 'Select VMD dance file…')}
-                </button>
-                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', marginTop: 4 }}>
-                  {t('选择 .vmd 舞蹈文件后，可选择配套 .mp3 音乐文件', 'Select a .vmd dance file, then optionally pick a matching .mp3')}
-                </div>
-              </div>
             </div>
           )}
         </div>
+      </div>
+    </div>
+  )
+}
+
+function LangToggle({ language, onChange, t }: { language: 'zh' | 'en'; onChange: (v: 'zh' | 'en') => void; t: (zh: string, en: string) => string }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <span style={{ fontSize: 14 }}>{t('语言', 'Language')}</span>
+      <div style={{ display: 'flex', gap: 4 }}>
+        {(['zh', 'en'] as const).map((l) => (
+          <button
+            key={l}
+            onClick={() => onChange(l)}
+            style={{
+              ...smallBtnStyle,
+              background: language === l ? 'rgba(100, 160, 255, 0.4)' : 'rgba(255, 255, 255, 0.08)',
+              borderColor: language === l ? 'rgba(100, 160, 255, 0.6)' : 'rgba(255, 255, 255, 0.15)',
+            }}
+          >
+            {l === 'zh' ? '中文' : 'English'}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function VolumeControl({ volume, onChange, t }: { volume: number; onChange: (v: number) => void; t: (zh: string, en: string) => string }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <span style={{ fontSize: 14 }}>{t('音量', 'Volume')}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={Math.round(volume * 100)}
+          onChange={(e) => onChange(Number(e.target.value) / 100)}
+          style={{ width: 100, accentColor: 'rgba(100, 160, 255, 0.8)' }}
+        />
+        <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', width: 28, textAlign: 'right' }}>{Math.round(volume * 100)}</span>
+      </div>
+    </div>
+  )
+}
+
+function TrackingControl({ tracking, onChange, t }: { tracking: 'mouse' | 'camera'; onChange: (v: 'mouse' | 'camera') => void; t: (zh: string, en: string) => string }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <span style={{ fontSize: 14 }}>{t('视线跟随', 'Eye Tracking')}</span>
+      <div style={{ display: 'flex', gap: 4 }}>
+        {(['mouse', 'camera'] as const).map((m) => (
+          <button
+            key={m}
+            onClick={() => onChange(m)}
+            style={{
+              ...smallBtnStyle,
+              background: tracking === m ? 'rgba(100, 160, 255, 0.4)' : 'rgba(255, 255, 255, 0.08)',
+              borderColor: tracking === m ? 'rgba(100, 160, 255, 0.6)' : 'rgba(255, 255, 255, 0.15)',
+            }}
+          >
+            {m === 'mouse' ? t('鼠标', 'Mouse') : t('镜头', 'Camera')}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function UIAlignControl({ uiAlign, onChange, t }: { uiAlign: 'left' | 'right'; onChange: (v: 'left' | 'right') => void; t: (zh: string, en: string) => string }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <span style={{ fontSize: 14 }}>{t('UI位置', 'UI Position')}</span>
+      <div style={{ display: 'flex', gap: 4 }}>
+        {(['left', 'right'] as const).map((a) => (
+          <button
+            key={a}
+            onClick={() => onChange(a)}
+            style={{
+              ...smallBtnStyle,
+              background: uiAlign === a ? 'rgba(100, 160, 255, 0.4)' : 'rgba(255, 255, 255, 0.08)',
+              borderColor: uiAlign === a ? 'rgba(100, 160, 255, 0.6)' : 'rgba(255, 255, 255, 0.15)',
+            }}
+          >
+            {a === 'left' ? t('靠左', 'Left') : t('靠右', 'Right')}
+          </button>
+        ))}
       </div>
     </div>
   )
@@ -1024,30 +654,4 @@ const selectStyle: React.CSSProperties = {
   padding: '0 8px',
   outline: 'none',
   fontFamily: '"Segoe UI", "Microsoft YaHei", sans-serif',
-}
-
-const textareaStyle: React.CSSProperties = {
-  width: '100%',
-  boxSizing: 'border-box',
-  border: '1px solid rgba(255, 255, 255, 0.2)',
-  borderRadius: 6,
-  background: 'rgba(0, 0, 0, 0.3)',
-  color: '#fff',
-  fontSize: 12,
-  lineHeight: '1.5',
-  padding: '6px 8px',
-  outline: 'none',
-  fontFamily: '"Segoe UI", "Microsoft YaHei", sans-serif',
-  resize: 'vertical',
-}
-
-const applyBtnStyle: React.CSSProperties = {
-  height: 32,
-  padding: '0 12px',
-  border: 'none',
-  borderRadius: 6,
-  background: 'rgba(100, 160, 255, 0.5)',
-  color: '#fff',
-  fontSize: 13,
-  cursor: 'pointer',
 }

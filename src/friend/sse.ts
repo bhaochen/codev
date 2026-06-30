@@ -38,6 +38,7 @@ export type VrmBroadcastPayload = {
   text?: string;
   emotion?: string;
   emotionIntensity?: number;
+  action?: string;
   audioUrl?: string;
   audioIndex?: number;
   clearText?: boolean;

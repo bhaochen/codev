@@ -80,7 +80,7 @@ import { ReadMcpResourceTool } from './tools/ReadMcpResourceTool/ReadMcpResource
 import { ToolSearchTool } from './tools/ToolSearchTool/ToolSearchTool.js'
 import { DebugSessionTool } from './tools/DebugSessionTool.js'
 import { FriendEmotionTool } from './tools/FriendEmotionTool.js'
-import { FriendScreenObserveTool } from './tools/FriendScreenObserveTool.js'
+// Friend ScreenObserve removed — voice + emotion only
 import { EnterPlanModeTool } from './tools/EnterPlanModeTool/EnterPlanModeTool.js'
 import { EnterWorktreeTool } from './tools/EnterWorktreeTool/EnterWorktreeTool.js'
 import { ExitWorktreeTool } from './tools/ExitWorktreeTool/ExitWorktreeTool.js'
@@ -252,7 +252,6 @@ export function getAllBaseTools(): Tools {
     DebugSessionTool,
     // Friend VRM desktop pet tools — enabled when the plugin is active
     FriendEmotionTool,
-    FriendScreenObserveTool,
     ListMcpResourcesTool,
     ReadMcpResourceTool,
     // Include ToolSearchTool when tool search might be enabled (optimistic check)
