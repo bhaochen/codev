@@ -48,6 +48,7 @@
 | 文档 | 说明 |
 |------|------|
 | [HTTP/WS 服务器](server/overview.md) | Bun.serve()、REST API、WebSocket、服务层 |
+| [Computer Use 系统](server/computer-use.md) | Python Runtime 辅助脚本架构、跨平台设计、JSON 通信协议 |
 | [Provider 代理](server/proxy-provider.md) | Anthropic ↔ OpenAI 协议转换、多提供商支持 |
 
 ### 后端服务

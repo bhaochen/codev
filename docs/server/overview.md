@@ -107,7 +107,7 @@ VersperClaw 桌面服务器是一个同进程 HTTP + WebSocket 服务器，基�
 | `/api/teams` | 团队配置 |
 | `/api/providers` | Provider 提供商配置 |
 | `/api/adapters` | 适配器管理 |
-| `/api/computer-use` | Computer Use 功能控制 |
+| `/api/computer-use` | [Computer Use 功能控制](computer-use.md) — 环境检测、Python venv 安装、桌面控制 |
 | `/api/haha-oauth` | haha 自定义 OAuth 认证 |
 | `/api/haha-openai-oauth` | haha OpenAI OAuth 认证 |
 | `/api/h5-access` | H5 访问策略 |
