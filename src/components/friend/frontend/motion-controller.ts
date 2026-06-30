@@ -187,9 +187,16 @@ export class MotionController {
     const preset = actionPresets[name]
     if (!preset) { console.warn('[Motion] unknown action:', name); return }
 
-    // If already playing an action, queue instead of dropping
-    if (this._actionPlaying) {
-      // Avoid duplicate consecutive queued items
+    // If currently holding (pose frozen, not actively animating), interrupt hold
+    // and play the new action immediately. This prevents LLM text-message actions
+    // from being blocked by a stale 10s hold timer.
+    if (this._actionPlaying && this.holdTimer !== null) {
+      this.clearTimers()
+      this._actionPlaying = false
+      // fall through to play new action
+    } else if (this._actionPlaying) {
+      // Normal queue: only when an action is actively animating (e.g. two rapid
+      // LLM tool calls). Hold does NOT queue — it interrupts.
       const last = this.actionQueue[this.actionQueue.length - 1]
       if (!last || last.name !== name) {
         this.actionQueue.push({ name, hold })
@@ -247,6 +254,15 @@ export class MotionController {
     if (hold) {
       this.holdTimer = setTimeout(() => {
         if (gen !== this._actionGeneration) return
+        this.clearTimers()
+        // Drain any actions queued during hold before going idle —
+        // prevents the queue leak where LLM actions are silently dropped.
+        const queued = this.actionQueue.shift()
+        if (queued) {
+          this._actionPlaying = false
+          this.playAction(queued.name, queued.hold)
+          return
+        }
         this._actionPlaying = false
         this.startIdle()
       }, 10000)

@@ -14,6 +14,8 @@ import { Menu, Move, Rotate3D, EyeOff, Settings, RefreshCw, Pin } from 'lucide-r
 const DEFAULT_MODEL = '/friend/model1.vrm'
 
 // 情绪 → 动作映射
+// 只有有明确肢体动作关联的情绪才映射；neutral/relaxed 不绑动作，
+// 避免角色在无明确意图时做出违和姿势。
 const emotionActionMap: Record<string, string> = {
   think: 'scratchHead',
   question: 'point',
@@ -22,12 +24,12 @@ const emotionActionMap: Record<string, string> = {
   surprised: 'excited',
   angry: 'angry',
   awkward: 'playFingers',
-  sad: 'shy',
   love: 'shy',
   flirty: 'shy',
   greeting: 'greeting',
-  relaxed: 'salute',
-  neutral: 'salute',
+  sad: '',
+  relaxed: '',
+  neutral: '',
 }
 
 const btnStyle: React.CSSProperties = {
@@ -122,7 +124,10 @@ export default function App() {
         if (action) sceneRef.current.playAction(action)
       } else {
         sceneRef.current.setEmotionWithReset(msg.emotion, msg.emotionDuration ?? 10000, msg.emotionIntensity)
-        if (action) sceneRef.current.playAction(action, true)
+        // No hold — action plays once, emotion timer handles duration.
+        // Hold would lock _actionPlaying for 10s, blocking text-message actions
+        // when friend_emotion tool fires before broadcastResponse.
+        if (action) sceneRef.current.playAction(action)
       }
     }
   }, [])
