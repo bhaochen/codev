@@ -97,9 +97,12 @@ cp VersperClaw ~/.local/bin
     "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "200000",
     "ENABLE_TOOL_SEARCH": "true",
     "TAVILY_API_KEY": "",
-  # "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "0", default 1 
+    # "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "0", default 1 
     "teammateMode": "tmux", # or in-process
     "groqApiKey": "gsk_" # https://console.groq.com
+    # map locationtool
+    "AMAP_API_KEY": "b_",
+    "GOOGLE_MAPS_API_KEY": "AI_"
   }
 
   # set auto-dream config
