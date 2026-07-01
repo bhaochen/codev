@@ -413,30 +413,45 @@ async function amapSearchPlaces(
   // Use pre-resolved coordinates if available, otherwise geocode
   const resolved = geo ?? await amapGeocode(location)
 
-  const params = new URLSearchParams({
-    key,
-    location: `${resolved.lng},${resolved.lat}`,
-    radius: String(radius || 5000),
-    offset: '25',
-    page: '1',
-    extensions: 'all',
-  })
-  if (query) params.set('keywords', query)
-  if (type) params.set('types', type)
+  const allPois: any[] = []
+  const maxPages = 20 // 高德最多返回 10000 条 (offset 10000 × page 1 就夠了，分頁當備用)
+  const pageSize = 1000
 
-  const res = await fetch(`https://restapi.amap.com/v3/place/around?${params}`, {
-    headers: { 'Accept': 'application/json' },
-    signal: AbortSignal.timeout(15000),
-  })
+  for (let page = 1; page <= maxPages; page++) {
+    const params = new URLSearchParams({
+      key,
+      location: `${resolved.lng},${resolved.lat}`,
+      radius: String(radius || 5000),
+      offset: String(pageSize),
+      page: String(page),
+      extensions: 'all',
+    })
+    if (query) params.set('keywords', query)
+    if (type) params.set('types', type)
 
-  if (!res.ok) throw new Error(`Amap around search HTTP ${res.status}`)
-  const data = await res.json() as any
+    const res = await fetch(`https://restapi.amap.com/v3/place/around?${params}`, {
+      headers: { 'Accept': 'application/json' },
+      signal: AbortSignal.timeout(15000),
+    })
 
-  if (data.status !== '1') {
-    throw new Error(`Amap search failed: ${data.info}`)
+    if (!res.ok) throw new Error(`Amap around search HTTP ${res.status}`)
+    const data = await res.json() as any
+
+    if (data.status !== '1') {
+      throw new Error(`Amap search failed: ${data.info}`)
+    }
+
+    const pois = data.pois || []
+    allPois.push(...pois)
+
+    // 如果這頁沒滿 pageSize，或已達總數，停止翻頁
+    if (pois.length < pageSize || allPois.length >= Number(data.count || 0)) break
+
+    // 高德限制每秒 3 次請求，稍微等一下
+    await new Promise(r => setTimeout(r, 350))
   }
 
-  return (data.pois || []).map((poi: any) => ({
+  return allPois.map((poi: any) => ({
     name: poi.name,
     address: poi.address || '',
     lat: parseFloat(poi.location?.split(',')[1] || '0'),
@@ -574,16 +589,30 @@ async function googleSearchPlaces(
 ): Promise<PlaceResult[]> {
   const key = getGoogleKey()
   const resolved = geo ?? await googleGeocode(location, language)
+  const allPlaces: any[] = []
+  const baseUrl = query
+    ? 'https://maps.googleapis.com/maps/api/place/textsearch/json'
+    : 'https://maps.googleapis.com/maps/api/place/nearbysearch/json'
 
-  const params = new URLSearchParams({
-    key,
-    language: language || 'zh-CN',
-  })
+  let nextPageToken: string | undefined
 
-  if (query) {
-    // Text search for specific queries
-    params.set('query', `${query} in ${location}`)
-    const res = await fetch(`https://maps.googleapis.com/maps/api/place/textsearch/json?${params}`, {
+  for (let page = 0; page < 3; page++) { // Google 最多 60 條（3 頁 × 20）
+    const params = new URLSearchParams({ key, language: language || 'zh-CN' })
+
+    if (page === 0) {
+      if (query) {
+        params.set('query', `${query} in ${location}`)
+      } else {
+        params.set('location', `${resolved.lat},${resolved.lng}`)
+        params.set('radius', String(radius || 5000))
+      }
+    } else if (nextPageToken) {
+      // 翻頁需要等 2 秒讓 token 生效
+      await new Promise(r => setTimeout(r, 2000))
+      params.set('pagetoken', nextPageToken)
+    }
+
+    const res = await fetch(`${baseUrl}?${params}`, {
       headers: { 'Accept': 'application/json' },
       signal: AbortSignal.timeout(15000),
     })
@@ -591,32 +620,20 @@ async function googleSearchPlaces(
     if (!res.ok) throw new Error(`Google places search HTTP ${res.status}`)
     const data = await res.json() as any
     if (data.status !== 'OK') {
+      if (allPlaces.length > 0) break // 翻頁失敗但已有結果，繼續
       throw new Error(`Google places search failed: ${data.status} — ${data.error_message || ''}`)
     }
 
-    return parseGooglePlacesResults(data.results, resolved)
+    allPlaces.push(...(data.results || []))
+    nextPageToken = data.next_page_token
+    if (!nextPageToken) break
   }
 
-  // Nearby search
-  params.set('location', `${resolved.lat},${resolved.lng}`)
-  params.set('radius', String(radius || 5000))
-
-  const res = await fetch(`https://maps.googleapis.com/maps/api/place/nearbysearch/json?${params}`, {
-    headers: { 'Accept': 'application/json' },
-    signal: AbortSignal.timeout(15000),
-  })
-
-  if (!res.ok) throw new Error(`Google nearby search HTTP ${res.status}`)
-  const data = await res.json() as any
-  if (data.status !== 'OK') {
-    throw new Error(`Google nearby search failed: ${data.status} — ${data.error_message || ''}`)
-  }
-
-  return parseGooglePlacesResults(data.results, resolved)
+  return parseGooglePlacesResults(allPlaces, resolved)
 }
 
 function parseGooglePlacesResults(results: any[], geo: LocationResult): PlaceResult[] {
-  return (results || []).slice(0, 20).map((place: any) => ({
+  return (results || []).map((place: any) => ({
     name: place.name,
     address: place.formatted_address || place.vicinity || '',
     lat: place.geometry?.location?.lat || geo.lat,
@@ -626,7 +643,7 @@ function parseGooglePlacesResults(results: any[], geo: LocationResult): PlaceRes
     phone: place.formatted_phone_number,
     website: place.website,
     openingHours: place.opening_hours?.open_now ? 'Open now' : undefined,
-    photos: (place.photos || []).slice(0, 3).map((p: any) =>
+    photos: (place.photos || []).map((p: any) =>
       `https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photoreference=${p.photo_reference}&key=${getGoogleKey()}`
     ),
     cost: place.price_level ? '💰'.repeat(place.price_level) : undefined,
