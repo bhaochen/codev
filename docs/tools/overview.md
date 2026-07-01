@@ -294,6 +294,8 @@ WebSearchTool 支持两个搜索后端：
 
 **配合搜索工具：** Prompt 层面指导模型在获取地点后，可调用 WebSearchTool 查攻略/评价，或用 WebFetchTool 获取详情页内容。
 
+**搜索结果数量：** 高德搜索默认翻页至全部结果（每页 1000 条，最多 20 页 ≈ 10000 条）；Google 搜索使用 `next_page_token` 翻页（最多 60 条，Google 上限）。`locate` 动作优先尝试 Amap/Google WiFi 指纹定位，最后回退到 IP 定位（3 个 IP 服务）。
+
 **输入参数：** `action` (必填), `location` (必填), `destination`, `query`, `radius` (默认 5000m), `mode` (driving/walking/transit/bicycling), `waypoints`, `type` (Amap POI 类型过滤), `region` (强制指定), `language`
 
 相关文件：
