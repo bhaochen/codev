@@ -80,6 +80,7 @@ import { ReadMcpResourceTool } from './tools/ReadMcpResourceTool/ReadMcpResource
 import { ToolSearchTool } from './tools/ToolSearchTool/ToolSearchTool.js'
 import { DebugSessionTool } from './tools/DebugSessionTool.js'
 import { FriendEmotionTool } from './tools/FriendEmotionTool.js'
+import { LocationTool } from './tools/LocationTool/LocationTool.js'
 // Friend ScreenObserve removed — voice + emotion only
 import { EnterPlanModeTool } from './tools/EnterPlanModeTool/EnterPlanModeTool.js'
 import { EnterWorktreeTool } from './tools/EnterWorktreeTool/EnterWorktreeTool.js'
@@ -252,6 +253,8 @@ export function getAllBaseTools(): Tools {
     DebugSessionTool,
     // Friend VRM desktop pet tools — enabled when the plugin is active
     FriendEmotionTool,
+    // Location & mapping tool — uses Amap (China) or Google Maps (international)
+    LocationTool,
     ListMcpResourcesTool,
     ReadMcpResourceTool,
     // Include ToolSearchTool when tool search might be enabled (optimistic check)

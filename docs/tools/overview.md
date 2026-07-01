@@ -202,6 +202,7 @@ LLM 请求工具调用
 | `SkillToolProgress` | 技能执行进度 | SkillTool |
 | `TaskOutputProgress` | 后台任务输出进度 | TaskOutputTool |
 | `WebSearchProgress` | 网络搜索进度 | WebSearchTool |
+| `LocationToolProgress` | 地理位置搜索进度 | LocationTool |
 | `REPLToolProgress` | REPL 工具进度 | REPLTool |
 | `HookProgress` | 钩子执行进度 | Hooks |
 
@@ -267,3 +268,61 @@ WebSearchTool 支持两个搜索后端：
 - `/home/yuki/Code/Agent/VersperClaw/src/tools.ts` — 工具注册与过滤
 - `/home/yuki/Code/Agent/VersperClaw/src/services/tools/toolExecution.ts` — 执行引擎
 - `/home/yuki/Code/Agent/VersperClaw/src/services/tools/toolHooks.ts` — 工具钩子
+
+---
+
+### LocationTool
+
+地理位置与地图搜索工具。根据地区自动选择地图服务商：
+
+| 地区 | 服务商 | 环境变量 |
+|------|--------|----------|
+| 中国大陆 | 高德地图 (Amap) | `AMAP_API_KEY` |
+| 海外 | Google Maps | `GOOGLE_MAPS_API_KEY` |
+
+**支持的操作：**
+
+| 动作 | 功能 | Amap API | Google API |
+|------|------|----------|------------|
+| `locate` | IP 地理定位 (无需 location 参数) | — | — |
+| `geocode` | 地址→坐标 | 地理编码 | Geocoding |
+| `search_places` | 周边/关键词搜索 POI | POI 周边搜索 | Places / Nearby Search |
+| `get_directions` | 两点间路线规划 | 驾车/公交路径规划 | Directions |
+| `plan_trip` | 多途经点行程规划 | 分段路径拼接 | 多航点 Directions |
+
+**地区自动检测：** 含中文字符或已知中国城市名 → Amap，否则 → Google。支持 `region` 参数强制指定。
+
+**配合搜索工具：** Prompt 层面指导模型在获取地点后，可调用 WebSearchTool 查攻略/评价，或用 WebFetchTool 获取详情页内容。
+
+**输入参数：** `action` (必填), `location` (必填), `destination`, `query`, `radius` (默认 5000m), `mode` (driving/walking/transit/bicycling), `waypoints`, `type` (Amap POI 类型过滤), `region` (强制指定), `language`
+
+相关文件：
+- `/home/yuki/Code/Agent/VersperClaw/src/tools/LocationTool/LocationTool.ts` — 主工具逻辑
+- `/home/yuki/Code/Agent/VersperClaw/src/tools/LocationTool/prompt.ts` — 提示词
+- `/home/yuki/Code/Agent/VersperClaw/src/tools/LocationTool/UI.tsx` — 渲染组件
+
+#### API Key 申请指南
+
+**高德地图 API Key（中国大陆用）**
+
+1. **注册账号** — 打开 [高德开放平台](https://lbs.amap.com/)，点击右上角「注册」
+2. **创建应用** — 登录后进入控制台 → 「应用管理」→ 「创建新应用」
+3. **添加 Key** — 在创建的应用中点击「添加 Key」→ 服务平台选择 **「Web 服务」**
+4. **获取 Key** — 创建成功后复制 Key，设为环境变量：
+   ```bash
+   export AMAP_API_KEY=你的高德Key
+   ```
+
+**Google Maps API Key（海外用）**
+
+1. **创建项目** — 打开 [Google Cloud Console](https://console.cloud.google.com/)，创建新项目
+2. **启用 API** — 进入「API 和服务」→「库」，搜索并启用以下 API：
+   - **Geocoding API**（地址 → 坐标）
+   - **Places API**（地点搜索）
+   - **Directions API**（路线规划）
+3. **创建凭据** — 「API 和服务」→「凭据」→「创建凭据」→「API 密钥」
+4. **限制密钥**（强烈建议）— 在凭据页面设置 API 限制，仅允许上面启用的三个 API，避免滥用
+5. 设为环境变量：
+   ```bash
+   export GOOGLE_MAPS_API_KEY=你的GoogleKey
+   ```

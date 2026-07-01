@@ -35,6 +35,7 @@
 |----------|------|----------|----------|
 | **WebSearch** (WebSearchTool) | 搜索 | 执行网络搜索。支持 Tavily API 和本地 SearXNG 两种后端（优先本地 SearXNG） | `query` (必填, 最少 2 字符) |
 | **WebFetch** (WebFetchTool) | 搜索 | 抓取指定 URL 的内容，并对内容执行 prompt 处理（提取、总结等） | `url` (必填), `prompt` (必填) |
+| **LocationTool** (LocationTool) | 搜索 | 地理位置与地图搜索。中国大陆使用高德地图，海外使用 Google Maps。支持地理编码、POI 搜索、路线规划、行程规划 | `action` (必填), `location` (必填), `destination`, `query`, `radius`, `mode`, `waypoints`, `type`, `region`, `language` |
 | **ToolSearch** (ToolSearchTool) | 搜索 | 搜索延迟加载的工具。当 ToolSearch 启用时，部分工具的 schema 不会随初始提示发送，需通过此工具查询后再调用 | `query` (必填, 支持 "select:name" 精确选择), `max_results` (默认 5) |
 
 ---
