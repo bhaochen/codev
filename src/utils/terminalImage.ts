@@ -1,3 +1,4 @@
+import { execFileSync } from 'child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -5,7 +6,7 @@ import { Buffer } from 'buffer'
 import { env } from './env.js'
 import { execFileNoThrow } from './execFileNoThrow.js'
 import { wrapForMultiplexer } from '../ink/termio/osc.js'
-import { which } from './which.js'
+import { which, whichSync } from './which.js'
 
 export type ImageProtocol = 'kitty' | null
 
@@ -188,6 +189,73 @@ export async function renderImageWithTimg(
         )
         if (half.code === 0 && half.stdout) {
           result = half.stdout
+        }
+      }
+    } finally {
+      try {
+        rmSync(tmpDir, { recursive: true, force: true })
+      } catch {
+        // ignore cleanup errors
+      }
+    }
+
+    return result
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Synchronous version of renderImageWithTimg. Blocks the event loop while
+ * spawning timg, which prevents Ink from rendering between the tool call
+ * and the image output — eliminating cursor-position races.
+ *
+ * @see renderImageWithTimg
+ */
+export function renderImageWithTimgSync(
+  buffer: Buffer,
+  format: string,
+  columns?: number,
+  rows?: number,
+): string | null {
+  try {
+    const timgPath = whichSync('timg')
+    if (!timgPath) return null
+
+    const cols = columns ?? process.stdout.columns ?? 80
+    const termRows = rows ?? process.stdout.rows ?? 40
+    const maxRows = Math.max(10, Math.floor(termRows * 0.5))
+    const tmpDir = mkdtempSync(join(tmpdir(), 'versperclaw-timg-'))
+    const ext = format === 'jpeg' ? 'jpg' : format
+    const tmpFile = join(tmpDir, `image.${ext}`)
+    let result: string | null = null
+
+    try {
+      writeFileSync(tmpFile, buffer)
+
+      // Try quarter blocks first (4 pixels per cell, better quality)
+      try {
+        const stdout = execFileSync(
+          timgPath,
+          ['-p', 'q', '-g', `${cols}x${maxRows}`, tmpFile],
+          { encoding: 'utf8', timeout: 15000, maxBuffer: 10 * 1024 * 1024 },
+        )
+        if (stdout) result = stdout
+      } catch {
+        // fall through to half blocks
+      }
+
+      // Fallback to half blocks (2 pixels per cell, max compatibility)
+      if (!result) {
+        try {
+          const stdout = execFileSync(
+            timgPath,
+            ['-p', 'h', '-g', `${cols}x${maxRows}`, tmpFile],
+            { encoding: 'utf8', timeout: 15000, maxBuffer: 10 * 1024 * 1024 },
+          )
+          if (stdout) result = stdout
+        } catch {
+          // ignored
         }
       }
     } finally {
