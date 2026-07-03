@@ -704,29 +704,67 @@ function writeLineToScreen(
               break
             }
           }
+        } else if (nextChar === '_') {
+          // APC (Application Program Command): pass through to screen
+          // buffer. Terminal receives the raw \x1b_G...\x1b\\ sequence
+          // and interprets it as a Kitty graphics protocol command,
+          // rendering the native image at this position within Ink's
+          // layout — no \x1b[H or writeRaw positioning needed.
+          setCellAt(screen, offsetX, y, {
+            char: '\x1b',
+            styleId: stylePool.none,
+            width: CellWidth.Narrow,
+            hyperlink: undefined,
+          })
+          offsetX++
+          setCellAt(screen, offsetX, y, {
+            char: '_',
+            styleId: stylePool.none,
+            width: CellWidth.Narrow,
+            hyperlink: undefined,
+          })
+          offsetX++
+          charIdx++ // skip past ESC
+          while (charIdx < characters.length - 1) {
+            charIdx++
+            const c = characters[charIdx]?.value
+            if (c === undefined) break
+            setCellAt(screen, offsetX, y, {
+              char: c,
+              styleId: stylePool.none,
+              width: CellWidth.Narrow,
+              hyperlink: undefined,
+            })
+            offsetX++
+            if (c === '\x07') break
+            if (c === '\x1b') {
+              const nextC = characters[charIdx + 1]?.value
+              if (nextC === '\\') {
+                charIdx++
+                setCellAt(screen, offsetX, y, {
+                  char: '\\',
+                  styleId: stylePool.none,
+                  width: CellWidth.Narrow,
+                  hyperlink: undefined,
+                })
+                offsetX++
+                break
+              }
+            }
+          }
         } else if (
           nextChar === ']' ||
           nextChar === 'P' ||
-          nextChar === '_' ||
           nextChar === '^' ||
           nextChar === 'X'
         ) {
-          // String-based sequences terminated by BEL (0x07) or ST (ESC \):
-          // - OSC: ESC ] ... (Operating System Command)
-          // - DCS: ESC P ... (Device Control String)
-          // - APC: ESC _ ... (Application Program Command)
-          // - PM:  ESC ^ ... (Privacy Message)
-          // - SOS: ESC X ... (Start of String)
+          // String-based sequences (OSC, DCS, PM, SOS) terminated by
+          // BEL (0x07) or ST (ESC \): skip as before.
           charIdx++ // skip the introducer char
           while (charIdx < characters.length - 1) {
             charIdx++
             const c = characters[charIdx]?.value
-            // BEL (0x07) terminates the sequence
-            if (c === '\x07') {
-              break
-            }
-            // ST (String Terminator) is ESC \
-            // When we see ESC, check if next char is backslash
+            if (c === '\x07') break
             if (c === '\x1b') {
               const nextC = characters[charIdx + 1]?.value
               if (nextC === '\\') {
