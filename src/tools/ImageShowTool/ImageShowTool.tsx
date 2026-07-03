@@ -4,12 +4,11 @@ import React, { useContext, useEffect, useRef } from 'react'
 import { z } from 'zod/v4'
 import { RawAnsi, Text } from '../../ink.js'
 import { TerminalWriteContext } from '../../ink/useTerminalNotification.js'
+import { wrapForMultiplexer } from '../../ink/termio/osc.js'
 import { buildTool, type ToolDef } from '../../Tool.js'
 import { logForDebugging } from '../../utils/debug.js'
 import {
   detectImageProtocol,
-  encodeKittyImage,
-  isInsideTmux,
   renderImageWithTimgSync,
 } from '../../utils/terminalImage.js'
 
@@ -122,19 +121,15 @@ function getToolUseSummary(input: Partial<Input>): string | null {
 }
 
 /**
- * React component that renders the image via the Kitty graphics protocol
- * when the terminal naturally supports it (Kitty/Ghostty/WezTerm outside
- * tmux). timg fallback is rendered in-band via RawAnsi (in
- * renderToolResultMessage), so Ink knows the image dimensions and its
- * virtual cursor stays in sync with the terminal.
+ * Renders a pre-generated Kitty protocol image sequence by writing it
+ * directly to stdout via writeRaw (bypassing Ink's virtual DOM so the
+ * native image protocol reaches the terminal cleanly).
  */
 function TerminalImageDisplay({
-  base64,
-  format,
+  sequence,
   message,
 }: {
-  base64?: string
-  format?: string
+  sequence: string
   message: string
 }): React.ReactNode {
   const writeRaw = useContext(TerminalWriteContext)
@@ -143,21 +138,9 @@ function TerminalImageDisplay({
   useEffect(() => {
     if (renderedRef.current || !writeRaw) return
     renderedRef.current = true
-
-    // Kitty protocol: timg fallback is rendered in renderToolResultMessage
-    // via RawAnsi (in-band with Ink's virtual DOM), so Ink knows the image
-    // dimensions and cursor position stays correct.
-    // Only use Kitty when it can reach the terminal natively.
-    const protocol = detectImageProtocol()
-    if (protocol === 'kitty' && !isInsideTmux() && base64 && format) {
-      const buf = Buffer.from(base64, 'base64')
-      const sequence = encodeKittyImage(buf, format)
-      if (sequence) {
-        writeRaw(sequence + '\n')
-        logForDebugging('ImageShow: displayed via Kitty protocol')
-      }
-    }
-  }, [base64, format, writeRaw])
+    writeRaw(sequence + '\n')
+    logForDebugging('ImageShow: displayed via Kitty protocol (timg)')
+  }, [sequence, writeRaw])
 
   return <Text dimColor>{message}</Text>
 }
@@ -166,7 +149,7 @@ export const ImageShowTool = buildTool({
   name: IMAGE_TOOL_NAME,
   description:
     'Display an image (PNG/JPEG/GIF/WebP) directly in the terminal. ' +
-    'Uses the Kitty graphics protocol when available outside tmux, ' +
+    'Uses the Kitty graphics protocol via timg when the terminal supports it, ' +
     'or falls back to timg Unicode-block rendering for universal compatibility. ' +
     'Supports both URLs (https://) and local file paths. Images are shown inline above the tool result.',
 
@@ -191,7 +174,7 @@ export const ImageShowTool = buildTool({
   },
 
   async prompt(_options): Promise<string> {
-    return `ImageShow displays a PNG/JPEG/GIF/WebP image directly in the terminal. Uses the Kitty graphics protocol when available (outside tmux), or falls back to timg Unicode-block rendering for universal terminal compatibility. Supports local file paths (e.g. /tmp/image.png) and HTTPS URLs (e.g. https://example.com/image.png). The image is shown inline above the tool result.`
+    return `ImageShow displays a PNG/JPEG/GIF/WebP image directly in the terminal. Uses the Kitty graphics protocol via timg when the terminal supports it (Kitty, Ghostty, WezTerm, foot), or falls back to timg Unicode-block rendering for universal terminal compatibility. Supports local file paths (e.g. /tmp/image.png) and HTTPS URLs (e.g. https://example.com/image.png). The image is shown inline above the tool result.`
   },
 
   async checkPermissions(): Promise<{ behavior: 'allow' }> {
@@ -248,6 +231,7 @@ export const ImageShowTool = buildTool({
       message: string
       base64?: string
       format?: string
+      kittyOutput?: string
       timgOutput?: string
     },
     _progressMessages,
@@ -257,8 +241,20 @@ export const ImageShowTool = buildTool({
       return null
     }
 
-    // timg output rendered in-band via RawAnsi so Ink knows the image
-    // dimensions and its virtual cursor stays in sync with the terminal.
+    // Kitty protocol output rendered via writeRaw (out-of-band) for native
+    // terminal image rendering. The text message tells Ink the image exists
+    // so it doesn't leave a blank gap.
+    if (content.kittyOutput) {
+      return (
+        <TerminalImageDisplay
+          sequence={content.kittyOutput}
+          message={content.message}
+        />
+      )
+    }
+
+    // timg block-mode output rendered in-band via RawAnsi so Ink knows the
+    // image dimensions and its virtual cursor stays in sync with the terminal.
     if (content.timgOutput) {
       // Strip cursor hide/show sequences that timg adds
       const cleaned = content.timgOutput.replace(/\x1b\[\?25[hl]/g, '')
@@ -272,13 +268,7 @@ export const ImageShowTool = buildTool({
       return <RawAnsi lines={lines} width={width} />
     }
 
-    return (
-      <TerminalImageDisplay
-        base64={content.base64}
-        format={content.format}
-        message={content.message}
-      />
-    )
+    return <Text dimColor>{content.message}</Text>
   },
 
   async call(input: Input): Promise<{
@@ -288,6 +278,7 @@ export const ImageShowTool = buildTool({
       imageData?: { base64: string; mediaType: string }
       base64?: string
       format?: string
+      kittyOutput?: string
       timgOutput?: string
     }
   }> {
@@ -320,18 +311,25 @@ export const ImageShowTool = buildTool({
 
     logForDebugging(`ImageShow: loaded ${buffer.length} byte ${format} image`)
 
-    // Generate timg Unicode-block rendering. The output is passed through
-    // to the Ink virtual DOM via RawAnsi in renderToolResultMessage, so
-    // Ink knows the image dimensions and its cursor stays in sync.
-    // Kitty protocol is separately handled in TerminalImageDisplay via
-    // writeRaw (only when the terminal natively supports it outside tmux).
+    // Try native Kitty protocol rendering via timg when the terminal supports it.
+    // timg's -p kitty produces Kitty protocol escape sequences natively,
+    // which are then wrapped for tmux passthrough if needed and written
+    // directly to stdout via writeRaw in TerminalImageDisplay.
+    // Falls back to Unicode block rendering for universal compatibility.
     const protocol = detectImageProtocol()
+    let kittyOutput: string | undefined
     let timgOutput: string | undefined
-    if (isInsideTmux() || protocol !== 'kitty') {
-      timgOutput = renderImageWithTimgSync(buffer, format) ?? undefined
-      if (timgOutput) {
-        logForDebugging('ImageShow: displayed via timg Unicode blocks (in-band with Ink)')
+
+    if (protocol === 'kitty') {
+      const rawKitty = renderImageWithTimgSync(buffer, format, undefined, undefined, 'kitty')
+      if (rawKitty) {
+        kittyOutput = wrapForMultiplexer(rawKitty)
+        logForDebugging('ImageShow: generated via timg Kitty protocol')
       }
+    }
+
+    if (!kittyOutput) {
+      timgOutput = renderImageWithTimgSync(buffer, format, undefined, undefined, 'blocks') ?? undefined
     }
 
     return {
@@ -344,6 +342,7 @@ export const ImageShowTool = buildTool({
         },
         base64: buffer.toString('base64'),
         format,
+        kittyOutput,
         timgOutput,
       },
     }
