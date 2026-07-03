@@ -80,6 +80,7 @@ import { ReadMcpResourceTool } from './tools/ReadMcpResourceTool/ReadMcpResource
 import { ToolSearchTool } from './tools/ToolSearchTool/ToolSearchTool.js'
 import { DebugSessionTool } from './tools/DebugSessionTool.js'
 import { FriendEmotionTool } from './tools/FriendEmotionTool.js'
+import { ImageShowTool } from './tools/ImageShowTool/ImageShowTool.js'
 import { LocationTool } from './tools/LocationTool/LocationTool.js'
 // Friend ScreenObserve removed — voice + emotion only
 import { EnterPlanModeTool } from './tools/EnterPlanModeTool/EnterPlanModeTool.js'
@@ -253,6 +254,8 @@ export function getAllBaseTools(): Tools {
     DebugSessionTool,
     // Friend VRM desktop pet tools — enabled when the plugin is active
     FriendEmotionTool,
+    // ImageShow — display images in terminal via Kitty graphics protocol
+    ImageShowTool,
     // Location & mapping tool — uses Amap (China) or Google Maps (international)
     LocationTool,
     ListMcpResourcesTool,

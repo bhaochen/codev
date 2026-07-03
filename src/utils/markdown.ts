@@ -137,6 +137,8 @@ export function formatToken(
     case 'hr':
       return '---'
     case 'image':
+      // Fallback: Markdown.tsx intercepts image tokens to render <InlineImage>,
+      // but if formatToken is called directly (e.g. from applyMarkdown), show URL.
       return token.href
     case 'link': {
       // Prevent mailto links from being displayed as clickable links
@@ -286,6 +288,14 @@ export function formatToken(
 // only) so hostnames like docs.github.io/guide#42 don't false-positive. Repo
 // segment allows dots (e.g. cc.kurs.web). Lookbehind is avoided — it defeats
 // YARR JIT in JSC.
+/**
+ * Regex for detecting bare image URLs in text.
+ * Matches URLs ending in common image extensions.
+ * Used by Markdown.tsx to split text tokens containing image URLs.
+ */
+export const IMAGE_URL_RE =
+  /https?:\/\/[^\s()<>]+?\.(?:png|jpg|jpeg|gif|webp)(?:[?#][^\s()<>]*?)?/gi
+
 const ISSUE_REF_PATTERN =
   /(^|[^\w./-])([A-Za-z0-9][\w-]*\/[A-Za-z0-9][\w.-]*)#(\d+)\b/g
 
