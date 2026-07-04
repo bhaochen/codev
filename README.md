@@ -6,6 +6,7 @@
 
 ## 📢 News
 
+- **2026-07-04** 🖼️ Inline Terminal Images — Native Kitty graphics protocol rendering via timg; WebSearch, WebFetch, and LocationTool results now display inline images directly in the TUI with cursor-safe hide/show and dynamic row layout.
 - **2026-07-01** 🗺️ LocationTool unlimited search — Amap places search now paginates (1000/page, up to 10000 results); Google Places uses `next_page_token` (up to 60); photo limits removed.
 - **2026-06-22** 🔊 Groq Whisper STT — CLI `/voice` now uses Groq Whisper API (cloud whisper-large-v3, no Python needed) and `node-edge-tts` for TTS, matching Friend's stack.
 - **2026-06-21** 🎙️ Groq Free STT — Friend voice input now supports Groq Whisper API as STT provider; TypeScript-only, no Python subprocess required.
