@@ -139,19 +139,27 @@ export const ImageShowTool = buildTool({
     }
 
     // Block-mode placeholder rendered in-band via RawAnsi so Ink knows the
-    // image dimensions and its virtual cursor stays in sync. The Kitty protocol
-    // APC escape sequence (when available) is prepended to the first block-mode
-    // line; output.ts's writeLineToScreen passes APC through to the screen
-    // buffer, so the terminal receives the native image at this position.
+    // image dimensions and its virtual cursor stays in sync. When Kitty
+    // protocol is available, visible block characters are replaced with
+    // spaces so the native image shows through transparently, while the
+    // line structure (row count, per-row visual width) is preserved for
+    // Ink DOM cursor tracking.
     if (content.timgOutput) {
       const cleaned = content.timgOutput.replace(/\x1b\[\?25[hl]/g, '')
-      const lines = cleaned.split('\n').filter(l => l.length > 0)
+      let lines = cleaned.split('\n').filter(l => l.length > 0)
       if (lines.length > 0) {
+        if (content.kittyOutput) {
+          // Strip ANSI SGR codes and replace non-space visible chars with
+          // spaces. The native Kitty image will show through these spaces.
+          lines = lines.map(l =>
+            l.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '').replace(/[^\s]/g, ' '),
+          )
+          const width = Math.max(...lines.map(l => l.length))
+          lines[0] = content.kittyOutput + lines[0]
+          return <RawAnsi lines={lines} width={width} />
+        }
         const ansiStrip = (s: string) => s.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
         const width = Math.max(...lines.map(l => ansiStrip(l).length))
-        if (content.kittyOutput) {
-          lines[0] = content.kittyOutput + lines[0]
-        }
         return <RawAnsi lines={lines} width={width} />
       }
     }

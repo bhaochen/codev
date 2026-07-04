@@ -302,22 +302,10 @@ export class LogUpdate {
     let currentStyleId = stylePool.none
     let currentHyperlink: Hyperlink = undefined
 
-    // Emit per-row raw writes (APC, Kitty protocol) before cell diff loop.
-    // Track which rows have been emitted to avoid duplicates across damage regions.
-    const emittedRawRows = new Set<number>()
-
     // First pass: render changes to existing rows (rows < prev.screen.height)
     let needsFullReset = false
     let resetTriggerY = -1
     diffEach(prev.screen, next.screen, (x, y, removed, added) => {
-      // Emit raw write (e.g. Kitty APC) for this row if not yet emitted
-      if (!emittedRawRows.has(y)) {
-        emittedRawRows.add(y)
-        const rawWrite = next.screen.rawWritesAtRow.get(y)
-        if (rawWrite) {
-          screen.diff.push({ type: 'stdout', content: rawWrite })
-        }
-      }
       // Skip new rows - we'll render them directly after
       if (growing && y >= prev.screen.height) {
         return
@@ -412,14 +400,8 @@ export class LogUpdate {
       undefined,
     )
 
-    // Handle growth: emit raw writes for new rows, then render cells
+    // Handle growth: render new rows directly (they naturally scroll the terminal)
     if (growing) {
-      for (let y = prev.screen.height; y < next.screen.height; y++) {
-        const rawWrite = next.screen.rawWritesAtRow.get(y)
-        if (rawWrite) {
-          screen.diff.push({ type: 'stdout', content: rawWrite })
-        }
-      }
       renderFrameSlice(
         screen,
         next,
@@ -427,6 +409,20 @@ export class LogUpdate {
         next.screen.height,
         stylePool,
       )
+    }
+
+    // Emit raw writes (APC/DCS) at viewport-adjusted positions so native
+    // images appear at the correct scroll position every frame, even when
+    // the diff loop skips unchanged rows. The CUP is rewritten to target
+    // a viewport-relative row instead of an absolute screen-buffer row.
+    for (const [row, rawWrite] of next.screen.rawWritesAtRow) {
+      if (row < viewportY) continue
+      const vpRow = row - viewportY
+      const adjusted = rawWrite.replace(
+        /^\x1b\[(\d+);(\d+)H/,
+        (_, __, col) => `\x1b[${vpRow + 1};${col}H`,
+      )
+      screen.diff.push({ type: 'stdout', content: adjusted })
     }
 
     // Restore cursor. Skipped in alt-screen: the cursor is hidden, its
@@ -536,6 +532,12 @@ function renderFrame(
   stylePool: StylePool,
 ): void {
   renderFrameSlice(screen, frame, 0, frame.screen.height, stylePool)
+  // Emit raw writes (APC/DCS) after cells so native images are drawn at
+  // the correct viewport position. Full reset always starts from (0,0),
+  // so the original CUP row (screen-buffer row + 1) is already correct.
+  for (const [, rawWrite] of frame.screen.rawWritesAtRow) {
+    screen.diff.push({ type: 'stdout', content: rawWrite })
+  }
 }
 
 /**
@@ -576,6 +578,7 @@ function renderFrameSlice(
         return [patches, { dx: -prev.x, dy: rowsToAdvance }]
       })
     }
+
     // Reset at start of each line — no cell rendered yet
     lastRenderedStyleId = -1
 
