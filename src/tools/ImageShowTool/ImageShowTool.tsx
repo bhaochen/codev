@@ -9,7 +9,6 @@ import { buildTool, type ToolDef } from '../../Tool.js'
 import { logForDebugging } from '../../utils/debug.js'
 import {
   detectImageProtocol,
-  getImageRowsCount,
   renderImageWithTimgSync,
 } from '../../utils/terminalImage.js'
 
@@ -51,17 +50,22 @@ function getToolUseSummary(input: Partial<Input>): string | null {
  * vertical space with empty RawAnsi lines so Ink doesn't overwrite the
  * image area.
  */
-function KittyImage({ kittyOutput, imageRows }: { kittyOutput: string; imageRows: number }) {
+function KittyImage({
+  kittyOutput,
+  imageRows,
+  offset = 4,
+}: {
+  kittyOutput: string
+  imageRows: number
+  offset?: number
+}) {
   const writeRaw = useContext(TerminalWriteContext)
 
   useEffect(() => {
     if (writeRaw && kittyOutput) {
-      // After Ink renders the reserved empty lines, cursor is at the bottom.
-      // Move cursor up to the top so the image renders at the start of the
-      // reserved space.
-      writeRaw(`\x1b[${imageRows}A${kittyOutput}`)
+      writeRaw(`\x1b[${imageRows + offset}A${kittyOutput}\x1b[${imageRows + offset}B`)
     }
-  }, [kittyOutput, imageRows, writeRaw])
+  }, [kittyOutput, imageRows, offset, writeRaw])
 
   const width = process.stdout.columns ?? 80
   const lines = new Array<string>(imageRows).fill('')
@@ -290,7 +294,8 @@ export const ImageShowTool = buildTool({
         // Pass the raw timg output directly through writeRaw — no need to
         // strip cursor sequences since writeRaw bypasses Ink's screen buffer.
         kittyOutput = wrapForMultiplexer(rawKitty.trimEnd())
-        imageRows = getImageRowsCount(buffer, format)
+        const termRows = process.stdout.rows ?? 40
+        imageRows = Math.max(10, Math.floor(termRows * 0.5))
         logForDebugging(
           `ImageShow: generated Kitty protocol output, image rows = ${imageRows}`,
         )

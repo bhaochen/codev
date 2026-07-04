@@ -4,6 +4,7 @@
     "target": "ESNext",
     "module": "Preserve",
     "moduleDetection": "force",
+    "ignoreDeprecations": "6.0",
     "jsx": "react-jsx",
     "allowJs": true,
     "types": ["bun"],
