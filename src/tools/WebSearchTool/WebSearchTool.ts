@@ -11,6 +11,7 @@ import {
   renderToolUseMessage,
   renderToolUseProgressMessage,
 } from './UI.js'
+import { fetchImagesAsInline } from '../../utils/inlineImageUtils.js'
 
 const inputSchema = lazySchema(() =>
   z.strictObject({
@@ -44,7 +45,9 @@ const outputSchema = lazySchema(() =>
   }),
 )
 
-export type Output = z.infer<ReturnType<typeof outputSchema>>
+export type Output = z.infer<ReturnType<typeof outputSchema>> & {
+  images?: Array<{ url: string; base64: string; mediaType: string }>
+}
 
 export type { WebSearchProgress } from '../../types/tools.js'
 import type { WebSearchProgress } from '../../types/tools.js'
@@ -257,6 +260,14 @@ export const WebSearchTool = buildTool({
               },
             ]
 
+      const imageUrls = cleaned
+        .map((r) => r.image)
+        .filter((url): url is string => !!url)
+        .slice(0, 4)
+
+      const images =
+        imageUrls.length > 0 ? await fetchImagesAsInline(imageUrls, 4) : undefined
+
       const duration = (performance.now() - start) / 1000
 
       return {
@@ -264,6 +275,7 @@ export const WebSearchTool = buildTool({
           query: input.query,
           results: output,
           durationSeconds: duration,
+          images,
         },
       }
     } catch (error) {
@@ -298,8 +310,7 @@ export const WebSearchTool = buildTool({
         text += r + '\n\n'
       } else {
         r.content.forEach((item: any, i: number) => {
-          const imgLine = item.image ? `\n![${item.title}](${item.image})\n` : ''
-          text += `${i + 1}. ${item.title}\n${item.url}\n${item.snippet || ''}${imgLine}\n`
+          text += `${i + 1}. ${item.title}\n${item.url}\n${item.snippet || ''}\n`
         })
       }
     }
@@ -307,7 +318,17 @@ export const WebSearchTool = buildTool({
     return {
       tool_use_id: toolUseID,
       type: 'tool_result',
-      content: text,
+      content: [
+        { type: 'text', text },
+        ...(output.images?.map((img) => ({
+          type: 'image' as const,
+          source: {
+            type: 'base64' as const,
+            data: img.base64,
+            media_type: img.mediaType as 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp',
+          },
+        })) ?? []),
+      ],
     }
   },
 }) satisfies ToolDef<any, Output, WebSearchProgress>

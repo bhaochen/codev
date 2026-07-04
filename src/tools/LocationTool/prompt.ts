@@ -24,7 +24,12 @@ This tool provides location-based services using two map providers:
 **Combining with other tools:**
 - After getting place/POI results from LocationTool, you can use **WebSearchTool** to search for travel guides, reviews, or additional information about specific places
 - Use **WebFetchTool** to fetch detailed information from URLs found in search results (e.g., attraction pages, hotel booking sites, travel blog posts)
-- Example: Search places → WebSearch for reviews → WebFetch for detailed info
+- **ImageShowTool**: When place results include photo URLs, the tool will automatically display images inline in the terminal. You can also explicitly call ImageShowTool with any image URL (local path or https:// URL) to display images.
+- **Google Street View**: For any location (lat,lng), you can directly call ImageShowTool with a Google Street View Static API URL to display a street view panorama:
+  - URL format: \`https://maps.googleapis.com/maps/api/streetview?size=800x400&location=<lat>,<lng>&heading=0&pitch=0&key=<YOUR_API_KEY>\`
+  - Note: The free tier of Google Street View Static API requires an API key but has generous quotas
+  - Use this when users ask for "street view" or "街景" of a location
+- Example: Search places → WebSearch for reviews → WebFetch for detailed info → ImageShow for photos → ImageShow with Google Street View URL for street panoramas
 
 **Transport modes for directions:**
 - For China (Amap): "driving", "walking", "transit" (公交/地铁)

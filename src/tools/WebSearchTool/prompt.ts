@@ -21,9 +21,8 @@ Search Strategy:
 
 Search Result Format:
   - Each search result includes: title, URL, snippet, and optionally an image URL (thumbnail)
-  - You can use images in your response via markdown syntax: ![alt text](image_url)
-  - When search results include images, incorporate them into your answer for a richer,图文混排 experience
-  - Images make responses much more readable — use them whenever available
+  - **Images are automatically displayed inline in the terminal** when search results include image thumbnails — no need to manually call ImageShowTool for search result images
+  - You can also explicitly call ImageShowTool with any image URL (https://... or local path) to display images
 
 CRITICAL REQUIREMENT - You MUST follow this:
   - After answering the user's question, you MUST include a "Sources:" section at the end of your response

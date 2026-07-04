@@ -9,6 +9,7 @@ import {
   renderToolUseMessage,
   renderToolUseProgressMessage,
 } from './UI.js'
+import { fetchImagesAsInline } from '../../utils/inlineImageUtils.js'
 
 // ── Region detection ────────────────────────────────────────────────────────
 
@@ -365,6 +366,7 @@ type Output = {
   error?: string
   rawData?: unknown
   ipGeo?: IpGeoInfo
+  images?: Array<{ url: string; base64: string; mediaType: string }>
 }
 
 // ── Amap API helpers ─────────────────────────────────────────────────────────
@@ -912,6 +914,7 @@ export const LocationTool = buildTool({
       let geocoding: LocationResult | undefined
       let places: PlaceResult[] | undefined
       let directions: DirectionsResult | undefined
+      let images: Output['images']
 
       switch (action) {
         case 'geocode':
@@ -995,6 +998,15 @@ export const LocationTool = buildTool({
         })
       }
 
+      if (places && places.length > 0) {
+        const photoUrls = places
+          .flatMap((p) => p.photos ?? [])
+          .slice(0, 6)
+        if (photoUrls.length > 0) {
+          images = await fetchImagesAsInline(photoUrls, 6)
+        }
+      }
+
       return {
         data: {
           action,
@@ -1003,6 +1015,7 @@ export const LocationTool = buildTool({
           places,
           directions,
           ipGeo,
+          images,
         } satisfies Output,
       }
     } catch (error) {
@@ -1094,7 +1107,17 @@ export const LocationTool = buildTool({
     return {
       tool_use_id: toolUseID,
       type: 'tool_result',
-      content: lines.join('\n'),
+      content: [
+        { type: 'text', text: lines.join('\n') },
+        ...(output.images?.map((img) => ({
+          type: 'image' as const,
+          source: {
+            type: 'base64' as const,
+            data: img.base64,
+            media_type: img.mediaType as 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp',
+          },
+        })) ?? []),
+      ],
     }
   },
 }) satisfies ToolDef<ReturnType<typeof inputSchema>, Output, LocationToolProgress>
