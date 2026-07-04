@@ -1,14 +1,8 @@
-# Codev: Co-Dev with AI
+# Codev: Co-Dev with AI via Terminal
 
-<p align="center">
-  <sub>Terminal-native, voice-ready, swarm-capable.</sub>
-</p>
-
-<!--
 <div align="center">
-  <img src="assets/friend/friend_use.png" alt="VersperAI" width="80%">
+  <img src="assets/ctx_auto_compose/ctx_line.png" alt="Codev" width="80%">
 </div>
--->
 
 ## 📢 News
 
