@@ -1,5 +1,10 @@
 # Codev: Co-Dev with AI via Terminal
 
+![TypeScript](https://img.shields.io/badge/-TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white)
+![Bun](https://img.shields.io/badge/-Bun-000000?style=flat-square&logo=bun&logoColor=F9F9FB)
+![Arch Linux](https://img.shields.io/badge/-Arch%20Linux-1793D1?style=flat-square&logo=arch-linux&logoColor=white)
+![CLI](https://img.shields.io/badge/-CLI-000000?style=flat-square&logo=gnu-bash&logoColor=white)
+
 <div align="center">
   <img src="assets/ctx_auto_compose/ctx_line.png" alt="Codev" width="80%">
 </div>
