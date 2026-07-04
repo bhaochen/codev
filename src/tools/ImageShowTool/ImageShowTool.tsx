@@ -8,6 +8,7 @@ import { buildTool, type ToolDef } from '../../Tool.js'
 import { logForDebugging } from '../../utils/debug.js'
 import {
   detectImageProtocol,
+  getImageRowsCount,
   renderImageWithTimgSync,
 } from '../../utils/terminalImage.js'
 
@@ -130,6 +131,7 @@ export const ImageShowTool = buildTool({
       message: string
       kittyOutput?: string
       timgOutput?: string
+      imageRows?: number
     },
     _progressMessages,
     _options,
@@ -138,26 +140,23 @@ export const ImageShowTool = buildTool({
       return null
     }
 
-    // Block-mode placeholder rendered in-band via RawAnsi so Ink knows the
-    // image dimensions and its virtual cursor stays in sync. When Kitty
-    // protocol is available, visible block characters are replaced with
-    // spaces so the native image shows through transparently, while the
-    // line structure (row count, per-row visual width) is preserved for
-    // Ink DOM cursor tracking.
+    // When Kitty protocol is available, reserve image-height rows of spaces
+    // in Ink's virtual DOM for layout, while the native image is rendered
+    // directly via the APC escape sequence (stored in rawWritesAtRow). This
+    // avoids the issue of block-mode overlay characters interfering with the
+    // native image display.
+    if (content.kittyOutput && content.imageRows && content.imageRows > 0) {
+      const width = process.stdout.columns ?? 80
+      const lines = Array.from({ length: content.imageRows }, () => ' '.repeat(width))
+      lines[0] = content.kittyOutput + lines[0]
+      return <RawAnsi lines={lines} width={width} />
+    }
+
+    // Block-mode fallback when Kitty protocol is not supported.
     if (content.timgOutput) {
       const cleaned = content.timgOutput.replace(/\x1b\[\?25[hl]/g, '')
-      let lines = cleaned.split('\n').filter(l => l.length > 0)
+      const lines = cleaned.split('\n').filter(l => l.length > 0)
       if (lines.length > 0) {
-        if (content.kittyOutput) {
-          // Strip ANSI SGR codes and replace non-space visible chars with
-          // spaces. The native Kitty image will show through these spaces.
-          lines = lines.map(l =>
-            l.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '').replace(/[^\s]/g, ' '),
-          )
-          const width = Math.max(...lines.map(l => l.length))
-          lines[0] = content.kittyOutput + lines[0]
-          return <RawAnsi lines={lines} width={width} />
-        }
         const ansiStrip = (s: string) => s.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
         const width = Math.max(...lines.map(l => ansiStrip(l).length))
         return <RawAnsi lines={lines} width={width} />
@@ -254,24 +253,34 @@ export const ImageShowTool = buildTool({
 
     logForDebugging(`ImageShow: loaded ${buffer.length} byte ${format} image`)
 
-    // Hybrid rendering:
-    // 1. Kitty protocol via timg for native-quality overlay (when supported)
-    // 2. Block-mode via timg for Ink DOM cursor tracking (always, as fallback)
+    // Rendering approach:
+    // 1. Kitty protocol via timg for native-quality display (when supported)
+    // 2. Block-mode via timg as fallback for terminals without Kitty support
     const protocol = detectImageProtocol()
     let kittyOutput: string | undefined
     let timgOutput: string | undefined
+    let imageRows = 0
 
     if (protocol === 'kitty') {
       const rawKitty = renderImageWithTimgSync(buffer, format, undefined, undefined, 'kitty')
       if (rawKitty) {
         kittyOutput = wrapForMultiplexer(rawKitty)
-        logForDebugging('ImageShow: generated Kitty protocol output via timg')
+        imageRows = getImageRowsCount(buffer, format)
+        logForDebugging(
+          `ImageShow: generated Kitty protocol output, image rows = ${imageRows}`,
+        )
+      }
+      // If we couldn't determine image rows, fall back to block-mode layout
+      if (imageRows === 0) {
+        kittyOutput = undefined
       }
     }
 
-    timgOutput = renderImageWithTimgSync(buffer, format, undefined, undefined, 'blocks') ?? undefined
-    if (timgOutput) {
-      logForDebugging('ImageShow: generated block-mode output via timg')
+    if (!kittyOutput) {
+      timgOutput = renderImageWithTimgSync(buffer, format, undefined, undefined, 'blocks') ?? undefined
+      if (timgOutput) {
+        logForDebugging('ImageShow: generated block-mode output via timg')
+      }
     }
 
     return {
@@ -286,6 +295,7 @@ export const ImageShowTool = buildTool({
         format,
         kittyOutput,
         timgOutput,
+        imageRows,
       },
     }
   },

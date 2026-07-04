@@ -233,6 +233,63 @@ export async function renderImageWithTimg(
 }
 
 /**
+ * Determine the number of terminal rows an image occupies when rendered.
+ * Runs `timg -p q` (block-mode) and counts the output lines.
+ * Used to reserve layout space in Ink's virtual DOM when the Kitty
+ * protocol is used for native-quality rendering.
+ *
+ * @param buffer - The raw image buffer
+ * @param format - Image format (png, jpeg, gif, webp)
+ * @param columns - Optional terminal width in character columns (default: stdout.columns)
+ * @returns Number of terminal rows, or 0 on failure
+ */
+export function getImageRowsCount(
+  buffer: Buffer,
+  format: string,
+  columns?: number,
+): number {
+  try {
+    const timgPath = whichSync('timg')
+    if (!timgPath) return 0
+
+    const cols = columns ?? process.stdout.columns ?? 80
+    const termRows = process.stdout.rows ?? 40
+    const maxRows = Math.max(10, Math.floor(termRows * 0.5))
+    const tmpDir = mkdtempSync(join(tmpdir(), 'versperclaw-timg-rows-'))
+    const ext = format === 'jpeg' ? 'jpg' : format
+    const tmpFile = join(tmpDir, `image.${ext}`)
+
+    try {
+      writeFileSync(tmpFile, buffer)
+
+      const stdout = execFileSync(
+        timgPath,
+        ['-p', 'q', '-g', `${cols}x${maxRows}`, tmpFile],
+        { encoding: 'utf8', timeout: 15000, maxBuffer: 10 * 1024 * 1024 },
+      )
+
+      // Count non-empty lines; strip ANSI escape sequences first so we
+      // only count lines that actually contain block-mode content.
+      const lines = stdout
+        .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
+        .replace(/\x1b\[?25[hl]/g, '')
+        .split('\n')
+        .filter(l => l.trim().length > 0)
+
+      return lines.length
+    } finally {
+      try {
+        rmSync(tmpDir, { recursive: true, force: true })
+      } catch {
+        // ignore cleanup errors
+      }
+    }
+  } catch {
+    return 0
+  }
+}
+
+/**
  * Synchronous version of renderImageWithTimg. Blocks the event loop while
  * spawning timg, which prevents Ink from rendering between the tool call
  * and the image output — eliminating cursor-position races.

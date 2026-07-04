@@ -302,10 +302,40 @@ export class LogUpdate {
     let currentStyleId = stylePool.none
     let currentHyperlink: Hyperlink = undefined
 
+    // Track which rows had raw writes emitted to avoid duplicates
+    const emittedRawRows = new Set<number>()
+
     // First pass: render changes to existing rows (rows < prev.screen.height)
     let needsFullReset = false
     let resetTriggerY = -1
     diffEach(prev.screen, next.screen, (x, y, removed, added) => {
+      // If the cell outside the viewport range has changed, we need to reset
+      // because we can't move the cursor there to draw.
+      if (y < viewportY) {
+        needsFullReset = true
+        resetTriggerY = y
+        return true // early exit
+      }
+
+      // Emit raw write (APC/DCS) with viewport-adjusted CUP so native
+      // images appear at the correct scroll position within the viewport.
+      if (!emittedRawRows.has(y)) {
+        emittedRawRows.add(y)
+        const rawWrite = next.screen.rawWritesAtRow.get(y)
+        if (rawWrite) {
+          const vpRow = y - viewportY
+          const adjusted = rawWrite.replace(
+            /^\x1b\[(\d+);(\d+)H/,
+            (_, __, col) => `\x1b[${vpRow + 1};${col}H`,
+          )
+          screen.diff.push({ type: 'stdout', content: adjusted })
+          // Sync virtual cursor to screen-buffer row so the cell
+          // loop's moveCursorTo computes correct deltas.
+          screen.txn(prev => {
+            return [[], { dx: x - prev.x, dy: y - prev.y }]
+          })
+        }
+      }
       // Skip new rows - we'll render them directly after
       if (growing && y >= prev.screen.height) {
         return
@@ -338,14 +368,6 @@ export class LogUpdate {
       // Uses isEmptyCellAt to check if both packed words are zero (empty cell).
       if (added && isEmptyCellAt(next.screen, x, y) && !removed) {
         return
-      }
-
-      // If the cell outside the viewport range has changed, we need to reset
-      // because we can't move the cursor there to draw.
-      if (y < viewportY) {
-        needsFullReset = true
-        resetTriggerY = y
-        return true // early exit
       }
 
       moveCursorTo(screen, x, y)
@@ -408,21 +430,8 @@ export class LogUpdate {
         prev.screen.height,
         next.screen.height,
         stylePool,
+        viewportY,
       )
-    }
-
-    // Emit raw writes (APC/DCS) at viewport-adjusted positions so native
-    // images appear at the correct scroll position every frame, even when
-    // the diff loop skips unchanged rows. The CUP is rewritten to target
-    // a viewport-relative row instead of an absolute screen-buffer row.
-    for (const [row, rawWrite] of next.screen.rawWritesAtRow) {
-      if (row < viewportY) continue
-      const vpRow = row - viewportY
-      const adjusted = rawWrite.replace(
-        /^\x1b\[(\d+);(\d+)H/,
-        (_, __, col) => `\x1b[${vpRow + 1};${col}H`,
-      )
-      screen.diff.push({ type: 'stdout', content: adjusted })
     }
 
     // Restore cursor. Skipped in alt-screen: the cursor is hidden, its
@@ -532,17 +541,13 @@ function renderFrame(
   stylePool: StylePool,
 ): void {
   renderFrameSlice(screen, frame, 0, frame.screen.height, stylePool)
-  // Emit raw writes (APC/DCS) after cells so native images are drawn at
-  // the correct viewport position. Full reset always starts from (0,0),
-  // so the original CUP row (screen-buffer row + 1) is already correct.
-  for (const [, rawWrite] of frame.screen.rawWritesAtRow) {
-    screen.diff.push({ type: 'stdout', content: rawWrite })
-  }
 }
 
 /**
  * Render a slice of rows from the frame's screen.
  * Each row is rendered followed by a newline. Cursor ends at (0, endY).
+ * @param viewportY Number of rows above the viewport (scrollback), for
+ *   viewport-adjusted raw write (APC/DCS) CUP positioning.
  */
 function renderFrameSlice(
   screen: VirtualScreen,
@@ -550,6 +555,7 @@ function renderFrameSlice(
   startY: number,
   endY: number,
   stylePool: StylePool,
+  viewportY = 0,
 ): VirtualScreen {
   let currentStyleId = stylePool.none
   let currentHyperlink: Hyperlink = undefined
@@ -577,6 +583,28 @@ function renderFrameSlice(
         }
         return [patches, { dx: -prev.x, dy: rowsToAdvance }]
       })
+    }
+
+    // Emit raw write (APC/DCS) with viewport-adjusted CUP so native
+    // images appear at the correct scroll position within the viewport.
+    const rawWrite = frame.screen.rawWritesAtRow.get(y)
+    if (rawWrite) {
+      const vpRow = y - viewportY
+      const adjusted = rawWrite.replace(
+        /^\x1b\[(\d+);(\d+)H/,
+        (_, __, col) => `\x1b[${vpRow + 1};${col}H`,
+      )
+      screen.diff.push({ type: 'stdout', content: adjusted })
+      // Sync virtual cursor to screen-buffer row so the cell
+      // loop's moveCursorTo computes correct deltas.
+      const cupMatch = rawWrite.match(/^\x1b\[(\d+);(\d+)H/)
+      if (cupMatch) {
+        const targetY = parseInt(cupMatch[1], 10) - 1
+        const targetX = parseInt(cupMatch[2], 10) - 1
+        screen.txn(prev => {
+          return [[], { dx: targetX - prev.x, dy: targetY - prev.y }]
+        })
+      }
     }
 
     // Reset at start of each line — no cell rendered yet
