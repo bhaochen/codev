@@ -1,8 +1,14 @@
-# VersperClaw: Not Only AI Assistant Code Agent
+# Codev: Co-Dev with AI
 
+<p align="center">
+  <sub>Terminal-native, voice-ready, swarm-capable.</sub>
+</p>
+
+<!--
 <div align="center">
   <img src="assets/friend/friend_use.png" alt="VersperAI" width="80%">
 </div>
+-->
 
 ## 📢 News
 
