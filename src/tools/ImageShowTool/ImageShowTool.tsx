@@ -1,9 +1,10 @@
 import { readFile } from 'fs/promises'
 import { homedir } from 'os'
-import React from 'react'
+import React, { useContext, useEffect } from 'react'
 import { z } from 'zod/v4'
 import { RawAnsi, Text } from '../../ink.js'
 import { wrapForMultiplexer } from '../../ink/termio/osc.js'
+import { TerminalWriteContext } from '../../ink/useTerminalNotification.js'
 import { buildTool, type ToolDef } from '../../Tool.js'
 import { logForDebugging } from '../../utils/debug.js'
 import {
@@ -42,6 +43,29 @@ function detectFormat(url: string): string {
 
 function getToolUseSummary(input: Partial<Input>): string | null {
   return input?.url ? `Show: ${input.url.split('/').pop() ?? input.url}` : null
+}
+
+/**
+ * Renders a Kitty-protocol image by writing the escape sequence directly
+ * to the terminal via writeRaw, bypassing Ink's virtual DOM. Reserves
+ * vertical space with empty RawAnsi lines so Ink doesn't overwrite the
+ * image area.
+ */
+function KittyImage({ kittyOutput, imageRows }: { kittyOutput: string; imageRows: number }) {
+  const writeRaw = useContext(TerminalWriteContext)
+
+  useEffect(() => {
+    if (writeRaw && kittyOutput) {
+      // After Ink renders the reserved empty lines, cursor is at the bottom.
+      // Move cursor up to the top so the image renders at the start of the
+      // reserved space.
+      writeRaw(`\x1b[${imageRows}A${kittyOutput}`)
+    }
+  }, [kittyOutput, imageRows, writeRaw])
+
+  const width = process.stdout.columns ?? 80
+  const lines = new Array<string>(imageRows).fill('')
+  return <RawAnsi lines={lines} width={width} />
 }
 
 export const ImageShowTool = buildTool({
@@ -140,16 +164,15 @@ export const ImageShowTool = buildTool({
       return null
     }
 
-    // When Kitty protocol is available, reserve image-height rows of spaces
-    // in Ink's virtual DOM for layout, while the native image is rendered
-    // directly via the APC escape sequence (stored in rawWritesAtRow). This
-    // avoids the issue of block-mode overlay characters interfering with the
-    // native image display.
+    // Kitty protocol: bypass Ink's virtual DOM via writeRaw and reserve
+    // space with empty RawAnsi lines.
     if (content.kittyOutput && content.imageRows && content.imageRows > 0) {
-      const width = process.stdout.columns ?? 80
-      const lines = Array.from({ length: content.imageRows }, () => ' '.repeat(width))
-      lines[0] = content.kittyOutput + lines[0]
-      return <RawAnsi lines={lines} width={width} />
+      return (
+        <KittyImage
+          kittyOutput={content.kittyOutput}
+          imageRows={content.imageRows}
+        />
+      )
     }
 
     // Block-mode fallback when Kitty protocol is not supported.
@@ -264,13 +287,14 @@ export const ImageShowTool = buildTool({
     if (protocol === 'kitty') {
       const rawKitty = renderImageWithTimgSync(buffer, format, undefined, undefined, 'kitty')
       if (rawKitty) {
-        kittyOutput = wrapForMultiplexer(rawKitty)
+        // Pass the raw timg output directly through writeRaw — no need to
+        // strip cursor sequences since writeRaw bypasses Ink's screen buffer.
+        kittyOutput = wrapForMultiplexer(rawKitty.trimEnd())
         imageRows = getImageRowsCount(buffer, format)
         logForDebugging(
           `ImageShow: generated Kitty protocol output, image rows = ${imageRows}`,
         )
       }
-      // If we couldn't determine image rows, fall back to block-mode layout
       if (imageRows === 0) {
         kittyOutput = undefined
       }

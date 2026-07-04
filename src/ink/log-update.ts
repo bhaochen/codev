@@ -317,25 +317,6 @@ export class LogUpdate {
         return true // early exit
       }
 
-      // Emit raw write (APC/DCS) with viewport-adjusted CUP so native
-      // images appear at the correct scroll position within the viewport.
-      if (!emittedRawRows.has(y)) {
-        emittedRawRows.add(y)
-        const rawWrite = next.screen.rawWritesAtRow.get(y)
-        if (rawWrite) {
-          const vpRow = y - viewportY
-          const adjusted = rawWrite.replace(
-            /^\x1b\[(\d+);(\d+)H/,
-            (_, __, col) => `\x1b[${vpRow + 1};${col}H`,
-          )
-          screen.diff.push({ type: 'stdout', content: adjusted })
-          // Sync virtual cursor to screen-buffer row so the cell
-          // loop's moveCursorTo computes correct deltas.
-          screen.txn(prev => {
-            return [[], { dx: x - prev.x, dy: y - prev.y }]
-          })
-        }
-      }
       // Skip new rows - we'll render them directly after
       if (growing && y >= prev.screen.height) {
         return
@@ -399,6 +380,24 @@ export class LogUpdate {
           patches.push({ type: 'stdout', content: ' ' })
           return [patches, { dx: 1, dy: 0 }]
         })
+      }
+
+      // Emit cursor-hide + bare APC/DCS + cursor-show after cell content
+      // so the native image overlays cell characters with no cursor flicker.
+      // No CUP prefix — the cursor is already at the correct row/column
+      // from moveCursorTo above.
+      if (!emittedRawRows.has(y)) {
+        emittedRawRows.add(y)
+        const rw = next.screen.rawWritesAtRow.get(y)
+        if (rw) {
+          screen.diff.push({
+            type: 'stdout',
+            content: '\x1b[?25l' + rw + '\x1b[?25h',
+          })
+          screen.txn(prev => {
+            return [[], { dx: x - prev.x, dy: y - prev.y }]
+          })
+        }
       }
     })
     if (needsFullReset) {
@@ -585,28 +584,6 @@ function renderFrameSlice(
       })
     }
 
-    // Emit raw write (APC/DCS) with viewport-adjusted CUP so native
-    // images appear at the correct scroll position within the viewport.
-    const rawWrite = frame.screen.rawWritesAtRow.get(y)
-    if (rawWrite) {
-      const vpRow = y - viewportY
-      const adjusted = rawWrite.replace(
-        /^\x1b\[(\d+);(\d+)H/,
-        (_, __, col) => `\x1b[${vpRow + 1};${col}H`,
-      )
-      screen.diff.push({ type: 'stdout', content: adjusted })
-      // Sync virtual cursor to screen-buffer row so the cell
-      // loop's moveCursorTo computes correct deltas.
-      const cupMatch = rawWrite.match(/^\x1b\[(\d+);(\d+)H/)
-      if (cupMatch) {
-        const targetY = parseInt(cupMatch[1], 10) - 1
-        const targetX = parseInt(cupMatch[2], 10) - 1
-        screen.txn(prev => {
-          return [[], { dx: targetX - prev.x, dy: targetY - prev.y }]
-        })
-      }
-    }
-
     // Reset at start of each line — no cell rendered yet
     lastRenderedStyleId = -1
 
@@ -658,6 +635,19 @@ function renderFrameSlice(
       currentHyperlink,
       undefined,
     )
+    // Emit cursor-hide + bare APC/DCS + cursor-show after cell content.
+    // The cursor is already at the CR+LF row position — no CUP needed.
+    {
+      const rw = frame.screen.rawWritesAtRow.get(y)
+      if (rw) {
+        screen.diff.push({
+          type: 'stdout',
+          content: '\x1b[?25l' + rw + '\x1b[?25h',
+        })
+        screen.txn(prev => [[], { dx: -prev.x, dy: y - prev.y }])
+      }
+    }
+
     // CR+LF at end of row — \r resets to column 0, \n moves to next line.
     // Without \r, the terminal cursor stays at whatever column content ended
     // (since we skip trailing spaces, this can be mid-row).

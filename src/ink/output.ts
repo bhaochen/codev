@@ -730,17 +730,15 @@ function writeLineToScreen(
             const ci = characters[i]
             if (ci) apc += ci.value
           }
-          // Append to existing entry (multi-chunk APC) or create new one.
-          // First chunk includes CUP positioning; subsequent chunks append
-          // the next \x1b_G...\x1b\\ without redundant cursor movement.
+          // Append or create raw write entry. Store the bare APC — the
+          // cursor is already at the correct screen-buffer position when
+          // this entry is emitted (via CR+LF in renderFrameSlice or
+          // moveCursorTo in diffEach).
           const existing = screen.rawWritesAtRow.get(y)
           if (existing) {
             screen.rawWritesAtRow.set(y, existing + apc)
           } else {
-            screen.rawWritesAtRow.set(
-              y,
-              `\x1b[${y + 1};${offsetX + 1}H${apc}`,
-            )
+            screen.rawWritesAtRow.set(y, apc)
           }
         } else if (
           nextChar === ']' ||
@@ -786,10 +784,7 @@ function writeLineToScreen(
               const ci = characters[i]
               if (ci) dcs += ci.value
             }
-            screen.rawWritesAtRow.set(
-              y,
-              `\x1b[${y + 1};${offsetX + 1}H${dcs}`,
-            )
+            screen.rawWritesAtRow.set(y, dcs)
             charIdx = dcsEnd
           }
         } else if (
