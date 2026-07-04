@@ -705,52 +705,42 @@ function writeLineToScreen(
             }
           }
         } else if (nextChar === '_') {
-          // APC (Application Program Command): pass through to screen
-          // buffer. Terminal receives the raw \x1b_G...\x1b\\ sequence
-          // and interprets it as a Kitty graphics protocol command,
-          // rendering the native image at this position within Ink's
-          // layout — no \x1b[H or writeRaw positioning needed.
-          setCellAt(screen, offsetX, y, {
-            char: '\x1b',
-            styleId: stylePool.none,
-            width: CellWidth.Narrow,
-            hyperlink: undefined,
-          })
-          offsetX++
-          setCellAt(screen, offsetX, y, {
-            char: '_',
-            styleId: stylePool.none,
-            width: CellWidth.Narrow,
-            hyperlink: undefined,
-          })
-          offsetX++
+          // APC (Application Program Command): store in screen.rawWritesAtRow
+          // for emission by log-update.ts before the row's cell content.
+          // This avoids the screen buffer width limit — APC payloads (e.g.
+          // Kitty base64 images) can be hundreds of KB, but screen rows are
+          // only ~80 columns wide.
+          const apcStartIdx = charIdx
           charIdx++ // skip past ESC
           while (charIdx < characters.length - 1) {
             charIdx++
             const c = characters[charIdx]?.value
-            if (c === undefined) break
-            setCellAt(screen, offsetX, y, {
-              char: c,
-              styleId: stylePool.none,
-              width: CellWidth.Narrow,
-              hyperlink: undefined,
-            })
-            offsetX++
             if (c === '\x07') break
             if (c === '\x1b') {
               const nextC = characters[charIdx + 1]?.value
               if (nextC === '\\') {
-                charIdx++
-                setCellAt(screen, offsetX, y, {
-                  char: '\\',
-                  styleId: stylePool.none,
-                  width: CellWidth.Narrow,
-                  hyperlink: undefined,
-                })
-                offsetX++
+                charIdx++ // skip backslash
                 break
               }
             }
+          }
+          // Reconstruct the full APC sequence from char tokens
+          let apc = ''
+          for (let i = apcStartIdx; i <= charIdx; i++) {
+            const ci = characters[i]
+            if (ci) apc += ci.value
+          }
+          // Append to existing entry (multi-chunk APC) or create new one.
+          // First chunk includes CUP positioning; subsequent chunks append
+          // the next \x1b_G...\x1b\\ without redundant cursor movement.
+          const existing = screen.rawWritesAtRow.get(y)
+          if (existing) {
+            screen.rawWritesAtRow.set(y, existing + apc)
+          } else {
+            screen.rawWritesAtRow.set(
+              y,
+              `\x1b[${y + 1};${offsetX + 1}H${apc}`,
+            )
           }
         } else if (
           nextChar === ']' ||
@@ -760,6 +750,7 @@ function writeLineToScreen(
         ) {
           // String-based sequences (OSC, DCS, PM, SOS) terminated by
           // BEL (0x07) or ST (ESC \): skip as before.
+          const seqStartIdx = charIdx
           charIdx++ // skip the introducer char
           while (charIdx < characters.length - 1) {
             charIdx++
@@ -772,6 +763,34 @@ function writeLineToScreen(
                 break
               }
             }
+          }
+
+          // Tmux DCS passthrough (\x1bPtmux;...\x1b\\): store the entire
+          // DCS sequence in rawWritesAtRow so tmux forwards the inner APC
+          // to the terminal for native Kitty image rendering.
+          if (
+            nextChar === 'P' &&
+            charIdx + 2 < characters.length &&
+            characters[seqStartIdx + 2]?.value === 't' &&
+            characters[seqStartIdx + 3]?.value === 'm' &&
+            characters[seqStartIdx + 4]?.value === 'u' &&
+            characters[seqStartIdx + 5]?.value === 'x' &&
+            characters[seqStartIdx + 6]?.value === ';' &&
+            characters[charIdx + 1]?.value === '\x1b' &&
+            characters[charIdx + 2]?.value === '\\'
+          ) {
+            // Extend to include outer DCS terminator (\x1b\\)
+            const dcsEnd = charIdx + 2
+            let dcs = ''
+            for (let i = seqStartIdx; i <= dcsEnd; i++) {
+              const ci = characters[i]
+              if (ci) dcs += ci.value
+            }
+            screen.rawWritesAtRow.set(
+              y,
+              `\x1b[${y + 1};${offsetX + 1}H${dcs}`,
+            )
+            charIdx = dcsEnd
           }
         } else if (
           nextCode !== undefined &&

@@ -302,10 +302,22 @@ export class LogUpdate {
     let currentStyleId = stylePool.none
     let currentHyperlink: Hyperlink = undefined
 
+    // Emit per-row raw writes (APC, Kitty protocol) before cell diff loop.
+    // Track which rows have been emitted to avoid duplicates across damage regions.
+    const emittedRawRows = new Set<number>()
+
     // First pass: render changes to existing rows (rows < prev.screen.height)
     let needsFullReset = false
     let resetTriggerY = -1
     diffEach(prev.screen, next.screen, (x, y, removed, added) => {
+      // Emit raw write (e.g. Kitty APC) for this row if not yet emitted
+      if (!emittedRawRows.has(y)) {
+        emittedRawRows.add(y)
+        const rawWrite = next.screen.rawWritesAtRow.get(y)
+        if (rawWrite) {
+          screen.diff.push({ type: 'stdout', content: rawWrite })
+        }
+      }
       // Skip new rows - we'll render them directly after
       if (growing && y >= prev.screen.height) {
         return
@@ -400,8 +412,14 @@ export class LogUpdate {
       undefined,
     )
 
-    // Handle growth: render new rows directly (they naturally scroll the terminal)
+    // Handle growth: emit raw writes for new rows, then render cells
     if (growing) {
+      for (let y = prev.screen.height; y < next.screen.height; y++) {
+        const rawWrite = next.screen.rawWritesAtRow.get(y)
+        if (rawWrite) {
+          screen.diff.push({ type: 'stdout', content: rawWrite })
+        }
+      }
       renderFrameSlice(
         screen,
         next,
