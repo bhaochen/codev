@@ -1,5 +1,5 @@
-import { chmodSync, cpSync, existsSync, mkdirSync, symlinkSync, unlinkSync } from 'fs'
-import { dirname, join, relative } from 'path'
+import { chmodSync, cpSync, existsSync, mkdirSync } from 'fs'
+import { dirname, join } from 'path'
 
 const pkg = await Bun.file(new URL('../package.json', import.meta.url)).json() as {
   name: string
@@ -163,11 +163,4 @@ if (!existsSync(vendorDir)) {
   console.log(`Copied vendor/ → ${vendorDir}/`)
 }
 
-// Create symlink at project root for convenient access
-const symlink = join(process.cwd(), 'codev')
-const symlinkTarget = relative(process.cwd(), outfile)
-try { unlinkSync(symlink) } catch { /* ignore */ }
-try { symlinkSync(symlinkTarget, symlink) } catch { /* ignore */ }
-
 console.log(`Built ${outfile}`)
-console.log(`Symlink ${symlink} → ${symlinkTarget}`)
