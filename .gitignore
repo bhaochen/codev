@@ -2,6 +2,7 @@ node_modules/
 packages/
 dist/
 .codex
+Codev
 codev
 
 # Prebuilt native binaries (tracked in claude-code/ reference)
