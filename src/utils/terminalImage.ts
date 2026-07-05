@@ -58,14 +58,6 @@ export function detectImageProtocol(): ImageProtocol {
       return 'kitty'
   }
 
-  // Inside tmux, TERM_PROGRAM may reveal the host terminal if forwarded
-  if (process.env.TMUX) {
-    const hostTerm = process.env.TERM_PROGRAM ?? ''
-    if (['kitty', 'WezTerm', 'ghostty', 'foot'].includes(hostTerm)) {
-      return 'kitty'
-    }
-  }
-
   return null
 }
 
@@ -141,32 +133,25 @@ export function getImageProtocolSummary(): string {
 }
 
 /**
- * Supported rendering modes for timg-based image display.
- */
-export type TimgMode = 'kitty' | 'blocks'
-
-/**
- * Render an image using the `timg` utility.
+ * Render an image using the `timg` utility with Unicode block characters.
+ * Works in any terminal that supports Unicode and 24-bit color (virtually all
+ * modern terminals). Falls back gracefully if timg is not installed.
  *
- * In `kitty` mode, uses the Kitty graphics protocol for native-quality
- * rendering in terminals that support it.
- *
- * In `blocks` mode, renders with Unicode quarter-block characters for
- * universal compatibility, falling back to half-blocks if needed.
+ * The image is rendered using quarter-block characters ("pixelation q") for
+ * the best quality-to-compatibility ratio. If timg fails, half-blocks are
+ * tried as a fallback.
  *
  * @param buffer - The raw image buffer (decoded)
  * @param format - Image format (png, jpeg, gif, webp)
- * @param columns - Optional terminal width in character columns
- * @param rows - Optional terminal height in character rows
- * @param mode - Rendering mode: `'kitty'` or `'blocks'` (default: `'blocks'`)
- * @returns Escape sequence string for rendering, or null on failure
+ * @param columns - Optional terminal width in character columns (auto-detected)
+ * @param rows - Optional terminal height in character rows (auto-detected)
+ * @returns ANSI escape sequence string for rendering, or null on failure
  */
 export async function renderImageWithTimg(
   buffer: Buffer,
   format: string,
   columns?: number,
   rows?: number,
-  mode: TimgMode = 'blocks',
 ): Promise<string | null> {
   try {
     const timgPath = await which('timg')
@@ -185,37 +170,25 @@ export async function renderImageWithTimg(
     try {
       writeFileSync(tmpFile, buffer)
 
-      if (mode === 'kitty') {
-        // Native Kitty protocol rendering
-        const kitty = await execFileNoThrow(
+      // Try quarter blocks first (4 pixels per cell, better quality)
+      const quarter = await execFileNoThrow(
+        timgPath,
+        ['-p', 'q', '-g', `${cols}x${maxRows}`, tmpFile],
+        { timeout: 15000, preserveOutputOnError: true },
+      )
+      if (quarter.code === 0 && quarter.stdout) {
+        result = quarter.stdout
+      }
+
+      // Fallback to half blocks (2 pixels per cell, max compatibility)
+      if (!result) {
+        const half = await execFileNoThrow(
           timgPath,
-          ['-p', 'kitty', '-g', `${cols}x${maxRows}`, tmpFile],
-          { timeout: 30000, preserveOutputOnError: true },
-        )
-        if (kitty.code === 0 && kitty.stdout) {
-          result = kitty.stdout
-        }
-      } else {
-        // Try quarter blocks first (4 pixels per cell, better quality)
-        const quarter = await execFileNoThrow(
-          timgPath,
-          ['-p', 'q', '-g', `${cols}x${maxRows}`, tmpFile],
+          ['-p', 'h', '-g', `${cols}x${maxRows}`, tmpFile],
           { timeout: 15000, preserveOutputOnError: true },
         )
-        if (quarter.code === 0 && quarter.stdout) {
-          result = quarter.stdout
-        }
-
-        // Fallback to half blocks (2 pixels per cell, max compatibility)
-        if (!result) {
-          const half = await execFileNoThrow(
-            timgPath,
-            ['-p', 'h', '-g', `${cols}x${maxRows}`, tmpFile],
-            { timeout: 15000, preserveOutputOnError: true },
-          )
-          if (half.code === 0 && half.stdout) {
-            result = half.stdout
-          }
+        if (half.code === 0 && half.stdout) {
+          result = half.stdout
         }
       }
     } finally {
@@ -233,63 +206,6 @@ export async function renderImageWithTimg(
 }
 
 /**
- * Determine the number of terminal rows an image occupies when rendered.
- * Runs `timg -p q` (block-mode) and counts the output lines.
- * Used to reserve layout space in Ink's virtual DOM when the Kitty
- * protocol is used for native-quality rendering.
- *
- * @param buffer - The raw image buffer
- * @param format - Image format (png, jpeg, gif, webp)
- * @param columns - Optional terminal width in character columns (default: stdout.columns)
- * @returns Number of terminal rows, or 0 on failure
- */
-export function getImageRowsCount(
-  buffer: Buffer,
-  format: string,
-  columns?: number,
-): number {
-  try {
-    const timgPath = whichSync('timg')
-    if (!timgPath) return 0
-
-    const cols = columns ?? process.stdout.columns ?? 80
-    const termRows = process.stdout.rows ?? 40
-    const maxRows = Math.max(10, Math.floor(termRows * 0.5))
-    const tmpDir = mkdtempSync(join(tmpdir(), 'codev-timg-rows-'))
-    const ext = format === 'jpeg' ? 'jpg' : format
-    const tmpFile = join(tmpDir, `image.${ext}`)
-
-    try {
-      writeFileSync(tmpFile, buffer)
-
-      const stdout = execFileSync(
-        timgPath,
-        ['-p', 'q', '-g', `${cols}x${maxRows}`, tmpFile],
-        { encoding: 'utf8', timeout: 15000, maxBuffer: 10 * 1024 * 1024 },
-      )
-
-      // Count non-empty lines; strip ANSI escape sequences first so we
-      // only count lines that actually contain block-mode content.
-      const lines = stdout
-        .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
-        .replace(/\x1b\[?25[hl]/g, '')
-        .split('\n')
-        .filter(l => l.trim().length > 0)
-
-      return lines.length
-    } finally {
-      try {
-        rmSync(tmpDir, { recursive: true, force: true })
-      } catch {
-        // ignore cleanup errors
-      }
-    }
-  } catch {
-    return 0
-  }
-}
-
-/**
  * Synchronous version of renderImageWithTimg. Blocks the event loop while
  * spawning timg, which prevents Ink from rendering between the tool call
  * and the image output — eliminating cursor-position races.
@@ -301,7 +217,6 @@ export function renderImageWithTimgSync(
   format: string,
   columns?: number,
   rows?: number,
-  mode: TimgMode = 'blocks',
 ): string | null {
   try {
     const timgPath = whichSync('timg')
@@ -318,43 +233,29 @@ export function renderImageWithTimgSync(
     try {
       writeFileSync(tmpFile, buffer)
 
-      if (mode === 'kitty') {
-        // Native Kitty protocol rendering
+      // Try quarter blocks first (4 pixels per cell, better quality)
+      try {
+        const stdout = execFileSync(
+          timgPath,
+          ['-p', 'q', '-g', `${cols}x${maxRows}`, tmpFile],
+          { encoding: 'utf8', timeout: 15000, maxBuffer: 10 * 1024 * 1024 },
+        )
+        if (stdout) result = stdout
+      } catch {
+        // fall through to half blocks
+      }
+
+      // Fallback to half blocks (2 pixels per cell, max compatibility)
+      if (!result) {
         try {
           const stdout = execFileSync(
             timgPath,
-            ['-p', 'kitty', '-g', `${cols}x${maxRows}`, tmpFile],
-            { encoding: 'utf8', timeout: 30000, maxBuffer: 50 * 1024 * 1024 },
-          )
-          if (stdout) result = stdout
-        } catch {
-          // failed
-        }
-      } else {
-        // Try quarter blocks first (4 pixels per cell, better quality)
-        try {
-          const stdout = execFileSync(
-            timgPath,
-            ['-p', 'q', '-g', `${cols}x${maxRows}`, tmpFile],
+            ['-p', 'h', '-g', `${cols}x${maxRows}`, tmpFile],
             { encoding: 'utf8', timeout: 15000, maxBuffer: 10 * 1024 * 1024 },
           )
           if (stdout) result = stdout
         } catch {
-          // fall through to half blocks
-        }
-
-        // Fallback to half blocks (2 pixels per cell, max compatibility)
-        if (!result) {
-          try {
-            const stdout = execFileSync(
-              timgPath,
-              ['-p', 'h', '-g', `${cols}x${maxRows}`, tmpFile],
-              { encoding: 'utf8', timeout: 15000, maxBuffer: 10 * 1024 * 1024 },
-            )
-            if (stdout) result = stdout
-          } catch {
-            // ignored
-          }
+          // ignored
         }
       }
     } finally {

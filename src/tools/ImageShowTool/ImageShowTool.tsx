@@ -1,14 +1,11 @@
 import { readFile } from 'fs/promises'
 import { homedir } from 'os'
-import React, { useContext, useEffect } from 'react'
+import React from 'react'
 import { z } from 'zod/v4'
 import { RawAnsi, Text } from '../../ink.js'
-import { wrapForMultiplexer } from '../../ink/termio/osc.js'
-import { TerminalWriteContext } from '../../ink/useTerminalNotification.js'
 import { buildTool, type ToolDef } from '../../Tool.js'
 import { logForDebugging } from '../../utils/debug.js'
 import {
-  detectImageProtocol,
   renderImageWithTimgSync,
 } from '../../utils/terminalImage.js'
 
@@ -40,46 +37,111 @@ function detectFormat(url: string): string {
   return 'png'
 }
 
-function getToolUseSummary(input: Partial<Input>): string | null {
-  return input?.url ? `Show: ${input.url.split('/').pop() ?? input.url}` : null
+/** Read a local file and return its buffer + detected format */
+async function readLocalImage(url: string): Promise<{ buffer: Buffer; format: string } | null> {
+  try {
+    const format = detectFormat(url)
+    const buffer = await readFile(url)
+    return { buffer, format }
+  } catch {
+    return null
+  }
+}
+
+/** Download an image from URL and return its buffer + detected format */
+async function fetchImage(url: string): Promise<{ buffer: Buffer; format: string } | null> {
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; Codev/1.0)',
+      },
+      redirect: 'follow',
+    })
+
+    if (!response.ok) {
+      logForDebugging(`ImageShow: HTTP ${response.status} for ${url}`)
+      return null
+    }
+
+    const contentType = response.headers.get('content-type') ?? ''
+    const format = detectFormat(url !== contentType ? url : contentType)
+
+    const reader = response.body?.getReader()
+    if (!reader) return null
+
+    const chunks: Uint8Array[] = []
+    let totalSize = 0
+    const MAX_SIZE = 10_000_000
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      totalSize += value.byteLength
+      if (totalSize > MAX_SIZE) {
+        logForDebugging(`ImageShow: image too large (${totalSize} bytes) for ${url}`)
+        reader.cancel()
+        return null
+      }
+      chunks.push(value)
+    }
+
+    const combinedLength = chunks.reduce((acc, c) => acc + c.byteLength, 0)
+    const combined = new Uint8Array(combinedLength)
+    let offset = 0
+    for (const chunk of chunks) {
+      combined.set(chunk, offset)
+      offset += chunk.byteLength
+    }
+
+    return { buffer: Buffer.from(combined.buffer), format }
+  } catch (err) {
+    logForDebugging(`ImageShow: fetch error ${err} for ${url}`)
+    return null
+  }
+}
+
+/** Load image: local file or remote URL */
+async function loadImage(url: string): Promise<{ buffer: Buffer; format: string } | null> {
+  // Expand ~ to home directory
+  const normalizedUrl = url.startsWith('~')
+    ? url.replace(/^~(?=$|\/)/, homedir())
+    : url
+  if (normalizedUrl.startsWith('file://') || normalizedUrl.startsWith('/') || normalizedUrl.startsWith('.')) {
+    const path = normalizedUrl.startsWith('file://') ? normalizedUrl.slice(7) : normalizedUrl
+    return readLocalImage(path)
+  }
+  return fetchImage(normalizedUrl)
 }
 
 /**
- * Renders a Kitty-protocol image by writing the escape sequence directly
- * to the terminal via writeRaw, bypassing Ink's virtual DOM. Reserves
- * vertical space with empty RawAnsi lines so Ink doesn't overwrite the
- * image area.
+ * React component that renders timg Unicode-block output within Ink's
+ * virtual DOM so Ink knows the image dimensions and the cursor stays
+ * in sync with the terminal.
  */
-function KittyImage({
-  kittyOutput,
-  imageRows,
-  offset = 4,
-}: {
-  kittyOutput: string
-  imageRows: number
-  offset?: number
-}) {
-  const writeRaw = useContext(TerminalWriteContext)
-
-  useEffect(() => {
-    if (writeRaw && kittyOutput) {
-      writeRaw(`\x1b[${imageRows + offset}A${kittyOutput}\x1b[${imageRows + offset}B`)
-    }
-  }, [kittyOutput, imageRows, offset, writeRaw])
-
-  const width = process.stdout.columns ?? 80
-  const lines = new Array<string>(imageRows).fill('')
+function TimgDisplay({ output }: { output: string }): React.ReactNode {
+  // Strip cursor hide/show sequences that timg adds
+  const cleaned = output.replace(/\x1b\[\?25[hl]/g, '')
+  const lines = cleaned.split('\n').filter(l => l.length > 0)
+  if (lines.length === 0) {
+    return null
+  }
+  // Measure visible width (strip ANSI escape codes)
+  const ansiStrip = (s: string) => s.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
+  const width = Math.max(...lines.map(l => ansiStrip(l).length))
   return <RawAnsi lines={lines} width={width} />
+}
+
+function getToolUseSummary(input: Partial<Input>): string | null {
+  return input?.url ? `Show: ${input.url.split('/').pop() ?? input.url}` : null
 }
 
 export const ImageShowTool = buildTool({
   name: IMAGE_TOOL_NAME,
   description:
     'Display an image (PNG/JPEG/GIF/WebP) directly in the terminal. ' +
-    'Uses the Kitty graphics protocol via timg for native quality when the ' +
-    'terminal supports it, with a Unicode-block fallback for universal compatibility. ' +
-    'The block-mode output is rendered within Ink\'s virtual DOM so the cursor ' +
-    'stays in sync and the image scrolls with conversation content.',
+    'Renders with timg Unicode-block characters within Ink\'s virtual DOM ' +
+    'so the cursor stays in sync and the image scrolls with conversation content. ' +
+    'Supports both URLs (https://) and local file paths.',
 
   getToolUseSummary,
   getActivityDescription(input) {
@@ -102,7 +164,7 @@ export const ImageShowTool = buildTool({
   },
 
   async prompt(_options): Promise<string> {
-    return `ImageShow displays a PNG/JPEG/GIF/WebP image directly in the terminal. Uses the Kitty graphics protocol via timg when the terminal supports it (Kitty, Ghostty, WezTerm, foot), or falls back to timg Unicode-block rendering for universal terminal compatibility. Supports local file paths (e.g. /tmp/image.png) and HTTPS URLs (e.g. https://example.com/image.png). The image is shown inline above the tool result.`
+    return `ImageShow displays a PNG/JPEG/GIF/WebP image directly in the terminal using timg Unicode-block rendering. Supports local file paths (e.g. /tmp/image.png) and HTTPS URLs (e.g. https://example.com/image.png). The image is rendered within Ink's virtual DOM so the cursor stays in sync.`
   },
 
   async checkPermissions(): Promise<{ behavior: 'allow' }> {
@@ -157,9 +219,7 @@ export const ImageShowTool = buildTool({
     content: {
       success: boolean
       message: string
-      kittyOutput?: string
       timgOutput?: string
-      imageRows?: number
     },
     _progressMessages,
     _options,
@@ -168,26 +228,8 @@ export const ImageShowTool = buildTool({
       return null
     }
 
-    // Kitty protocol: bypass Ink's virtual DOM via writeRaw and reserve
-    // space with empty RawAnsi lines.
-    if (content.kittyOutput && content.imageRows && content.imageRows > 0) {
-      return (
-        <KittyImage
-          kittyOutput={content.kittyOutput}
-          imageRows={content.imageRows}
-        />
-      )
-    }
-
-    // Block-mode fallback when Kitty protocol is not supported.
     if (content.timgOutput) {
-      const cleaned = content.timgOutput.replace(/\x1b\[\?25[hl]/g, '')
-      const lines = cleaned.split('\n').filter(l => l.length > 0)
-      if (lines.length > 0) {
-        const ansiStrip = (s: string) => s.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
-        const width = Math.max(...lines.map(l => ansiStrip(l).length))
-        return <RawAnsi lines={lines} width={width} />
-      }
+      return <TimgDisplay output={content.timgOutput} />
     }
 
     return <Text dimColor>{content.message}</Text>
@@ -199,8 +241,6 @@ export const ImageShowTool = buildTool({
       message: string
       imageData?: { base64: string; mediaType: string }
       base64?: string
-      format?: string
-      kittyOutput?: string
       timgOutput?: string
     }
   }> {
@@ -209,60 +249,9 @@ export const ImageShowTool = buildTool({
 
     logForDebugging(`ImageShow: loading ${url}`)
 
-    // Expand ~ to home directory for local files
-    const normalizedUrl = url.startsWith('~')
-      ? url.replace(/^~(?=$|\/)/, homedir())
-      : url
+    const result = await loadImage(url)
 
-    let imgResult: { buffer: Buffer; format: string } | null = null
-
-    if (normalizedUrl.startsWith('file://') || normalizedUrl.startsWith('/') || normalizedUrl.startsWith('.')) {
-      const path = normalizedUrl.startsWith('file://') ? normalizedUrl.slice(7) : normalizedUrl
-      try {
-        const format = detectFormat(path)
-        const buffer = await readFile(path)
-        imgResult = { buffer, format }
-      } catch {
-        // fall through
-      }
-    } else {
-      try {
-        const response = await fetch(normalizedUrl, {
-          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Codev/1.0)' },
-          redirect: 'follow',
-        })
-        if (response.ok) {
-          const contentType = response.headers.get('content-type') ?? ''
-          const format = detectFormat(normalizedUrl !== contentType ? normalizedUrl : contentType)
-          const reader = response.body?.getReader()
-          if (reader) {
-            const chunks: Uint8Array[] = []
-            let totalSize = 0
-            while (true) {
-              const { done, value } = await reader.read()
-              if (done) break
-              totalSize += value.byteLength
-              if (totalSize > 10_000_000) {
-                reader.cancel()
-                break
-              }
-              chunks.push(value)
-            }
-            const combined = new Uint8Array(chunks.reduce((acc, c) => acc + c.byteLength, 0))
-            let offset = 0
-            for (const chunk of chunks) {
-              combined.set(chunk, offset)
-              offset += chunk.byteLength
-            }
-            imgResult = { buffer: Buffer.from(combined.buffer), format }
-          }
-        }
-      } catch (err) {
-        logForDebugging(`ImageShow: fetch error ${err} for ${normalizedUrl}`)
-      }
-    }
-
-    if (!imgResult) {
+    if (!result) {
       return {
         data: {
           success: false,
@@ -271,45 +260,25 @@ export const ImageShowTool = buildTool({
       }
     }
 
-    const { buffer, format } = imgResult
+    const { buffer, format } = result
+
     const mediaType =
-      format === 'jpeg' ? 'image/jpeg'
-        : format === 'gif' ? 'image/gif'
-          : format === 'webp' ? 'image/webp'
+      format === 'jpeg'
+        ? 'image/jpeg'
+        : format === 'gif'
+          ? 'image/gif'
+          : format === 'webp'
+            ? 'image/webp'
             : 'image/png'
 
     logForDebugging(`ImageShow: loaded ${buffer.length} byte ${format} image`)
 
-    // Rendering approach:
-    // 1. Kitty protocol via timg for native-quality display (when supported)
-    // 2. Block-mode via timg as fallback for terminals without Kitty support
-    const protocol = detectImageProtocol()
-    let kittyOutput: string | undefined
-    let timgOutput: string | undefined
-    let imageRows = 0
-
-    if (protocol === 'kitty') {
-      const rawKitty = renderImageWithTimgSync(buffer, format, undefined, undefined, 'kitty')
-      if (rawKitty) {
-        // Pass the raw timg output directly through writeRaw — no need to
-        // strip cursor sequences since writeRaw bypasses Ink's screen buffer.
-        kittyOutput = wrapForMultiplexer(rawKitty.trimEnd())
-        const termRows = process.stdout.rows ?? 40
-        imageRows = Math.max(10, Math.floor(termRows * 0.5))
-        logForDebugging(
-          `ImageShow: generated Kitty protocol output, image rows = ${imageRows}`,
-        )
-      }
-      if (imageRows === 0) {
-        kittyOutput = undefined
-      }
-    }
-
-    if (!kittyOutput) {
-      timgOutput = renderImageWithTimgSync(buffer, format, undefined, undefined, 'blocks') ?? undefined
-      if (timgOutput) {
-        logForDebugging('ImageShow: generated block-mode output via timg')
-      }
+    // Always render via timg Unicode blocks within Ink's virtual DOM.
+    // RawAnsi in renderToolResultMessage renders the output so Ink knows
+    // the image dimensions and the cursor stays in sync.
+    const timgOutput = renderImageWithTimgSync(buffer, format) ?? undefined
+    if (timgOutput) {
+      logForDebugging('ImageShow: generated timg Unicode-block output')
     }
 
     return {
@@ -321,10 +290,7 @@ export const ImageShowTool = buildTool({
           mediaType,
         },
         base64: buffer.toString('base64'),
-        format,
-        kittyOutput,
         timgOutput,
-        imageRows,
       },
     }
   },
