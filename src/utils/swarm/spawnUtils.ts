@@ -20,7 +20,7 @@ import { TEAMMATE_COMMAND_ENV_VAR } from './constants.js'
  * Resolves the real executable path for the current process.
  *
  * In bun-compiled mode, process.execPath may return a bunfs virtual path
- * (e.g., /$bunfs/root/VersperClaw) that only exists within the bun runtime.
+ * (e.g., /$bunfs/root/Codev) that only exists within the bun runtime.
  * When a tmux pane tries to execute this path in a regular shell, it fails
  * with "No such file or directory".
  *

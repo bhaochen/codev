@@ -1,4 +1,4 @@
-# 面试准备指南 — VersperClaw / Claude Code 架构知识体系
+# 面试准备指南 — Codev / Claude Code 架构知识体系
 
 > 适用场景: 系统设计面试、技术深挖面试、架构师/高级工程师面试
 > 目标: 覆盖 AI CLI 代理的核心设计决策、权衡、以及可以引申到通用分布式系统的知识点
@@ -7,9 +7,9 @@
 
 ## 1. 项目概述 (30-second pitch)
 
-**VersperClaw 是什么?**
+**Codev 是什么?**
 
-VersperClaw 是从 Anthropic Claude Code fork 出来的 AI CLI 代理 (Agentic Coding Assistant)，运行在终端中，核心能力是理解自然语言开发指令并自动执行多步骤编码任务。
+Codev 是从 Anthropic Claude Code fork 出来的 AI CLI 代理 (Agentic Coding Assistant)，运行在终端中，核心能力是理解自然语言开发指令并自动执行多步骤编码任务。
 
 **三个核心差异化:**
 
@@ -157,7 +157,7 @@ Transparency (丢失细节, LLM 可能遗忘关键上下文)
 
 ### Q: 多 Provider 架构如何实现?
 
-VersperClaw 支持多种 LLM Provider, 架构分为两层:
+Codev 支持多种 LLM Provider, 架构分为两层:
 
 **Tier 1: Anthropic 原生通道**
 
@@ -199,7 +199,7 @@ VersperClaw 支持多种 LLM Provider, 架构分为两层:
 
 ### Q: Friend VRM 系统为什么设计为同进程 + SSE?
 
-Friend 是 VersperClaw 的 3D 桌面伴侣系统, 使用 VRM 模型 (3D 虚拟角色), 具备表情、动作、语音对话能力。
+Friend 是 Codev 的 3D 桌面伴侣系统, 使用 VRM 模型 (3D 虚拟角色), 具备表情、动作、语音对话能力。
 
 **架构选择:**
 
@@ -250,7 +250,7 @@ vs 微服务 (Microservices)
 
 ### Q: Feature Flag 系统如何实现死代码消除?
 
-VersperClaw 使用编译时 Feature Flag 系统, 实现 `#ifdef` 风格的死代码消除。
+Codev 使用编译时 Feature Flag 系统, 实现 `#ifdef` 风格的死代码消除。
 
 **实现位置:** `src/feature/feature.ts` / `feature()` 函数
 
@@ -342,7 +342,7 @@ if (feature("VOICE_MODE")) {
 - 不同用户有不同的风险和信任水平
 - 需要有审计和回溯能力
 
-**方案设计 (参考 VersperClaw):**
+**方案设计 (参考 Codev):**
 
 ```
 权限光谱: default → acceptEdits → plan → auto → bypassPermissions → dontAsk → bubble
@@ -392,7 +392,7 @@ if (feature("VOICE_MODE")) {
 **架构选择: 同进程 vs 微服务**
 
 ```
-方案 A: 同进程 (VersperClaw 的选择)
+方案 A: 同进程 (Codev 的选择)
   ┌─────────────────────────────┐
   │  Agent Process              │
   │  ┌──────┐  ┌──────────────┐ │
@@ -451,7 +451,7 @@ if (feature("VOICE_MODE")) {
 **方案对比:**
 
 ```
-方案 A: Fetch Override (VersperClaw 选型)
+方案 A: Fetch Override (Codev 选型)
   优点:
     - 无侵入: 不修改 SDK, 不修改 Agent 核心逻辑
     - 统一接口: 所有代码只认识 Anthropic Messages 格式
@@ -519,7 +519,7 @@ OpenAI → Anthropic 逆映射同理
 ```
 
 - **37signals 二分法**: 权限提示是摩擦, 但也是安全护栏
-- **VersperClaw 的答案**: 渐进信任 + 4 层防御 + ML 辅助
+- **Codev 的答案**: 渐进信任 + 4 层防御 + ML 辅助
 - **面试价值**: 展示对安全架构和 UX 权衡的深度理解
 
 ---
@@ -537,7 +537,7 @@ OpenAI → Anthropic 逆映射同理
   但可能丢失关键信息           但 token 成本更高
 ```
 
-- **VersperClaw 的答案**: 5 层压缩管道 + JSONL 持久化 + Append-only 日志
+- **Codev 的答案**: 5 层压缩管道 + JSONL 持久化 + Append-only 日志
 - **关键洞察**: 压缩丢弃的是"发送给 LLM 的内容", 不是"系统记录的内容"
 - **面试价值**: 展示对 LLM 上下文窗口限制的实际工程理解
 
@@ -578,7 +578,7 @@ Agent Loop 简单 (~88 行)    扩展机制丰富
   开发效率高                   但调试困难
 ```
 
-- **VersperClaw 的答案**: 同进程, 因为这是一个单用户终端工具, 不是分布式系统
+- **Codev 的答案**: 同进程, 因为这是一个单用户终端工具, 不是分布式系统
 - **何时应该选微服务?** 多用户 Web 服务、需要独立扩缩容、团队分工明确
 - **面试价值**: 展示架构选型不是技术炫耀, 而是根据实际场景做合理决策
 
@@ -687,15 +687,15 @@ Friend VRM 的场景是 Agent → Avatar 的单向广播, SSE 是最优解。如
 
 ```
 30 秒: "一个带 3D 桌宠的 AI 编程助手 CLI"
- 2 分钟: "VersperClaw 是从 Claude Code fork 的 AI CLI 代理,
+ 2 分钟: "Codev 是从 Claude Code fork 的 AI CLI 代理,
           核心增强是多 Provider 支持和 VRM 桌面伴侣,
           采用同进程 + SSE 架构实现低延迟语音对话"
 10 分钟: 深入 Agent Loop、权限系统、压缩管道、Friend 架构
 ```
 
-### 把 VersperClaw 经验映射到通用系统设计
+### 把 Codev 经验映射到通用系统设计
 
-| VersperClaw 概念 | 通用系统设计概念 |
+| Codev 概念 | 通用系统设计概念 |
 |------------------|-------------------|
 | Agent Loop | Event-driven orchestration |
 | 4 层防御纵深 | Defense in depth |
@@ -711,4 +711,4 @@ Friend VRM 的场景是 Agent → Avatar 的单向广播, SSE 是最优解。如
 ---
 
 > 最后更新: 2026-06-22
-> 基于 VersperClaw main branch (commit 835ff5a)
+> 基于 Codev main branch (commit 835ff5a)

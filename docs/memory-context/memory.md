@@ -2,7 +2,7 @@
 
 ## 概述
 
-VersperClaw 拥有一个基于文件的持久化记忆存储系统（Memdir），允许 Agent 在不同会话间记住用户信息、偏好、项目上下文等。记忆存储在项目对应的 `~/.claude/projects/<slug>/memory/` 目录中。
+Codev 拥有一个基于文件的持久化记忆存储系统（Memdir），允许 Agent 在不同会话间记住用户信息、偏好、项目上下文等。记忆存储在项目对应的 `~/.claude/projects/<slug>/memory/` 目录中。
 
 ---
 

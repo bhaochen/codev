@@ -244,7 +244,7 @@ class FeishuService {
         appId: config.appId!,
         appSecret: config.appSecret!,
         domain,
-        source: 'versperclaw',
+        source: 'codev',
         // Use default logger level (info)
         respectProxyEnv: true,
         wsConfig: { pingTimeout: 3 },
@@ -437,7 +437,7 @@ class FeishuService {
 
   async runRegistrationWizard(): Promise<{ appId: string; appSecret: string }> {
     const result = await registerApp({
-      source: 'versperclaw',
+      source: 'codev',
       onQRCodeReady: info => {
         log.info('wizard', 'qr-ready', {
           url: info.url,
@@ -542,7 +542,7 @@ class FeishuService {
           try {
             await new Promise<void>((resolve, reject) => {
               const child = spawn(
-                '/home/yuki/Code/Agent/VersperClaw/.venv/bin/voxcpm',
+                '/home/yuki/Code/Agent/Codev/.venv/bin/voxcpm',
                 ['clone', '--text', chunk, '--reference-audio', refAudio, '--denoise', '--output', rawPath],
                 { shell: false },
               )

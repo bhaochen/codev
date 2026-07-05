@@ -15,7 +15,7 @@ const featureArgs = FULL_EXPERIMENTAL_FEATURES.flatMap(f => ['--feature', f])
 const defineArgs = [
   '--define', `MACRO.VERSION:${JSON.stringify(version)}`,
   '--define', `MACRO.BUILD_TIME:${JSON.stringify(buildTime)}`,
-  '--define', `MACRO.PACKAGE_URL:${JSON.stringify('versperclaw-dev')}`,
+  '--define', `MACRO.PACKAGE_URL:${JSON.stringify('codev-dev')}`,
   '--define', `MACRO.NATIVE_PACKAGE_URL:undefined`,
   '--define', `MACRO.FEEDBACK_CHANNEL:${JSON.stringify('github')}`,
   '--define', `MACRO.ISSUES_EXPLAINER:${JSON.stringify('')}`,

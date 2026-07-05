@@ -25,7 +25,7 @@ export function resolveBundledCliPathFromExecPath(
   }
 
   // If execPath points to an existing regular file, it IS the CLI binary
-  // (handles standalone compiled binaries like VersperClaw, cli, etc.)
+  // (handles standalone compiled binaries like Codev, cli, etc.)
   if (existsAndIsFile(execPath)) {
     return execPath
   }

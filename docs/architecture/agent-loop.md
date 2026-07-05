@@ -1,7 +1,7 @@
 # Agent 循环与查询引擎深度分析
 
 > 本文基于 `src/query.ts`、`src/QueryEngine.ts`、`src/query/*`、`src/services/tools/*` 等核心模块，
-> 详细阐述 VersperClaw (Claude Code) 的 Agent 循环架构、模型调用管道、工具调度机制、恢复策略与继续决策逻辑。
+> 详细阐述 Codev (Claude Code) 的 Agent 循环架构、模型调用管道、工具调度机制、恢复策略与继续决策逻辑。
 > 文中列出具体文件路径、函数名称与行号，供开发者快速定位代码。
 
 ---

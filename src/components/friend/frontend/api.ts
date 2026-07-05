@@ -1,6 +1,6 @@
 import type { VRMSceneHandle } from './components/VRMScene'
 
-/** VersperClaw server base URL */
+/** Codev server base URL */
 export const SERVER_URL = 'http://127.0.0.1:3456'
 
 /** Base path for the Friend VRM plugin API */

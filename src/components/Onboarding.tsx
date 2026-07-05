@@ -72,9 +72,9 @@ export function Onboarding({
          */}
         <OrderedList>
           <OrderedList.Item>
-            <Text>VersperClaw can make mistakes</Text>
+            <Text>Codev can make mistakes</Text>
             <Text dimColor wrap="wrap">
-              You should always review VersperClaw&apos;s responses, especially when
+              You should always review Codev&apos;s responses, especially when
               <Newline />
               running code.
               <Newline />
@@ -87,7 +87,7 @@ export function Onboarding({
             <Text dimColor wrap="wrap">
               For more details see:
               <Newline />
-              <Link url="https://github.com/versperai/VersperClaw" />
+              <Link url="https://github.com/chenbhao/Codev" />
             </Text>
           </OrderedList.Item>
         </OrderedList>

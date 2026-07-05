@@ -56,9 +56,9 @@ export const WebFetchTool = buildTool({
     const { url } = input as { url: string } // 类型断言
     try {
       const hostname = new URL(url).hostname
-      return `VersperClaw wants to fetch content from ${hostname}` // 用户提示
+      return `Codev wants to fetch content from ${hostname}` // 用户提示
     } catch {
-      return `VersperClaw wants to fetch content from this URL`
+      return `Codev wants to fetch content from this URL`
     }
   },
   userFacingName() {

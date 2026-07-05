@@ -2,7 +2,7 @@
  * SSE client registry and typed broadcast for Friend VRM avatar.
  *
  * Uses Bun ReadableStream-based SSE (not Node http.ServerResponse),
- * compatible with the VersperClaw Bun.serve() infrastructure.
+ * compatible with the Codev Bun.serve() infrastructure.
  */
 
 type SseClient = {

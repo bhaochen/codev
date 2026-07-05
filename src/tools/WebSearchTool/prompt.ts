@@ -6,7 +6,7 @@ export function getWebSearchPrompt(): string {
   const currentMonthYear = getLocalMonthYear()
 
   return `
-- Allows VersperClaw to search the web using a local SearXNG search engine or Tavily cloud search (when TAVILY_API_KEY is configured) and use the results to inform responses
+- Allows Codev to search the web using a local SearXNG search engine or Tavily cloud search (when TAVILY_API_KEY is configured) and use the results to inform responses
 - Provides up-to-date information for current events, technical documentation, and recent data
 - Returns structured search results including titles, URLs, and snippets
 - Works with all AI providers including local models

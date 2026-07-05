@@ -501,7 +501,7 @@ class TelegramService {
     if (text === '/start') {
       void this.sendMessage(
         normalizedChatId,
-        'Telegram 已连接到当前 VersperClaw 会话。直接发送文本即可开始远程对话。',
+        'Telegram 已连接到当前 Codev 会话。直接发送文本即可开始远程对话。',
       ).catch(() => {})
       return
     }

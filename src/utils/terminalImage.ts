@@ -174,7 +174,7 @@ export async function renderImageWithTimg(
 
     const cols = columns ?? process.stdout.columns ?? 80
     const termRows = rows ?? process.stdout.rows ?? 40
-    const tmpDir = mkdtempSync(join(tmpdir(), 'versperclaw-timg-'))
+    const tmpDir = mkdtempSync(join(tmpdir(), 'codev-timg-'))
     const ext = format === 'jpeg' ? 'jpg' : format
     const tmpFile = join(tmpDir, `image.${ext}`)
     let result: string | null = null
@@ -255,7 +255,7 @@ export function getImageRowsCount(
     const cols = columns ?? process.stdout.columns ?? 80
     const termRows = process.stdout.rows ?? 40
     const maxRows = Math.max(10, Math.floor(termRows * 0.5))
-    const tmpDir = mkdtempSync(join(tmpdir(), 'versperclaw-timg-rows-'))
+    const tmpDir = mkdtempSync(join(tmpdir(), 'codev-timg-rows-'))
     const ext = format === 'jpeg' ? 'jpg' : format
     const tmpFile = join(tmpDir, `image.${ext}`)
 
@@ -310,7 +310,7 @@ export function renderImageWithTimgSync(
     const cols = columns ?? process.stdout.columns ?? 80
     const termRows = rows ?? process.stdout.rows ?? 40
     const maxRows = Math.max(10, Math.floor(termRows * 0.5))
-    const tmpDir = mkdtempSync(join(tmpdir(), 'versperclaw-timg-'))
+    const tmpDir = mkdtempSync(join(tmpdir(), 'codev-timg-'))
     const ext = format === 'jpeg' ? 'jpg' : format
     const tmpFile = join(tmpDir, `image.${ext}`)
     let result: string | null = null

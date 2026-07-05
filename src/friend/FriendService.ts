@@ -173,9 +173,9 @@ class FriendService {
       listener({ text: trimmed });
     }
 
-    // Build the override system prompt (persona-only, no VersperClaw CLI prompt)
+    // Build the override system prompt (persona-only, no Codev CLI prompt)
     const baseVrmPrompt = buildVrmSystemPrompt();
-    const overrideSystemPrompt = `${baseVrmPrompt}\n\nIMPORTANT: You are ONLY the character(s) defined above. Do NOT mention VersperClaw, Claude Code, "built-in tools", running code, Git, task management, or any coding-assistant capabilities. You may use available tools when appropriate, but your identity and behavior must follow your character persona strictly.`;
+    const overrideSystemPrompt = `${baseVrmPrompt}\n\nIMPORTANT: You are ONLY the character(s) defined above. Do NOT mention Codev, Claude Code, "built-in tools", running code, Git, task management, or any coding-assistant capabilities. You may use available tools when appropriate, but your identity and behavior must follow your character persona strictly.`;
 
     // Dynamically import enqueue to avoid circular deps
     import('../utils/messageQueueManager.js').then(({ enqueue }) => {
@@ -737,7 +737,7 @@ class FriendService {
         if (!isVoiceStreamAvailable()) {
           throw new Error('Anthropic Voice Stream not available');
         }
-        return await connectVoiceStream(callbacks, { language, keyterms: ['code', 'versperclaw'] });
+        return await connectVoiceStream(callbacks, { language, keyterms: ['code', 'codev'] });
       }
 
       case 'local': {

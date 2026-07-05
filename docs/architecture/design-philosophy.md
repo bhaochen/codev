@@ -1,10 +1,10 @@
 # 设计哲学与架构原则
 
-> 本文档综合自 Dive into Claude Code (arXiv:2604.14228v1) 的架构分析以及 VersperClaw
+> 本文档综合自 Dive into Claude Code (arXiv:2604.14228v1) 的架构分析以及 Codev
 > 源代码的实际实现模式，旨在为面试准备和系统设计讨论提供参考。
 >
 > Claude Code 的设计哲学源于五个核心人类价值，通过十三条设计原则转化为具体的架构决策。
-> VersperClaw 在此基础上进行了多 Provider 和 Friend VRM 等扩展。
+> Codev 在此基础上进行了多 Provider 和 Friend VRM 等扩展。
 
 ---
 
@@ -171,13 +171,13 @@ Claude Code 的原则组合的独特之处在于：最小决策脚手架 + 分�
 
 ---
 
-## 4. VersperClaw 与 Claude Code 的差异
+## 4. Codev 与 Claude Code 的差异
 
-VersperClaw 以 Claude Code 为上游基础，进行了以下主要变更和扩展：
+Codev 以 Claude Code 为上游基础，进行了以下主要变更和扩展：
 
 ### 4.1 多 Provider 支持
 
-- Claude Code 内置仅支持 Anthropic API，而 VersperClaw 通过 Provider 代理架构
+- Claude Code 内置仅支持 Anthropic API，而 Codev 通过 Provider 代理架构
   支持 OpenAI、Groq、DeepSeek 以及所有兼容 OpenAI 的 API。
 - **实现模式**：`src/server/proxy/handler.ts` 实现双路由决策——
     - 1P Anthropic 路径：直接调用 Anthropic SDK
@@ -314,7 +314,7 @@ Budget Reduction (工具结果大小限制)
 - **Dive into Claude Code** (arXiv:2604.14228v1): 对本文档所基于的原始架构分析论文
 - **Anthropic Safe Agents Framework**: 安全代理设计的原则文档
 - **Claude Code 官方文档**: [https://code.claude.com/docs/](https://code.claude.com/docs/)
-- **VersperClaw 源代码**: `/home/yuki/Code/Agent/VersperClaw/src/`
+- **Codev 源代码**: `/home/yuki/Code/Agent/Codev/src/`
   - 核心循环: `src/query.ts`
   - 权限系统: `src/utils/permissions/`
   - 压缩管道: `src/services/compact/`
@@ -326,4 +326,4 @@ Budget Reduction (工具结果大小限制)
 ---
 
 > **文档版本**: v1.0 — 2026-06-22
-> **作者**: 基于 Claude Code 设计哲学论文和 VersperClaw 源代码综合分析
+> **作者**: 基于 Claude Code 设计哲学论文和 Codev 源代码综合分析

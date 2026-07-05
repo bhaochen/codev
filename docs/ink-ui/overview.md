@@ -2,9 +2,9 @@
 
 ## 概述
 
-VersperClaw 的 Ink 是基于 [vadimdemedes/ink](https://github.com/vadimdemedes/ink) v6 的深度定制分叉（fork）。Ink 使用 React 组件模型渲染终端用户界面。它将 React 的虚拟 DOM 映射到终端字符网格，支持 Yoga Flexbox 布局、样式继承、事件处理、文本选择、搜索高亮等丰富的交互能力。
+Codev 的 Ink 是基于 [vadimdemedes/ink](https://github.com/vadimdemedes/ink) v6 的深度定制分叉（fork）。Ink 使用 React 组件模型渲染终端用户界面。它将 React 的虚拟 DOM 映射到终端字符网格，支持 Yoga Flexbox 布局、样式继承、事件处理、文本选择、搜索高亮等丰富的交互能力。
 
-> 与上游相比，VersperClaw 的 Ink 新增/修改了以下核心能力：自定义 DOM 节点树、压缩屏幕缓冲区（Int32Array）、基于 Yoga WASM 的布局引擎、Kitty 键盘协议支持、SGR 鼠标跟踪、文本选择模式、搜索高亮、双向文本处理、scrollable 容器、声明式光标位置等。
+> 与上游相比，Codev 的 Ink 新增/修改了以下核心能力：自定义 DOM 节点树、压缩屏幕缓冲区（Int32Array）、基于 Yoga WASM 的布局引擎、Kitty 键盘协议支持、SGR 鼠标跟踪、文本选择模式、搜索高亮、双向文本处理、scrollable 容器、声明式光标位置等。
 
 ---
 

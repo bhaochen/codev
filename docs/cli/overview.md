@@ -260,7 +260,7 @@ CLI 入口由 **Commander.js** 解析命令行参数，随后启动 **REPL**（�
 支持的配置项包括 theme、model、permissions（权限模式）、音效、通知等。
 
 相关文件：
-- `/home/yuki/Code/Agent/VersperClaw/src/commands.ts` — 命令注册与过滤核心
-- `/home/yuki/Code/Agent/VersperClaw/src/types/command.ts` — Command 类型定义
-- `/home/yuki/Code/Agent/VersperClaw/src/skills/loadSkillsDir.ts` — 技能目录加载
-- `/home/yuki/Code/Agent/VersperClaw/src/tools/WorkflowTool/` — 工作流工具实现
+- `/home/yuki/Code/Agent/Codev/src/commands.ts` — 命令注册与过滤核心
+- `/home/yuki/Code/Agent/Codev/src/types/command.ts` — Command 类型定义
+- `/home/yuki/Code/Agent/Codev/src/skills/loadSkillsDir.ts` — 技能目录加载
+- `/home/yuki/Code/Agent/Codev/src/tools/WorkflowTool/` — 工作流工具实现

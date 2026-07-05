@@ -2,7 +2,7 @@
 
 ## 概述
 
-VersperClaw 桌面服务器是一个同进程 HTTP + WebSocket 服务器，基于 **Bun.serve()** 运行，为 Tauri 桌面应用提供全套 API 接口。服务器与 CLI 子进程通过 SDK WebSocket Bridge 通信，桌面 UI 通过客户端 WebSocket 与服务器交互。
+Codev 桌面服务器是一个同进程 HTTP + WebSocket 服务器，基于 **Bun.serve()** 运行，为 Tauri 桌面应用提供全套 API 接口。服务器与 CLI 子进程通过 SDK WebSocket Bridge 通信，桌面 UI 通过客户端 WebSocket 与服务器交互。
 
 - **入口文件**: `src/server/server.ts`
 - **运行时**: Bun (JavaScript/TypeScript 运行时)

@@ -190,7 +190,7 @@ async function ensureSession(sessionName: string): Promise<void> {
 /**
  * Resolves the real executable path for the current process.
  * In bun-compiled mode, process.execPath returns a bunfs virtual path
- * (e.g., /$bunfs/root/VersperClaw). Uses /proc/self/exe on Linux to
+ * (e.g., /$bunfs/root/Codev). Uses /proc/self/exe on Linux to
  * resolve the real binary path so spawned tmux panes can find it.
  */
 function resolveRealExecPath(): string {

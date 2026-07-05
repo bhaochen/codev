@@ -1,12 +1,12 @@
 [package]
-name = "versperclaw-friend"
+name = "codev-friend"
 version = "0.1.0"
-description = "VersperClaw VRM desktop pet"
-authors = ["VersperClaw"]
+description = "Codev VRM desktop pet"
+authors = ["Codev"]
 edition = "2021"
 
 [lib]
-name = "versperclaw_friend_lib"
+name = "codev_friend_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
 
 [build-dependencies]

@@ -1,4 +1,4 @@
-// Provider abstraction for VersperClaw voice mode.
+// Provider abstraction for Codev voice mode.
 //
 // Two interfaces:
 // - `TranscriptionProvider` — speech → text
@@ -121,7 +121,7 @@ export class LocalWhisperSTT implements TranscriptionProvider {
   }
 
   private async makeTmpDir(prefix: string): Promise<string> {
-    const dir = path.join(os.tmpdir(), `versperclaw-${prefix}-${process.pid}-${Date.now()}`)
+    const dir = path.join(os.tmpdir(), `codev-${prefix}-${process.pid}-${Date.now()}`)
     await new Promise<void>((resolve) => {
       const w = spawn('mkdir', ['-p', dir])
       w.on('close', (code) => (code === 0 ? resolve() : resolve()))
@@ -231,7 +231,7 @@ export class EdgeTTSProvider implements TTSProvider {
   }
 
   private async writeTempText(text: string): Promise<string> {
-    const p = path.join(os.tmpdir(), `versperclaw-edge-tts-${process.pid}-${Date.now()}.txt`)
+    const p = path.join(os.tmpdir(), `codev-edge-tts-${process.pid}-${Date.now()}.txt`)
     await (await import('node:fs')).promises.writeFile(p, text, 'utf8')
     return p
   }

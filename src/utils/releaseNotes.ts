@@ -26,9 +26,9 @@ const MAX_RELEASE_NOTES_SHOWN = 5
  * 3. Next time the user starts Claude, the cached changelog is available immediately
  */
 export const CHANGELOG_URL =
-  'https://github.com/versperai/VersperClaw/releases'
+  'https://github.com/chenbhao/Codev/releases'
 const RAW_CHANGELOG_URL =
-  'https://api.github.com/repos/versperai/VersperClaw/releases'
+  'https://api.github.com/repos/chenbhao/Codev/releases'
 
 /**
  * Get the path for the cached changelog file.
@@ -91,7 +91,7 @@ export async function fetchAndStoreChangelog(): Promise<void> {
   }
 
   const response = await axios.get(RAW_CHANGELOG_URL, {
-    headers: { 'User-Agent': 'VersperClaw' },
+    headers: { 'User-Agent': 'Codev' },
   })
   if (response.status === 200) {
     const releases = response.data as Array<{

@@ -260,7 +260,7 @@ VAD（Voice Activity Detection）服务 (`src/friend/voice/vad-service.ts`) 使�
 4. **外部模块排除**: `@ant/*`、`audio-capture-napi`、`image-processor-napi`、`modifiers-napi`、`url-handler-napi` 通过 `--external` 排除捆绑，减小二进制体积并允许运行时加载原生模块。
 5. **环境变量定义**: `process.env.USER_TYPE='external'`、`process.env.CLAUDE_CODE_FORCE_FULL_LOGO='true'`、`process.env.CCR_FORCE_BUNDLE='true'` 等定义确保构建产物运行于正确模式。
 6. **完整特性集**: 使用 `--feature-set=dev-full` 启用全部实验特性（50+ feature flags），默认仅启用 `VOICE_MODE`。
-7. **输出产物**: 开发版本输出到 `./VersperClaw`，发布版本输出到 `./dist/cli`。
+7. **输出产物**: 开发版本输出到 `./Codev`，发布版本输出到 `./dist/cli`。
 
 ---
 

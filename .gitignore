@@ -2,7 +2,7 @@ node_modules/
 packages/
 dist/
 .codex
-VersperClaw
+codev
 
 # Prebuilt native binaries (tracked in claude-code/ reference)
 vendor/

@@ -2,7 +2,7 @@
 
 ## 概述
 
-Coordinator 模式是 VersperClaw 的一种高级执行模式，允许一个协调者（Coordinator）LLM 通过 `AgentTool` 派生子代理（Worker）并行执行任务。通过 `CLAUDE_CODE_COORDINATOR_MODE` 环境变量激活。
+Coordinator 模式是 Codev 的一种高级执行模式，允许一个协调者（Coordinator）LLM 通过 `AgentTool` 派生子代理（Worker）并行执行任务。通过 `CLAUDE_CODE_COORDINATOR_MODE` 环境变量激活。
 
 ### 激活方式
 
@@ -210,7 +210,7 @@ AgentTool({ prompt: "Based on your findings, implement the fix" }) // 错误：�
 
 ### 概述
 
-Agent Teams（Swarm 模式）是 VersperClaw 的多 Agent 拓扑模型，通过 `feature('AGENT_SWARMS')` 编译期标记门控。与 Coordinator/Worker 模式不同，Teams 采用**文件系统邮箱通信**，每个 Agent 在独立进程中运行（tmux split-pane / in-process）。
+Agent Teams（Swarm 模式）是 Codev 的多 Agent 拓扑模型，通过 `feature('AGENT_SWARMS')` 编译期标记门控。与 Coordinator/Worker 模式不同，Teams 采用**文件系统邮箱通信**，每个 Agent 在独立进程中运行（tmux split-pane / in-process）。
 
 ### 激活方式
 

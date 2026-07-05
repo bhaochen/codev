@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# versperclaw installer
+# codev installer
 # Usage: curl -fsSL https://raw.githubusercontent.com/paoloanzn/free-code/main/install.sh | bash
 
 RED='\033[0;31m'
@@ -12,8 +12,8 @@ BOLD='\033[1m'
 DIM='\033[2m'
 RESET='\033[0m'
 
-REPO="https://github.com/versperai/VerserClaw.git"
-INSTALL_DIR="$HOME/versperclaw"
+REPO="https://github.com/chenbhao/Codev.git"
+INSTALL_DIR="$HOME/codev"
 BUN_MIN_VERSION="1.3.11"
 
 info() { printf "${CYAN}[*]${RESET} %s\n" "$*"; }
@@ -125,18 +125,18 @@ install_deps() {
 }
 
 build_binary() {
-  info "Building VersperClaw (all experimental features enabled)..."
+  info "Building Codev (all experimental features enabled)..."
   cd "$INSTALL_DIR"
   bun run build:dev:full
-  ok "Binary built: $INSTALL_DIR/VersperClaw"
+  ok "Binary built: $INSTALL_DIR/Codev"
 }
 
 link_binary() {
   local link_dir="$HOME/.local/bin"
   mkdir -p "$link_dir"
 
-  ln -sf "$INSTALL_DIR/VersperClaw" "$link_dir/versperclaw"
-  ok "Symlinked: $link_dir/versperclaw"
+  ln -sf "$INSTALL_DIR/Codev" "$link_dir/codev"
+  ok "Symlinked: $link_dir/codev"
 
   if ! echo "$PATH" | tr ':' '\n' | grep -qx "$link_dir"; then
     warn "$link_dir is not on your PATH"
@@ -169,16 +169,16 @@ echo ""
 printf "${GREEN}${BOLD}  Installation complete!${RESET}\n"
 echo ""
 printf "  ${BOLD}Run it:${RESET}\n"
-printf "    ${CYAN}versperclaw${RESET}                          # interactive REPL\n"
-printf "    ${CYAN}versperclaw -p \"your prompt\"${RESET}          # one-shot mode\n"
+printf "    ${CYAN}codev${RESET}                          # interactive REPL\n"
+printf "    ${CYAN}codev -p \"your prompt\"${RESET}          # one-shot mode\n"
 echo ""
 printf "  ${BOLD}Set your API key:${RESET}\n"
 printf "    ${CYAN}export ANTHROPIC_API_KEY=\"sk-ant-...\"${RESET}\n"
 echo ""
 printf "  ${BOLD}Or log in with Claude.ai:${RESET}\n"
-printf "    ${CYAN}versperclaw /login${RESET}\n"
+printf "    ${CYAN}codev /login${RESET}\n"
 echo ""
 printf "  ${DIM}Source: $INSTALL_DIR${RESET}\n"
-printf "  ${DIM}Binary: $INSTALL_DIR/VersperClaw${RESET}\n"
-printf "  ${DIM}Link:   ~/.local/bin/versperclaw${RESET}\n"
+printf "  ${DIM}Binary: $INSTALL_DIR/Codev${RESET}\n"
+printf "  ${DIM}Link:   ~/.local/bin/codev${RESET}\n"
 echo ""

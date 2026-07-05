@@ -9,8 +9,8 @@
 | 命令 | 对应脚本参数 | 输出格式 | 说明 |
 | --- | --- | --- | --- |
 | `bun run build` | 无 | 源码产物 (`./cli`) | 默认构建，不编译为二进制 |
-| `bun run build:dev` | `--dev` | 源码产物 (`./VersperClaw`) | 开发版本，自动附加 git SHA 和构建时间作为开发版本号 |
-| `bun run build:dev:full` | `--dev --feature-set=dev-full` | 源码产物 (`./VersperClaw`) | 开发版本，启用全部实验性功能标记 |
+| `bun run build:dev` | `--dev` | 源码产物 (`./Codev`) | 开发版本，自动附加 git SHA 和构建时间作为开发版本号 |
+| `bun run build:dev:full` | `--dev --feature-set=dev-full` | 源码产物 (`./Codev`) | 开发版本，启用全部实验性功能标记 |
 | `bun run compile` | `--compile` | 二进制可执行文件 (`./dist/cli`) | 生产构建，编译为 Bun 原生二进制 |
 | `bun run dev` | — | 直接运行 | 通过 `bun run ./src/entrypoints/cli.tsx` 直接执行，跳过构建步骤 |
 
@@ -534,7 +534,7 @@ export function filterToolsByDenyRules<T extends { name: string; mcpInfo?: ... }
 dist/
 ├── cli                     # 生产二进制（`--compile` 模式，~192MB）
 ├── cli.js                  # 生产源码产物（非编译模式，~20MB）
-├── VersperClaw             # 开发二进制（`--dev --compile` 模式，~202MB）
+├── Codev             # 开发二进制（`--dev --compile` 模式，~202MB）
 └── vendor/                 # 原生二进制库（仅非编译模式）
     ├── audio-capture/      # 音频捕获原生模块
     ├── audio-capture-src/  # 音频捕获源码
@@ -546,9 +546,9 @@ dist/
 | 构建模式 | 入口文件 | 产物路径 | 大小 | 类型 |
 | --- | --- | --- | --- | --- |
 | `build`（默认） | `scripts/build.ts` | `./cli` | ~0（源码引用） | 源码（Bun bundle） |
-| `build:dev` | `scripts/build.ts --dev` | `./VersperClaw` | ~0（源码引用） | 源码 |
+| `build:dev` | `scripts/build.ts --dev` | `./Codev` | ~0（源码引用） | 源码 |
 | `compile` | `scripts/build.ts --compile` | `./dist/cli` | ~192MB | Bun 编译二进制 |
-| `compile + dev` | `scripts/build.ts --compile --dev` | `./dist/VersperClaw` | ~202MB | Bun 编译二进制（调试） |
+| `compile + dev` | `scripts/build.ts --compile --dev` | `./dist/Codev` | ~202MB | Bun 编译二进制（调试） |
 
 ### 5.3 预加载脚本
 
@@ -591,11 +591,11 @@ bun run dev
 
 # 开发构建 + 运行
 bun run build:dev
-./VersperClaw
+./Codev
 
 # 开发构建（全部实验特性）+ 运行
 bun run build:dev:full
-./VersperClaw
+./Codev
 ```
 
 ### 6.2 生产构建

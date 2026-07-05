@@ -1,5 +1,5 @@
 /**
- * Friend API — VRM avatar frontend HTTP routes for VersperClaw.
+ * Friend API — VRM avatar frontend HTTP routes for Codev.
  *
  * Simplified to only voice + emotion/action features.
  */
@@ -217,7 +217,7 @@ export async function handleFriendApi(req: Request, url: URL): Promise<Response>
   // ── Persona (read-only) ──
   const workspaceRoot = path.join(
     process.env.HOME || process.env.USERPROFILE || '',
-    '.config', 'VersperClaw', 'friend',
+    '.config', 'Codev', 'friend',
   );
   const identityPath = path.join(workspaceRoot, 'IDENTITY.md');
   const soulPath = path.join(workspaceRoot, 'SOUL.md');

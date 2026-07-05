@@ -883,7 +883,7 @@ function ScanningDialog({
         const { registerApp } = await import('@larksuite/channel')
 
         const result = await registerApp({
-          source: 'versperclaw',
+          source: 'codev',
           onQRCodeReady: (info) => {
             if (cancelled) return
             setQrUrl(info.url)

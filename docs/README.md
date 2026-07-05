@@ -1,6 +1,6 @@
-# VersperClaw 文档
+# Codev 文档
 
-> VersperClaw — 基于 Anthropic Claude Code 的增强型 AI CLI 代理，集成 VRM 桌面伴侣、多 Provider、语音对话和自动化模式。
+> Codev — 基于 Anthropic Claude Code 的增强型 AI CLI 代理，集成 VRM 桌面伴侣、多 Provider、语音对话和自动化模式。
 
 ## 目录
 

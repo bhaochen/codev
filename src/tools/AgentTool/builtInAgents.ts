@@ -2,7 +2,7 @@ import { feature } from 'bun:bundle'
 import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
-import { VERSPER_CLAW_GUIDE_AGENT } from './built-in/versperClawGuideAgent.js'
+import { CODEV_GUIDE_AGENT } from './built-in/codevGuideAgent.js'
 import { EXPLORE_AGENT } from './built-in/exploreAgent.js'
 import { GENERAL_PURPOSE_AGENT } from './built-in/generalPurposeAgent.js'
 import { PLAN_AGENT } from './built-in/planAgent.js'
@@ -73,7 +73,7 @@ export function getBuiltInAgents(): AgentDefinition[] {
     process.env.CLAUDE_CODE_ENTRYPOINT !== 'sdk-cli'
 
   if (isNonSdkEntrypoint) {
-    agents.push(VERSPER_CLAW_GUIDE_AGENT)
+    agents.push(CODEV_GUIDE_AGENT)
   }
 
   if (isVerificationAgentEnabled()) {

@@ -2,7 +2,7 @@
 
 ## 项目定位
 
-VersperClaw 是一个 AI CLI 智能代理，基于 Anthropic Claude Code 源代码构建，增强了对以下场景的支持：
+Codev 是一个 AI CLI 智能代理，基于 Anthropic Claude Code 源代码构建，增强了对以下场景的支持：
 
 - **VRM 桌面伴侣**（Friend）：在同一进程中运行 HTTP/SSE 服务，驱动 3D VRM 角色的表情、语音和文本气泡
 - **多模型提供者**：通过反向代理层将 Anthropic Messages API 协议翻译为 OpenAI Chat/Responses API 协议，支持数十种第三方模型

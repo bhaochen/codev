@@ -36,13 +36,13 @@ function freePort(port: number): boolean {
     const pid = parseInt(pidMatch[1]!, 10);
     if (pid === process.pid) return true; // we own it
 
-    // Only kill bun/VersperClaw processes — don't touch unknown services
+    // Only kill bun/Codev processes — don't touch unknown services
     const proc = Bun.spawnSync(['ps', '-p', String(pid), '-o', 'comm=']);
     const comm = proc.stdout.toString().trim();
     if (!comm) return false; // process doesn't exist
     const baseName = comm.split('/').pop() || comm;
-    if (baseName !== 'bun' && baseName !== 'VersperClaw' && !baseName.startsWith('claude-') && !baseName.includes('node')) {
-      console.warn(`[FriendServer] Port ${port} is occupied by non-VersperClaw process: ${comm}`);
+    if (baseName !== 'bun' && baseName !== 'Codev' && !baseName.startsWith('claude-') && !baseName.includes('node')) {
+      console.warn(`[FriendServer] Port ${port} is occupied by non-Codev process: ${comm}`);
       return false;
     }
 

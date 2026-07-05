@@ -2,7 +2,7 @@
 
 ## 概述
 
-VersperClaw 的语音系统支持**语音转文字（STT, Speech-to-Text）** 和 **文字转语音（TTS, Text-to-Speech）** 功能。语音录制使用底层音频捕获库（cpal），含有 SoX 和 arecord 回退方案。语音识别支持多个提供商，包括云端 API 和本地模型；语音合成同样支持多个引擎，涵盖 Edge TTS 和 DashScope TTS。
+Codev 的语音系统支持**语音转文字（STT, Speech-to-Text）** 和 **文字转语音（TTS, Text-to-Speech）** 功能。语音录制使用底层音频捕获库（cpal），含有 SoX 和 arecord 回退方案。语音识别支持多个提供商，包括云端 API 和本地模型；语音合成同样支持多个引擎，涵盖 Edge TTS 和 DashScope TTS。
 
 > 注意：部分功能受构建特性门控（feature gate）限制，仅在 ant-internal 构建中可用。
 

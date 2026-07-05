@@ -1,6 +1,6 @@
 # 核心数据流
 
-本文档详细描述 VersperClaw 的六大核心数据流，包含 ASCII 序列图和关键代码路径。
+本文档详细描述 Codev 的六大核心数据流，包含 ASCII 序列图和关键代码路径。
 
 ---
 
@@ -90,7 +90,7 @@ query() 函数
 
 ### 语音捕获架构
 
-VersperClaw 使用进程内音频捕获（cpal Rust 库，通过 `native-modules/audio-capture-napi`），而不是传统的 arecord/parecord 子进程。
+Codev 使用进程内音频捕获（cpal Rust 库，通过 `native-modules/audio-capture-napi`），而不是传统的 arecord/parecord 子进程。
 
 ```
 麦克风 (硬件)

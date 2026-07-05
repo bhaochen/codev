@@ -1,6 +1,6 @@
 # 工具参考大全
 
-> 完整收录 VersperClaw 中所有 AI 可调用的工具（约 60+），按功能分类。
+> 完整收录 Codev 中所有 AI 可调用的工具（约 60+），按功能分类。
 
 ---
 
@@ -184,4 +184,4 @@
 
 ---
 
-> 注: 本参考基于 `/home/yuki/Code/Agent/VersperClaw/src/tools.ts` 的 `getAllBaseTools()` 函数。MCP 工具的完整列表取决于用户配置的 MCP 服务器，未在此表中逐一列出。
+> 注: 本参考基于 `/home/yuki/Code/Agent/Codev/src/tools.ts` 的 `getAllBaseTools()` 函数。MCP 工具的完整列表取决于用户配置的 MCP 服务器，未在此表中逐一列出。

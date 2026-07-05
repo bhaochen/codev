@@ -2,7 +2,7 @@
 
 ## 定位
 
-Friend 是 VersperClaw 的 VRM 3D 桌面伙伴系统，与 CLI 共享同一进程运行。它通过 SSE + HTTP 与 Tauri 前端通信，无需独立的子进程或外部服务。用户可以与 VRM 角色进行文字聊天、语音对话，角色会通过 3D 表情、肢体动作和语音进行反馈。
+Friend 是 Codev 的 VRM 3D 桌面伙伴系统，与 CLI 共享同一进程运行。它通过 SSE + HTTP 与 Tauri 前端通信，无需独立的子进程或外部服务。用户可以与 VRM 角色进行文字聊天、语音对话，角色会通过 3D 表情、肢体动作和语音进行反馈。
 
 核心设计理念：**同进程集成** — FriendService 作为单例运行在 CLI 主进程中，消息通过 `messageQueueManager.enqueue()` 直接注入到对话流程中，AI 回复通过 SSE 实时广播到前端显示。
 
@@ -19,7 +19,7 @@ Friend 是 VersperClaw 的 VRM 3D 桌面伙伴系统，与 CLI 共享同一进�
 | **TTS 服务** | `src/friend/tts.ts` | Edge TTS + Qwen DashScope TTS，音频文件注册表 |
 | **STT 服务** | `src/friend/stt-service.ts` | 基于文件的语音转录（REST 端点） |
 | **VAD 服务** | `src/friend/voice/vad-service.ts` | Silero VAD ONNX 模型，onnxruntime-web WASM 后端 |
-| **偏好设置** | `src/friend/prefs.ts` | 持久化到 `~/.config/VersperClaw/friend.json` |
+| **偏好设置** | `src/friend/prefs.ts` | 持久化到 `~/.config/Codev/friend.json` |
 | **Tauri 启动器** | `src/friend/tauri-launcher.ts` | 启动 Tauri 桌面窗口 |
 | **前端应用** | `src/components/friend/frontend/` | React + Three.js + @pixiv/three-vrm |
 
@@ -81,7 +81,7 @@ Friend 支持 13 种情绪，映射到 VRM blend shapes 和骨骼动画：
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    VersperClaw 主进程 (Bun)                      │
+│                    Codev 主进程 (Bun)                      │
 │                                                                 │
 │  ┌──────────────┐    ┌──────────────────┐    ┌───────────────┐  │
 │  │   CLI TUI    │    │   LLM Provider   │    │   Bridge API  │  │
@@ -135,4 +135,4 @@ Friend 支持 13 种情绪，映射到 VRM blend shapes 和骨骼动画：
 - API 路由: `src/server/api/friend.ts` — 所有 HTTP 端点
 - LLM 工具: `src/tools/FriendEmotionTool.ts`, `src/tools/FriendScreenObserveTool.ts`
 - 技能注入: `src/skills/bundled/friendPrompt.ts`
-- 配置: `~/.config/VersperClaw/friend.json`
+- 配置: `~/.config/Codev/friend.json`

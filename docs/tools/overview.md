@@ -52,7 +52,7 @@ Tool<Input, Output, Progress>
 | `toAutoClassifierInput()` | `''`（跳过分类器） |
 | `userFacingName()` | `name` |
 
-相关文件：`/home/yuki/Code/Agent/VersperClaw/src/Tool.ts`
+相关文件：`/home/yuki/Code/Agent/Codev/src/Tool.ts`
 
 ---
 
@@ -87,7 +87,7 @@ getTools(permissionContext) → Tool[]
 
 单纯合并内置工具与 MCP 工具（不去重、不排序），用于工具搜索阈值计算等场景。
 
-相关文件：`/home/yuki/Code/Agent/VersperClaw/src/tools.ts`
+相关文件：`/home/yuki/Code/Agent/Codev/src/tools.ts`
 
 ---
 
@@ -207,10 +207,10 @@ LLM 请求工具调用
 | `HookProgress` | 钩子执行进度 | Hooks |
 
 相关文件：
-- `/home/yuki/Code/Agent/VersperClaw/src/services/tools/toolExecution.ts` — 执行引擎
-- `/home/yuki/Code/Agent/VersperClaw/src/types/tools.ts` — 进度类型定义
-- `/home/yuki/Code/Agent/VersperClaw/src/hooks/toolPermission/` — 权限钩子
-- `/home/yuki/Code/Agent/VersperClaw/src/utils/permissions/` — 权限工具函数
+- `/home/yuki/Code/Agent/Codev/src/services/tools/toolExecution.ts` — 执行引擎
+- `/home/yuki/Code/Agent/Codev/src/types/tools.ts` — 进度类型定义
+- `/home/yuki/Code/Agent/Codev/src/hooks/toolPermission/` — 权限钩子
+- `/home/yuki/Code/Agent/Codev/src/utils/permissions/` — 权限工具函数
 
 ---
 
@@ -264,10 +264,10 @@ WebSearchTool 支持两个搜索后端：
 - `JINA_API_KEY` — 可选的 Jina AI API 密钥，用于增强型内容提取
 
 相关文件：
-- `/home/yuki/Code/Agent/VersperClaw/src/Tool.ts` — Tool 类型与 buildTool 框架
-- `/home/yuki/Code/Agent/VersperClaw/src/tools.ts` — 工具注册与过滤
-- `/home/yuki/Code/Agent/VersperClaw/src/services/tools/toolExecution.ts` — 执行引擎
-- `/home/yuki/Code/Agent/VersperClaw/src/services/tools/toolHooks.ts` — 工具钩子
+- `/home/yuki/Code/Agent/Codev/src/Tool.ts` — Tool 类型与 buildTool 框架
+- `/home/yuki/Code/Agent/Codev/src/tools.ts` — 工具注册与过滤
+- `/home/yuki/Code/Agent/Codev/src/services/tools/toolExecution.ts` — 执行引擎
+- `/home/yuki/Code/Agent/Codev/src/services/tools/toolHooks.ts` — 工具钩子
 
 ---
 
@@ -299,9 +299,9 @@ WebSearchTool 支持两个搜索后端：
 **输入参数：** `action` (必填), `location` (必填), `destination`, `query`, `radius` (默认 5000m), `mode` (driving/walking/transit/bicycling), `waypoints`, `type` (Amap POI 类型过滤), `region` (强制指定), `language`
 
 相关文件：
-- `/home/yuki/Code/Agent/VersperClaw/src/tools/LocationTool/LocationTool.ts` — 主工具逻辑
-- `/home/yuki/Code/Agent/VersperClaw/src/tools/LocationTool/prompt.ts` — 提示词
-- `/home/yuki/Code/Agent/VersperClaw/src/tools/LocationTool/UI.tsx` — 渲染组件
+- `/home/yuki/Code/Agent/Codev/src/tools/LocationTool/LocationTool.ts` — 主工具逻辑
+- `/home/yuki/Code/Agent/Codev/src/tools/LocationTool/prompt.ts` — 提示词
+- `/home/yuki/Code/Agent/Codev/src/tools/LocationTool/UI.tsx` — 渲染组件
 
 #### API Key 申请指南
 

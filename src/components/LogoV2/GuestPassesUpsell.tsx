@@ -66,7 +66,7 @@ export function GuestPassesUpsell(): React.ReactNode {
       <Text color="clawd_body">[✻]</Text> <Text color="clawd_body">[✻]</Text>{' '}
       <Text color="clawd_body">[✻]</Text> ·{' '}
       {reward
-        ? `Share Versper Claw and earn ${formatCreditAmount(reward)} of extra usage · /passes`
+        ? `Share Codev and earn ${formatCreditAmount(reward)} of extra usage · /passes`
         : '3 guest passes at /passes'}
     </Text>
   )

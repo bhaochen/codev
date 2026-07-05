@@ -1,6 +1,6 @@
 # 安全与权限系统深度分析
 
-> 本文基于 VersperClaw (Claude Code) 源代码，深入分析其安全架构与权限子系统。
+> 本文基于 Codev (Claude Code) 源代码，深入分析其安全架构与权限子系统。
 > 版本参考：commit `835ff5a` / `cdb3bdd`
 
 ---

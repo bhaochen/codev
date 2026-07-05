@@ -369,7 +369,7 @@ function TelegramDialog({
     <Dialog title="Telegram" onCancel={() => onDone(undefined, { display: 'skip' })}>
       <Box flexDirection="column" gap={1}>
         <Text dimColor>
-          在当前 VersperClaw 进程内启动 Telegram 长轮询，并把私聊消息接入当前会话。
+          在当前 Codev 进程内启动 Telegram 长轮询，并把私聊消息接入当前会话。
         </Text>
         <Text>
           状态:

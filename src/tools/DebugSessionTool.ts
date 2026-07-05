@@ -1,5 +1,5 @@
 /**
- * DebugSessionTool — manage the .versperclaw-debug runtime debugging directory.
+ * DebugSessionTool — manage the .codev-debug runtime debugging directory.
  *
  * Ported from Openclaude's DebugSessionTool.
  * Used by /debug to manage log sessions, separators, tail-reading, and cleanup.
@@ -13,7 +13,7 @@ import { lazySchema } from '../utils/lazySchema.js'
 import { jsonStringify } from '../utils/slowOperations.js'
 
 export const DEBUG_SESSION_TOOL_NAME = 'DebugSession'
-const DEBUG_SESSION_DIR = '.versperclaw-debug'
+const DEBUG_SESSION_DIR = '.codev-debug'
 const DEBUG_SESSION_LOG_FILE = 'debug.log'
 const DEBUG_SESSION_STATE_FILE = 'state'
 
@@ -171,17 +171,17 @@ export const DebugSessionTool = buildTool({
   maxResultSizeChars: 200_000,
   strict: true,
   async description() {
-    return 'Manage the fixed .versperclaw-debug runtime debugging directory, log separators, log reading, and cleanup.'
+    return 'Manage the fixed .codev-debug runtime debugging directory, log separators, log reading, and cleanup.'
   },
   async prompt() {
     return `Use ${DEBUG_SESSION_TOOL_NAME} only during /debug runtime debugging.
 
 Actions:
-- init: create .versperclaw-debug/, reset debug.log, and reset the run counter.
+- init: create .codev-debug/, reset debug.log, and reset the run counter.
 - begin_run: append a RUN #N separator before reproducing the bug.
 - begin_verify: append a VERIFY separator before validating a fix.
 - read_log: read the tail of debug.log.
-- cleanup: delete .versperclaw-debug/ after all DEBUG PROBE blocks have been removed from source files.`
+- cleanup: delete .codev-debug/ after all DEBUG PROBE blocks have been removed from source files.`
   },
   get inputSchema(): InputSchema {
     return inputSchema()

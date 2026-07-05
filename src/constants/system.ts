@@ -7,9 +7,9 @@ import { isEnvDefinedFalsy } from '../utils/envUtils.js'
 import { getAPIProvider } from '../utils/model/providers.js'
 import { getWorkload } from '../utils/workloadContext.js'
 
-const DEFAULT_PREFIX = `You are VersperClaw, versperai's CLI.`
-const AGENT_SDK_CLAUDE_CODE_PRESET_PREFIX = `You are VersperClaw, versperai's CLI, running within the Agent SDK.`
-const AGENT_SDK_PREFIX = `You are a VersperClaw agent, built on versperai's Agent SDK.`
+const DEFAULT_PREFIX = `You are Codev, chenbhao's CLI.`
+const AGENT_SDK_CLAUDE_CODE_PRESET_PREFIX = `You are Codev, chenbhao's CLI, running within the Agent SDK.`
+const AGENT_SDK_PREFIX = `You are a Codev agent, built on chenbhao's Agent SDK.`
 
 const CLI_SYSPROMPT_PREFIX_VALUES = [
   DEFAULT_PREFIX,

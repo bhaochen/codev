@@ -1,5 +1,5 @@
 /**
- * Tauri desktop app process management for Friend (VersperClaw native).
+ * Tauri desktop app process management for Friend (Codev native).
  *
  * Launches the VRM desktop pet as a native Tauri window.
  * The HTTP server runs in-process via friend/server.ts —
@@ -14,8 +14,8 @@ let tauriProcess: ReturnType<typeof spawn> | null = null;
 export async function launchTauri(log: { info: (msg: string) => void; warn: (msg: string) => void }) {
   // Find the Tauri binary
   const cwd = process.cwd()
-  const releaseBinary = path.join(cwd, 'src', 'components', 'friend', 'frontend', 'src-tauri', 'target', 'release', 'versperclaw-friend')
-  const debugBinary = path.join(cwd, 'src', 'components', 'friend', 'frontend', 'src-tauri', 'target', 'debug', 'versperclaw-friend')
+  const releaseBinary = path.join(cwd, 'src', 'components', 'friend', 'frontend', 'src-tauri', 'target', 'release', 'codev-friend')
+  const debugBinary = path.join(cwd, 'src', 'components', 'friend', 'frontend', 'src-tauri', 'target', 'debug', 'codev-friend')
 
   const binary = existsSync(releaseBinary) ? releaseBinary
     : existsSync(debugBinary) ? debugBinary

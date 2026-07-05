@@ -1,8 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicedoc/tauri/dev/crates/tauri-config-schema/schema.json",
-  "productName": "VersperClaw Friend",
+  "productName": "Codev Friend",
   "version": "0.1.0",
-  "identifier": "com.versperclaw.friend",
+  "identifier": "com.codev.friend",
   "build": {
     "devUrl": "http://127.0.0.1:3456/friend/"
   },
@@ -21,7 +21,7 @@
   "app": {
     "windows": [
       {
-        "title": "VersperClaw Friend",
+        "title": "Codev Friend",
         "label": "main",
         "url": "http://127.0.0.1:3456/friend/",
         "transparent": true,

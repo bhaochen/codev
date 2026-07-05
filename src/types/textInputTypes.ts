@@ -358,7 +358,7 @@ export type QueuedCommand = {
   /**
    * When set, completely replaces the default system prompt for this query.
    * Used by Friend mode to use ONLY the persona prompt instead of the full
-   * VersperClaw CLI system prompt.
+   * Codev CLI system prompt.
    */
   overrideSystemPrompt?: string
 }

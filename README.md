@@ -37,7 +37,7 @@
 - **2026-05-06** 🚀 Added OpenCode as a free provider — includes GPT-5 Nano and Big Pickle 🥒 models, `/model` list with life-free model display, and auto-refresh. Introduced ctx_line context tracking with online persistence. Better collapsing fetch results and auto-compact documentation polish. Merged PR #6 for Tavily search backend migration.
 - **2026-04-30** 🔍 Added Tavily as optional search backend in WebSearchTool via PR #6.
 - **2026-04-24** 🧹 Cleaned up empty contributor docs.
-- **2026-04-21** 🛡️ Fixed auto-compact env in settings.json; VersperClaw now handles Ctrl+C resume gracefully.
+- **2026-04-21** 🛡️ Fixed auto-compact env in settings.json; Codev now handles Ctrl+C resume gracefully.
 - **2026-04-20** 📝 Documented ToolSearch behavior and <tr> table formatting.
 - **2026-04-19** 📖 Described auto-dream and subagent features in README; punctuation and layout polish. Tagged **v2.0.1** 🏷️.
 - **2026-04-18** 💭 Snapshot auto-dream feature; ToolSearch now uses WebSearch under the hood.
@@ -48,7 +48,7 @@
 - **2026-04-08** 🌐 Full WebSearch toolchain — SearXNG integration, Jina AI websearch & fetch, WebFetch UI notes, build fix. Four search approaches landed in one day.
 - **2026-04-07** 🔍 Zero-search prototype; Python env removed; TLS-enabled web search working end-to-end.
 - **2026-04-06** 🛠️ Open ripgrep via USE_BUILTIN_RIPGREP=0; WebFetch UI notes; skill message renamed; WebSearch API error fixed.
-- **2026-04-05** 🤖 AutoMode — autonomous decision-making execution mode. `/sandbox` with sandbox-runtime @0.0.44. Project renamed to versperclaw. OpenRouter ↔ Local model switching, auto-refresh TUI, Telegram `/login` local model transition.
+- **2026-04-05** 🤖 AutoMode — autonomous decision-making execution mode. `/sandbox` with sandbox-runtime @0.0.44. Project renamed to codev. OpenRouter ↔ Local model switching, auto-refresh TUI, Telegram `/login` local model transition.
 - **2026-04-04** 📱 Telegram backend — `/telegram` command, interactive commands, message receiving in TUI, chatId overflow fixed. `/buddy` companion mode; recent activity in individual directories.
 - **2026-04-03** 🔄 Reborn as verspercode **v0.1.0** — complete `/login` system (OpenRouter + local models), `/model` search & UI, free OpenRouter model auto-load, onboarding flow. Local model filesystem-based provider.
 
@@ -63,7 +63,7 @@
 - **2026-03-27** 🔬 Research workflow — `/paper` and `/code` commands, 4-step research + autoresearch, ANN vector index, hybrid retrieval with semantic cache, external memory, token-budgeted evidence pipeline, IncompleteRead retry, long-term index cache. Workflows engine, `/resume` session toggle, CLI UI refresh.
 - **2026-03-26** 🏗️ Configuration overhaul — YAML → JSON + .env + TOML. Clean config dir.
 - **2026-03-24** 🌐 Browser control — Chrome DevTools MCP integration, WeChat gateway, Telegram gateway. Setup wizard, README with demo GIF, version menu.
-- **2026-03-22** 🎉 Initial commit — versperclaw **v0.1.0** born.
+- **2026-03-22** 🎉 Initial commit — codev **v0.1.0** born.
 
 </details>
 
@@ -71,14 +71,16 @@
 
 ```bash
 # script install
-curl -fsSL https://raw.githubusercontent.com/versperai/VersperClaw/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/chenbhao/Codev/main/install.sh | bash
 
 # source install
-git clone https://github.com/versperai/VersperClaw.git && cd VersperClaw && bun install && bun run build &&  bun run friend:build && ./VersperClaw
+git clone https://github.com/chenbhao/Codev.git && cd Codev && bun install && bun run build &&  bun run friend:build && ./Codev
 
 # if want global use bin file
-cp VersperClaw ~/.local/bin
-# then can use VersperClaw in everywhere after `/login`
+# cp dist/codev ~/.local/bin
+ln -sf dist/codev ~/.local/bin/codev
+
+# then can use Codev in everywhere after `/login`
 ```
 
 ## 🚀 Quick Start
@@ -139,7 +141,7 @@ sudo usermod -aG docker $USER
 sudo systemctl enable --now docker
 
 # 2. docker-compose pull
-# use VersperSearch a pre-build docker config in https://github.com/versperai/VersperSearch
+# use VersperSearch a pre-build docker config in https://github.com/chenbhao/VersperSearch
 # or install searxng in docker-compose by yourself
 curl -fsSL \
 -O https://raw.githubusercontent.com/searxng/searxng/master/container/docker-compose.yml \

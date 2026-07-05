@@ -2,7 +2,7 @@
  * FriendEmotionTool — VRM avatar emotion control for Friend desktop pet.
  *
  * Allows the LLM to set the VRM avatar's facial expression and adjust
- * its own mood index. Native VersperClaw tool.
+ * its own mood index. Native Codev tool.
  */
 import { z } from 'zod';
 import { buildTool, type ToolDef } from '../Tool.js';

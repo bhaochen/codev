@@ -1,6 +1,6 @@
 # 上下文压缩管道 (Compaction Pipeline) 深度分析
 
-> 本文档基于 VersperClaw 源代码分析，涵盖 `/src/services/compact/` 目录下的全部压缩机制，
+> 本文档基于 Codev 源代码分析，涵盖 `/src/services/compact/` 目录下的全部压缩机制，
 > 以及 `/src/query.ts` 中压缩管道编排逻辑。
 
 ---
@@ -784,11 +784,11 @@ clearSessionMessagesCache()              // 清理消息缓存
 
 ---
 
-## 7. VersperClaw 中的具体实现
+## 7. Codev 中的具体实现
 
 ### 7.1 与官方 Claude Code 的差异
 
-VersperClaw 的压缩实现相比于 Anthropic 官方 Claude Code 有以下主要差异和保留：
+Codev 的压缩实现相比于 Anthropic 官方 Claude Code 有以下主要差异和保留：
 
 #### 保留的核心能力
 
@@ -902,5 +902,5 @@ VersperClaw 的压缩实现相比于 Anthropic 官方 Claude Code 有以下主�
 
 ---
 
-> 文档版本: 基于 VersperClaw `cdb3bdd` 提交分析
+> 文档版本: 基于 Codev `cdb3bdd` 提交分析
 > 最后更新: 2026-06-22

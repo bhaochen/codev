@@ -42,7 +42,7 @@ async function startSttConnection(
       }
       const conn = await connectVoiceStream(callbacks, {
         language: language || 'en',
-        keyterms: ['code', 'versperclaw'],
+        keyterms: ['code', 'codev'],
       });
       return conn;
     }

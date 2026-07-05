@@ -1,13 +1,13 @@
 # 多 Provider 认证与协议转换架构
 
-> 本文档描述 VersperClaw (cc-haha) 的多 Provider 认证架构、OAuth 2.0 流程、API 协议转换机制以及 Provider 配置管理体系。
-> 代码库：`/home/yuki/Code/Agent/VersperClaw`
+> 本文档描述 Codev (cc-haha) 的多 Provider 认证架构、OAuth 2.0 流程、API 协议转换机制以及 Provider 配置管理体系。
+> 代码库：`/home/yuki/Code/Agent/Codev`
 
 ---
 
 ## 1. 支持的认证提供者
 
-VersperClaw 支持以下 Provider，按认证方式与协议类型分类：
+Codev 支持以下 Provider，按认证方式与协议类型分类：
 
 | Provider | 认证方式 | 协议格式 | 实现位置 |
 |---|---|---|---|
@@ -28,7 +28,7 @@ VersperClaw 支持以下 Provider，按认证方式与协议类型分类：
 
 ### 2.1 两级架构总览
 
-VersperClaw 拥有两套独立的 Provider 系统，设计目标不同：
+Codev 拥有两套独立的 Provider 系统，设计目标不同：
 
 ```
 Tier 1: TUI 内置 Provider (原始 Claude Code)
@@ -36,7 +36,7 @@ Tier 1: TUI 内置 Provider (原始 Claude Code)
   存储: ~/.claude.json (单字段 authProvider)
   实现: src/services/api/client.ts + src/utils/model/providers.ts
 
-Tier 2: cc-haha Provider 预设系统 (VersperClaw 扩展)
+Tier 2: cc-haha Provider 预设系统 (Codev 扩展)
   用途: 桌面端多 Provider 管理、预设配置、Proxy 转换
   存储: ~/.claude/cc-haha/providers.json (结构化索引)
   实现: src/server/services/providerService.ts
@@ -240,7 +240,7 @@ OpenAI → Anthropic (非流式):
 
 ### 3.5 服务端 Proxy 模式
 
-除了客户端的 Fetch Override 模式，VersperClaw 还实现了一套**服务端 Proxy**，位于 `src/server/proxy/handler.ts`。
+除了客户端的 Fetch Override 模式，Codev 还实现了一套**服务端 Proxy**，位于 `src/server/proxy/handler.ts`。
 
 设计目标：将协议转换逻辑从客户端分离到独立 HTTP 服务，支持更灵活的 Provider 管理。
 

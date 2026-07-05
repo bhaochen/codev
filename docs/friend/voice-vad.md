@@ -146,7 +146,7 @@ startSttConnectionWithTimeout(provider, language)
 startSttConnection(provider, language)
     │
     ├── anthropic: connectVoiceStream(callbacks, { language, keyterms })
-    │    keyterms: ['code', 'versperclaw'] 提高相关词汇识别率
+    │    keyterms: ['code', 'codev'] 提高相关词汇识别率
     │
     ├── local: preloadWhisperModel + connectLocalWhisperStream
     │    需预加载模型（首次加载较慢）

@@ -1,5 +1,5 @@
 /**
- * Persistent preferences for Friend desktop pet (VersperClaw native).
+ * Persistent preferences for Friend desktop pet (Codev native).
  */
 import path from 'node:path';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
@@ -27,7 +27,7 @@ export interface FriendPrefs {
 }
 
 const homeDir = process.env.HOME || process.env.USERPROFILE || '';
-const VSCODE_CONFIG_DIR = path.join(homeDir, '.config', 'VersperClaw');
+const VSCODE_CONFIG_DIR = path.join(homeDir, '.config', 'Codev');
 const PREFS_PATH = path.join(VSCODE_CONFIG_DIR, 'friend.json');
 
 const DEFAULT_PREFS: FriendPrefs = {

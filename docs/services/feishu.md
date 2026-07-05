@@ -2,7 +2,7 @@
 
 ## 概述
 
-VersperClaw 内置飞书（国内版）和 Lark（国际版）机器人集成，允许用户在即时通讯中与 AI CLI 进行对话。机器人通过 `@larksuite/channel` SDK 建立长连接 WebSocket，支持私聊、群聊、语音回复、引用回复等功能。
+Codev 内置飞书（国内版）和 Lark（国际版）机器人集成，允许用户在即时通讯中与 AI CLI 进行对话。机器人通过 `@larksuite/channel` SDK 建立长连接 WebSocket，支持私聊、群聊、语音回复、引用回复等功能。
 
 ---
 
@@ -172,7 +172,7 @@ Feishu WS → NormalizedMessage → PendingQueue → Access Control → Slash Ro
 
 支持一键创建飞书应用，无需手动在开发者后台操作：
 
-1. 调用 `@larksuite/channel` 的 `registerApp({ source: 'versperclaw' })`
+1. 调用 `@larksuite/channel` 的 `registerApp({ source: 'codev' })`
 2. 返回 QR 码 URL，终端用 ASCII 渲染
 3. 用户使用飞书手机端扫码授权
 4. `client_id` 和 `client_secret` 自动保存到配置

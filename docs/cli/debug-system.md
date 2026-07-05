@@ -2,7 +2,7 @@
 
 ## 概述
 
-VersperClaw 提供两层调试能力：
+Codev 提供两层调试能力：
 
 1. **会话级调试日志** — 基于 `logForDebugging()` 的持久化日志系统，用于内部诊断
 2. **`/debug` 交互式调试** — 基于 DEBUG PROBE 的主动式调试工作流（v2.0）
@@ -66,7 +66,7 @@ debug.ts (bundled skill)
 模型自动执行：分析 → 插探针 → 复现 → 分析日志 → 修复 → 验证 → 清理
         │
         ▼
-DebugSessionTool — 管理 .versperclaw-debug/ 目录
+DebugSessionTool — 管理 .codev-debug/ 目录
 ```
 
 ### 与 v1 的区别
@@ -74,7 +74,7 @@ DebugSessionTool — 管理 .versperclaw-debug/ 目录
 | 方面 | v1（旧） | v2.0（当前） |
 |------|---------|-------------|
 | 方式 | 被动读取调试日志 | 主动插入探针 |
-| 数据源 | `~/.claude/debug/*.txt` | `.versperclaw-debug/debug.log` |
+| 数据源 | `~/.claude/debug/*.txt` | `.codev-debug/debug.log` |
 | 模型角色 | 分析已有日志 | 插桩 → 复现 → 分析 → 修复 |
 | 工作流 | 无结构化步骤 | 8 步 CHECKPOINT |
 
@@ -84,7 +84,7 @@ DebugSessionTool — 管理 .versperclaw-debug/ 目录
 |------|------|
 | **Step 0: Triage** | 确认 bug 报告完整（预期/实际/复现步骤/一致性/错误） |
 | **Step 1: Plan Probes** | 阅读代码，形成 2-3 个假设，输出探针插入计划表 |
-| **Step 2: Init Session** | 调用 `DebugSession({ action: "init" })` 创建 `.versperclaw-debug/` |
+| **Step 2: Init Session** | 调用 `DebugSession({ action: "init" })` 创建 `.codev-debug/` |
 | **Step 3: Insert Probes** | 用 Edit 插入 `DEBUG PROBE [N]` / `DEBUG PROBE END [N]` 代码块 |
 | **Step 4: Reproduce & Log** | 调用 `DebugSession begin_run`，运行复现命令，通过 `read_log` 收集 |
 | **Step 5: Analyze** | 引用日志行，定位根因 |
@@ -97,7 +97,7 @@ DebugSessionTool — 管理 .versperclaw-debug/ 目录
 ```typescript
 // DEBUG PROBE [1] <label>
 try {
-  require('fs').appendFileSync('.versperclaw-debug/debug.log',
+  require('fs').appendFileSync('.codev-debug/debug.log',
     `[${new Date().toISOString()}] [js] file.ts:42 | label | value=${JSON.stringify(value)}\n`)
 } catch {}
 // DEBUG PROBE END [1]
@@ -118,16 +118,16 @@ try {
 
 | 动作 | 说明 |
 |------|------|
-| `init` | 创建 `.versperclaw-debug/` 目录、`debug.log`、`state` 文件 |
+| `init` | 创建 `.codev-debug/` 目录、`debug.log`、`state` 文件 |
 | `begin_run` | 追加 `RUN #N` 分隔符，递增运行计数器 |
 | `begin_verify` | 追加 `VERIFY` 分隔符 |
 | `read_log` | 读取 `debug.log` 尾部内容 |
-| `cleanup` | 删除 `.versperclaw-debug/` 目录 |
+| `cleanup` | 删除 `.codev-debug/` 目录 |
 
 ### 目录结构
 
 ```
-.versperclaw-debug/
+.codev-debug/
   debug.log       -- 探针写入 + RUN/VERIFY 分隔符
   state           -- JSON: { "runCount": 3 }
 ```

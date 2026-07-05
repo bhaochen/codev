@@ -1,5 +1,5 @@
 /**
- * Shared constants for Friend — VersperClaw native plugin.
+ * Shared constants for Friend — Codev native plugin.
  */
 
 export const GATEWAY_URL = 'http://127.0.0.1:3456';

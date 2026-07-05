@@ -49,7 +49,7 @@ for (let i = 0; i < args.length; i += 1) {
 }
 const features = [...featureSet]
 
-const outfile = join('dist', 'VersperClaw')
+const outfile = join('dist', 'codev')
 
 // ── Pre-step: build Friend VRM frontend ──────────────────────────────────
 function buildFriendFrontend(): boolean {
@@ -164,7 +164,7 @@ if (!existsSync(vendorDir)) {
 }
 
 // Create symlink at project root for convenient access
-const symlink = join(process.cwd(), 'VersperClaw')
+const symlink = join(process.cwd(), 'codev')
 const symlinkTarget = relative(process.cwd(), outfile)
 try { unlinkSync(symlink) } catch { /* ignore */ }
 try { symlinkSync(symlinkTarget, symlink) } catch { /* ignore */ }

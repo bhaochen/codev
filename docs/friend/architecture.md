@@ -195,7 +195,7 @@ broadcastToVrm(payload: VrmBroadcastPayload)
 
 `freePort()` 方法在启动时尝试释放被占用的端口：
 1. 使用 `ss -tlnp` 查找端口占用进程
-2. 验证进程是否为 `bun`/`VersperClaw`/`claude-*`/`node`
+2. 验证进程是否为 `bun`/`Codev`/`claude-*`/`node`
 3. 发送 SIGTERM，等待 3s，失败则 SIGKILL
 
 ### 3.3 路由
@@ -365,7 +365,7 @@ interface FriendPrefs {
 }
 ```
 
-持久化路径: `~/.config/VersperClaw/friend.json`
+持久化路径: `~/.config/Codev/friend.json`
 
 ---
 
@@ -378,7 +378,7 @@ interface FriendPrefs {
 - 管道 stdout/stderr 到主进程日志
 - 退出时自动清理
 
-启动路径: `src/components/friend/frontend/src-tauri/target/{release|debug}/versperclaw-friend`
+启动路径: `src/components/friend/frontend/src-tauri/target/{release|debug}/codev-friend`
 
 ---
 

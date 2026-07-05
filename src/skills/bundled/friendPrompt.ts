@@ -15,7 +15,7 @@ const FRIEND_URL = 'http://127.0.0.1:3456/friend/'
 
 export function loadPersona(): string {
   const homeDir = process.env.HOME || process.env.USERPROFILE || ''
-  const baseDir = path.join(homeDir, '.config', 'VersperClaw', 'friend')
+  const baseDir = path.join(homeDir, '.config', 'Codev', 'friend')
   const parts: string[] = []
 
   const identityPath = path.join(baseDir, 'IDENTITY.md')

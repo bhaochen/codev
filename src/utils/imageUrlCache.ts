@@ -124,7 +124,7 @@ export async function downloadImage(url: string): Promise<CachedImage | null> {
       headers: {
         // Some image hosts block requests without a browser-like User-Agent
         'User-Agent':
-          'Mozilla/5.0 (compatible; VersperClaw/1.0; +https://versperai.dev)',
+          'Mozilla/5.0 (compatible; Codev/1.0; +https://chenbhao.dev)',
       },
       // Follow up to 5 redirects (e.g. Wikimedia CDN redirects)
       redirect: 'follow',

@@ -20,14 +20,14 @@ const ALLOWED_TOOLS = [
   DEBUG_SESSION_TOOL_NAME,
 ]
 
-const DEBUG_SESSION_DIR = '.versperclaw-debug'
+const DEBUG_SESSION_DIR = '.codev-debug'
 
 function buildDebugPrompt(args: string): string {
   const issue = args.trim() || 'The user did not provide a bug description yet.'
 
   return `# /debug - Runtime Debugging
 
-You are in VersperClaw debug mode. Debug mode is evidence-driven: insert temporary probes, collect runtime data, identify the root cause from logs, fix, verify, and clean up.
+You are in Codev debug mode. Debug mode is evidence-driven: insert temporary probes, collect runtime data, identify the root cause from logs, fix, verify, and clean up.
 
 Debug artifact directory: \`${DEBUG_SESSION_DIR}/\`
 Runtime log file: \`${DEBUG_SESSION_DIR}/debug.log\`
