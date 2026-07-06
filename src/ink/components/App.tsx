@@ -21,6 +21,8 @@ import { ClockProvider } from './ClockContext.js';
 import CursorDeclarationContext, { type CursorDeclarationSetter } from './CursorDeclarationContext.js';
 import ErrorOverview from './ErrorOverview.js';
 import StdinContext from './StdinContext.js';
+import StdoutContext from './StdoutContext.js';
+import AccessibilityContext from './AccessibilityContext.js';
 import { TerminalFocusProvider } from './TerminalFocusContext.js';
 import { TerminalSizeContext } from './TerminalSizeContext.js';
 
@@ -38,6 +40,7 @@ type Props = {
   readonly stdin: NodeJS.ReadStream;
   readonly stdout: NodeJS.WriteStream;
   readonly stderr: NodeJS.WriteStream;
+  readonly writeToStdout: (data: string) => void;
   readonly exitOnCtrlC: boolean;
   readonly onExit: (error?: Error) => void;
   readonly terminalColumns: number;
@@ -170,7 +173,11 @@ export default class App extends PureComponent<Props, State> {
             <TerminalFocusProvider>
               <ClockProvider>
                 <CursorDeclarationContext.Provider value={this.props.onCursorDeclaration ?? (() => {})}>
-                  {this.state.error ? <ErrorOverview error={this.state.error as Error} /> : this.props.children}
+                  <StdoutContext.Provider value={{ stdout: this.props.stdout, write: this.props.writeToStdout }}>
+                    <AccessibilityContext.Provider value={{ isScreenReaderEnabled: false }}>
+                      {this.state.error ? <ErrorOverview error={this.state.error as Error} /> : this.props.children}
+                    </AccessibilityContext.Provider>
+                  </StdoutContext.Provider>
                 </CursorDeclarationContext.Provider>
               </ClockProvider>
             </TerminalFocusProvider>
