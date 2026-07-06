@@ -1,5 +1,17 @@
+import { z } from 'zod/v4'
 import { Jimp } from "jimp";
+import { buildTool, type ToolDef } from '../../Tool.js'
 import { loadImageFromUrl } from "../../ink-picture/utils/jimpURL.ts";
+import { lazySchema } from '../../utils/lazySchema.js'
+import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js'
+import { IMAGE_SHOW_TOOL_NAME, DESCRIPTION } from './prompt.js'
+import {
+  getToolUseSummary,
+  renderToolResultMessage,
+  renderToolUseMessage,
+} from './UI.js'
+
+// ── Utility functions (kept for standalone UI and external use) ──
 
 export const CELL_WIDTH = 8;
 export const CELL_HEIGHT = 16;
@@ -46,3 +58,125 @@ export function calculateDimensions(
     pixelHeight: finalH_pixels,
   };
 }
+
+// ── Tool definition ──
+
+const inputSchema = lazySchema(() =>
+  z.strictObject({
+    src: z.string().describe('Image source — local file path or HTTPS URL'),
+  }),
+)
+type InputSchema = ReturnType<typeof inputSchema>
+
+const outputSchema = lazySchema(() =>
+  z.object({
+    src: z.string().describe('The image source that was displayed'),
+    success: z.boolean().describe('Whether the image was displayed successfully'),
+  }),
+)
+type OutputSchema = ReturnType<typeof outputSchema>
+
+export type Output = z.infer<OutputSchema>
+
+export const ImageShowTool = buildTool({
+  name: IMAGE_SHOW_TOOL_NAME,
+  searchHint: 'display an image in the terminal',
+  maxResultSizeChars: 10_000,
+  shouldDefer: true,
+  async description(input) {
+    const { src } = input as { src: string }
+    try {
+      const url = new URL(src)
+      return `Codev wants to display image from ${url.hostname}`
+    } catch {
+      return `Codev wants to display image: ${src}`
+    }
+  },
+  userFacingName() {
+    return 'Image'
+  },
+  getToolUseSummary,
+  getActivityDescription(input) {
+    const { src } = input as { src: string }
+    try {
+      const url = new URL(src)
+      return `Showing image from ${url.hostname}`
+    } catch {
+      return `Showing image: ${src}`
+    }
+  },
+  get inputSchema(): InputSchema {
+    return inputSchema()
+  },
+  get outputSchema(): OutputSchema {
+    return outputSchema()
+  },
+  isConcurrencySafe() {
+    return true
+  },
+  isReadOnly() {
+    return true
+  },
+  async checkPermissions(_input, _context): Promise<PermissionDecision> {
+    return {
+      behavior: 'allow',
+      updatedInput: _input,
+      decisionReason: { type: 'other', reason: 'ImageShowTool is read-only' },
+    }
+  },
+  async prompt(_options) {
+    return DESCRIPTION
+  },
+  async validateInput(input) {
+    const { src } = input
+    if (!src || src.trim().length === 0) {
+      return {
+        result: false,
+        message: 'Error: "src" is required and cannot be empty.',
+        meta: { reason: 'missing_src' },
+        errorCode: 1,
+      }
+    }
+    return { result: true }
+  },
+  renderToolUseMessage,
+  renderToolResultMessage,
+  async call({ src }) {
+    try {
+      const image = await loadImage(src)
+      const dims = calculateDimensions(
+        image.bitmap.width,
+        image.bitmap.height,
+        80,
+      )
+      void dims
+      return {
+        data: {
+          src,
+          success: true,
+        } satisfies Output,
+      }
+    } catch (error) {
+      return {
+        data: {
+          src,
+          success: false,
+        } satisfies Output,
+      }
+    }
+  },
+  mapToolResultToToolResultBlockParam(output, toolUseID) {
+    return {
+      tool_use_id: toolUseID,
+      type: 'tool_result',
+      content: [
+        {
+          type: 'text',
+          text: output.success
+            ? `Image displayed: ${output.src}`
+            : `Failed to display image: ${output.src}`,
+        },
+      ],
+    }
+  },
+} satisfies ToolDef<InputSchema, Output>)
