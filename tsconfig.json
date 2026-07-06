@@ -10,7 +10,9 @@
     "types": ["bun"],
     "baseUrl": ".",
     "paths": {
-      "src/*": ["src/*"]
+      "src/*": ["src/*"],
+      "ink-picture": ["src/ink-picture"],
+      "ink-picture/*": ["src/ink-picture/*"]
     },
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,

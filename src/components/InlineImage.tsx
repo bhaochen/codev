@@ -1,5 +1,5 @@
 import React from 'react'
-import Image, { InkPictureProvider } from 'ink-picture'
+import Image, { InkPictureProvider } from 'src/ink-picture/index.ts'
 import Link from '../ink/components/Link.js'
 import { supportsHyperlinks } from '../ink/supports-hyperlinks.js'
 import { Box, Text } from '../ink.js'

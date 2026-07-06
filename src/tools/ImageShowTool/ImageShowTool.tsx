@@ -5,7 +5,7 @@ import { z } from 'zod/v4'
 import { Text } from '../../ink.js'
 import { buildTool, type ToolDef } from '../../Tool.js'
 import { logForDebugging } from '../../utils/debug.js'
-import Image, { InkPictureProvider } from 'ink-picture'
+import Image, { InkPictureProvider, type TerminalInfo } from 'src/ink-picture/index.ts'
 
 const IMAGE_TOOL_NAME = 'ImageShow'
 
@@ -109,6 +109,22 @@ async function loadImage(url: string): Promise<{ buffer: Buffer; format: string 
     return readLocalImage(path)
   }
   return fetchImage(normalizedUrl)
+}
+
+/**
+ * Lightweight synchronous Kitty graphics protocol detection.
+ * Uses only env vars — no module dependencies, no async queries.
+ */
+function detectKittySync(): boolean {
+  return !!(
+    process.env.TERM?.includes('kitty') ||
+    process.env.KITTY_WINDOW_ID ||
+    process.env.TERM_PROGRAM === 'kitty' ||
+    process.env.TERM_PROGRAM === 'ghostty' ||
+    process.env.TERM_PROGRAM === 'WezTerm' ||
+    process.env.TERM_PROGRAM === 'konsole' ||
+    process.env.TERM_PROGRAM === 'foot'
+  )
 }
 
 function getToolUseSummary(input: Partial<Input>): string | null {
@@ -215,8 +231,16 @@ export const ImageShowTool = buildTool({
       const imgWidth = Math.floor(cols * 0.6)
       const imgHeight = Math.floor(rows * 0.4)
 
+      // Sync terminal info prevents InkPictureProvider's async terminal
+      // query from delaying the first render and ensures the correct
+      // protocol is used from frame one.
+      const terminalInfo: Partial<TerminalInfo> = {
+        supportsKittyGraphics: detectKittySync(),
+        supportsUnicode: true,
+      }
+
       return (
-        <InkPictureProvider>
+        <InkPictureProvider terminalInfo={terminalInfo}>
           <Image
             src={content.src}
             width={imgWidth}
