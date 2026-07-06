@@ -1,13 +1,13 @@
 #!/usr/bin/env bun
 /**
- * Visual test: display a local image using ink-picture + Ink.
- *
- * Height is auto-calculated from the original aspect ratio:
- * only width is fixed (60% of terminal columns).
+ * Visual test: display a local image or URL using ink-picture + Ink.
  *
  * Usage:
- *   bun run src/ink-picture/__tests__/LocalPicture.test.tsx
- *   Press Ctrl+C to exit (image persists)
+ *   bun run src/ink-picture/__tests__/LocalPicture.test.tsx [path|url]
+ *
+ * Examples:
+ *   bun run src/ink-picture/__tests__/LocalPicture.test.tsx ~/Pictures/IMAGE/image.png
+ *   bun run src/ink-picture/__tests__/LocalPicture.test.tsx https://example.com/image.jpg
  */
 
 import { Jimp } from "jimp";
@@ -15,42 +15,57 @@ import React, { useEffect, useState } from "react";
 import { render, Box, Text, useApp } from "ink";
 import Image, { InkPictureProvider } from "../index.ts";
 
-const IMAGE_PATH = "/home/yuki/Pictures/Wallpapers/3god.jpg";
-
 // 终端字符尺寸（像素）
 const CELL_WIDTH = 8;
 const CELL_HEIGHT = 16;
 
+// 获取命令行参数
+const args = process.argv.slice(2);
+const IMAGE_PATH = args[0] || "/home/yuki/Pictures/Wallpapers/3god.jpg";
+
+// 判断是 URL 还是本地路径
+const isUrl = IMAGE_PATH.startsWith("http://") || IMAGE_PATH.startsWith("https://");
+
+// 加载图片（支持本地和 URL）
+async function loadImage(path: string) {
+  if (isUrl) {
+    // URL：先下载，再用 Jimp 读取
+    const response = await fetch(path);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch: ${response.status}`);
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    return Jimp.fromBuffer(buffer);
+  } else {
+    // 本地路径：直接用 Jimp.read
+    return Jimp.read(path);
+  }
+}
+
 function App() {
   const { exit } = useApp();
   const [dimensions, setDimensions] = useState<{
-    width: number;       // 字符列数
-    height: number;      // 字符行数
-    pixelWidth: number;  // 像素宽度
-    pixelHeight: number; // 像素高度
+    width: number;
+    height: number;
+    pixelWidth: number;
+    pixelHeight: number;
   } | null>(null);
   const [err, setErr] = useState(false);
 
   useEffect(() => {
     (async () => {
       try {
-        const image = await Jimp.read(IMAGE_PATH);
+        const image = await loadImage(IMAGE_PATH);
         const origW = image.bitmap.width;
         const origH = image.bitmap.height;
         const cols = process.stdout.columns ?? 80;
 
-        // 1. 目标字符尺寸
-        const targetW_chars = Math.floor(cols * 0.4);
-
-        // 2. 转为像素尺寸（用于图片缩放）
+        const targetW_chars = Math.floor(cols * 0.1618);
         const targetW_pixels = targetW_chars * CELL_WIDTH;
         const targetH_pixels = Math.floor(targetW_pixels * (origH / origW));
-
-        // 3. 确保最小高度（至少 3 行字符）
         const minH_pixels = 3 * CELL_HEIGHT;
         const finalH_pixels = Math.max(targetH_pixels, minH_pixels);
-
-        // 4. 转回字符行数（用于 Ink 占位）
         const targetH_chars = Math.ceil(finalH_pixels / CELL_HEIGHT);
 
         setDimensions({
@@ -59,23 +74,21 @@ function App() {
           pixelWidth: targetW_pixels,
           pixelHeight: finalH_pixels,
         });
-      } catch {
+      } catch (e) {
+        console.error("Error loading image:", e);
         setErr(true);
       }
     })();
   }, []);
 
-  // Ctrl+C 直接退出，不清理图片
   useEffect(() => {
-    const handleSigint = () => {
-      exit();
-    };
-    process.on('SIGINT', handleSigint);
-    return () => process.off('SIGINT', handleSigint);
+    const handleSigint = () => exit();
+    process.on("SIGINT", handleSigint);
+    return () => process.off("SIGINT", handleSigint);
   }, [exit]);
 
   if (err) {
-    return <Text color="red">Failed to load image</Text>;
+    return <Text color="red">Failed to load image: {IMAGE_PATH}</Text>;
   }
 
   if (!dimensions) {
@@ -87,11 +100,11 @@ function App() {
       <InkPictureProvider>
         <Image
           src={IMAGE_PATH}
-          width={dimensions.width}           // 字符列数（Ink 占位）
-          height={dimensions.height}          // 字符行数（Ink 占位）
-          pixelWidth={dimensions.pixelWidth}   // 像素宽度（图片缩放）
-          pixelHeight={dimensions.pixelHeight} // 像素高度（图片缩放）
-          alt="3god"
+          width={dimensions.width}
+          height={dimensions.height}
+          pixelWidth={dimensions.pixelWidth}
+          pixelHeight={dimensions.pixelHeight}
+          alt={isUrl ? "url-image" : "local-image"}
         />
       </InkPictureProvider>
     </Box>
