@@ -1,11 +1,12 @@
-import { readFile } from 'fs/promises'
 import { homedir } from 'os'
 import React from 'react'
 import { z } from 'zod/v4'
+import { Jimp } from 'jimp'
 import { Text } from '../../ink.js'
 import { buildTool, type ToolDef } from '../../Tool.js'
 import { logForDebugging } from '../../utils/debug.js'
 import Image, { InkPictureProvider, type TerminalInfo } from 'src/ink-picture/index.ts'
+import { loadImageFromUrl } from 'src/ink-picture/utils/jimpURL.ts'
 
 const IMAGE_TOOL_NAME = 'ImageShow'
 
@@ -25,91 +26,9 @@ const inputSchema = () =>
 
 type Input = z.infer<ReturnType<typeof inputSchema>>
 
-/** Detect format from URL/file extension */
-function detectFormat(url: string): string {
-  const clean = url.split('?')[0]!.split('#')[0]!
-  const ext = clean.split('.').pop()?.toLowerCase() ?? ''
-  if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)) {
-    return ext === 'jpg' ? 'jpeg' : ext
-  }
-  return 'png'
-}
-
-/** Read a local file and return its buffer + detected format */
-async function readLocalImage(url: string): Promise<{ buffer: Buffer; format: string } | null> {
-  try {
-    const format = detectFormat(url)
-    const buffer = await readFile(url)
-    return { buffer, format }
-  } catch {
-    return null
-  }
-}
-
-/** Download an image from URL and return its buffer + detected format */
-async function fetchImage(url: string): Promise<{ buffer: Buffer; format: string } | null> {
-  try {
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; Codev/1.0)',
-      },
-      redirect: 'follow',
-    })
-
-    if (!response.ok) {
-      logForDebugging(`ImageShow: HTTP ${response.status} for ${url}`)
-      return null
-    }
-
-    const contentType = response.headers.get('content-type') ?? ''
-    const format = detectFormat(url !== contentType ? url : contentType)
-
-    const reader = response.body?.getReader()
-    if (!reader) return null
-
-    const chunks: Uint8Array[] = []
-    let totalSize = 0
-    const MAX_SIZE = 10_000_000
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      totalSize += value.byteLength
-      if (totalSize > MAX_SIZE) {
-        logForDebugging(`ImageShow: image too large (${totalSize} bytes) for ${url}`)
-        reader.cancel()
-        return null
-      }
-      chunks.push(value)
-    }
-
-    const combinedLength = chunks.reduce((acc, c) => acc + c.byteLength, 0)
-    const combined = new Uint8Array(combinedLength)
-    let offset = 0
-    for (const chunk of chunks) {
-      combined.set(chunk, offset)
-      offset += chunk.byteLength
-    }
-
-    return { buffer: Buffer.from(combined.buffer), format }
-  } catch (err) {
-    logForDebugging(`ImageShow: fetch error ${err} for ${url}`)
-    return null
-  }
-}
-
-/** Load image: local file or remote URL */
-async function loadImage(url: string): Promise<{ buffer: Buffer; format: string } | null> {
-  // Expand ~ to home directory
-  const normalizedUrl = url.startsWith('~')
-    ? url.replace(/^~(?=$|\/)/, homedir())
-    : url
-  if (normalizedUrl.startsWith('file://') || normalizedUrl.startsWith('/') || normalizedUrl.startsWith('.')) {
-    const path = normalizedUrl.startsWith('file://') ? normalizedUrl.slice(7) : normalizedUrl
-    return readLocalImage(path)
-  }
-  return fetchImage(normalizedUrl)
-}
+/** Standard terminal cell size in pixels */
+const CELL_WIDTH = 8
+const CELL_HEIGHT = 16
 
 /**
  * Lightweight synchronous Kitty graphics protocol detection.
@@ -129,6 +48,26 @@ function detectKittySync(): boolean {
 
 function getToolUseSummary(input: Partial<Input>): string | null {
   return input?.url ? `Show: ${input.url.split('/').pop() ?? input.url}` : null
+}
+
+/** Normalize image source path: expand ~, strip file:// */
+function normalizeSrc(url: string): string {
+  let src = url
+  if (src.startsWith('~')) {
+    src = src.replace(/^~(?=$|\/)/, homedir())
+  }
+  if (src.startsWith('file://')) {
+    src = src.slice(7)
+  }
+  return src
+}
+
+/** Load image from local path or URL, returning Jimp instance */
+async function loadImage(src: string): Promise<Jimp> {
+  if (src.startsWith('http://') || src.startsWith('https://')) {
+    return loadImageFromUrl(src)
+  }
+  return Jimp.read(src)
 }
 
 export const ImageShowTool = buildTool({
@@ -216,6 +155,8 @@ export const ImageShowTool = buildTool({
       message: string
       src?: string
       alt?: string
+      naturalWidth?: number
+      naturalHeight?: number
     },
     _progressMessages,
     _options,
@@ -227,9 +168,27 @@ export const ImageShowTool = buildTool({
     if (content.src) {
       const cols = process.stdout.columns ?? 80
       const rows = process.stdout.rows ?? 40
-      // Reasonable image size: 60% of terminal width, 40% of terminal height
-      const imgWidth = Math.floor(cols * 0.6)
-      const imgHeight = Math.floor(rows * 0.4)
+
+      // Target: 60% of terminal width
+      const targetW_chars = Math.floor(cols * 0.6)
+      const targetW_pixels = targetW_chars * CELL_WIDTH
+
+      // Compute height from original aspect ratio if available
+      let pixelHeight: number
+      let imgHeight: number
+
+      if (content.naturalWidth && content.naturalHeight) {
+        const targetH_pixels = Math.floor(
+          targetW_pixels * (content.naturalHeight / content.naturalWidth),
+        )
+        const minH_pixels = 3 * CELL_HEIGHT
+        pixelHeight = Math.max(targetH_pixels, minH_pixels)
+        imgHeight = Math.ceil(pixelHeight / CELL_HEIGHT)
+      } else {
+        // Fallback: 40% of terminal height
+        imgHeight = Math.floor(rows * 0.4)
+        pixelHeight = imgHeight * CELL_HEIGHT
+      }
 
       // Sync terminal info prevents InkPictureProvider's async terminal
       // query from delaying the first render and ensures the correct
@@ -243,8 +202,10 @@ export const ImageShowTool = buildTool({
         <InkPictureProvider terminalInfo={terminalInfo}>
           <Image
             src={content.src}
-            width={imgWidth}
+            width={targetW_chars}
             height={imgHeight}
+            pixelWidth={targetW_pixels}
+            pixelHeight={pixelHeight}
             alt={content.alt}
           />
         </InkPictureProvider>
@@ -262,58 +223,58 @@ export const ImageShowTool = buildTool({
       base64?: string
       src?: string
       alt?: string
+      naturalWidth?: number
+      naturalHeight?: number
     }
   }> {
     const url = input.url
     const alt = input.alt ?? url.split('/').pop() ?? 'image'
 
-    // Normalize src for ink-picture rendering
-    let src = url
-    if (src.startsWith('~')) {
-      src = src.replace(/^~(?=$|\/)/, homedir())
-    }
-    if (src.startsWith('file://')) {
-      src = src.slice(7)
-    }
-
+    const src = normalizeSrc(url)
     logForDebugging(`ImageShow: loading ${url}`)
 
-    const result = await loadImage(url)
+    try {
+      const image = await loadImage(src)
+      const naturalWidth = image.bitmap.width
+      const naturalHeight = image.bitmap.height
 
-    if (!result) {
+      const buffer = await image.getBuffer('image/png')
+
+      if (buffer.length > 10_000_000) {
+        logForDebugging(`ImageShow: image too large (${buffer.length} bytes)`)
+        return {
+          data: {
+            success: false,
+            message: `Image too large (${(buffer.length / 1024 / 1024).toFixed(1)} MB). Max 10 MB.`,
+          },
+        }
+      }
+
+      logForDebugging(`ImageShow: loaded ${buffer.length} byte PNG, ${naturalWidth}x${naturalHeight}`)
+
+      return {
+        data: {
+          success: true,
+          message: `Displayed: ${alt} (${buffer.length} bytes, PNG, ${naturalWidth}x${naturalHeight})`,
+          imageData: {
+            base64: buffer.toString('base64'),
+            mediaType: 'image/png',
+          },
+          base64: buffer.toString('base64'),
+          src,
+          alt,
+          naturalWidth,
+          naturalHeight,
+        },
+      }
+    } catch (err) {
+      logForDebugging(`ImageShow: load error ${err} for ${url}`)
       return {
         data: {
           success: false,
-          message: `Failed to load image from: ${url}`,
+          message: `Failed to fetch: ${url}`,
         },
       }
-    }
-
-    const { buffer, format } = result
-
-    const mediaType =
-      format === 'jpeg'
-        ? 'image/jpeg'
-        : format === 'gif'
-          ? 'image/gif'
-          : format === 'webp'
-            ? 'image/webp'
-            : 'image/png'
-
-    logForDebugging(`ImageShow: loaded ${buffer.length} byte ${format} image`)
-
-    return {
-      data: {
-        success: true,
-        message: `Displayed: ${alt} (${buffer.length} bytes, ${format})`,
-        imageData: {
-          base64: buffer.toString('base64'),
-          mediaType,
-        },
-        base64: buffer.toString('base64'),
-        src,
-        alt,
-      },
     }
   },
 }) satisfies ToolDef<any, any>
