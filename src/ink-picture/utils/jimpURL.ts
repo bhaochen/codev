@@ -24,9 +24,7 @@ export async function loadImageFromUrl(url: string) {
   const mime = contentType.split(";")[0].trim().toLowerCase();
 
   if (mime && !SUPPORTED_MIME_TYPES.has(mime)) {
-    throw new Error(
-      `Unsupported image format: ${mime}. Supported: ${[...SUPPORTED_MIME_TYPES].join(", ")}`,
-    );
+    throw new Error("Failed to fetch");
   }
 
   const arrayBuffer = await response.arrayBuffer();

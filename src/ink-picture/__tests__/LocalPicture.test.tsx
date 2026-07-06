@@ -68,8 +68,9 @@ function App() {
           pixelHeight: finalH_pixels,
         });
       } catch (e) {
-        console.error("Error loading image:", e);
+        console.error(e);
         setErr(true);
+        exit();
       }
     })();
   }, []);
@@ -81,7 +82,7 @@ function App() {
   }, [exit]);
 
   if (err) {
-    return <Text color="red">Failed to load image: {IMAGE_PATH}</Text>;
+    return <Text color="red">Failed to fetch: {IMAGE_PATH}</Text>;
   }
 
   if (!dimensions) {
