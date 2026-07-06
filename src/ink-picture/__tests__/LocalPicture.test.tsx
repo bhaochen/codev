@@ -14,6 +14,7 @@ import { Jimp } from "jimp";
 import React, { useEffect, useState } from "react";
 import { render, Box, Text, useApp } from "ink";
 import Image, { InkPictureProvider } from "../index.ts";
+import { loadImageFromUrl } from "../utils/jimpURL.ts";
 
 // 终端字符尺寸（像素）
 const CELL_WIDTH = 8;
@@ -29,16 +30,8 @@ const isUrl = IMAGE_PATH.startsWith("http://") || IMAGE_PATH.startsWith("https:/
 // 加载图片（支持本地和 URL）
 async function loadImage(path: string) {
   if (isUrl) {
-    // URL：先下载，再用 Jimp 读取
-    const response = await fetch(path);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch: ${response.status}`);
-    }
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    return Jimp.fromBuffer(buffer);
+    return loadImageFromUrl(path);
   } else {
-    // 本地路径：直接用 Jimp.read
     return Jimp.read(path);
   }
 }
