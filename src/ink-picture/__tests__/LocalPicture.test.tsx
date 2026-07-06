@@ -7,6 +7,7 @@
  *
  * Usage:
  *   bun run src/ink-picture/__tests__/LocalPicture.test.tsx
+ *   Press Ctrl+C to exit (image persists)
  */
 
 import { Jimp } from "jimp";
@@ -16,11 +17,17 @@ import Image, { InkPictureProvider } from "../index.ts";
 
 const IMAGE_PATH = "/home/yuki/Pictures/Wallpapers/3god.jpg";
 
+// 终端字符尺寸（像素）
+const CELL_WIDTH = 8;
+const CELL_HEIGHT = 16;
+
 function App() {
   const { exit } = useApp();
   const [dimensions, setDimensions] = useState<{
-    width: number;
-    height: number;
+    width: number;       // 字符列数
+    height: number;      // 字符行数
+    pixelWidth: number;  // 像素宽度
+    pixelHeight: number; // 像素高度
   } | null>(null);
   const [err, setErr] = useState(false);
 
@@ -31,18 +38,40 @@ function App() {
         const origW = image.bitmap.width;
         const origH = image.bitmap.height;
         const cols = process.stdout.columns ?? 80;
-        const targetW = Math.floor(cols * 0.6);
-        const targetH = Math.floor(targetW * (origH / origW) / 2);
-        setDimensions({ width: targetW, height: targetH });
+
+        // 1. 目标字符尺寸
+        const targetW_chars = Math.floor(cols * 0.6);
+
+        // 2. 转为像素尺寸（用于图片缩放）
+        const targetW_pixels = targetW_chars * CELL_WIDTH;
+        const targetH_pixels = Math.floor(targetW_pixels * (origH / origW));
+
+        // 3. 确保最小高度（至少 3 行字符）
+        const minH_pixels = 3 * CELL_HEIGHT;
+        const finalH_pixels = Math.max(targetH_pixels, minH_pixels);
+
+        // 4. 转回字符行数（用于 Ink 占位）
+        const targetH_chars = Math.ceil(finalH_pixels / CELL_HEIGHT);
+
+        setDimensions({
+          width: targetW_chars,
+          height: targetH_chars,
+          pixelWidth: targetW_pixels,
+          pixelHeight: finalH_pixels,
+        });
       } catch {
         setErr(true);
       }
     })();
   }, []);
 
+  // Ctrl+C 直接退出，不清理图片
   useEffect(() => {
-    const timer = setTimeout(() => exit(), 3000);
-    return () => clearTimeout(timer);
+    const handleSigint = () => {
+      exit();
+    };
+    process.on('SIGINT', handleSigint);
+    return () => process.off('SIGINT', handleSigint);
   }, [exit]);
 
   if (err) {
@@ -58,8 +87,10 @@ function App() {
       <InkPictureProvider>
         <Image
           src={IMAGE_PATH}
-          width={dimensions.width}
-          height={dimensions.height}
+          width={dimensions.width}           // 字符列数（Ink 占位）
+          height={dimensions.height}          // 字符行数（Ink 占位）
+          pixelWidth={dimensions.pixelWidth}   // 像素宽度（图片缩放）
+          pixelHeight={dimensions.pixelHeight} // 像素高度（图片缩放）
           alt="3god"
         />
       </InkPictureProvider>

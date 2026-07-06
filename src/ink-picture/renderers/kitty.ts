@@ -31,8 +31,20 @@ export function makeKittyTransmitChunks(
 export function makeKittyPlacement(
   imageId: number,
   placementId: number = 1,
+  charWidth?: number,   // 新增：字符列数
+  charHeight?: number,   // 新增：字符行数
 ): string {
-  return `\x1b_Ga=p,i=${imageId},p=${placementId},C=1,q=2\x1b\\`;
+  let params = `a=p,i=${imageId},p=${placementId},C=1,q=2`;
+
+  // 新增：限制显示区域
+  if (charWidth !== undefined) {
+    params += `,c=${charWidth}`;
+  }
+  if (charHeight !== undefined) {
+    params += `,r=${charHeight}`;
+  }
+
+  return `\x1b_G${params}\x1b\\`;
 }
 
 export function makeKittyDeletion(

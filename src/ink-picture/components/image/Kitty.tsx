@@ -78,7 +78,8 @@ function KittyImage(props: ImageProps) {
     stdout.write("\r");
     stdout.write(cursorForward(componentPosition.col));
 
-    stdout.write(makeKittyPlacement(imageId, 1));
+    // 关键修改：传入 resolvedWidth 和 resolvedHeight（字符尺寸）
+    stdout.write(makeKittyPlacement(imageId, 1, resolvedWidth, resolvedHeight));
 
     stdout.write("\x1b8");
 
