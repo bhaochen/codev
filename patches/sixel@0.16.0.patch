@@ -1,0 +1,13 @@
+diff --git a/upng.js b/upng.js
+index 339e821ea5acdd0869f0915d72828a62f1520a83..15c1a3d3da2d99aece0807a5375971fe45829d4e 100644
+--- a/upng.js
++++ b/upng.js
+@@ -4,7 +4,7 @@
+  * commit cb463cb7b857fc1fbd47bb8628c536e02aaa24ce
+  * license: MIT License, Copyright (c) 2017 Photopea
+  */
+-module.exports = UPNG = {};
++var UPNG = {}; module.exports = UPNG;
+ 
+ 	
+ 
