@@ -44,6 +44,8 @@ function Image({
   getVisibility,
   width = "100%",
   height = "100%",
+  pixelWidth,
+  pixelHeight,
   ...props
 }: ImageComponentProps) {
   const isScreenReaderEnabled = useIsScreenReaderEnabled();
@@ -121,6 +123,8 @@ function Image({
         key={effectiveProtocol}
         width={resolvedWidth}
         height={resolvedHeight}
+        pixelWidth={pixelWidth}
+        pixelHeight={pixelHeight}
         {...props}
       />
     </Box>

@@ -18,7 +18,7 @@ import type { ImageProps } from "./protocol.js";
 function KittyImage(props: ImageProps) {
   const terminalInfo = useTerminalInfo();
   const { stdout } = useStdout();
-  const { src, width, height, alt } = props;
+  const { src, width, height, pixelWidth, pixelHeight, alt } = props;
 
   const { containerRef, resolvedWidth, resolvedHeight } = useMeasuredSize(
     width,
@@ -27,13 +27,14 @@ function KittyImage(props: ImageProps) {
 
   const componentPosition = usePosition(containerRef);
 
-  const pixelWidth = resolvedWidth * (terminalInfo?.cellWidth ?? 0);
-  const pixelHeight = resolvedHeight * (terminalInfo?.cellHeight ?? 0);
+  // Use external pixel dimensions if provided, otherwise compute from chars
+  const actualPixelWidth = pixelWidth ?? resolvedWidth * (terminalInfo?.cellWidth ?? 0);
+  const actualPixelHeight = pixelHeight ?? resolvedHeight * (terminalInfo?.cellHeight ?? 0);
 
   const { imageData, error } = useImage({
     src,
-    pixelWidth,
-    pixelHeight,
+    pixelWidth: actualPixelWidth,
+    pixelHeight: actualPixelHeight,
     mode: "png",
   });
 
@@ -118,6 +119,7 @@ function KittyImage(props: ImageProps) {
       ref={containerRef}
       width={width}
       height={height}
+      imageHeight={actualPixelHeight}
       alt={alt}
       error={error}
       loaded={!!imageId}

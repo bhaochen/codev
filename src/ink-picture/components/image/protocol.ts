@@ -13,6 +13,10 @@ export interface ImageProps {
   height: number | string;
   /** Alternative text displayed while loading or on error */
   alt?: string;
+  /** Override pixel width for image scaling (default: resolved from width) */
+  pixelWidth?: number;
+  /** Override pixel height for image scaling (default: resolved from height) */
+  pixelHeight?: number;
 }
 
 /**

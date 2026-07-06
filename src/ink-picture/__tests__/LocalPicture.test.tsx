@@ -40,7 +40,7 @@ function App() {
         const cols = process.stdout.columns ?? 80;
 
         // 1. 目标字符尺寸
-        const targetW_chars = Math.floor(cols * 0.6);
+        const targetW_chars = Math.floor(cols * 0.4);
 
         // 2. 转为像素尺寸（用于图片缩放）
         const targetW_pixels = targetW_chars * CELL_WIDTH;
