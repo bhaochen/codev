@@ -11,10 +11,10 @@
  */
 
 import { Jimp } from "jimp";
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { render, Box, Text, useApp } from "ink";
-import Image, { InkPictureProvider } from "../../ink-picture/index.ts";
-import { loadImageFromUrl } from "../../ink-picture/utils/jimpURL.ts";
+import Image, { InkPictureProvider } from "../index.ts";
+import { loadImageFromUrl } from "../utils/jimpURL.ts";
 
 // 终端字符尺寸（像素）
 const CELL_WIDTH = 8;
@@ -78,7 +78,6 @@ function App() {
   useEffect(() => {
     const handleSigint = () => exit();
     process.on("SIGINT", handleSigint);
-    return () => process.off("SIGINT", handleSigint);
   }, [exit]);
 
   if (err) {

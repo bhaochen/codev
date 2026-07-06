@@ -11,7 +11,7 @@
  */
 
 import { Jimp } from "jimp";
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { render, Box, Text, useApp } from "ink";
 import Image, { InkPictureProvider } from "../index.ts";
 import { loadImageFromUrl } from "../utils/jimpURL.ts";
@@ -78,7 +78,6 @@ function App() {
   useEffect(() => {
     const handleSigint = () => exit();
     process.on("SIGINT", handleSigint);
-    return () => process.off("SIGINT", handleSigint);
   }, [exit]);
 
   if (err) {
