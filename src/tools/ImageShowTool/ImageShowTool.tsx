@@ -157,6 +157,7 @@ export const ImageShowTool = buildTool({
       alt?: string
       naturalWidth?: number
       naturalHeight?: number
+      base64?: string
     },
     _progressMessages,
     _options,
@@ -190,6 +191,12 @@ export const ImageShowTool = buildTool({
         pixelHeight = imgHeight * CELL_HEIGHT
       }
 
+      // Use the already-loaded PNG buffer to avoid a second file read
+      // inside the Image component. This is more reliable in the compiled binary.
+      const imageSrc = content.base64
+        ? Buffer.from(content.base64, 'base64')
+        : content.src
+
       // Sync terminal info prevents InkPictureProvider's async terminal
       // query from delaying the first render and ensures the correct
       // protocol is used from frame one.
@@ -201,7 +208,7 @@ export const ImageShowTool = buildTool({
       return (
         <InkPictureProvider terminalInfo={terminalInfo}>
           <Image
-            src={content.src}
+            src={imageSrc}
             width={targetW_chars}
             height={imgHeight}
             pixelWidth={targetW_pixels}
@@ -268,11 +275,12 @@ export const ImageShowTool = buildTool({
         },
       }
     } catch (err) {
-      logForDebugging(`ImageShow: load error ${err} for ${url}`)
+      const errMsg = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
+      logForDebugging(`ImageShow: load error ${errMsg} for ${url}`)
       return {
         data: {
           success: false,
-          message: `Failed to fetch: ${url}`,
+          message: `Failed to fetch: ${url} (${errMsg})`,
         },
       }
     }
