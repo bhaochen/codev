@@ -392,15 +392,6 @@ export type Screen = Size & {
   noSelect: Uint8Array
 
   /**
-   * Per-row raw escape sequences (e.g. Kitty protocol APC) that must be
-   * emitted before the row's cell content. Populated by writeLineToScreen
-   * in output.ts when a RawAnsi line starts with \x1b_ (APC). Each entry
-   * already includes CUP positioning: \x1b[row;colH + raw-sequence.
-   * log-update.ts emits these before diffing cells in a row.
-   */
-  rawWritesAtRow: Map<number, string>
-
-  /**
    * Per-ROW soft-wrap continuation marker. softWrap[r]=N>0 means row r
    * is a word-wrap continuation of row r-1 (the `\n` before it was
    * inserted by wrapAnsi, not in the source), and row r-1's written
@@ -496,7 +487,6 @@ export function createScreen(
     emptyStyleId: styles.none,
     damage: undefined,
     noSelect: new Uint8Array(size),
-    rawWritesAtRow: new Map(),
     softWrap: new Int32Array(height),
   }
 }
@@ -549,9 +539,8 @@ export function resetScreen(
 
   // Shared pools accumulate — no clearing needed. Unique char/hyperlink sets are bounded.
 
-  // Clear damage tracking and per-row raw writes
+  // Clear damage tracking
   screen.damage = undefined
-  screen.rawWritesAtRow.clear()
 }
 
 /**

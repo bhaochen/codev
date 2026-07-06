@@ -302,9 +302,6 @@ export class LogUpdate {
     let currentStyleId = stylePool.none
     let currentHyperlink: Hyperlink = undefined
 
-    // Track which rows had raw writes emitted to avoid duplicates
-    const emittedRawRows = new Set<number>()
-
     // First pass: render changes to existing rows (rows < prev.screen.height)
     let needsFullReset = false
     let resetTriggerY = -1
@@ -381,24 +378,6 @@ export class LogUpdate {
           return [patches, { dx: 1, dy: 0 }]
         })
       }
-
-      // Emit cursor-hide + bare APC/DCS + cursor-show after cell content
-      // so the native image overlays cell characters with no cursor flicker.
-      // No CUP prefix — the cursor is already at the correct row/column
-      // from moveCursorTo above.
-      if (!emittedRawRows.has(y)) {
-        emittedRawRows.add(y)
-        const rw = next.screen.rawWritesAtRow.get(y)
-        if (rw) {
-          screen.diff.push({
-            type: 'stdout',
-            content: '\x1b[?25l' + rw + '\x1b[?25h',
-          })
-          screen.txn(prev => {
-            return [[], { dx: x - prev.x, dy: y - prev.y }]
-          })
-        }
-      }
     })
     if (needsFullReset) {
       return fullResetSequence_CAUSES_FLICKER(next, 'offscreen', stylePool, {
@@ -429,7 +408,6 @@ export class LogUpdate {
         prev.screen.height,
         next.screen.height,
         stylePool,
-        viewportY,
       )
     }
 
@@ -545,8 +523,6 @@ function renderFrame(
 /**
  * Render a slice of rows from the frame's screen.
  * Each row is rendered followed by a newline. Cursor ends at (0, endY).
- * @param viewportY Number of rows above the viewport (scrollback), for
- *   viewport-adjusted raw write (APC/DCS) CUP positioning.
  */
 function renderFrameSlice(
   screen: VirtualScreen,
@@ -554,7 +530,6 @@ function renderFrameSlice(
   startY: number,
   endY: number,
   stylePool: StylePool,
-  viewportY = 0,
 ): VirtualScreen {
   let currentStyleId = stylePool.none
   let currentHyperlink: Hyperlink = undefined
@@ -635,19 +610,6 @@ function renderFrameSlice(
       currentHyperlink,
       undefined,
     )
-    // Emit cursor-hide + bare APC/DCS + cursor-show after cell content.
-    // The cursor is already at the CR+LF row position — no CUP needed.
-    {
-      const rw = frame.screen.rawWritesAtRow.get(y)
-      if (rw) {
-        screen.diff.push({
-          type: 'stdout',
-          content: '\x1b[?25l' + rw + '\x1b[?25h',
-        })
-        screen.txn(prev => [[], { dx: -prev.x, dy: y - prev.y }])
-      }
-    }
-
     // CR+LF at end of row — \r resets to column 0, \n moves to next line.
     // Without \r, the terminal cursor stays at whatever column content ended
     // (since we skip trailing spaces, this can be mid-row).

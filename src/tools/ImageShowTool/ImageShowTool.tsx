@@ -2,16 +2,10 @@ import { readFile } from 'fs/promises'
 import { homedir } from 'os'
 import React from 'react'
 import { z } from 'zod/v4'
-import Jimp from 'jimp'
-import { RawAnsi, Text } from '../../ink.js'
+import { Text } from '../../ink.js'
 import { buildTool, type ToolDef } from '../../Tool.js'
 import { logForDebugging } from '../../utils/debug.js'
-import {
-  getBestTextProtocol,
-  renderImage,
-  type PixelData,
-  type TextImageProtocol,
-} from '../../utils/imageRenderers.js'
+import Image, { InkPictureProvider } from 'ink-picture'
 
 const IMAGE_TOOL_NAME = 'ImageShow'
 
@@ -117,83 +111,6 @@ async function loadImage(url: string): Promise<{ buffer: Buffer; format: string 
   return fetchImage(normalizedUrl)
 }
 
-/**
- * Render an image buffer to an ANSI-escaped string via jimp + text-based
- * protocol (halfBlock / braille / ascii).
- *
- * Pure-JS equivalent of the old renderImageWithTimgSync that used the
- * external `timg` binary.
- *
- * @returns ANSI-escaped string, or null on failure.
- */
-async function renderImageWithJimp(
-  buffer: Buffer,
-  _format: string,
-): Promise<string | null> {
-  try {
-    const cols = process.stdout.columns ?? 80
-    const termRows = process.stdout.rows ?? 40
-    // Use at most half the terminal height so the image doesn't dominate
-    const maxRows = Math.max(10, Math.floor(termRows * 0.5))
-    // Aim for roughly 2:1 cell ratio (cells are ~2x tall)
-    const maxCols = Math.min(cols, Math.round(maxRows * 2))
-
-    // Decode image via jimp
-    const image = await Jimp.read(buffer)
-    const origWidth = image.bitmap.width
-    const origHeight = image.bitmap.height
-
-    // Scale to fit terminal
-    const scale = Math.min(maxCols / origWidth, maxRows / origHeight, 1)
-    const targetWidth = Math.round(origWidth * scale)
-    const targetHeight = Math.round(origHeight * scale)
-
-    image.resize(targetWidth, targetHeight)
-
-    // Extract pixel data
-    const pixelData: PixelData = {
-      data: image.bitmap.data,
-      info: {
-        width: targetWidth,
-        height: targetHeight,
-        channels: 4,
-      },
-    }
-
-    // Detect terminal capabilities and pick the best text protocol
-    const supportsColor = process.env.NO_COLOR === undefined
-    const supportsUnicode = true // modern terminals all support Unicode
-
-    const protocol: TextImageProtocol = getBestTextProtocol({
-      supportsUnicode,
-      supportsColor,
-    })
-
-    logForDebugging(`ImageShow: rendering ${targetWidth}x${targetHeight} via ${protocol}`)
-
-    return renderImage(pixelData, protocol, supportsColor)
-  } catch (err) {
-    logForDebugging(`ImageShow: jimp render error ${err}`)
-    return null
-  }
-}
-
-/**
- * React component that renders ink-picture output within Ink's
- * virtual DOM so Ink knows the image dimensions and the cursor stays
- * in sync with the terminal.
- */
-function ImageDisplay({ output }: { output: string }): React.ReactNode {
-  const lines = output.split('\n').filter(l => l.length > 0)
-  if (lines.length === 0) {
-    return null
-  }
-  // Measure visible width (strip ANSI escape codes)
-  const ansiStrip = (s: string) => s.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
-  const width = Math.max(...lines.map(l => ansiStrip(l).length))
-  return <RawAnsi lines={lines} width={width} />
-}
-
 function getToolUseSummary(input: Partial<Input>): string | null {
   return input?.url ? `Show: ${input.url.split('/').pop() ?? input.url}` : null
 }
@@ -202,9 +119,8 @@ export const ImageShowTool = buildTool({
   name: IMAGE_TOOL_NAME,
   description:
     'Display an image (PNG/JPEG/GIF/WebP) directly in the terminal. ' +
-    'Renders with Unicode-block characters within Ink\'s virtual DOM ' +
-    'so the cursor stays in sync and the image scrolls with conversation content. ' +
-    'Supports both URLs (https://) and local file paths.',
+    'Renders with full-resolution via Kitty Graphics Protocol when supported, ' +
+    'with automatic fallback to text-based rendering (half-block, braille, ascii).',
 
   getToolUseSummary,
   getActivityDescription(input) {
@@ -282,7 +198,8 @@ export const ImageShowTool = buildTool({
     content: {
       success: boolean
       message: string
-      imageOutput?: string
+      src?: string
+      alt?: string
     },
     _progressMessages,
     _options,
@@ -291,8 +208,23 @@ export const ImageShowTool = buildTool({
       return null
     }
 
-    if (content.imageOutput) {
-      return <ImageDisplay output={content.imageOutput} />
+    if (content.src) {
+      const cols = process.stdout.columns ?? 80
+      const rows = process.stdout.rows ?? 40
+      // Reasonable image size: 60% of terminal width, 40% of terminal height
+      const imgWidth = Math.floor(cols * 0.6)
+      const imgHeight = Math.floor(rows * 0.4)
+
+      return (
+        <InkPictureProvider>
+          <Image
+            src={content.src}
+            width={imgWidth}
+            height={imgHeight}
+            alt={content.alt}
+          />
+        </InkPictureProvider>
+      )
     }
 
     return <Text dimColor>{content.message}</Text>
@@ -304,11 +236,21 @@ export const ImageShowTool = buildTool({
       message: string
       imageData?: { base64: string; mediaType: string }
       base64?: string
-      imageOutput?: string
+      src?: string
+      alt?: string
     }
   }> {
     const url = input.url
     const alt = input.alt ?? url.split('/').pop() ?? 'image'
+
+    // Normalize src for ink-picture rendering
+    let src = url
+    if (src.startsWith('~')) {
+      src = src.replace(/^~(?=$|\/)/, homedir())
+    }
+    if (src.startsWith('file://')) {
+      src = src.slice(7)
+    }
 
     logForDebugging(`ImageShow: loading ${url}`)
 
@@ -336,14 +278,6 @@ export const ImageShowTool = buildTool({
 
     logForDebugging(`ImageShow: loaded ${buffer.length} byte ${format} image`)
 
-    // Render via jimp + text protocol within Ink's virtual DOM.
-    // ImageDisplay in renderToolResultMessage renders the output so Ink
-    // knows the image dimensions and the cursor stays in sync.
-    const imageOutput = await renderImageWithJimp(buffer, format)
-    if (imageOutput) {
-      logForDebugging('ImageShow: generated text-protocol output')
-    }
-
     return {
       data: {
         success: true,
@@ -353,7 +287,8 @@ export const ImageShowTool = buildTool({
           mediaType,
         },
         base64: buffer.toString('base64'),
-        imageOutput,
+        src,
+        alt,
       },
     }
   },

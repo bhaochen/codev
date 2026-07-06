@@ -704,56 +704,29 @@ function writeLineToScreen(
               break
             }
           }
-        } else if (nextChar === '_') {
-          // APC (Application Program Command): store in screen.rawWritesAtRow
-          // for emission by log-update.ts before the row's cell content.
-          // This avoids the screen buffer width limit — APC payloads (e.g.
-          // Kitty base64 images) can be hundreds of KB, but screen rows are
-          // only ~80 columns wide.
-          const apcStartIdx = charIdx
-          charIdx++ // skip past ESC
-          while (charIdx < characters.length - 1) {
-            charIdx++
-            const c = characters[charIdx]?.value
-            if (c === '\x07') break
-            if (c === '\x1b') {
-              const nextC = characters[charIdx + 1]?.value
-              if (nextC === '\\') {
-                charIdx++ // skip backslash
-                break
-              }
-            }
-          }
-          // Reconstruct the full APC sequence from char tokens
-          let apc = ''
-          for (let i = apcStartIdx; i <= charIdx; i++) {
-            const ci = characters[i]
-            if (ci) apc += ci.value
-          }
-          // Append or create raw write entry. Store the bare APC — the
-          // cursor is already at the correct screen-buffer position when
-          // this entry is emitted (via CR+LF in renderFrameSlice or
-          // moveCursorTo in diffEach).
-          const existing = screen.rawWritesAtRow.get(y)
-          if (existing) {
-            screen.rawWritesAtRow.set(y, existing + apc)
-          } else {
-            screen.rawWritesAtRow.set(y, apc)
-          }
         } else if (
           nextChar === ']' ||
           nextChar === 'P' ||
+          nextChar === '_' ||
           nextChar === '^' ||
           nextChar === 'X'
         ) {
-          // String-based sequences (OSC, DCS, PM, SOS) terminated by
-          // BEL (0x07) or ST (ESC \): skip as before.
-          const seqStartIdx = charIdx
+          // String-based sequences terminated by BEL (0x07) or ST (ESC \):
+          // - OSC: ESC ] ... (Operating System Command)
+          // - DCS: ESC P ... (Device Control String)
+          // - APC: ESC _ ... (Application Program Command)
+          // - PM:  ESC ^ ... (Privacy Message)
+          // - SOS: ESC X ... (Start of String)
           charIdx++ // skip the introducer char
           while (charIdx < characters.length - 1) {
             charIdx++
             const c = characters[charIdx]?.value
-            if (c === '\x07') break
+            // BEL (0x07) terminates the sequence
+            if (c === '\x07') {
+              break
+            }
+            // ST (String Terminator) is ESC \
+            // When we see ESC, check if next char is backslash
             if (c === '\x1b') {
               const nextC = characters[charIdx + 1]?.value
               if (nextC === '\\') {
@@ -761,31 +734,6 @@ function writeLineToScreen(
                 break
               }
             }
-          }
-
-          // Tmux DCS passthrough (\x1bPtmux;...\x1b\\): store the entire
-          // DCS sequence in rawWritesAtRow so tmux forwards the inner APC
-          // to the terminal for native Kitty image rendering.
-          if (
-            nextChar === 'P' &&
-            charIdx + 2 < characters.length &&
-            characters[seqStartIdx + 2]?.value === 't' &&
-            characters[seqStartIdx + 3]?.value === 'm' &&
-            characters[seqStartIdx + 4]?.value === 'u' &&
-            characters[seqStartIdx + 5]?.value === 'x' &&
-            characters[seqStartIdx + 6]?.value === ';' &&
-            characters[charIdx + 1]?.value === '\x1b' &&
-            characters[charIdx + 2]?.value === '\\'
-          ) {
-            // Extend to include outer DCS terminator (\x1b\\)
-            const dcsEnd = charIdx + 2
-            let dcs = ''
-            for (let i = seqStartIdx; i <= dcsEnd; i++) {
-              const ci = characters[i]
-              if (ci) dcs += ci.value
-            }
-            screen.rawWritesAtRow.set(y, dcs)
-            charIdx = dcsEnd
           }
         } else if (
           nextCode !== undefined &&
