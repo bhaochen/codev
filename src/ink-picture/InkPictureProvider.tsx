@@ -257,6 +257,16 @@ export function InkPictureProvider({
       info.supportsKittyGraphics = result.supportsKittyGraphics;
       info.supportsITerm2Graphics = supportsITerm2Graphics;
 
+      // Ghostty supports Kitty graphics protocol natively
+      if (process.env.TERM_PROGRAM === 'ghostty') {
+        info.supportsKittyGraphics = true;
+      }
+
+      // Fallback color detection if supports-color fails
+      if (!info.supportsColor && process.env.COLORTERM === 'truecolor') {
+        info.supportsColor = true;
+      }
+
       // Apply iTerm2 cell size override for HiDPI scaling
       // See https://iterm2.com/documentation-escape-codes.html#report-cell-size
       if (
