@@ -43,7 +43,7 @@ export function useImage<T extends "pixels" | "png" = "pixels">(options: {
       }
 
       setError(false);
-      image.resize({ w: pixelWidth, h: pixelHeight });
+      image.cover({ w: pixelWidth, h: pixelHeight });
 
       if (mode === "png") {
         const result = await getPngBuffer(image);
