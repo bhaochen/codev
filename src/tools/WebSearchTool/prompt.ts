@@ -19,10 +19,14 @@ Search Strategy:
   - If results are weak or empty, try rephrasing the query
   - Prefer more specific queries when possible (add keywords, version numbers, or context)
 
-Search Result Format:
-  - Each search result includes: title, URL, snippet, and optionally an image URL (thumbnail)
-  - **Images are automatically displayed inline in the terminal** when search results include image thumbnails — no need to manually call ImageShowTool for search result images
-  - You can also explicitly call ImageShowTool with any image URL (https://... or local path) to display images
+Image Search (search_images parameter):
+  - Set **search_images: true** to search specifically for images (photos, artworks, screenshots).
+    Example: WebSearch(query: "milet 写真", search_images: true)
+  - When search_images is true, results include direct image URLs (img_src) that you can display
+    with ImageShowTool(src: img_src).
+  - Example workflow: WebSearch(query: "...", search_images: true) → pick a result → ImageShowTool(src: img_src)
+  - Without search_images: true, this is a general web search and image URLs are NOT available.
+  - DO NOT pass article/page URLs to ImageShowTool — it only accepts direct image URLs (.jpg/.png/.gif/.webp).
 
 CRITICAL REQUIREMENT - You MUST follow this:
   - After answering the user's question, you MUST include a "Sources:" section at the end of your response
