@@ -134,7 +134,6 @@ function KittyImage(props: ImageProps) {
       ref={containerRef}
       width={width}
       height={height}
-      imageHeight={actualPixelHeight}
       alt={alt}
       error={error}
       loaded={!!imageId}

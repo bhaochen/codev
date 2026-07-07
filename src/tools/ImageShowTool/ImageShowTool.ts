@@ -69,15 +69,19 @@ export function calculateDimensions(
   const targetW_chars = Math.floor(terminalCols * 0.1618);
   const targetW_pixels = targetW_chars * CELL_WIDTH;
   const targetH_pixels = Math.floor(targetW_pixels * (imageHeight / imageWidth));
-  const minH_pixels = 3 * CELL_HEIGHT;
-  const finalH_pixels = Math.max(targetH_pixels, minH_pixels);
-  const targetH_chars = Math.ceil(finalH_pixels / CELL_HEIGHT);
+  const minH_chars = 3;
+
+  // Compute char height first, then back-compute pixelHeight to guarantee
+  // pixelHeight === height * CELL_HEIGHT — no rounding gap between the
+  // placeholder Box and the actual Kitty image.
+  const targetH_chars = Math.max(Math.ceil(targetH_pixels / CELL_HEIGHT), minH_chars);
+  const finalPixelHeight = targetH_chars * CELL_HEIGHT;
 
   return {
     width: targetW_chars,
     height: targetH_chars,
     pixelWidth: targetW_pixels,
-    pixelHeight: finalH_pixels,
+    pixelHeight: finalPixelHeight,
   };
 }
 
