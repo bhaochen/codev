@@ -1,19 +1,16 @@
 import React, { useMemo } from 'react'
-import Image, { InkPictureProvider } from '../../ink-picture/index.js'
 import { Box, Text } from '../../ink.js'
 import { MessageResponse } from '../../components/MessageResponse.js'
+import { InkPictureProvider } from '../../ink-picture/InkPictureProvider.js'
 import type { ImageShowOutput } from './ImageShowTool.js'
 import { detectTerminalCaps } from './detectTerminal.js'
+import { DirectImageDisplay } from './DirectImageDisplay.js'
 
 // ── Image display component ──
-// Renders a placeholder in Ink's TUI and uses Kitty/Sixel protocol to draw
-// the full-resolution image directly on the terminal framebuffer (bypassing
-// the Ink render cycle). The placeholder reserves character cells so the TUI
-// layout isn't broken; ink-picture's useDirectRenderer repositions the image
-// after each Ink screen refresh.
-//
-// Terminal detection uses environment variables (TERM, TERM_PROGRAM, etc.)
-// instead of ANSI escape queries, avoiding stdin conflicts with Ink's TUI.
+// Follows the old timg approach (commit f6a6fdc):
+// - Writes Kitty protocol directly to the terminal fd (bypassing Ink)
+// - Renders empty placeholder in Ink for correct TUI layout
+// - The image is drawn on the terminal framebuffer without affecting layout
 
 export function ImageDisplay({ src, width, height, pixelWidth, pixelHeight }: {
   src: string
@@ -24,16 +21,25 @@ export function ImageDisplay({ src, width, height, pixelWidth, pixelHeight }: {
 }) {
   const terminalInfo = useMemo(() => detectTerminalCaps(), [])
 
+  const supportsKittyGraphics = terminalInfo.supportsKittyGraphics === true
+
+  if (!supportsKittyGraphics) {
+    return (
+      <MessageResponse height={1}>
+        <Text dimColor>Image: {src}</Text>
+      </MessageResponse>
+    )
+  }
+
   return (
     <Box flexDirection="column">
       <InkPictureProvider terminalInfo={terminalInfo}>
-        <Image
+        <DirectImageDisplay
           src={src}
           width={width}
           height={height}
           pixelWidth={pixelWidth}
           pixelHeight={pixelHeight}
-          alt={typeof src === 'string' ? src : 'image'}
         />
       </InkPictureProvider>
     </Box>
