@@ -1,8 +1,10 @@
+import { execFileSync } from 'child_process'
 import { z } from 'zod/v4'
 import { Jimp } from "jimp";
 import { buildTool, type ToolDef } from '../../Tool.js'
 import { loadImageFromUrl } from "../../ink-picture/utils/jimpURL.ts";
 import { lazySchema } from '../../utils/lazySchema.js'
+import { whichSync } from '../../utils/which.js'
 import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js'
 import { IMAGE_SHOW_TOOL_NAME, DESCRIPTION } from './prompt.js'
 import {
@@ -32,6 +34,7 @@ export interface ImageShowOutput {
   height?: number
   pixelWidth?: number
   pixelHeight?: number
+  kittySequence?: string
 }
 
 // ── Utilities ──
@@ -89,6 +92,7 @@ const outputSchema = lazySchema(() =>
     height: z.number().optional(),
     pixelWidth: z.number().optional(),
     pixelHeight: z.number().optional(),
+    kittySequence: z.string().optional(),
   }),
 )
 type OutputSchema = ReturnType<typeof outputSchema>
@@ -168,11 +172,34 @@ export const ImageShowTool = buildTool({
         cols,
       )
 
+      // Generate full-resolution Kitty protocol sequence via timg
+      let kittySequence: string | undefined
+      try {
+        const timgPath = whichSync('timg')
+        if (timgPath) {
+          // Pipe image to timg via stdin, capture Kitty protocol output
+          const pngBuffer = await image.getBuffer("image/png")
+          kittySequence = execFileSync(
+            timgPath,
+            ['-p', 'kitty', '-g', `${dims.width}x${dims.height}`, '-'],
+            {
+              input: pngBuffer,
+              encoding: 'utf8',
+              timeout: 30000,
+              maxBuffer: 50 * 1024 * 1024,
+            },
+          )
+        }
+      } catch {
+        // timg not available — fall back to text display
+      }
+
       return {
         data: {
           src,
           success: true,
           ...dims,
+          kittySequence,
         } satisfies ImageShowOutput,
       }
     } catch (error) {
