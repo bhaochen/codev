@@ -94,7 +94,7 @@ async function searchSearXNG(
         title: r.title,
         url: r.url,
         snippet: r.content,
-        image: r.thumbnail || undefined,
+        image: r.img_src || r.thumbnail || undefined,
       }))
   } catch (error) {
     logError('SearXNG search failed', error)
@@ -307,6 +307,9 @@ export const WebSearchTool = buildTool({
       } else {
         r.content.forEach((item: any, i: number) => {
           text += `${i + 1}. ${item.title}\n${item.url}\n${item.snippet || ''}\n`
+          if (item.image) {
+            text += `Image: ${item.image}\n`
+          }
         })
       }
     }

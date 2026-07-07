@@ -155,7 +155,7 @@ export function ImageDisplay({
 // ── Tool rendering functions ──
 
 export function renderToolUseMessage(): React.ReactNode {
-  return "ImageShow";
+  return "Image";
 }
 
 export function renderToolUseProgressMessage(): React.ReactNode {
