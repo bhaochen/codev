@@ -1,6 +1,40 @@
 import React from 'react'
-import { MessageResponse } from '../../components/MessageResponse.js'
+import Image, { InkPictureProvider } from '../../ink-picture/index.js'
 import { Box, Text } from '../../ink.js'
+import { MessageResponse } from '../../components/MessageResponse.js'
+import type { ImageShowOutput } from './ImageShowTool.js'
+
+// ── Image display component ──
+// Renders a placeholder in Ink's TUI and uses Kitty/Sixel protocol to draw
+// the full-resolution image directly on the terminal framebuffer (bypassing
+// the Ink render cycle). The placeholder reserves character cells so the TUI
+// layout isn't broken; ink-picture's useDirectRenderer repositions the image
+// after each Ink screen refresh.
+
+export function ImageDisplay({ src, width, height, pixelWidth, pixelHeight }: {
+  src: string
+  width: number
+  height: number
+  pixelWidth: number
+  pixelHeight: number
+}) {
+  return (
+    <Box flexDirection="column">
+      <InkPictureProvider>
+        <Image
+          src={src}
+          width={width}
+          height={height}
+          pixelWidth={pixelWidth}
+          pixelHeight={pixelHeight}
+          alt={typeof src === 'string' ? src : 'image'}
+        />
+      </InkPictureProvider>
+    </Box>
+  )
+}
+
+// ── Tool rendering functions ──
 
 export function renderToolUseMessage(
   { src }: { src?: string },
@@ -20,10 +54,12 @@ export function renderToolUseProgressMessage(): React.ReactNode {
 }
 
 export function renderToolResultMessage(
-  { src, success }: { src: string; success: boolean },
+  output: ImageShowOutput,
   _progressMessages: unknown[],
   { verbose }: { verbose: boolean },
 ): React.ReactNode {
+  const { src, success, width, height, pixelWidth, pixelHeight } = output
+
   if (!success) {
     return (
       <MessageResponse height={1}>
@@ -31,17 +67,21 @@ export function renderToolResultMessage(
       </MessageResponse>
     )
   }
-  if (verbose) {
+
+  // Render the image via ink-picture when we have dimension data
+  if (width && height && pixelWidth && pixelHeight) {
     return (
-      <Box flexDirection="column">
-        <MessageResponse height={1}>
-          <Text>
-            Image displayed: <Text bold>{src}</Text>
-          </Text>
-        </MessageResponse>
-      </Box>
+      <ImageDisplay
+        src={src}
+        width={width}
+        height={height}
+        pixelWidth={pixelWidth}
+        pixelHeight={pixelHeight}
+      />
     )
   }
+
+  // Fallback: text-only summary
   return (
     <MessageResponse height={1}>
       <Text>

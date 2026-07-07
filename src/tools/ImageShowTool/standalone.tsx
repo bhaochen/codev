@@ -12,7 +12,6 @@
 
 import { useEffect, useState } from "react";
 import { render, Box, Text, useApp } from "ink";
-import Image, { InkPictureProvider } from "../../ink-picture/index.ts";
 import {
   getImagePath,
   isUrl,
@@ -20,6 +19,7 @@ import {
   calculateDimensions,
   type ImageDimensions,
 } from "./ImageShowTool.ts";
+import { ImageDisplay } from "./UI.js";
 
 const args = process.argv.slice(2);
 const IMAGE_PATH = getImagePath(args);
@@ -36,7 +36,7 @@ function App() {
         const dims = calculateDimensions(
           image.bitmap.width,
           image.bitmap.height,
-          process.stdout.columns ?? 80
+          process.stdout.columns ?? 80,
         );
         setDimensions(dims);
       } catch (e) {
@@ -65,16 +65,13 @@ function App() {
 
   return (
     <Box flexDirection="column">
-      <InkPictureProvider>
-        <Image
-          src={IMAGE_PATH}
-          width={dimensions.width}
-          height={dimensions.height}
-          pixelWidth={dimensions.pixelWidth}
-          pixelHeight={dimensions.pixelHeight}
-          alt={isUrl(IMAGE_PATH) ? "url-image" : "local-image"}
-        />
-      </InkPictureProvider>
+      <ImageDisplay
+        src={IMAGE_PATH}
+        width={dimensions.width}
+        height={dimensions.height}
+        pixelWidth={dimensions.pixelWidth}
+        pixelHeight={dimensions.pixelHeight}
+      />
     </Box>
   );
 }

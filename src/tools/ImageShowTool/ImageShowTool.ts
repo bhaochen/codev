@@ -10,22 +10,13 @@ import {
   renderToolResultMessage,
   renderToolUseMessage,
 } from './UI.js'
-import type { PixelData, PngData } from "../../ink-picture/renderers/types.js";
-import {
-  makeKittyTransmitChunks,
-  makeKittyPlacement,
-} from "../../ink-picture/renderers/kitty.js";
-import { renderSixel } from "../../ink-picture/renderers/sixel.js";
-import { renderITerm2 } from "../../ink-picture/renderers/iterm2.js";
-import { renderHalfBlock } from "../../ink-picture/renderers/halfBlock.js";
-import { renderBraille } from "../../ink-picture/renderers/braille.js";
-import { renderAscii } from "../../ink-picture/renderers/ascii.js";
-import generateKittyId from "../../ink-picture/utils/generateKittyId.js";
 
-// ── Utility functions (kept for standalone UI and external use) ──
+// ── Constants ──
 
 export const CELL_WIDTH = 8;
 export const CELL_HEIGHT = 16;
+
+// ── Types ──
 
 export interface ImageDimensions {
   width: number;        // 字符宽度
@@ -33,6 +24,17 @@ export interface ImageDimensions {
   pixelWidth: number;   // 像素宽度
   pixelHeight: number;  // 像素高度
 }
+
+export interface ImageShowOutput {
+  src: string
+  success: boolean
+  width?: number
+  height?: number
+  pixelWidth?: number
+  pixelHeight?: number
+}
+
+// ── Utilities ──
 
 export function getImagePath(args: string[]): string {
   return args[0] || "/home/yuki/Pictures/Wallpapers/3god.jpg";
@@ -70,109 +72,6 @@ export function calculateDimensions(
   };
 }
 
-// ── Protocol detection ──
-
-type Protocol = 'kitty' | 'sixel' | 'iterm2' | 'halfBlock' | 'braille' | 'ascii'
-
-function detectProtocol(): Protocol {
-  const termProgram = process.env.TERM_PROGRAM
-  const term = process.env.TERM
-
-  // Kitty protocol — stores image in terminal GPU memory, survives screen clears
-  if (termProgram === 'ghostty' || termProgram === 'kitty' || term?.includes('kitty')) {
-    return 'kitty'
-  }
-
-  // Sixel
-  if (term?.includes('sixel') || termProgram === 'ghostty' || termProgram === 'vscode') {
-    return 'sixel'
-  }
-
-  // iTerm2 inline images
-  if (termProgram === 'iTerm.app' || termProgram === 'WezTerm' || termProgram === 'WarpTerminal') {
-    return 'iterm2'
-  }
-
-  // Text-based fallback
-  const colorterm = process.env.COLORTERM
-  const supportsColor = colorterm === 'truecolor' || !!colorterm ||
-    term?.includes('truecolor') || term?.includes('256color')
-  const supportsUnicode = true // all modern terminals
-
-  if (supportsUnicode && supportsColor) return 'halfBlock'
-  if (supportsUnicode) return 'braille'
-  return 'ascii'
-}
-
-type JimpInstance = Awaited<ReturnType<typeof Jimp.read>>
-
-async function renderImage(image: JimpInstance, dims: ImageDimensions): Promise<void> {
-  const protocol = detectProtocol()
-
-  image.cover({ w: dims.pixelWidth, h: dims.pixelHeight })
-
-  const pixels: PixelData = {
-    data: image.bitmap.data,
-    info: { width: image.bitmap.width, height: image.bitmap.height, channels: 4 },
-  }
-
-  switch (protocol) {
-    case 'kitty': {
-      const pngBuf = await image.getBuffer("image/png")
-      const b64 = pngBuf.toString('base64')
-      const imgId = generateKittyId()
-      const chunks = makeKittyTransmitChunks(imgId, b64)
-      for (const chunk of chunks) {
-        process.stdout.write(chunk)
-      }
-      process.stdout.write('\n')
-      process.stdout.write(makeKittyPlacement(imgId, 1, dims.width, dims.height))
-      process.stdout.write('\n')
-      break
-    }
-    case 'sixel': {
-      const output = renderSixel(pixels)
-      process.stdout.write(output)
-      process.stdout.write('\n')
-      break
-    }
-    case 'iterm2': {
-      const pngBuf = await image.getBuffer("image/png")
-      const pngData: PngData = {
-        data: pngBuf,
-        info: { width: image.bitmap.width, height: image.bitmap.height },
-      }
-      const output = renderITerm2(pngData, { width: dims.pixelWidth, height: dims.pixelHeight })
-      process.stdout.write(output)
-      process.stdout.write('\n')
-      break
-    }
-    case 'halfBlock': {
-      const output = renderHalfBlock(pixels)
-      process.stdout.write('\n')
-      process.stdout.write(output)
-      process.stdout.write('\n')
-      break
-    }
-    case 'braille': {
-      const output = renderBraille(pixels)
-      process.stdout.write('\n')
-      process.stdout.write(output)
-      process.stdout.write('\n')
-      break
-    }
-    case 'ascii': {
-      const output = renderAscii(pixels, {
-        colored: !!(process.env.COLORTERM || process.env.TERM?.includes('truecolor')),
-      })
-      process.stdout.write('\n')
-      process.stdout.write(output)
-      process.stdout.write('\n')
-      break
-    }
-  }
-}
-
 // ── Tool definition ──
 
 const inputSchema = lazySchema(() =>
@@ -184,8 +83,12 @@ type InputSchema = ReturnType<typeof inputSchema>
 
 const outputSchema = lazySchema(() =>
   z.object({
-    src: z.string().describe('The image source that was displayed'),
-    success: z.boolean().describe('Whether the image was displayed successfully'),
+    src: z.string(),
+    success: z.boolean(),
+    width: z.number().optional(),
+    height: z.number().optional(),
+    pixelWidth: z.number().optional(),
+    pixelHeight: z.number().optional(),
   }),
 )
 type OutputSchema = ReturnType<typeof outputSchema>
@@ -265,25 +168,24 @@ export const ImageShowTool = buildTool({
         cols,
       )
 
-      // Render the image directly to terminal using ink-picture
-      await renderImage(image, dims)
-
       return {
         data: {
           src,
           success: true,
-        } satisfies Output,
+          ...dims,
+        } satisfies ImageShowOutput,
       }
     } catch (error) {
+      console.error(`[ImageShowTool] Failed to display ${src}:`, error)
       return {
         data: {
           src,
           success: false,
-        } satisfies Output,
+        } satisfies ImageShowOutput,
       }
     }
   },
-  mapToolResultToToolResultBlockParam(output, toolUseID) {
+  mapToolResultToToolResultBlockParam(output: ImageShowOutput, toolUseID: string) {
     return {
       tool_use_id: toolUseID,
       type: 'tool_result',
@@ -297,4 +199,4 @@ export const ImageShowTool = buildTool({
       ],
     }
   },
-} satisfies ToolDef<InputSchema, Output>)
+} satisfies ToolDef<InputSchema, ImageShowOutput>)
