@@ -1,8 +1,9 @@
-import React from 'react'
+import React, { useMemo } from 'react'
 import Image, { InkPictureProvider } from '../../ink-picture/index.js'
 import { Box, Text } from '../../ink.js'
 import { MessageResponse } from '../../components/MessageResponse.js'
 import type { ImageShowOutput } from './ImageShowTool.js'
+import { detectTerminalCaps } from './detectTerminal.js'
 
 // ── Image display component ──
 // Renders a placeholder in Ink's TUI and uses Kitty/Sixel protocol to draw
@@ -10,6 +11,9 @@ import type { ImageShowOutput } from './ImageShowTool.js'
 // the Ink render cycle). The placeholder reserves character cells so the TUI
 // layout isn't broken; ink-picture's useDirectRenderer repositions the image
 // after each Ink screen refresh.
+//
+// Terminal detection uses environment variables (TERM, TERM_PROGRAM, etc.)
+// instead of ANSI escape queries, avoiding stdin conflicts with Ink's TUI.
 
 export function ImageDisplay({ src, width, height, pixelWidth, pixelHeight }: {
   src: string
@@ -18,9 +22,11 @@ export function ImageDisplay({ src, width, height, pixelWidth, pixelHeight }: {
   pixelWidth: number
   pixelHeight: number
 }) {
+  const terminalInfo = useMemo(() => detectTerminalCaps(), [])
+
   return (
     <Box flexDirection="column">
-      <InkPictureProvider>
+      <InkPictureProvider terminalInfo={terminalInfo}>
         <Image
           src={src}
           width={width}

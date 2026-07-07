@@ -231,6 +231,11 @@ export function InkPictureProvider({
   }, [config]);
 
   useEffect(() => {
+    // When terminalInfo overrides are provided, skip the ANSI escape query
+    // to avoid stdout/stden conflicts with the host TUI. The overrides take
+    // precedence over queried results in resolvedInfo anyway.
+    if (overrides && Object.keys(overrides).length > 0) return;
+
     const controller = new AbortController();
 
     const queryTerminalInfo = async () => {
