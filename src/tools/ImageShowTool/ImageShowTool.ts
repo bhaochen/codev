@@ -1,4 +1,5 @@
 import { execFileSync } from 'child_process'
+import fs from 'node:fs'
 import { z } from 'zod/v4'
 import { Jimp } from "jimp";
 import { buildTool, type ToolDef } from '../../Tool.js'
@@ -51,7 +52,12 @@ export async function loadImage(path: string) {
   if (isUrl(path)) {
     return loadImageFromUrl(path);
   } else {
-    return Jimp.read(path);
+    // Read file to Buffer first, then pass to Jimp.read().
+    // Jimp v1.x has inconsistent path resolution in some runtimes
+    // (Bun, ESM contexts), so this avoids relying on Jimp's internal
+    // file detection by feeding the raw buffer directly.
+    const buffer = fs.readFileSync(path);
+    return Jimp.read(buffer);
   }
 }
 
