@@ -196,7 +196,7 @@ export const ImageShowTool = buildTool({
   name: IMAGE_SHOW_TOOL_NAME,
   searchHint: 'display an image in the terminal',
   maxResultSizeChars: 10_000,
-  shouldDefer: true,
+  shouldDefer: false,
   async description(input) {
     const { src } = input as { src: string }
     try {
