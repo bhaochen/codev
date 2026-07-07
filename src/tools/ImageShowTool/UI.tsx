@@ -154,13 +154,8 @@ export function ImageDisplay({
 
 // ── Tool rendering functions ──
 
-export function renderToolUseMessage(
-  { src }: { src?: string },
-  { verbose }: { theme?: string; verbose: boolean },
-): React.ReactNode {
-  if (!src) return null;
-  if (verbose) return `src: "${src}"`;
-  return src;
+export function renderToolUseMessage(): React.ReactNode {
+  return "ImageShow";
 }
 
 export function renderToolUseProgressMessage(): React.ReactNode {

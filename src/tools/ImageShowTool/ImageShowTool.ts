@@ -64,24 +64,25 @@ export async function loadImage(path: string) {
 export function calculateDimensions(
   imageWidth: number,
   imageHeight: number,
-  terminalCols: number
+  terminalRows: number
 ): ImageDimensions {
-  const targetW_chars = Math.floor(terminalCols * 0.1618);
-  const targetW_pixels = targetW_chars * CELL_WIDTH;
-  const targetH_pixels = Math.floor(targetW_pixels * (imageHeight / imageWidth));
-  const minH_chars = 3;
+  // Height = 16.18% of terminal height; width derived from aspect ratio.
+  const targetH_chars = Math.floor(terminalRows * 0.1618);
+  const targetH_pixels = targetH_chars * CELL_HEIGHT;
+  const minW_chars = 3;
 
-  // Compute char height first, then back-compute pixelHeight to guarantee
-  // pixelHeight === height * CELL_HEIGHT — no rounding gap between the
+  // Pixel width from aspect ratio, then back-compute char width to guarantee
+  // pixelWidth === width * CELL_WIDTH — no rounding gap between the
   // placeholder Box and the actual Kitty image.
-  const targetH_chars = Math.max(Math.ceil(targetH_pixels / CELL_HEIGHT), minH_chars);
-  const finalPixelHeight = targetH_chars * CELL_HEIGHT;
+  const targetW_pixels = Math.floor(targetH_pixels * (imageWidth / imageHeight));
+  const targetW_chars = Math.max(Math.ceil(targetW_pixels / CELL_WIDTH), minW_chars);
+  const finalPixelWidth = targetW_chars * CELL_WIDTH;
 
   return {
     width: targetW_chars,
     height: targetH_chars,
-    pixelWidth: targetW_pixels,
-    pixelHeight: finalPixelHeight,
+    pixelWidth: finalPixelWidth,
+    pixelHeight: targetH_pixels,
   };
 }
 
@@ -175,11 +176,11 @@ export const ImageShowTool = buildTool({
   async call({ src }) {
     try {
       const image = await loadImage(src)
-      const cols = process.stdout.columns ?? 80
+      const rows = process.stdout.rows ?? 24
       const dims = calculateDimensions(
         image.bitmap.width,
         image.bitmap.height,
-        cols,
+        rows,
       )
 
       // Generate full-resolution Kitty protocol sequence via timg

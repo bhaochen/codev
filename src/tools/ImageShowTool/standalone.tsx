@@ -36,7 +36,7 @@ function App() {
         const dims = calculateDimensions(
           image.bitmap.width,
           image.bitmap.height,
-          process.stdout.columns ?? 80,
+          process.stdout.rows ?? 24,
         );
         setDimensions(dims);
       } catch (e) {
