@@ -11,11 +11,13 @@ import {
   renderToolUseMessage,
   renderToolUseProgressMessage,
 } from './UI.js'
-import { fetchImagesAsInline } from '../../utils/inlineImageUtils.js'
-
 const inputSchema = lazySchema(() =>
   z.strictObject({
     query: z.string().min(2).describe('The search query to use'),
+    search_images: z.boolean().optional().describe(
+      'Set to true to search for images specifically (vs general web results). ' +
+      'Use when the user asks to see/look up photos, images, or visual references.'
+    ),
   }),
 )
 
@@ -45,9 +47,7 @@ const outputSchema = lazySchema(() =>
   }),
 )
 
-export type Output = z.infer<ReturnType<typeof outputSchema>> & {
-  images?: Array<{ url: string; base64: string; mediaType: string }>
-}
+export type Output = z.infer<ReturnType<typeof outputSchema>>
 
 export type { WebSearchProgress } from '../../types/tools.js'
 import type { WebSearchProgress } from '../../types/tools.js'
@@ -56,12 +56,17 @@ import type { WebSearchProgress } from '../../types/tools.js'
  * 使用 SearXNG 本地搜索
  */
 async function searchSearXNG(
-  query: string
+  query: string,
+  searchImages?: boolean
 ): Promise<Array<{ title: string; url: string; snippet?: string; image?: string }>> {
   try {
-    const url = new URL('http://localhost:8080/search')
+    const baseUrl = process.env.SEARXNG_BASE_URL || 'http://localhost:8080'
+    const url = new URL('/search', baseUrl)
     url.searchParams.set('q', query)
     url.searchParams.set('format', 'json')
+    if (searchImages) {
+      url.searchParams.set('categories', 'images')
+    }
 
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 10000)
@@ -243,7 +248,7 @@ export const WebSearchTool = buildTool({
       const useTavily = !!process.env.TAVILY_API_KEY
       const results = useTavily
         ? await searchTavily(input.query)
-        : await searchSearXNG(input.query)
+        : await searchSearXNG(input.query, input.search_images)
 
       const cleaned = results.map(r => ({
         ...r,
@@ -260,14 +265,6 @@ export const WebSearchTool = buildTool({
               },
             ]
 
-      const imageUrls = cleaned
-        .map((r) => r.image)
-        .filter((url): url is string => !!url)
-        .slice(0, 4)
-
-      const images =
-        imageUrls.length > 0 ? await fetchImagesAsInline(imageUrls, 4) : undefined
-
       const duration = (performance.now() - start) / 1000
 
       return {
@@ -275,7 +272,6 @@ export const WebSearchTool = buildTool({
           query: input.query,
           results: output,
           durationSeconds: duration,
-          images,
         },
       }
     } catch (error) {
@@ -318,17 +314,7 @@ export const WebSearchTool = buildTool({
     return {
       tool_use_id: toolUseID,
       type: 'tool_result',
-      content: [
-        { type: 'text', text },
-        ...(output.images?.map((img) => ({
-          type: 'image' as const,
-          source: {
-            type: 'base64' as const,
-            data: img.base64,
-            media_type: img.mediaType as 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp',
-          },
-        })) ?? []),
-      ],
+      content: [{ type: 'text', text }],
     }
   },
 }) satisfies ToolDef<any, Output, WebSearchProgress>
