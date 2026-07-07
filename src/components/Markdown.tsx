@@ -7,7 +7,6 @@ import { type CliHighlight, getCliHighlightPromise } from '../utils/cliHighlight
 import { hashContent } from '../utils/hash.js';
 import { configureMarked, formatToken } from '../utils/markdown.js';
 import { stripPromptXMLTags } from '../utils/messages.js';
-import { InlineImage } from './InlineImage.js';
 import { MarkdownTable } from './MarkdownTable.js';
 type Props = {
   children: string;
@@ -145,10 +144,6 @@ function MarkdownBody(t0) {
       if (token.type === "table") {
         flushNonTableContent();
         elements.push(<MarkdownTable key={elements.length} token={token as Tokens.Table} highlight={highlight} />);
-      } else if (token.type === "image") {
-        flushNonTableContent();
-        console.error(`[MarkdownBody] Found image token: href=${token.href} text=${token.text}`)
-        elements.push(<InlineImage key={elements.length} url={token.href} alt={token.text} />);
       } else {
         nonTableContent = nonTableContent + formatToken(token, theme, 0, null, null, highlight);
       }

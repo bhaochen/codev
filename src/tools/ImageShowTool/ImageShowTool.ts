@@ -10,6 +10,17 @@ import {
   renderToolResultMessage,
   renderToolUseMessage,
 } from './UI.js'
+import type { PixelData, PngData } from "../../ink-picture/renderers/types.js";
+import {
+  makeKittyTransmitChunks,
+  makeKittyPlacement,
+} from "../../ink-picture/renderers/kitty.js";
+import { renderSixel } from "../../ink-picture/renderers/sixel.js";
+import { renderITerm2 } from "../../ink-picture/renderers/iterm2.js";
+import { renderHalfBlock } from "../../ink-picture/renderers/halfBlock.js";
+import { renderBraille } from "../../ink-picture/renderers/braille.js";
+import { renderAscii } from "../../ink-picture/renderers/ascii.js";
+import generateKittyId from "../../ink-picture/utils/generateKittyId.js";
 
 // ── Utility functions (kept for standalone UI and external use) ──
 
@@ -57,6 +68,109 @@ export function calculateDimensions(
     pixelWidth: targetW_pixels,
     pixelHeight: finalH_pixels,
   };
+}
+
+// ── Protocol detection ──
+
+type Protocol = 'kitty' | 'sixel' | 'iterm2' | 'halfBlock' | 'braille' | 'ascii'
+
+function detectProtocol(): Protocol {
+  const termProgram = process.env.TERM_PROGRAM
+  const term = process.env.TERM
+
+  // Kitty protocol — stores image in terminal GPU memory, survives screen clears
+  if (termProgram === 'ghostty' || termProgram === 'kitty' || term?.includes('kitty')) {
+    return 'kitty'
+  }
+
+  // Sixel
+  if (term?.includes('sixel') || termProgram === 'ghostty' || termProgram === 'vscode') {
+    return 'sixel'
+  }
+
+  // iTerm2 inline images
+  if (termProgram === 'iTerm.app' || termProgram === 'WezTerm' || termProgram === 'WarpTerminal') {
+    return 'iterm2'
+  }
+
+  // Text-based fallback
+  const colorterm = process.env.COLORTERM
+  const supportsColor = colorterm === 'truecolor' || !!colorterm ||
+    term?.includes('truecolor') || term?.includes('256color')
+  const supportsUnicode = true // all modern terminals
+
+  if (supportsUnicode && supportsColor) return 'halfBlock'
+  if (supportsUnicode) return 'braille'
+  return 'ascii'
+}
+
+type JimpInstance = Awaited<ReturnType<typeof Jimp.read>>
+
+async function renderImage(image: JimpInstance, dims: ImageDimensions): Promise<void> {
+  const protocol = detectProtocol()
+
+  image.cover({ w: dims.pixelWidth, h: dims.pixelHeight })
+
+  const pixels: PixelData = {
+    data: image.bitmap.data,
+    info: { width: image.bitmap.width, height: image.bitmap.height, channels: 4 },
+  }
+
+  switch (protocol) {
+    case 'kitty': {
+      const pngBuf = await image.getBuffer("image/png")
+      const b64 = pngBuf.toString('base64')
+      const imgId = generateKittyId()
+      const chunks = makeKittyTransmitChunks(imgId, b64)
+      for (const chunk of chunks) {
+        process.stdout.write(chunk)
+      }
+      process.stdout.write('\n')
+      process.stdout.write(makeKittyPlacement(imgId, 1, dims.width, dims.height))
+      process.stdout.write('\n')
+      break
+    }
+    case 'sixel': {
+      const output = renderSixel(pixels)
+      process.stdout.write(output)
+      process.stdout.write('\n')
+      break
+    }
+    case 'iterm2': {
+      const pngBuf = await image.getBuffer("image/png")
+      const pngData: PngData = {
+        data: pngBuf,
+        info: { width: image.bitmap.width, height: image.bitmap.height },
+      }
+      const output = renderITerm2(pngData, { width: dims.pixelWidth, height: dims.pixelHeight })
+      process.stdout.write(output)
+      process.stdout.write('\n')
+      break
+    }
+    case 'halfBlock': {
+      const output = renderHalfBlock(pixels)
+      process.stdout.write('\n')
+      process.stdout.write(output)
+      process.stdout.write('\n')
+      break
+    }
+    case 'braille': {
+      const output = renderBraille(pixels)
+      process.stdout.write('\n')
+      process.stdout.write(output)
+      process.stdout.write('\n')
+      break
+    }
+    case 'ascii': {
+      const output = renderAscii(pixels, {
+        colored: !!(process.env.COLORTERM || process.env.TERM?.includes('truecolor')),
+      })
+      process.stdout.write('\n')
+      process.stdout.write(output)
+      process.stdout.write('\n')
+      break
+    }
+  }
 }
 
 // ── Tool definition ──
@@ -144,12 +258,16 @@ export const ImageShowTool = buildTool({
   async call({ src }) {
     try {
       const image = await loadImage(src)
+      const cols = process.stdout.columns ?? 80
       const dims = calculateDimensions(
         image.bitmap.width,
         image.bitmap.height,
-        80,
+        cols,
       )
-      void dims
+
+      // Render the image directly to terminal using ink-picture
+      await renderImage(image, dims)
+
       return {
         data: {
           src,
