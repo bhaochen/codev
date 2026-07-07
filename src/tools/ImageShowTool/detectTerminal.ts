@@ -24,6 +24,7 @@ export function detectTerminalCaps(): Partial<TerminalInfo> {
     termProgram === 'ghostty' ||
     termProgram === 'kitty' ||
     term.includes('kitty') ||
+    term.includes('ghostty') ||
     !!process.env.KITTY_WINDOW_ID
 
   // --- Sixel graphics ---

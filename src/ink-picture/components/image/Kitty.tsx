@@ -1,5 +1,8 @@
 import { useStdout } from "src/ink";
+import fs from "node:fs";
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useOnRender } from "../../InkPictureProvider.js";
+import { cursorForward } from "../../utils/ansiEscapes.js";
 import { useImage } from "../../hooks/useImage.js";
 import { useMeasuredSize } from "../../hooks/useMeasuredSize.js";
 import usePosition from "../../hooks/usePosition.js";
@@ -10,7 +13,6 @@ import {
   makeKittyPlacement,
   makeKittyTransmitChunks,
 } from "../../renderers/kitty.js";
-import { cursorForward, cursorUp } from "../../utils/ansiEscapes.js";
 import generateKittyId from "../../utils/generateKittyId.js";
 import ImageBox from "../ImageBox.js";
 import type { ImageProps } from "./protocol.js";
@@ -24,8 +26,7 @@ function KittyImage(props: ImageProps) {
     width,
     height,
   );
-
-  const componentPosition = usePosition(containerRef);
+  const position = usePosition(containerRef);
 
   // Use external pixel dimensions if provided, otherwise compute from chars
   const actualPixelWidth = pixelWidth ?? resolvedWidth * (terminalInfo?.cellWidth ?? 0);
@@ -40,51 +41,67 @@ function KittyImage(props: ImageProps) {
 
   const [imageId, setImageId] = useState<number | undefined>(undefined);
   const shouldCleanupRef = useRef(true);
-  const wasPlacedRef = useRef(false);
+  const imageIdRef = useRef<number | undefined>(undefined);
+  const dimsRef = useRef({ w: resolvedWidth, h: resolvedHeight });
+  dimsRef.current = { w: resolvedWidth, h: resolvedHeight };
 
+  // One-time transmit: store image data in terminal GPU memory.
+  // Uses fs.writeSync to process.stdout.fd to bypass Ink's stdout buffering.
   useEffect(() => {
     if (!imageData) return;
 
     const id = generateKittyId();
     const base64Data = imageData.data.toString("base64");
     const chunks = makeKittyTransmitChunks(id, base64Data);
+    const fd = process.stdout.fd;
     for (const chunk of chunks) {
-      stdout.write(chunk);
+      fs.writeSync(fd, chunk);
     }
+    imageIdRef.current = id;
     setImageId(id);
-  }, [imageData, stdout.write]);
+  }, [imageData]);
 
-  useEffect(() => {
-    if (!imageId) return;
-    if (!componentPosition) return;
+  // Place the image using position-aware cursor movement. This uses the
+  // same logic as ink-picture's writeImageToStdout / useDirectRenderer:
+  // it saves cursor → cursorUp(appHeight - row) → CR → cursorForward(col)
+  // → Kitty placement → restores cursor.
+  //
+  // The cursorUp formula accounts for Ink's trailing-newline quirk: when
+  // content fills the viewport (appHeight >= terminalHeight) Ink omits the
+  // extra newline, so we subtract 1 from the movement count.
+  useOnRender(() => {
+    const id = imageIdRef.current;
+    if (!id) return;
+    const pos = position;
+    if (!pos) return;
+    const { w, h } = dimsRef.current;
+    if (h <= 0) return;
 
-    if (
-      defaultVisibility(componentPosition, stdout.rows, stdout.columns) !==
-      "full"
-    ) {
-      if (wasPlacedRef.current) {
-        stdout.write(makeKittyDeletion(imageId, 1));
-        wasPlacedRef.current = false;
-      }
-      return;
-    }
+    // Skip if the image is not fully visible in the viewport
+    const visibility = defaultVisibility(pos, stdout.rows, stdout.columns);
+    if (visibility !== "full") return;
 
-    stdout.write("\x1b7");
-    stdout.write(
-      cursorUp(componentPosition.appHeight - componentPosition.row, {
-        appHeight: componentPosition.appHeight,
-        terminalHeight: stdout.rows,
-      }),
-    );
-    stdout.write("\r");
-    stdout.write(cursorForward(componentPosition.col));
+    // Calculate cursor-up distance using the same logic as cursorUp() in
+    // ansiEscapes.ts, inlined here to avoid importing the helper.
+    const appHeight = pos.appHeight;
+    const terminalHeight = stdout.rows;
+    const cursorUpCount = appHeight - pos.row;
+    const movementCount =
+      appHeight >= terminalHeight ? cursorUpCount - 1 : cursorUpCount;
+    if (movementCount <= 0) return;
 
-    // 关键修改：传入 resolvedWidth 和 resolvedHeight（字符尺寸）
-    stdout.write(makeKittyPlacement(imageId, 1, resolvedWidth, resolvedHeight));
-
-    stdout.write("\x1b8");
-
-    wasPlacedRef.current = true;
+    // Write directly to the terminal fd, bypassing Ink's stdout (which may
+    // buffer, intercept, or be overwritten by Ink's screen refresh cycle).
+    const fd = process.stdout.fd;
+    const buf = Buffer.concat([
+      Buffer.from(`\x1b7`),                           // save cursor (DECSC)
+      Buffer.from(`\x1b[${movementCount}A`),          // cursor up to image row
+      Buffer.from(`\r`),                               // carriage return to col 0
+      Buffer.from(cursorForward(pos.col)),             // forward to image column
+      Buffer.from(makeKittyPlacement(id, 1, w, h)),
+      Buffer.from(`\x1b8`),                           // restore cursor (DECRC)
+    ]);
+    fs.writeSync(fd, buf);
   });
 
   const onExit = useCallback(() => {
@@ -107,12 +124,10 @@ function KittyImage(props: ImageProps) {
       process.removeListener("SIGTERM", onSigInt);
       if (!shouldCleanupRef.current) return;
       if (!imageId) return;
-
-      // We always delete during unmount regardless of whether the image is placed
-      // in order to remove the image data from the terminal
-      stdout.write(makeKittyDeletion(imageId));
+      const fd = process.stdout.fd;
+      fs.writeSync(fd, makeKittyDeletion(imageId));
     };
-  }, [imageId, onExit, onSigInt, stdout.write]);
+  }, [imageId, onExit, onSigInt]);
 
   return (
     <ImageBox
