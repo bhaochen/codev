@@ -170,7 +170,8 @@ function cleanSearchResult(result: any) {
 export const WebSearchTool = buildTool({
   name: WEB_SEARCH_TOOL_NAME,
   description: 'Search the web — Tavily (when TAVILY_API_KEY is set) for general search, SearXNG for image search',
-  shouldDefer: true,
+  // 不 defer: 让 LLM 始终能看到 search_images 参数和图片搜索规则
+  shouldDefer: false,
 
   getToolUseSummary,
   getActivityDescription(input) {
@@ -263,11 +264,11 @@ export const WebSearchTool = buildTool({
         cleaned.length === 0
           ? [`No results for: ${input.query}`]
           : [
-              {
-                tool_use_id: 'search-1',
-                content: cleaned,
-              },
-            ]
+            {
+              tool_use_id: 'search-1',
+              content: cleaned,
+            },
+          ]
 
       const duration = (performance.now() - start) / 1000
 
