@@ -1,9 +1,9 @@
 import { execFileSync } from 'child_process'
+import crypto from 'node:crypto'
 import fs from 'node:fs'
 import { z } from 'zod/v4'
 import { Jimp } from "jimp";
 import { buildTool, type ToolDef } from '../../Tool.js'
-import { loadImageFromUrl } from "../../ink-picture/utils/jimpURL.ts";
 import { lazySchema } from '../../utils/lazySchema.js'
 import { whichSync } from '../../utils/which.js'
 import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js'
@@ -48,9 +48,34 @@ export function isUrl(path: string): boolean {
   return path.startsWith("http://") || path.startsWith("https://");
 }
 
+/**
+ * Download a URL to a temporary file, return the path.
+ * Caller should delete the file after use.
+ */
+export async function downloadToTemp(url: string): Promise<string> {
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (compatible; ImageShowTool/1.0)',
+      'Accept': 'image/*',
+    },
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const buffer = Buffer.from(await res.arrayBuffer())
+  const hash = crypto.createHash('md5').update(url).digest('hex')
+  const tmp = `/tmp/img_${hash}`
+  fs.writeFileSync(tmp, buffer)
+  return tmp
+}
+
 export async function loadImage(path: string) {
   if (isUrl(path)) {
-    return loadImageFromUrl(path);
+    // Download to temp file, then read with Jimp
+    const tmp = await downloadToTemp(path)
+    try {
+      return await Jimp.read(fs.readFileSync(tmp))
+    } finally {
+      fs.unlinkSync(tmp)
+    }
   } else {
     // Read file to Buffer first, then pass to Jimp.read().
     // Jimp v1.x has inconsistent path resolution in some runtimes
@@ -143,8 +168,9 @@ export const ImageShowTool = buildTool({
   get outputSchema(): OutputSchema {
     return outputSchema()
   },
+  // Kitty 协议序列是带内数据，并发写入终端会互相覆盖导致图片不显示
   isConcurrencySafe() {
-    return true
+    return false
   },
   isReadOnly() {
     return true
@@ -174,8 +200,17 @@ export const ImageShowTool = buildTool({
   renderToolUseMessage,
   renderToolResultMessage,
   async call({ src }) {
+    let tmpFile: string | undefined
     try {
-      const image = await loadImage(src)
+      // For URLs: download to temp file so timg can read it directly
+      let imagePath = src
+      if (isUrl(src)) {
+        tmpFile = await downloadToTemp(src)
+        imagePath = tmpFile
+      }
+
+      // Read with Jimp for dimension calculation (from buffer, no MIME restriction)
+      const image = await Jimp.read(fs.readFileSync(imagePath))
       const rows = process.stdout.rows ?? 24
       const dims = calculateDimensions(
         image.bitmap.width,
@@ -188,13 +223,10 @@ export const ImageShowTool = buildTool({
       try {
         const timgPath = whichSync('timg')
         if (timgPath) {
-          // Pipe image to timg via stdin, capture Kitty protocol output
-          const pngBuffer = await image.getBuffer("image/png")
           kittySequence = execFileSync(
             timgPath,
-            ['-p', 'kitty', '-g', `${dims.width}x${dims.height}`, '-'],
+            ['-p', 'kitty', '-g', `${dims.width}x${dims.height}`, imagePath],
             {
-              input: pngBuffer,
               encoding: 'utf8',
               timeout: 30000,
               maxBuffer: 50 * 1024 * 1024,
@@ -220,6 +252,10 @@ export const ImageShowTool = buildTool({
           src,
           success: false,
         } satisfies ImageShowOutput,
+      }
+    } finally {
+      if (tmpFile) {
+        try { fs.unlinkSync(tmpFile) } catch {}
       }
     }
   },
