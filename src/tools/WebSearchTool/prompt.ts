@@ -6,24 +6,20 @@ export function getWebSearchPrompt(): string {
   const currentMonthYear = getLocalMonthYear()
 
   return `
-- Allows Codev to search the web using a local SearXNG search engine or Tavily cloud search (when TAVILY_API_KEY is configured) and use the results to inform responses
+- Allows Codev to search the web and use results to inform responses
 - Provides up-to-date information for current events, technical documentation, and recent data
 - Returns structured search results including titles, URLs, and snippets
 - Works with all AI providers including local models
 - Designed for high-recall search to support reasoning and retrieval-augmented generation (RAG)
 
-Search Strategy:
-  - Default: Uses SearXNG metasearch engine (aggregates multiple sources)
-  - When TAVILY_API_KEY is set: Uses Tavily cloud search API for high-quality, LLM-optimized results
-  - Results may vary in quality; prioritize relevance and credibility
-  - If results are weak or empty, try rephrasing the query
-  - Prefer more specific queries when possible (add keywords, version numbers, or context)
+Search backends (automatic — no action needed):
+  - **General web search**: Uses Tavily cloud API when TAVILY_API_KEY is set; falls back to SearXNG if not
+  - **Image search** (search_images: true): Always uses SearXNG (Tavily does not support image search)
 
-Image Search (search_images parameter):
+Image Search (search_images: true):
   - Set **search_images: true** to search specifically for images (photos, artworks, screenshots).
     Example: WebSearch(query: "milet 写真", search_images: true)
-  - When search_images is true, results include direct image URLs (img_src) that you can display
-    with ImageShowTool(src: img_src).
+  - Results include direct image URLs (img_src) that you can display with ImageShowTool(src: img_src).
   - Example workflow: WebSearch(query: "...", search_images: true) → pick a result → ImageShowTool(src: img_src)
   - Without search_images: true, this is a general web search and image URLs are NOT available.
   - DO NOT pass article/page URLs to ImageShowTool — it only accepts direct image URLs (.jpg/.png/.gif/.webp).

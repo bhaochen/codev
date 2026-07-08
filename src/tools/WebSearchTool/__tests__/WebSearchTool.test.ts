@@ -190,7 +190,9 @@ describe('WebSearchTool', () => {
       )
 
       expect(result.type).toBe('tool_result')
-      expect(typeof result.content).toBe('string')
+      expect(Array.isArray(result.content)).toBe(true)
+      expect(result.content[0].type).toBe('text')
+      expect(typeof result.content[0].text).toBe('string')
     })
 
     test('should handle empty results', () => {
@@ -205,7 +207,7 @@ describe('WebSearchTool', () => {
         'id'
       )
 
-      expect(result.content).toContain('Results')
+      expect(result.content[0].text).toContain('Results')
     })
   })
 
@@ -222,6 +224,35 @@ describe('WebSearchTool', () => {
       expect(result.data.query).toBe('milet 的最新动态')
       expect(Array.isArray(result.data.results)).toBe(true)
       expect(result.data.durationSeconds).toBeGreaterThan(0)
+    }, 60000)
+
+    test('should return image URLs with search_images: true', async () => {
+      const result = await WebSearchTool.call(
+        { query: 'milet 写真', search_images: true },
+        {},
+        () => {},
+        null
+      )
+
+      expect(result).toBeDefined()
+      expect(result.data.query).toBe('milet 写真')
+
+      // Extract and print all image URLs from results
+      const imageUrls: string[] = []
+      for (const r of result.data.results) {
+        if (typeof r === 'string') continue
+        for (const item of r.content) {
+          if (item.image) imageUrls.push(item.image)
+        }
+      }
+
+      console.log(`\nFound ${imageUrls.length} image URLs for "milet 写真":`)
+      for (const url of imageUrls) {
+        console.log(`  ${url}`)
+      }
+
+      // Results may be empty if engines are slow, but the tool should not crash
+      expect(Array.isArray(result.data.results)).toBe(true)
     }, 60000)
   })
 
@@ -255,29 +286,29 @@ describe('WebSearchTool', () => {
       expect(Array.isArray(result.data.results)).toBe(true)
     }, 60000)
 
-    test('should use Tavily when TAVILY_API_KEY is set', async () => {
+    test('should return error when Tavily API key is invalid', async () => {
       process.env.TAVILY_API_KEY = 'tvly-test-key'
 
       const result = await WebSearchTool.call(
-        { query: 'test tavily query' },
+        { query: 'typescript' },
         {},
         () => {},
         null
       )
 
-      // With a fake key, Tavily will fail and we should get an error result
       expect(result).toBeDefined()
-      expect(result.data.query).toBe('test tavily query')
+      expect(result.data.query).toBe('typescript')
       expect(Array.isArray(result.data.results)).toBe(true)
-      // The result should contain an error since the API key is invalid
+      // With an invalid Tavily key, searchTavily throws → outer catch returns an error
       const hasError = result.data.results.some(
         r => typeof r === 'string' && r.includes('Error')
       )
       expect(hasError).toBe(true)
     }, 60000)
 
-    test('should include Tavily in description when key is set', () => {
+    test('should mention Tavily and SearXNG in description', () => {
       expect(WebSearchTool.description).toContain('Tavily')
+      expect(WebSearchTool.description).toContain('SearXNG')
     })
   })
 })

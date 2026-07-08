@@ -167,7 +167,7 @@ function cleanSearchResult(result: any) {
 
 export const WebSearchTool = buildTool({
   name: WEB_SEARCH_TOOL_NAME,
-  description: 'Search the web using local SearXNG or Tavily (when TAVILY_API_KEY is set)',
+  description: 'Search the web — Tavily (when TAVILY_API_KEY is set) for general search, SearXNG for image search',
   shouldDefer: true,
 
   getToolUseSummary,
@@ -245,10 +245,12 @@ export const WebSearchTool = buildTool({
         })
       }
 
-      const useTavily = !!process.env.TAVILY_API_KEY
-      const results = useTavily
-        ? await searchTavily(input.query)
-        : await searchSearXNG(input.query, input.search_images)
+      // Tavily 只做通用搜索，SearXNG 只做图片搜索
+      const results = input.search_images
+        ? await searchSearXNG(input.query, true)
+        : process.env.TAVILY_API_KEY
+          ? await searchTavily(input.query)
+          : await searchSearXNG(input.query, false)
 
       const cleaned = results.map(r => ({
         ...r,
