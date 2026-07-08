@@ -15,8 +15,10 @@ const inputSchema = lazySchema(() =>
   z.strictObject({
     query: z.string().min(2).describe('The search query to use'),
     search_images: z.boolean().optional().describe(
-      'Set to true to search for images specifically (vs general web results). ' +
-      'Use when the user asks to see/look up photos, images, or visual references.'
+      'IMPORTANT: Set to true when the user asks to see/show/find photos, images, pictures, or ' +
+      'visual references (e.g. "show me photos of...", "find pictures of...", "look up images of..."). ' +
+      'When true, results contain direct image URLs (.jpg/.png/.gif) ready to use with ImageShowTool. ' +
+      'Without this flag, image URLs are NOT available in results.'
     ),
   }),
 )

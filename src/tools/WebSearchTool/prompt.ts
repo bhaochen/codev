@@ -10,19 +10,19 @@ export function getWebSearchPrompt(): string {
 - Provides up-to-date information for current events, technical documentation, and recent data
 - Returns structured search results including titles, URLs, and snippets
 - Works with all AI providers including local models
-- Designed for high-recall search to support reasoning and retrieval-augmented generation (RAG)
 
-Search backends (automatic — no action needed):
-  - **General web search**: Uses Tavily cloud API when TAVILY_API_KEY is set; falls back to SearXNG if not
-  - **Image search** (search_images: true): Always uses SearXNG (Tavily does not support image search)
+CRITICAL RULE — When the user asks to see images/photos/pictures:
+  You MUST set search_images=true in the WebSearch call. Example:
+    WebSearch({ query: "milet 写真", search_images: true })
+  This returns results with direct image URLs (.jpg/.png/.gif) that you can
+  immediately pass to ImageShowTool(src: url). Do NOT do general web searches
+  and try to find images inside pages — that is wasteful and often fails.
+  Without search_images=true, image URLs are NOT available in the results.
 
-Image Search (search_images: true):
-  - Set **search_images: true** to search specifically for images (photos, artworks, screenshots).
-    Example: WebSearch(query: "milet 写真", search_images: true)
-  - Results include direct image URLs (img_src) that you can display with ImageShowTool(src: img_src).
-  - Example workflow: WebSearch(query: "...", search_images: true) → pick a result → ImageShowTool(src: img_src)
-  - Without search_images: true, this is a general web search and image URLs are NOT available.
-  - DO NOT pass article/page URLs to ImageShowTool — it only accepts direct image URLs (.jpg/.png/.gif/.webp).
+Image Search workflow (search_images: true):
+  - Results include direct image URLs ready for ImageShowTool
+  - Example: WebSearch(query: "...", search_images: true) → pick URLs → ImageShowTool(src: url)
+  - Do NOT pass article/page URLs to ImageShowTool — it only accepts direct image URLs
 
 CRITICAL REQUIREMENT - You MUST follow this:
   - After answering the user's question, you MUST include a "Sources:" section at the end of your response

@@ -169,6 +169,9 @@ mitmproxy -p 8888
 "voiceTTSVoice": "zh-TW-HsiaoChenNeural",
 "voiceLanguage": "zh-TW",
 
+# /imageshow
+sudo pacman -S timg
+
 # node-edge-tts
 # local whisper-stt
 uv venv
