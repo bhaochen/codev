@@ -75,7 +75,7 @@
 curl -fsSL https://raw.githubusercontent.com/chenbhao/Codev/main/install.sh | bash
 
 # source install
-git clone https://github.com/chenbhao/Codev.git && cd Codev && bun install && bun run build &&  bun run friend:build && codev
+git clone https://github.com/chenbhao/Codev.git && cd Codev && bun install && bun run build && codev
 
 # if want global use bin file
 # cp dist/codev ~/.local/bin
