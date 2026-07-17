@@ -357,7 +357,7 @@ export type QueuedCommand = {
   agentId?: AgentId
   /**
    * When set, completely replaces the default system prompt for this query.
-   * Used by Friend mode to use ONLY the persona prompt instead of the full
+   * Used by companion mode to use ONLY the persona prompt instead of the full
    * Codev CLI system prompt.
    */
   overrideSystemPrompt?: string

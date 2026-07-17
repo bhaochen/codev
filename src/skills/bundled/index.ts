@@ -12,7 +12,6 @@ import { registerSkillifySkill } from './skillify.js'
 import { registerStuckSkill } from './stuck.js'
 import { registerUpdateConfigSkill } from './updateConfig.js'
 import { registerVerifySkill } from './verify.js'
-import { registerFriendPromptSkill } from './friendPrompt.js'
 
 /**
  * Initialize all bundled skills.
@@ -35,7 +34,6 @@ export function initBundledSkills(): void {
   registerBatchSkill()
   registerStuckSkill()
   registerDreamSkill()
-  registerFriendPromptSkill()
   if (feature('REVIEW_ARTIFACT')) {
     /* eslint-disable @typescript-eslint/no-require-imports */
     const { registerHunterSkill } = require('./hunter.js')

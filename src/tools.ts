@@ -79,10 +79,8 @@ import { ListMcpResourcesTool } from './tools/ListMcpResourcesTool/ListMcpResour
 import { ReadMcpResourceTool } from './tools/ReadMcpResourceTool/ReadMcpResourceTool.js'
 import { ToolSearchTool } from './tools/ToolSearchTool/ToolSearchTool.js'
 import { DebugSessionTool } from './tools/DebugSessionTool.js'
-import { FriendEmotionTool } from './tools/FriendEmotionTool.js'
 import { ImageShowTool } from './tools/ImageShowTool/ImageShowTool.js'
 import { LocationTool } from './tools/LocationTool/LocationTool.js'
-// Friend ScreenObserve removed — voice + emotion only
 import { EnterPlanModeTool } from './tools/EnterPlanModeTool/EnterPlanModeTool.js'
 import { EnterWorktreeTool } from './tools/EnterWorktreeTool/EnterWorktreeTool.js'
 import { ExitWorktreeTool } from './tools/ExitWorktreeTool/ExitWorktreeTool.js'
@@ -252,8 +250,6 @@ export function getAllBaseTools(): Tools {
     ...(process.env.NODE_ENV === 'test' ? [TestingPermissionTool] : []),
     // Debug session tool — used by /debug for runtime probe debugging
     DebugSessionTool,
-    // Friend VRM desktop pet tools — enabled when the plugin is active
-    FriendEmotionTool,
     // ImageShow — display images in terminal via Kitty graphics protocol
     ImageShowTool,
     // Location & mapping tool — uses Amap (China) or Google Maps (international)

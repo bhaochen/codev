@@ -11,7 +11,31 @@ import Groq from 'groq-sdk'
 import { readFileSync, existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { VoiceStreamCallbacks, VoiceStreamConnection, FinalizeSource } from '../voiceStreamSTT.js'
+
+// ─── Shared STT connection contracts ───────────────────────────────────────
+
+export type VoiceStreamCallbacks = {
+  onTranscript: (text: string, isFinal: boolean) => void
+  onError: (error: string, opts?: { fatal?: boolean }) => void
+  onClose: () => void
+  onReady: (connection: VoiceStreamConnection) => void
+}
+
+// How finalize() resolved. `no_data_timeout` means zero server messages
+// after CloseStream — the silent-drop signature.
+export type FinalizeSource =
+  | 'post_closestream_endpoint'
+  | 'no_data_timeout'
+  | 'safety_timeout'
+  | 'ws_close'
+  | 'ws_already_closed'
+
+export type VoiceStreamConnection = {
+  send: (audioChunk: Buffer) => void
+  finalize: () => Promise<FinalizeSource>
+  close: () => void
+  isConnected: () => boolean
+}
 
 const MODELS = ['whisper-large-v3', 'whisper-large-v3-turbo'] as const
 
@@ -25,7 +49,7 @@ export type GroqSttOptions = {
 /**
  * Resolve the Groq API key from multiple sources (priority order):
  * 1. Explicitly passed `apiKey` option
- * 2. `getPrefs().groqApiKey` (from friend.json)
+ * 2. `getPrefs().groqApiKey` (from companion prefs)
  * 3. `process.env.GROQ_API_KEY`
  * 4. `~/.claude/settings.json` → env.groqApiKey
  */

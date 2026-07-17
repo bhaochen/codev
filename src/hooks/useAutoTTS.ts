@@ -1,6 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { playAudioFile } from '../services/voice/edgeTTS.js'
-import { edgeTts } from '../friend/tts.js'
+import { playAudioFile, edgeTts } from '../services/voice/edgeTTS.js'
 import { getInitialSettings } from '../utils/settings/settings.js'
 import type { RenderableMessage } from '../types/message.js'
 

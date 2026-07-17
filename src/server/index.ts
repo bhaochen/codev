@@ -15,9 +15,6 @@ import { handleProxyRequest } from './proxy/handler.js'
 import { ProviderService } from './services/providerService.js'
 import { handleHahaOAuthCallback } from './api/haha-oauth.js'
 import { handleHahaOpenAIOAuthCallback } from './api/haha-openai-oauth.js'
-import { handleFriendApi, setFriendServerInfo } from './api/friend.js'
-import { handleFriendStaticRequest } from './staticFriend.js'
-import { getPrefs } from '../friend/prefs.js'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { OPENAI_CODEX_REDIRECT_PATH } from '../services/openaiAuth/client.js'
@@ -368,31 +365,6 @@ export function startServer(port = PORT, host = HOST) {
           )
         }
 
-        // Friend VRM desktop pet plugin API
-        if (url.pathname.startsWith('/plugins/friend/')) {
-          if (cors.rejected) {
-            return corsRejectedResponse(cors)
-          }
-          try {
-            return await handleFriendApi(req, url)
-          } catch (error) {
-            console.error('[Friend] API error:', error)
-            return withCors(Response.json(
-              { error: 'Friend API error' },
-              { status: 500 },
-            ), cors)
-          }
-        }
-
-        // Friend VRM frontend static files (served at /friend/*)
-        if (url.pathname.startsWith('/friend') || url.pathname === '/friend') {
-          const friendResponse = await handleFriendStaticRequest(req, url)
-          if (friendResponse) {
-            return friendResponse
-          }
-          // Fall through to 404 if no matching file
-        }
-
         // Static H5 shell/assets are non-secret bootstrap content and must load
         // before the browser can read the QR token; API/proxy/ws stay protected above.
         const staticResponse = await handleStaticH5Request(req, url)
@@ -426,13 +398,6 @@ export function startServer(port = PORT, host = HOST) {
   })
 
   console.log(`[Server] Claude Code API server running at http://${host}:${port}`)
-
-  // Register Friend server info so API routes can construct URLs
-  setFriendServerInfo(host, port)
-
-  // Note: Friend Tauri window lifecycle is managed by the friend module
-  // (FriendService + friend/server.ts), not by the desktop server.
-  // Use `/friend start` in the CLI to launch the window.
 
   return server
 }

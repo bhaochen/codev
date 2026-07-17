@@ -9,7 +9,7 @@ export function isVoiceGrowthBookEnabled(): boolean {
 
 /**
  * Auth-only check for voice mode. Returns true unconditionally in
- * external builds — the Doubao ASR backend does not require Anthropic
+ * external builds — the Groq Whisper backend does not require Anthropic
  * OAuth, and the GrowthBook kill-switch is already bypassed.
  */
 export function hasVoiceAuth(): boolean {
@@ -17,7 +17,7 @@ export function hasVoiceAuth(): boolean {
 }
 
 /**
- * Full runtime check for Anthropic voice_stream backend.
+ * Full runtime check for voice mode.
  * Returns true when both auth + GrowthBook kill-switch pass.
  */
 export function isVoiceModeEnabled(): boolean {
@@ -25,8 +25,8 @@ export function isVoiceModeEnabled(): boolean {
 }
 
 /**
- * Check if voice mode can be activated with any STT backend.
- * The Doubao backend does not require Anthropic auth.
+ * Check if voice mode can be activated with the Groq STT backend.
+ * The Groq backend does not require Anthropic auth.
  */
 export function isVoiceAvailable(): boolean {
   return isVoiceGrowthBookEnabled()

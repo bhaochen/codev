@@ -1,9 +1,0 @@
-{
-  "identifier": "default",
-  "description": "Default capabilities for Codev Friend",
-  "windows": ["main"],
-  "permissions": [
-    "core:default",
-    "opener:default"
-  ]
-}

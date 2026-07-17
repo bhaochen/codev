@@ -44,7 +44,6 @@ import skills from './commands/skills/index.js'
 import status from './commands/status/index.js'
 import tasks from './commands/tasks/index.js'
 import feishu from './commands/feishu/index.js'
-import friend from './commands/friend/index.js'
 import goals from './commands/goal/index.js'
 import telegram from './commands/telegram/index.js'
 import teleport from './commands/teleport/index.js'
@@ -310,7 +309,6 @@ const COMMANDS = memoize((): Command[] => [
   theme,
   feedback,
   feishu,
-  friend,
   goals,
   review,
   ultrareview,

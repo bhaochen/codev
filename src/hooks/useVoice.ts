@@ -1,29 +1,24 @@
-// React hook for hold-to-talk voice input using Anthropic voice_stream STT.
+// React hook for hold-to-talk voice input using Groq Whisper STT (cloud).
 //
 // Hold the keybinding to record; release to stop and submit.  Auto-repeat
 // key events reset an internal timer — when no keypress arrives within
 // RELEASE_TIMEOUT_MS the recording stops automatically.  Uses the native
-// audio module (macOS) or SoX for recording, and Anthropic's voice_stream
-// endpoint (conversation_engine) for STT.
+// audio module (macOS) or SoX for recording, and Groq's Whisper API
+// (whisper-large-v3 / whisper-large-v3-turbo) for STT.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSetVoiceState } from '../context/voice.js'
 import { useTerminalFocus } from '../ink/hooks/use-terminal-focus.js'
-import { isDoubaoAvailableSync } from '../services/doubaoSTT.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../services/analytics/index.js'
 import { getVoiceKeyterms } from '../services/voiceKeyterms.js'
 import {
-  connectVoiceStream,
   type FinalizeSource,
-  isVoiceStreamAvailable,
   type VoiceStreamConnection,
-} from '../services/voiceStreamSTT.js'
-import { connectDoubaoStream } from '../services/doubaoSTT.js'
+} from '../services/voice/groqSTT.js'
 import { connectGroqStream } from '../services/voice/groqSTT.js'
-import { connectLocalWhisperStream, preloadWhisperModel } from '../services/voice/whisperSTT.js'
 import { logForDebugging } from '../utils/debug.js'
 import { toError } from '../utils/errors.js'
 import { getSystemLocaleLanguage } from '../utils/intl.js'
@@ -139,14 +134,6 @@ export function normalizeLanguageForSTT(language: string | undefined): {
   const base = lower.split('-')[0]
   if (base && SUPPORTED_LANGUAGE_CODES.has(base)) return { code: base }
   return { code: DEFAULT_STT_LANGUAGE, fellBackFrom: language }
-}
-
-function isDoubaoProvider(): boolean {
-  return getInitialSettings().voiceProvider === 'doubao'
-}
-
-function isLocalProvider(): boolean {
-  return getInitialSettings().voiceProvider === 'local'
 }
 
 function isGroqProvider(): boolean {
@@ -406,77 +393,10 @@ export function useVoice({
           !silentDropRetriedRef.current &&
           fullAudioRef.current.length > 0
         ) {
-// Local whisper & groq don't support silent-drop replay (batch backends)
-        if (isLocalProvider() || isGroqProvider()) {
+          // Groq (batch backend) doesn't support silent-drop replay — just
+          // close and report no transcript.
           callbacks.onClose()
           return
-        }
-        silentDropRetriedRef.current = true
-        logForDebugging(
-          `[voice] Silent-drop detected (no_data_timeout, ${String(fullAudioRef.current.length)} chunks); replaying on fresh connection`,
-        )
-        logEvent('tengu_voice_silent_drop_replay', {
-          recordingDurationMs,
-          chunkCount: fullAudioRef.current.length,
-        })
-        if (connectionRef.current) {
-          connectionRef.current.close()
-          connectionRef.current = null
-        }
-        const replayBuffer = fullAudioRef.current
-        await sleep(250)
-        if (isStale()) return
-        const rawLanguage = getInitialSettings().voiceLanguage || getInitialSettings().language
-        const stt = normalizeLanguageForSTT(rawLanguage)
-        const keyterms = await getVoiceKeyterms()
-        if (isStale()) return
-        await new Promise<void>(resolve => {
-          void connectVoiceStream(
-              {
-                onTranscript: (t, isFinal) => {
-                  if (isStale()) return
-                  if (isFinal && t.trim()) {
-                    if (accumulatedRef.current) accumulatedRef.current += ' '
-                    accumulatedRef.current += t.trim()
-                  }
-                },
-                onError: () => resolve(),
-                onClose: () => {},
-                onReady: conn => {
-                  if (isStale()) {
-                    conn.close()
-                    resolve()
-                    return
-                  }
-                  connectionRef.current = conn
-                  const SLICE = 32_000
-                  let slice: Buffer[] = []
-                  let bytes = 0
-                  for (const c of replayBuffer) {
-                    if (bytes > 0 && bytes + c.length > SLICE) {
-                      conn.send(Buffer.concat(slice))
-                      slice = []
-                      bytes = 0
-                    }
-                    slice.push(c)
-                    bytes += c.length
-                  }
-                  if (slice.length) conn.send(Buffer.concat(slice))
-                  void conn.finalize().then(() => {
-                    conn.close()
-                    resolve()
-                  })
-                },
-              },
-              { language: stt.code, keyterms },
-            ).then(
-              c => {
-                if (!c) resolve()
-              },
-              () => resolve(),
-            )
-          })
-          if (isStale()) return
         }
         fullAudioRef.current = []
 
@@ -600,7 +520,7 @@ export function useVoice({
   // stop when it loses focus. This enables a "multi-clauding army"
   // workflow where voice input follows window focus.
   useEffect(() => {
-    if (!enabled || !focusMode || isDoubaoProvider() || isLocalProvider() || isGroqProvider()) {
+    if (!enabled || !focusMode || isGroqProvider()) {
       // Focus mode was disabled while a focus-driven recording was active —
       // stop the recording so it doesn't linger until the silence timer fires.
       if (focusTriggeredRef.current && stateRef.current === 'recording') {
@@ -719,8 +639,8 @@ export function useVoice({
     audioLevelsRef.current = []
     const started = await voiceModule.startRecording(
       (chunk: Buffer) => {
-        // Copy for fullAudioRef replay buffer. send() in voiceStreamSTT
-        // copies again defensively — acceptable overhead at audio rates.
+        // Copy for fullAudioRef replay buffer. Connect the STT stream's
+        // send() copies again defensively — acceptable overhead at audio rates.
         // Skip buffering in focus mode — replay is gated on !focusTriggered
         // so the buffer is dead weight (up to ~20MB for a 10min session).
         const owned = Buffer.from(chunk)
@@ -804,23 +724,13 @@ export function useVoice({
 
     const attemptConnect = (keyterms: string[]): void => {
       const myAttemptGen = attemptGenRef.current
-      // Select STT backend based on settings.voiceProvider
+      // STT backend: Groq Whisper (cloud)
       let connectFn: (
           cbs: VoiceStreamCallbacks,
           opts: { language: string; keyterms: string[] },
         ) => Promise<VoiceStreamConnection | null>
-      if (isLocalProvider()) {
-        void preloadWhisperModel({ language: stt.code })
-        connectFn = (cbs, _opts) =>
-          connectLocalWhisperStream(cbs, { language: stt.code })
-      } else if (isDoubaoProvider()) {
-        connectFn = (cbs, opts) => connectDoubaoStream(cbs, opts)
-      } else if (isGroqProvider()) {
-        connectFn = (cbs, opts) =>
-          connectGroqStream(cbs, { language: opts.language })
-      } else {
-        connectFn = (cbs, opts) => connectVoiceStream(cbs, opts)
-      }
+      connectFn = (cbs, opts) =>
+        connectGroqStream(cbs, { language: opts.language })
       void connectFn(
         {
           onTranscript: (text: string, isFinal: boolean) => {
@@ -1027,14 +937,7 @@ export function useVoice({
           return
         }
         if (!conn) {
-          if (isLocalProvider()) {
-            logForDebugging(
-              '[voice] Local whisper STT failed to initialize',
-            )
-            onErrorRef.current?.(
-              'Local voice mode failed. Ensure Python with faster-whisper is installed.',
-            )
-          } else if (isGroqProvider()) {
+          if (isGroqProvider()) {
             logForDebugging(
               '[voice] Groq STT failed to initialize',
             )
@@ -1056,7 +959,7 @@ export function useVoice({
           return
         }
 
-        // Safety check: if the user released the key before connectVoiceStream
+        // Safety check: if the user released the key before the STT connection
         // resolved (but after onReady already ran), close the connection.
         if (stateRef.current !== 'recording') {
           audioBuffer.length = 0
@@ -1066,8 +969,8 @@ export function useVoice({
       })
     }
 
-    // Doubao, local, and groq backends don't use keyterms — skip the async fetch
-    if (isDoubaoProvider() || isLocalProvider() || isGroqProvider()) {
+    // Groq backend doesn't use keyterms — skip the async fetch
+    if (isGroqProvider()) {
       attemptConnect([])
     } else {
       void getVoiceKeyterms().then(attemptConnect)
@@ -1085,11 +988,7 @@ export function useVoice({
   // delay of ~500ms on macOS).
   const handleKeyEvent = useCallback(
     (fallbackMs = REPEAT_FALLBACK_MS): void => {
-      const sttAvailable = isLocalProvider() || isGroqProvider()
-        ? true
-        : isDoubaoProvider()
-          ? isDoubaoAvailableSync()
-          : isVoiceStreamAvailable()
+      const sttAvailable = isGroqProvider()
       if (!enabled || !sttAvailable) {
         return
       }

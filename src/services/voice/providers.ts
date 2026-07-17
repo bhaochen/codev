@@ -5,9 +5,7 @@
 // - `TTSProvider` — text → audio
 //
 // Built-in concrete providers:
-// - `LocalWhisperSTT` — subprocess wrapper around a local whisper.cpp / faster-whisper CLI
-// - `DoubaoSTTProvider` — wraps `src/services/doubaoSTT.ts`
-// - `EdgeTTSProvider` — subprocess wrapper around `edge-tts` CLI
+// - `EdgeTTSProvider` — uses the `node-edge-tts` package (no Python subprocess)
 // - `CommandTTSProvider` — generic shell command with `{input}` / `{input_path}` / `{output_path}` placeholders
 
 import { spawn } from 'node:child_process'
@@ -127,47 +125,6 @@ export class LocalWhisperSTT implements TranscriptionProvider {
       w.on('close', (code) => (code === 0 ? resolve() : resolve()))
     })
     return dir
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Doubao STT
-// ---------------------------------------------------------------------------
-
-export class DoubaoSTTProvider implements TranscriptionProvider {
-  readonly name = 'doubao'
-
-  async transcribe(wavPath: string, language?: string): Promise<TranscriptionResult> {
-    try {
-      const { connectDoubaoStream, normalizeLanguageForSTT } = await import('./doubaoSTT.js')
-      const normalized = normalizeLanguageForSTT(language)
-      const code = normalized.code
-      const chunks: Buffer[] = []
-      const conn = await connectDoubaoStream(
-        {
-          onTranscript: (text: string) => {
-            if (text) chunks.push(Buffer.from(text, 'utf8'))
-          },
-          onError: (msg: string) => {
-            throw new Error(msg)
-          },
-          onClose: () => {},
-          onReady: (c) => {
-            const buf = Buffer.from(await (async () => (await import('node:fs')).promises.readFile(wavPath))())
-            c.send(buf)
-            void c.finalize().then(() => c.close())
-          },
-        },
-        { language: code === 'en' ? undefined : code },
-      )
-      if (!conn) throw new Error('doubao connectDoubaoStream returned null')
-      await new Promise((resolve) => setTimeout(resolve, 500))
-      const text = Buffer.concat(chunks).toString('utf8').trim()
-      if (!text) return { success: false, text: '', error: 'empty transcript' }
-      return { success: true, text }
-    } catch (e: any) {
-      return { success: false, text: '', error: e?.message ?? String(e) }
-    }
   }
 }
 
