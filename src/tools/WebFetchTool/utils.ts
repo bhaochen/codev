@@ -137,86 +137,6 @@ async function retryWithBackoff<T>(
   throw lastError
 }
 
-/**
- * Fetch URL content using Python webtools script
- * Reference: nanobot's web.py implementation
- * Returns markdown formatted content with metadata
- * Returns null if should fall back to direct fetch
- */
-async function fetchWithPythonWebtools(url: string): Promise<{
-  content: string
-  contentType: string
-  title?: string
-  finalUrl?: string
-} | null> {
-  console.log(`[WebFetch] Fetching via Python webtools: ${url}`)
-
-  try {
-    const { spawn } = await import('child_process')
-    
-    return new Promise((resolve, reject) => {
-      const pythonScript = process.cwd() + '/scripts/python_webtools.py'
-      const maxChars = 50000
-      
-      const child = spawn('.venv/bin/python', [pythonScript, 'web_fetch', url, String(50000)], {
-        cwd: process.cwd(),
-      })
-
-      let stdout = ''
-      let stderr = ''
-
-      child.stdout.on('data', (data) => {
-        stdout += data.toString()
-      })
-
-      child.stderr.on('data', (data) => {
-        stderr += data.toString()
-      })
-
-      child.on('close', (code) => {
-        if (code !== 0) {
-          console.error('[WebFetch] Python script failed:', stderr)
-          resolve(null) // Return null to trigger fallback
-          return
-        }
-
-        try {
-          const result = JSON.parse(stdout)
-          
-          if (!result.success) {
-            console.error('[WebFetch] Python fetch failed:', result.error)
-            resolve(null) // Return null to trigger fallback
-            return
-          }
-
-          console.log(`[WebFetch] Python returned ${result.length} bytes`)
-          
-          resolve({
-            content: result.text,
-            contentType: 'text/markdown',
-            title: undefined, // Python already includes title in text
-            finalUrl: result.finalUrl || url,
-          })
-        } catch (error) {
-          console.error('[WebFetch] Failed to parse Python output:', error)
-          resolve(null) // Return null to trigger fallback
-        }
-      })
-
-      child.on('error', (error) => {
-        console.error('[WebFetch] Failed to start Python process:', error)
-        resolve(null) // Return null to trigger fallback
-      })
-    })
-  } catch (error) {
-    console.error('[WebFetch] Failed to call Python webtools:', error)
-    logError('WebFetch: Failed to call Python webtools', error)
-    return null // Return null to trigger fallback
-  }
-}
-
-      
-
 // Cache for storing fetched URL content
 type CacheEntry = {
   bytes: number
@@ -643,27 +563,6 @@ export async function getURLMarkdownContent(
   } catch (error) {
     console.error('[WebFetch] Local fetch failed:', error)
     logError('Local fetch failed', error)
-
-    // Try Python webtools fallback
-    try {
-      console.log('[WebFetch] Trying Python webtools fallback')
-      const pythonResult = await fetchWithPythonWebtools(upgradedUrl)
-
-      if (pythonResult) {
-        const bytes = Buffer.byteLength(pythonResult.content)
-        const entry: CacheEntry = {
-          bytes,
-          code: 200,
-          codeText: 'OK',
-          content: pythonResult.content,
-          contentType: pythonResult.contentType,
-        }
-        URL_CACHE.set(url, entry, { size: Math.max(1, bytes) })
-        return entry
-      }
-    } catch (pythonError) {
-      console.error('[WebFetch] Python fallback also failed:', pythonError)
-    }
 
     throw new Error(`Failed to fetch URL: ${error instanceof Error ? error.message : String(error)}`)
   }
