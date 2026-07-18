@@ -865,3 +865,35 @@ headless agent 模式下，超出限制直接终止 agent（`permissions.ts:1023
 │     └─ 用户确认对话框                  │
 └──────────────────────────────────────┘
 ```
+
+---
+
+## 附录：AskUserQuestion 独立问答通道
+
+`AskUserQuestion` 用于向用户提出多选题（澄清需求、在方案间做选择）。它**不再借道权限系统的 `ask` 流程**，而是走一条独立的问答通道，与权限确认队列解耦。
+
+### 与权限 `ask` 的区别
+
+| 维度 | 权限式 `ask`（早期实现） | 独立问答通道（当前实现） |
+|------|----------------------|----------------------|
+| `checkPermissions` 返回 | `behavior: 'ask'` | `behavior: 'allow'` |
+| 阻塞方式 | 权限回调回填 `answers` | `call` 内 `await questionService.ask(...)` |
+| 本地渲染 | 进 `toolUseConfirmQueue`，由 `PermissionRequest` 渲染 | 独立 overlay（`QuestionPrompt`），与 `toolPermissionOverlay` 并列 |
+| 焦点协调 | `tool-permission` 对话框 | `question` 对话框 + `useRegisterOverlay('question')` |
+
+### 运行时组件
+
+- **`src/services/question/questionService.ts`** — 独立问答通道。`ask(questions)` 存入 `pending: Map<id, ...>` 并返回 Promise；`reply` / `reject` 解析对应 Promise；通过 EventEmitter 广播 `asked` / `replied` / `rejected`。
+- **`src/tools/AskUserQuestionTool/AskUserQuestionTool.tsx`** — `call` 内 `await questionService.ask(...)`，再把结果按题映射为 `answers`。
+- **`src/components/question/QuestionPrompt.tsx`** — 独立 overlay，复用 `QuestionView` / `SubmitQuestionsView` / `use-multiple-choice-state` 渲染，并用 `useKeybindings`（`Tabs` 上下文）绑定多题切换。
+- **`src/screens/REPL.tsx`** — 订阅 `asked` 弹出 overlay；订阅 `replied` / `rejected` 关闭 overlay。
+
+### 桥接 / CCR 远程转发
+
+桥接（`BRIDGE_MODE`）连接时，`asked` 事件会**同时**把问题作为 `can_use_tool` control_request 转发给远程用户（claude.ai），与本地 overlay 竞速：
+
+- 远程 `allow` 且带 `updatedInput.answers` → 按题映射后 `questionService.reply(...)`；通用 `allow`（无 answers）降级为每题选第一个选项。
+- 远程 `deny` → `questionService.reject(...)`。
+- 任一端先应答，都会清掉本地 overlay 并 `cancelRequest` 另一端的 prompt，避免残留。
+
+> 注：因 `checkPermissions` 现返回 `allow`，AskUserQuestion 不再进入 `handleInteractivePermission`，故不会与桥接路径重复转发。

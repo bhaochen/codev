@@ -117,7 +117,7 @@
 
 | 工具名称 | 分类 | 用途描述 | 关键参数 |
 |----------|------|----------|----------|
-| **AskUserQuestion** (AskUserQuestionTool) | 特殊 | 向用户提出需要即时回答的问题 | 取决于实现 |
+| **AskUserQuestion** (AskUserQuestionTool) | 特殊 | 向用户提出 1-4 个多选题以澄清需求或做决策。走独立问答通道（不占用权限确认队列），本地 TUI 弹独立 overlay，桥接模式下同时转发给远程用户（claude.ai）竞速应答 | `questions` (必填, 1-4 个, 每题含 `question`/`header`/`options[{label,description,preview?}]` 2-4 个/`multiSelect`) |
 | **Config** (ConfigTool) | 特殊 | 读取或修改 Claude Code 配置设置（ant 内部版本） | `setting` (必填), `value` (可选) |
 | **Sleep** (SleepTool) | 特殊 | 让代理休眠一段时间。用于延迟执行或等待条件成熟 | 取决于实现 |
 | **CronCreate** (CronCreateTool) | 特殊 | 创建定时触发任务（cron 调度） | 取决于实现 |

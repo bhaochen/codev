@@ -150,6 +150,16 @@ SDK 消息格式转换器。将 CCR 发送的 SDK 格式消息（`SDKMessage`）
 
 在远程会话中处理权限请求桥接（位于 `src/hooks/useSSHSession.ts`、`useRemoteSession.ts`、`useDirectConnect.ts`），将远程权限提示通过 WebSocket 转发给用户。
 
+### AskUserQuestion 远程转发
+
+`AskUserQuestion` 走独立问答通道（详见 `docs/architecture/safety-and-permissions.md` 附录），桥接连接时会把问题作为 `can_use_tool` control_request 转发给远程用户（claude.ai），与本地 overlay 竞速应答：
+
+- 远程 `allow` + `updatedInput.answers` → 按题映射回填；通用 `allow` 降级为每题首个选项。
+- 远程 `deny` → 拒绝该问题。
+- 任一端先应答即 `cancelRequest` 另一端，避免残留 prompt。
+
+实现位于 `src/screens/REPL.tsx` 对 `questionService` 事件（`asked` / `replied` / `rejected`）的订阅。
+
 ---
 
 ## 认证机制
