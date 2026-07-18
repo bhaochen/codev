@@ -1560,14 +1560,81 @@ export function REPL({
     useState<import('../services/question/questionService.js').QuestionRequest | null>(null)
   useEffect(() => {
     const { questionService } = require('../services/question/questionService.js') as typeof import('../services/question/questionService.js')
-    const onAsked = (request: import('../services/question/questionService.js').QuestionRequest) => {
+    // Bridge cleanup keyed by question request id, so a local reply/reject can
+    // cancel the remote prompt (and vice versa) whichever side answers first.
+    const bridgeCleanups = new Map<string, () => void>()
+
+    const onAsked = (
+      request: import('../services/question/questionService.js').QuestionRequest,
+    ) => {
       setQuestionRequest(request)
+
+      // When the REPL bridge is connected, forward the question to the remote
+      // user (e.g. on claude.ai) as a can_use_tool control_request, racing it
+      // against the local overlay. Mirrors the sandbox permission pattern.
+      if (!feature('BRIDGE_MODE')) return
+      const bridgeCallbacks = store.getState().replBridgePermissionCallbacks
+      if (!bridgeCallbacks) return
+
+      const bridgeRequestId = randomUUID()
+      bridgeCallbacks.sendRequest(
+        bridgeRequestId,
+        'AskUserQuestion',
+        { questions: request.questions },
+        request.id,
+        request.questions.map(q => q.question).join(' | '),
+      )
+
+      const unsubscribe = bridgeCallbacks.onResponse(bridgeRequestId, response => {
+        bridgeCleanups.delete(request.id)
+        unsubscribe()
+        if (response.behavior === 'allow') {
+          // CCR returns per-question answers when it has a dedicated renderer;
+          // fall back to first option so a generic allow degrades gracefully.
+          const remote = response.updatedInput?.answers
+          const answers = request.questions.map((q, i) => {
+            const provided = Array.isArray(remote) ? remote[i] : undefined
+            if (Array.isArray(provided)) return provided.map(String)
+            if (typeof provided === 'string') return [provided]
+            const first = q.options[0]?.label
+            return first ? [first] : []
+          })
+          questionService.reply({ requestID: request.id, answers })
+        } else {
+          questionService.reject(request.id)
+        }
+      })
+
+      bridgeCleanups.set(request.id, () => {
+        unsubscribe()
+        bridgeCallbacks.cancelRequest(bridgeRequestId)
+      })
     }
+
+    // Local (or remote) resolution: dismiss the overlay and tear down the
+    // matching remote prompt so it doesn't linger on the other side.
+    const onResolved = (payload: { requestID: string }) => {
+      setQuestionRequest(prev =>
+        prev && prev.id === payload.requestID ? null : prev,
+      )
+      const cleanup = bridgeCleanups.get(payload.requestID)
+      if (cleanup) {
+        bridgeCleanups.delete(payload.requestID)
+        cleanup()
+      }
+    }
+
     questionService.events.on('asked', onAsked)
+    questionService.events.on('replied', onResolved)
+    questionService.events.on('rejected', onResolved)
     return () => {
       questionService.events.off('asked', onAsked)
+      questionService.events.off('replied', onResolved)
+      questionService.events.off('rejected', onResolved)
+      for (const cleanup of bridgeCleanups.values()) cleanup()
+      bridgeCleanups.clear()
     }
-  }, [])
+  }, [store])
 
 
   // Track bridge cleanup functions for sandbox permission requests so the
