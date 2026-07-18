@@ -10,6 +10,7 @@ import { Box, Text } from '../../ink.js';
 import type { Tool } from '../../Tool.js';
 import { buildTool, type ToolDef } from '../../Tool.js';
 import { lazySchema } from '../../utils/lazySchema.js';
+import { questionService, type QuestionInfo } from '../../services/question/questionService.js';
 import { ASK_USER_QUESTION_TOOL_CHIP_WIDTH, ASK_USER_QUESTION_TOOL_NAME, ASK_USER_QUESTION_TOOL_PROMPT, DESCRIPTION, PREVIEW_FEATURE_PROMPT } from './prompt.js';
 const questionOptionSchema = lazySchema(() => z.object({
   label: z.string().describe('The display text for this option that the user will see and select. Should be concise (1-5 words) and clearly describe the choice.'),
@@ -181,8 +182,7 @@ export const AskUserQuestionTool: Tool<InputSchema, Output> = buildTool({
   },
   async checkPermissions(input) {
     return {
-      behavior: 'ask' as const,
-      message: 'Answer questions?',
+      behavior: 'allow' as const,
       updatedInput: input
     };
   },
@@ -208,9 +208,27 @@ export const AskUserQuestionTool: Tool<InputSchema, Output> = buildTool({
   },
   async call({
     questions,
-    answers = {},
     annotations
   }, _context) {
+    const asked: QuestionInfo[] = questions.map(q => ({
+      question: q.question,
+      header: q.header,
+      options: q.options.map(o => ({
+        label: o.label,
+        description: o.description,
+        preview: o.preview
+      })),
+      multiSelect: q.multiSelect,
+      custom: true
+    }))
+    const result = await questionService.ask(asked)
+    const answers: Record<string, string> = {}
+    questions.forEach((q, i) => {
+      const answer = result[i]
+      if (answer && answer.length > 0) {
+        answers[q.question] = q.multiSelect ? answer.join(', ') : answer[0]
+      }
+    })
     return {
       data: {
         questions,

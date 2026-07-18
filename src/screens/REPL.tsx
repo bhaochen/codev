@@ -1556,6 +1556,19 @@ export function REPL({
       reject: (error: Error) => void
     }>
   >([])
+  const [questionRequest, setQuestionRequest] =
+    useState<import('../services/question/questionService.js').QuestionRequest | null>(null)
+  useEffect(() => {
+    const { questionService } = require('../services/question/questionService.js') as typeof import('../services/question/questionService.js')
+    const onAsked = (request: import('../services/question/questionService.js').QuestionRequest) => {
+      setQuestionRequest(request)
+    }
+    questionService.events.on('asked', onAsked)
+    return () => {
+      questionService.events.off('asked', onAsked)
+    }
+  }, [])
+
 
   // Track bridge cleanup functions for sandbox permission requests so the
   // local dialog handler can cancel the remote prompt when the local user
@@ -2672,6 +2685,7 @@ export function REPL({
     | 'sandbox-permission'
     | 'tool-permission'
     | 'prompt'
+    | 'question'
     | 'worker-sandbox-permission'
     | 'elicitation'
     | 'cost'
@@ -2706,6 +2720,7 @@ export function REPL({
     if (allowDialogsWithAnimation && toolUseConfirmQueue[0])
       return 'tool-permission'
     if (allowDialogsWithAnimation && promptQueue[0]) return 'prompt'
+    if (allowDialogsWithAnimation && questionRequest) return 'question'
     // Worker sandbox permission prompts (network access) from swarm workers
     if (allowDialogsWithAnimation && workerSandboxPermissions.queue[0])
       return 'worker-sandbox-permission'
@@ -2789,7 +2804,8 @@ export function REPL({
   useEffect(() => {
     if (!isLoading) return
 
-    const isPaused = focusedInputDialog === 'tool-permission'
+    const isPaused =
+      focusedInputDialog === 'tool-permission' || focusedInputDialog === 'question'
     const now = Date.now()
 
     if (isPaused && pauseStartTimeRef.current === null) {
@@ -2813,8 +2829,12 @@ export function REPL({
   // no 1-frame flash of the wrong scroll position.
   const prevDialogRef = useRef(focusedInputDialog)
   useLayoutEffect(() => {
-    const was = prevDialogRef.current === 'tool-permission'
-    const now = focusedInputDialog === 'tool-permission'
+    const was =
+      prevDialogRef.current === 'tool-permission' ||
+      prevDialogRef.current === 'question'
+    const now =
+      focusedInputDialog === 'tool-permission' ||
+      focusedInputDialog === 'question'
     if (was !== now) repinScroll()
     prevDialogRef.current = focusedInputDialog
   }, [focusedInputDialog, repinScroll])
@@ -6062,6 +6082,19 @@ export function REPL({
       />
     ) : null
 
+  // Standalone question overlay (decoupled from the permission system).
+  // Reuses the AskUserQuestion choice UI but resolves questionService.
+  const QuestionPromptBox = require('../components/question/QuestionPrompt.js').QuestionPrompt
+
+  const questionOverlay =
+    focusedInputDialog === 'question' && questionRequest ? (
+      <QuestionPromptBox
+        key={questionRequest.id}
+        request={questionRequest}
+        onResolved={() => setQuestionRequest(null)}
+      />
+    ) : null
+
   // Narrow terminals: companion collapses to a one-liner that REPL stacks
   // on its own row (above input in fullscreen, below in scrollback) instead
   // of row-beside. Wide terminals keep the row layout with sprite on the right.
@@ -6150,7 +6183,7 @@ export function REPL({
       >
         <FullscreenLayout
           scrollRef={scrollRef}
-          overlay={toolPermissionOverlay}
+          overlay={toolPermissionOverlay || questionOverlay}
           bottomFloat={
             feature('BUDDY') && companionVisible && !companionNarrow ? (
               <CompanionFloatingBubble />
