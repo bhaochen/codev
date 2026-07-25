@@ -26,9 +26,9 @@ const MAX_RELEASE_NOTES_SHOWN = 5
  * 3. Next time the user starts Claude, the cached changelog is available immediately
  */
 export const CHANGELOG_URL =
-  'https://github.com/chenbhao/Codev/releases'
+  'https://github.com/bhaochen/codev/releases'
 const RAW_CHANGELOG_URL =
-  'https://api.github.com/repos/chenbhao/Codev/releases'
+  'https://api.github.com/repos/bhaochen/codev/releases'
 
 /**
  * Get the path for the cached changelog file.
