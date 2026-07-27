@@ -101,13 +101,23 @@ const JUMP_WAVE: readonly Frame[] = [
   ...hold('default', 0, 1),
 ]
 
-const LOOK_AROUND: readonly Frame[] = [
-  ...hold('look-right', 0, 5),
-  ...hold('look-left', 0, 5),
-  ...hold('default', 0, 1),
-]
+function makeLookAnim(firstDir: 'left' | 'right'): Frame[] {
+  const [first, second] =
+    firstDir === 'left'
+      ? (['look-left', 'look-right'] as const)
+      : (['look-right', 'look-left'] as const)
+  return [
+    ...hold(first, 0, 10),
+    ...hold('default', 0, 3),
+    ...hold(second, 0, 10),
+    ...hold('default', 0, 5),
+  ]
+}
 
-const IDLE_ANIMS: readonly (readonly Frame[])[] = [JUMP_WAVE, LOOK_AROUND]
+const LOOK_LEFT_FIRST = makeLookAnim('left')
+const LOOK_RIGHT_FIRST = makeLookAnim('right')
+
+const IDLE_ANIMS: readonly (readonly Frame[])[] = [JUMP_WAVE, LOOK_LEFT_FIRST, LOOK_RIGHT_FIRST]
 const IDLE_ANIM_DELAY_MIN = 25000
 const IDLE_ANIM_DELAY_MAX = 50000
 
