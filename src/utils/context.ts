@@ -7,6 +7,7 @@ import { getModelCapability } from './model/modelCapabilities.js'
 import { MODEL_CONTEXT_WINDOWS_ENV_KEY } from './model/modelContextWindows.js'
 import { getAPIProvider } from './model/providers.js'
 import { getOpencodeModelContextWindow } from '../services/api/opencodeClient.js'
+import { getNvidiaModelContextWindow } from '../services/api/nvidiaClient.js'
 import { getInitialSettings } from './settings/settings.js'
 
 // Model context window size (200k tokens for all models right now)
@@ -90,6 +91,12 @@ export function getContextWindowForModel(
   if (getAPIProvider() === 'opencode') {
     const ocCtx = getOpencodeModelContextWindow(model)
     if (ocCtx) return ocCtx
+  }
+
+  // NVIDIA provider — read context window from models.dev cache
+  if (getAPIProvider() === 'nvidia') {
+    const nvCtx = getNvidiaModelContextWindow(model)
+    if (nvCtx) return nvCtx
   }
 
   if (betas?.includes(CONTEXT_1M_BETA_HEADER) && modelSupports1M(model)) {

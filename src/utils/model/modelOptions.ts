@@ -507,17 +507,15 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
       fetchNvidiaModels()
     })
 
-    const { getCachedNvidiaModels } = require('../../services/api/nvidiaClient.js') as {
-      getCachedNvidiaModels: () => string[]
-    }
+    const { getCachedNvidiaModels } = require('../../services/api/nvidiaClient.js')
     const models = getCachedNvidiaModels()
 
     if (models && models.length > 0) {
       return [
         getDefaultOptionForUser(fastMode),
         ...models.map(m => ({
-          value: m,
-          label: m,
+          value: m.id,
+          label: m.id,
           description: 'NVIDIA NIM model',
         })),
       ]
