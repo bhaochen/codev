@@ -121,6 +121,8 @@ const IDLE_ANIMS: readonly (readonly Frame[])[] = [JUMP_WAVE, LOOK_LEFT_FIRST, L
 const IDLE_ANIM_DELAY_MIN = 25000
 const IDLE_ANIM_DELAY_MAX = 50000
 
+const CLAWD_HEIGHT = 3
+
 // ==================== Main component ====================
 
 export function Clawd({ pose = 'default', gradientStops, suppressIdleAnim = false }: Props = {}): React.ReactNode {
@@ -161,8 +163,28 @@ export function Clawd({ pose = 'default', gradientStops, suppressIdleAnim = fals
     return () => clearInterval(intervalId)
   }, [reducedMotion])
 
-  // Idle animation (jump-wave / look-around)
-  const runIdleAnim = !suppressIdleAnim && introDone && !reducedMotion
+  // Click-triggered animation
+  const [clickAnim, setClickAnim] = useState<{
+    frames: readonly Frame[]
+    startTime: number
+  } | null>(null)
+
+  const onClick = () => {
+    if (reducedMotion || clickAnim !== null) return
+    const picked = IDLE_ANIMS[Math.floor(Math.random() * IDLE_ANIMS.length)]!
+    setClickAnim({ frames: picked, startTime: time })
+  }
+
+  useEffect(() => {
+    if (clickAnim === null) return
+    const elapsed = time - clickAnim.startTime
+    if (elapsed >= clickAnim.frames.length * FRAME_MS) {
+      setClickAnim(null)
+    }
+  }, [time, clickAnim])
+
+  // Idle animation (jump-wave / look-around) — pauses during click/tactile animations
+  const runIdleAnim = !suppressIdleAnim && introDone && !reducedMotion && clickAnim === null
   const [idleAnim, setIdleAnim] = useState<{
     frames: readonly Frame[]
     startTime: number
@@ -191,16 +213,16 @@ export function Clawd({ pose = 'default', gradientStops, suppressIdleAnim = fals
     }
   }, [runIdleAnim, time])
 
-  // Clear idle animation state when externally suppressed
   useEffect(() => {
     if (suppressIdleAnim) setIdleAnim(null)
   }, [suppressIdleAnim])
 
-  const hasActiveAnim = !suppressIdleAnim && idleAnim !== null
-  const frameIndex = hasActiveAnim
-    ? Math.min(Math.floor((time - idleAnim.startTime) / FRAME_MS), idleAnim.frames.length - 1)
+  // Merge animation sources: click takes priority over idle
+  const activeAnim = clickAnim ?? (suppressIdleAnim ? null : idleAnim)
+  const frameIndex = activeAnim !== null
+    ? Math.min(Math.floor((time - activeAnim.startTime) / FRAME_MS), activeAnim.frames.length - 1)
     : -1
-  const animFrame = frameIndex >= 0 ? idleAnim!.frames[frameIndex]! : null
+  const animFrame = frameIndex >= 0 ? activeAnim.frames[frameIndex]! : null
   const bounceOffset = animFrame?.offset ?? 0
   const animPose = animFrame?.pose
 
@@ -227,8 +249,7 @@ export function Clawd({ pose = 'default', gradientStops, suppressIdleAnim = fals
   }
 
   return (
-    <Box ref={ref} flexDirection="column">
-<<<<<<< HEAD
+    <Box ref={ref} flexDirection="column" height={CLAWD_HEIGHT} onClick={onClick}>
       <Box marginTop={bounceOffset} flexShrink={0} flexDirection="column">
         {innerContent}
       </Box>
