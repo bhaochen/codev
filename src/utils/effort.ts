@@ -77,6 +77,26 @@ export function modelSupportsEffort(model: string): boolean {
     return false
   }
 
+  // 3P providers with models.dev data — enable effort only for models that
+  // have explicit reasoning_options in the cache.
+  const provider = getAPIProvider()
+  if (provider === 'nvidia') {
+    const { getNvidiaModelReasoningOptions } = require('../services/api/nvidiaClient.js') as {
+      getNvidiaModelReasoningOptions: (id: string) => string[] | undefined
+    }
+    const opts = getNvidiaModelReasoningOptions(canonical)
+    if (opts && opts.length > 0) return true
+    return false
+  }
+  if (provider === 'opencode') {
+    const { getOpencodeModelReasoningOptions } = require('../services/api/opencodeClient.js') as {
+      getOpencodeModelReasoningOptions: (id: string) => string[] | undefined
+    }
+    const opts = getOpencodeModelReasoningOptions(canonical)
+    if (opts && opts.length > 0) return true
+    return false
+  }
+
   // IMPORTANT: Do not change the default effort support without notifying
   // the model launch DRI and research. This is a sensitive setting that can
   // greatly affect model quality and bashing.
@@ -84,7 +104,7 @@ export function modelSupportsEffort(model: string): boolean {
   // Default to true for unknown model strings on 1P.
   // Do not default to true for 3P as they have different formats for their
   // model strings (ex. anthropics/claude-code#30795)
-  return getAPIProvider() === 'firstParty'
+  return provider === 'firstParty'
 }
 
 // @[MODEL LAUNCH]: Add the new model to the allowlist if it supports 'max' effort.
@@ -167,7 +187,7 @@ export function getModelSupportedEfforts(model: string): EffortLevel[] {
     }
   }
 
-  // 3. NVIDIA provider — read reasoning_options from models.dev cache
+  // 3. Provider-specific reasoning_options from models.dev cache
   if (getAPIProvider() === 'nvidia') {
     const { getNvidiaModelReasoningOptions } = require('../services/api/nvidiaClient.js') as {
       getNvidiaModelReasoningOptions: (id: string) => string[] | undefined
@@ -175,6 +195,19 @@ export function getModelSupportedEfforts(model: string): EffortLevel[] {
     const nvOpts = getNvidiaModelReasoningOptions(canonical)
     if (nvOpts && nvOpts.length > 0) {
       const supported = nvOpts.filter((o): o is EffortLevel =>
+        (EFFORT_LEVELS as readonly string[]).includes(o),
+      )
+      if (supported.length > 0) return supported
+    }
+  }
+
+  if (getAPIProvider() === 'opencode') {
+    const { getOpencodeModelReasoningOptions } = require('../services/api/opencodeClient.js') as {
+      getOpencodeModelReasoningOptions: (id: string) => string[] | undefined
+    }
+    const ocOpts = getOpencodeModelReasoningOptions(canonical)
+    if (ocOpts && ocOpts.length > 0) {
+      const supported = ocOpts.filter((o): o is EffortLevel =>
         (EFFORT_LEVELS as readonly string[]).includes(o),
       )
       if (supported.length > 0) return supported

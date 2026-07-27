@@ -21,6 +21,7 @@ type CachedOpencodeModel = {
   isFree: boolean
   contextWindow?: number
   maxTokens?: number
+  reasoningOptions?: string[]
 }
 
 let cachedModels: CachedOpencodeModel[] | null = null
@@ -79,7 +80,7 @@ export async function fetchOpencodeModels(): Promise<void> {
       // ✨ 步骤 4：摒弃死板的硬编码 Set，改用云端 cost 策略实时判定免费模型
       // -----------------------------------------------------------------
       const opencodeModels = data?.opencode?.models || {}
-      const modelList: Array<{ id: string; name?: string; isFree: boolean }> = []
+      const modelList: CachedOpencodeModel[] = []
 
       for (const [modelId, config] of Object.entries(opencodeModels) as [string, any][]) {
         // 过滤掉已被官方废弃下架的模型
@@ -89,6 +90,9 @@ export async function fetchOpencodeModels(): Promise<void> {
         
         // 动态检测真正零成本的活体模型
         const isFreeModel = config.cost?.input === 0 && config.cost?.output === 0
+        const reasoningOptions = config.reasoning_options?.find(
+          (o: any) => o.type === 'effort',
+        )?.values
 
         modelList.push({
           id: modelId,
@@ -96,6 +100,7 @@ export async function fetchOpencodeModels(): Promise<void> {
           isFree: isFreeModel,
           contextWindow: config.limit?.context,
           maxTokens: config.limit?.output,
+          reasoningOptions,
         })
       }
 
@@ -132,6 +137,12 @@ export function getOpencodeModelMaxTokens(modelId: string): number | undefined {
   if (!cachedModels) return undefined
   const model = cachedModels.find(m => m.id === modelId)
   return model?.maxTokens
+}
+
+export function getOpencodeModelReasoningOptions(modelId: string): string[] | undefined {
+  if (!cachedModels) return undefined
+  const model = cachedModels.find(m => m.id === modelId)
+  return model?.reasoningOptions
 }
 
 type OpenAIMessage = {
