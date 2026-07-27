@@ -81,7 +81,15 @@ export function getAutoCompactThreshold(model: string): number {
     }
   }
 
-  return effectiveContextWindow - AUTOCOMPACT_BUFFER_TOKENS
+  // Buffer scales with context window: minimum 2 000, maximum 3 000
+  // For small local models (8K), 2 000 buffer leaves 6 000 usable tokens.
+  // For large Anthropic models (200K), 3 000 cap keeps existing behavior.
+  const buffer = Math.min(
+    Math.max(Math.round(effectiveContextWindow * 0.25), 2_000),
+    3_000,
+  )
+
+  return effectiveContextWindow - buffer
 }
 
 export function calculateTokenWarningState(

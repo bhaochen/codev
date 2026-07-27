@@ -59,6 +59,10 @@ function getBuiltinModelStrings(provider: APIProvider): ModelStrings {
     return out as ModelStrings
   }
 
+  if (provider === 'local') {
+    return getBuiltinModelStrings('firstParty') as ModelStrings
+  }
+
   const out = {} as ModelStrings
   for (const key of MODEL_KEYS) {
     out[key] = ALL_MODEL_CONFIGS[key][provider]

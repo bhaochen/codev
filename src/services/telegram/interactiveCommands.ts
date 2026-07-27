@@ -111,7 +111,7 @@ function buildLoginKeyboard(): TelegramInlineKeyboardMarkup {
     ],
     [
       { text: 'OpenRouter', callback_data: `${LOGIN_PREFIX}:provider:openrouter` },
-      { text: 'Local', callback_data: `${LOGIN_PREFIX}:provider:local` },
+      { text: 'Llama.cpp', callback_data: `${LOGIN_PREFIX}:provider:local` },
     ],
   ])
 }

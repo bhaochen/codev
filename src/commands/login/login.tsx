@@ -98,6 +98,9 @@ export async function call(
           } else if (provider === 'nvidia') {
             const { fetchNvidiaModels } = await import('../../services/api/nvidiaClient.js')
             await fetchNvidiaModels()
+          } else if (provider === 'local') {
+            const { fetchLocalModels } = await import('../../services/api/localClient.js')
+            await fetchLocalModels()
           }
 
           // Clear cached model strings so they re-initialize with the new provider
@@ -108,7 +111,7 @@ export async function call(
           context.setAppState(prev => ({
             ...prev,
             authVersion: prev.authVersion + 1,
-            mainLoopModel: provider === 'nvidia' ? null : 'big-pickle',
+            mainLoopModel: provider === 'nvidia' || provider === 'local' ? null : 'big-pickle',
             mainLoopModelForSession: null,
           }));
         }
@@ -187,9 +190,9 @@ export function Login(props: {
       {
         label: (
           <Text>
-            Local{' '}
+            Llama.cpp{' '}
             <Text dimColor={true}>
-              Local model server (Ollama, LM Studio, vLLM, etc.)
+              Llama.cpp server API
             </Text>
             {'\n'}
           </Text>
@@ -254,7 +257,7 @@ export function Login(props: {
     ) : selectedProvider === 'local' ? (
       <LocalLoginFlow
         onDone={onFlowDone}
-        startingMessage="Configure local model server (Ollama, LM Studio, vLLM, etc.)."
+        startingMessage="Configure Llama.cpp server."
       />
     ) : selectedProvider === 'nvidia' ? (
       <NvidiaLoginFlow

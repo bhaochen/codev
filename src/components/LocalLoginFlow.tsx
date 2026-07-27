@@ -36,7 +36,6 @@ export function LocalLoginFlow({ onDone, startingMessage }: Props) {
     setIsAnalyzing(true)
     try {
       const urlObj = new URL(inputUrl)
-      // 从 URL 路径中提取模型名，例如 http://127.0.0.1:8001/v1/models
       const pathParts = urlObj.pathname.split('/').filter(Boolean)
       const extractedModel = pathParts[pathParts.length - 1] || 'default'
       setModelName(extractedModel)
@@ -73,11 +72,11 @@ export function LocalLoginFlow({ onDone, startingMessage }: Props) {
   return (
     <Box flexDirection="column" gap={1}>
       <Text bold={true}>
-        {startingMessage ?? 'Configure local model server.'}
+        {startingMessage ?? 'Configure Llama.cpp server.'}
       </Text>
       
       <Box flexDirection="column" gap={1}>
-        <Text>Enter local model server URL:</Text>
+        <Text>Enter Llama.cpp server URL:</Text>
         <TextInput
           value={url}
           onChange={handleUrlChange}

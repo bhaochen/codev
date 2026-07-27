@@ -102,6 +102,35 @@ export function SearchableModelPicker({
           }, 10000)
         }
 
+        if (provider === 'local') {
+          // Poll until local models are cached
+          pollTimer = setInterval(async () => {
+            if (!mounted) {
+              if (pollTimer) clearInterval(pollTimer)
+              return
+            }
+            try {
+              const { getCachedLocalModels } = await import('../services/api/localClient.js')
+              const models = getCachedLocalModels()
+              if (models && models.length > 0) {
+                if (mounted) {
+                  setAppState(prev => ({ ...prev, authVersion: prev.authVersion + 1 }))
+                }
+                if (pollTimer) clearInterval(pollTimer)
+              }
+            } catch (error) {
+              console.error('Error checking local models cache:', error)
+              if (pollTimer) clearInterval(pollTimer)
+            }
+          }, 2000)
+          setTimeout(() => {
+            if (pollTimer && mounted) {
+              clearInterval(pollTimer)
+              pollTimer = null
+            }
+          }, 60000)
+        }
+
         if (provider === 'opencode' && modelOptions.length <= 1) {
           let retryCount = 0
           const MAX_RETRIES = 5

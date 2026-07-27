@@ -169,6 +169,14 @@ export function isOpencodeConfigured(): boolean {
   return getStoredProviderPreference() === 'opencode'
 }
 
+export function isLocalConfigured(): boolean {
+  if (getExplicitProviderOverride() === 'local') {
+    return true
+  }
+
+  return getStoredProviderPreference() === 'local'
+}
+
 export function getOpencodeBaseUrl(): string {
   return process.env.OPENCODE_BASE_URL ?? 'https://opencode.ai/zen/v1'
 }

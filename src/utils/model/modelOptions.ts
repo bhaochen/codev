@@ -413,6 +413,30 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
     return [getDefaultOptionForUser(fastMode)]
   }
 
+  // Local API (Llama.cpp): Fetch models dynamically from the server
+  if (getAPIProvider() === 'local') {
+    // Trigger background fetch of local models (non-blocking)
+    void import('../../services/api/localClient.js').then(({ fetchLocalModels }) => {
+      fetchLocalModels()
+    })
+
+    const { getCachedLocalModels } = require('../../services/api/localClient.js')
+    const models = getCachedLocalModels()
+
+    if (models && models.length > 0) {
+      return [
+        getDefaultOptionForUser(fastMode),
+        ...models.map(m => ({
+          value: m.id,
+          label: m.id,
+          description: 'Llama.cpp model',
+        })),
+      ]
+    }
+
+    return [getDefaultOptionForUser(fastMode)]
+  }
+
   if (process.env.USER_TYPE === 'ant') {
     // Build options from antModels config
     const antModelOptions: ModelOption[] = getAntModels().map(m => ({
@@ -492,11 +516,6 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
     openAIOptions.push(getOpus46Option(fastMode))
     openAIOptions.push(getHaiku45Option())
     return openAIOptions
-  }
-
-  // Local API: Show only Default option
-  if (getAPIProvider() === 'local') {
-    return [getDefaultOptionForUser(fastMode)]
   }
 
   // NVIDIA API: Show dynamically fetched models from the NVIDIA API catalog

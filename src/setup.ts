@@ -403,6 +403,9 @@ export async function setup(
   } else if (configuredAuthProvider === 'nvidia') {
     const { fetchNvidiaModels } = await import('./services/api/nvidiaClient.js')
     void fetchNvidiaModels()
+  } else if (configuredAuthProvider === 'local') {
+    const { fetchLocalModels } = await import('./services/api/localClient.js')
+    void fetchLocalModels()
   }
 
   // If permission mode is set to bypass, verify we're in a safe environment

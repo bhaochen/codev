@@ -97,7 +97,7 @@ export function modelSupportsEffort(model: string): boolean {
     return false
   }
   if (provider === 'openrouter') {
-    const { getOpenRouterModelReasoningOptions } = require('./openRouterModels.js') as {
+    const { getOpenRouterModelReasoningOptions } = require('./model/openRouterModels.js') as {
       getOpenRouterModelReasoningOptions: (id: string) => string[] | undefined
     }
     const opts = getOpenRouterModelReasoningOptions(canonical)
@@ -223,7 +223,7 @@ export function getModelSupportedEfforts(model: string): EffortLevel[] {
   }
 
   if (getAPIProvider() === 'openrouter') {
-    const { getOpenRouterModelReasoningOptions } = require('./openRouterModels.js') as {
+    const { getOpenRouterModelReasoningOptions } = require('./model/openRouterModels.js') as {
       getOpenRouterModelReasoningOptions: (id: string) => string[] | undefined
     }
     const orOpts = getOpenRouterModelReasoningOptions(canonical)

@@ -82,6 +82,8 @@ git clone https://github.com/chenbhao/Codev.git && cd Codev && bun install && bu
 ln -sf dist/codev ~/.local/bin/codev
 
 # then can use Codev in everywhere after `/login`
+
+# from https://models.dev/api.json get model detail
 ```
 
 ## 🚀 Quick Start
