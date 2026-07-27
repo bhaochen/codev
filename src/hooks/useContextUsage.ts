@@ -5,7 +5,7 @@ import {
   getContextWindowForModel,
   calculateContextPercentages,
 } from '../utils/context.js'
-import { getEffectiveContextWindowSize } from '../services/compact/autoCompact.js'
+import { getAutoCompactThreshold, getEffectiveContextWindowSize } from '../services/compact/autoCompact.js'
 
 export interface ContextUsageInfo {
   currentTokens: number
@@ -49,7 +49,7 @@ export function useContextUsage(): ContextUsageInfo {
   const hasData = percentages.used !== null
 
   // Compaction target is the threshold at which auto-compact triggers
-  const compactionTargetTokens = effectiveWindowSize
+  const compactionTargetTokens = getAutoCompactThreshold(model)
 
   return {
     currentTokens: totalInputTokens,
