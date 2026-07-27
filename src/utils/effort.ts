@@ -96,6 +96,14 @@ export function modelSupportsEffort(model: string): boolean {
     if (opts && opts.length > 0) return true
     return false
   }
+  if (provider === 'openrouter') {
+    const { getOpenRouterModelReasoningOptions } = require('./openRouterModels.js') as {
+      getOpenRouterModelReasoningOptions: (id: string) => string[] | undefined
+    }
+    const opts = getOpenRouterModelReasoningOptions(canonical)
+    if (opts && opts.length > 0) return true
+    return false
+  }
 
   // IMPORTANT: Do not change the default effort support without notifying
   // the model launch DRI and research. This is a sensitive setting that can
@@ -208,6 +216,19 @@ export function getModelSupportedEfforts(model: string): EffortLevel[] {
     const ocOpts = getOpencodeModelReasoningOptions(canonical)
     if (ocOpts && ocOpts.length > 0) {
       const supported = ocOpts.filter((o): o is EffortLevel =>
+        (EFFORT_LEVELS as readonly string[]).includes(o),
+      )
+      if (supported.length > 0) return supported
+    }
+  }
+
+  if (getAPIProvider() === 'openrouter') {
+    const { getOpenRouterModelReasoningOptions } = require('./openRouterModels.js') as {
+      getOpenRouterModelReasoningOptions: (id: string) => string[] | undefined
+    }
+    const orOpts = getOpenRouterModelReasoningOptions(canonical)
+    if (orOpts && orOpts.length > 0) {
+      const supported = orOpts.filter((o): o is EffortLevel =>
         (EFFORT_LEVELS as readonly string[]).includes(o),
       )
       if (supported.length > 0) return supported

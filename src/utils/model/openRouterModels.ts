@@ -1,6 +1,16 @@
 import type { ModelOption } from './modelOptions.js'
 
+const MODELS_META_URL = 'https://models.dev/api.json'
+
+type OpenRouterModelInfo = {
+  id: string
+  contextWindow?: number
+  maxTokens?: number
+  reasoningOptions?: string[]
+}
+
 let openRouterModelsCache: ModelOption[] | null = null
+let openRouterModelInfos: Map<string, OpenRouterModelInfo> | null = null
 let cacheTimestamp: number = 0
 let isFetching = false
 const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
@@ -52,6 +62,7 @@ export async function fetchOpenRouterModels(
   }
 
   try {
+    // Fetch model list from OpenRouter API
     const response = await fetch('https://openrouter.ai/api/v1/models', {
       headers: {
         Authorization: `Bearer ${key}`,
@@ -103,22 +114,53 @@ export async function fetchOpenRouterModels(
     })
 
     // Convert to ModelOption format
-    const options: ModelOption[] = validModels.map(model => {
-      // Truncate description if too long
-      let description = model.description || model.id
-      if (description.length > 100) {
-        description = description.substring(0, 97) + '...'
-      }
+    const options: ModelOption[] = validModels.map(model => ({
+      value: model.id,
+      label: model.name,
+      description: (model.description || model.id).substring(0, 100),
+    }))
 
-      return {
-        value: model.id,
-        label: model.name,
-        description: description,
+    // Fetch context windows and reasoning options from models.dev
+    const modelInfos = new Map<string, OpenRouterModelInfo>()
+    try {
+      const metaRes = await fetch(MODELS_META_URL, {
+        headers: {
+          'User-Agent': 'opencode/1.15.6 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14',
+        },
+        signal: AbortSignal.timeout(15_000),
+      })
+      if (metaRes.ok) {
+        const meta = await metaRes.json() as any
+        const orModels = meta?.openrouter?.models || {}
+        for (const [modelId, config] of Object.entries(orModels) as [string, any][]) {
+          const reasoningOptions = config.reasoning_options?.find(
+            (o: any) => o.type === 'effort',
+          )?.values
+          modelInfos.set(modelId, {
+            id: modelId,
+            contextWindow: config.limit?.context,
+            maxTokens: config.limit?.output,
+            reasoningOptions,
+          })
+        }
       }
-    })
+    } catch {
+      // models.dev unreachable — fall back to OpenRouter API context_length
+    }
 
-    // Update cache
+    // Merge: use OpenRouter API's context_length if models.dev has no entry
+    for (const model of validModels) {
+      if (!modelInfos.has(model.id)) {
+        modelInfos.set(model.id, {
+          id: model.id,
+          contextWindow: model.context_length,
+        })
+      }
+    }
+
+    // Update caches
     openRouterModelsCache = options
+    openRouterModelInfos = modelInfos
     cacheTimestamp = Date.now()
 
     return options
@@ -155,6 +197,16 @@ export function getFirstFreeModel(): ModelOption | null {
 export function clearOpenRouterModelsCache(): void {
   openRouterModelsCache = null
   cacheTimestamp = 0
+}
+
+export function getOpenRouterModelContextWindow(modelId: string): number | undefined {
+  if (!openRouterModelInfos) return undefined
+  return openRouterModelInfos.get(modelId)?.contextWindow
+}
+
+export function getOpenRouterModelReasoningOptions(modelId: string): string[] | undefined {
+  if (!openRouterModelInfos) return undefined
+  return openRouterModelInfos.get(modelId)?.reasoningOptions
 }
 
 // Start background fetch if OpenRouter is configured
