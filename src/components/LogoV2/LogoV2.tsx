@@ -25,6 +25,7 @@ import {
 } from './feedConfigs.js'
 import { getGlobalConfig, saveGlobalConfig } from 'src/utils/config.js'
 import { resolveThemeSetting } from 'src/utils/systemTheme.js'
+import { getTheme } from 'src/utils/theme.js'
 import { getInitialSettings } from 'src/utils/settings/settings.js'
 import {
   isDebugMode,
@@ -250,6 +251,12 @@ export function LogoV2(): React.ReactNode {
   const layoutMode = getLayoutMode(columns)
 
   const userTheme = resolveThemeSetting(getGlobalConfig().theme)
+  const themeColors = getTheme(userTheme)
+  const gradientStops: [string, string, string] = [
+    themeColors.success,
+    themeColors.clawd_body,
+    themeColors.claude,
+  ]
   const borderTitle = ` ${color('clawd_body', userTheme)('Codev')} ${color('inactive', userTheme)(`v${version}`)} `
   const compactBorderTitle = color('clawd_body', userTheme)(' Codev ')
 
@@ -295,7 +302,7 @@ export function LogoV2(): React.ReactNode {
           >
             <Text bold>{welcomeMessage}</Text>
             <Box marginY={1}>
-              <Clawd />
+              <Clawd gradientStops={gradientStops} />
             </Box>
             <Text dimColor>{modelDisplayName}</Text>
             <Text dimColor>{billingType}</Text>
@@ -381,7 +388,7 @@ export function LogoV2(): React.ReactNode {
                 <Text bold>{welcomeMessage}</Text>
               </Box>
 
-              <Clawd />
+              <Clawd gradientStops={gradientStops} />
 
               <Box flexDirection="column" alignItems="center">
                 <Text dimColor>{modelLine}</Text>

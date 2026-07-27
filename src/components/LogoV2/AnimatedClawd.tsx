@@ -1,12 +1,11 @@
 import * as React from 'react'
 import { useEffect, useRef, useState } from 'react'
-import { Box } from '../../ink.js'
+import { Box, useAnimationFrame } from '../../ink.js'
 import { getInitialSettings } from '../../utils/settings/settings.js'
 import { Clawd, type ClawdPose } from './Clawd.js'
 
 type Frame = { pose: ClawdPose; offset: number }
 
-/** Hold a pose for n frames (60ms each). */
 function hold(pose: ClawdPose, offset: number, frames: number): Frame[] {
   return Array.from({ length: frames }, () => ({ pose, offset }))
 }
@@ -16,17 +15,15 @@ function hold(pose: ClawdPose, offset: number, frames: number): Frame[] {
 // a crouch (offset=1) Clawd's feet row dips below the container and gets
 // clipped — reads as "ducking below the frame" before springing back up.
 
-// Click animation: crouch, then spring up with both arms raised. Twice.
 const JUMP_WAVE: readonly Frame[] = [
-  ...hold('default', 1, 2), // crouch
-  ...hold('arms-up', 0, 3), // spring!
+  ...hold('default', 1, 2),
+  ...hold('arms-up', 0, 3),
   ...hold('default', 0, 1),
-  ...hold('default', 1, 2), // crouch again
-  ...hold('arms-up', 0, 3), // spring!
+  ...hold('default', 1, 2),
+  ...hold('arms-up', 0, 3),
   ...hold('default', 0, 1),
 ]
 
-// Click animation: glance right, then left, then back.
 const LOOK_AROUND: readonly Frame[] = [
   ...hold('look-right', 0, 5),
   ...hold('look-left', 0, 5),
@@ -37,7 +34,6 @@ const CLICK_ANIMATIONS: readonly (readonly Frame[])[] = [JUMP_WAVE, LOOK_AROUND]
 
 const IDLE: Frame = { pose: 'default', offset: 0 }
 const FRAME_MS = 60
-const incrementFrame = (i: number) => i + 1
 const CLAWD_HEIGHT = 3
 
 /**
@@ -47,50 +43,52 @@ const CLAWD_HEIGHT = 3
  * crouch only the feet row clips (see comment above). Click only fires when
  * mouse tracking is enabled (i.e. inside `<AlternateScreen>` / fullscreen);
  * elsewhere this renders and behaves identically to plain `<Clawd />`.
+ *
+ * Animation timing is driven by the shared clock via `useAnimationFrame` so
+ * it auto-pauses when offscreen and stays in sync with other animations.
  */
-export function AnimatedClawd(): React.ReactNode {
-  const { pose, bounceOffset, onClick } = useClawdAnimation()
-  return (
-    <Box height={CLAWD_HEIGHT} flexDirection="column" onClick={onClick}>
-      <Box marginTop={bounceOffset} flexShrink={0}>
-        <Clawd pose={pose} />
-      </Box>
-    </Box>
-  )
-}
-
-function useClawdAnimation(): {
-  pose: ClawdPose
-  bounceOffset: number
-  onClick: () => void
-} {
-  // Read once at mount — no useSettings() subscription, since that would
-  // re-render on any settings change.
+export function AnimatedClawd({ gradientStops }: { gradientStops?: [string, string, ...string[]] } = {}): React.ReactNode {
   const [reducedMotion] = useState(
     () => getInitialSettings().prefersReducedMotion ?? false,
   )
-  const [frameIndex, setFrameIndex] = useState(-1)
+
   const sequenceRef = useRef<readonly Frame[]>(JUMP_WAVE)
+  const [animStart, setAnimStart] = useState<number | null>(null)
+  const [ref, time] = useAnimationFrame(animStart !== null ? FRAME_MS : null)
 
   const onClick = () => {
-    if (reducedMotion || frameIndex !== -1) return
+    if (reducedMotion || animStart !== null) return
     sequenceRef.current =
       CLICK_ANIMATIONS[Math.floor(Math.random() * CLICK_ANIMATIONS.length)]!
-    setFrameIndex(0)
+    setAnimStart(time)
   }
 
+  // Auto-reset when animation completes
   useEffect(() => {
-    if (frameIndex === -1) return
-    if (frameIndex >= sequenceRef.current.length) {
-      setFrameIndex(-1)
-      return
+    if (animStart === null) return
+    const elapsed = time - animStart
+    if (elapsed >= sequenceRef.current.length * FRAME_MS) {
+      setAnimStart(null)
     }
-    const timer = setTimeout(setFrameIndex, FRAME_MS, incrementFrame)
-    return () => clearTimeout(timer)
-  }, [frameIndex])
+  }, [time, animStart])
 
-  const seq = sequenceRef.current
+  // Compute current frame from elapsed time (not frame index, so clock drift
+  // or skipped ticks don't cause frame-skips or late completions).
+  const totalFrames = sequenceRef.current.length
+  const frameIndex =
+    animStart !== null
+      ? Math.min(Math.floor((time - animStart) / FRAME_MS), totalFrames - 1)
+      : -1
   const current =
-    frameIndex >= 0 && frameIndex < seq.length ? seq[frameIndex]! : IDLE
-  return { pose: current.pose, bounceOffset: current.offset, onClick }
+    frameIndex >= 0 && frameIndex < totalFrames
+      ? sequenceRef.current[frameIndex]
+      : IDLE
+
+  return (
+    <Box height={CLAWD_HEIGHT} flexDirection="column" onClick={onClick} ref={ref}>
+      <Box marginTop={current.offset} flexShrink={0}>
+        <Clawd pose={current.pose} gradientStops={gradientStops} />
+      </Box>
+    </Box>
+  )
 }
