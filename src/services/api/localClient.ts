@@ -27,7 +27,6 @@ async function fetchServerProps(nativeBase: string): Promise<{ contextWindow?: n
     const res = await fetch(`${nativeBase}/props`, { signal: AbortSignal.timeout(10_000) })
     if (res.ok) {
       const data = (await res.json()) as any
-      console.error(`[localClient] /props response:`, JSON.stringify(data).slice(0, 500))
       const settings = data?.default_generation_settings
       if (settings) {
         let cw: number | undefined
@@ -36,12 +35,11 @@ async function fetchServerProps(nativeBase: string): Promise<{ contextWindow?: n
         if (typeof settings.max_tokens === 'number') mt = settings.max_tokens
         if (typeof settings.n_predict === 'number') mt = settings.n_predict
         if (mt === -1 && cw) mt = cw
-        console.error(`[localClient] /props parsed: cw=${cw}, mt=${mt}`)
         return { contextWindow: cw, maxTokens: mt }
       }
     }
-  } catch (e) {
-    console.error(`[localClient] /props failed:`, e)
+  } catch {
+    // /props not available
   }
   return {}
 }
@@ -57,11 +55,9 @@ async function fetchModelIdsAndContextWindows(
 
   try {
     const nativeUrl = `${nativeBase}/models`
-    console.error(`[localClient] fetching /models from ${nativeUrl}`)
     const res = await fetch(nativeUrl, { signal: AbortSignal.timeout(10_000) })
     if (res.ok) {
       const json = (await res.json()) as any
-      console.error(`[localClient] /models response:`, JSON.stringify(json).slice(0, 1000))
       if (json.data && Array.isArray(json.data)) {
         for (const entry of json.data as Array<{
           id: string
@@ -76,17 +72,14 @@ async function fetchModelIdsAndContextWindows(
             if (m) configuredCtx = Number(m[1])
           }
           const ctx = entry.meta?.n_ctx ?? configuredCtx ?? entry.meta?.n_ctx_train
-          console.error(`[localClient] model ${entry.id}: n_ctx=${entry.meta?.n_ctx}, n_ctx_train=${entry.meta?.n_ctx_train}, configuredCtx=${configuredCtx}, resolved=${ctx}`)
           if (ctx) {
             contextWindows.set(entry.id, { contextWindow: ctx })
           }
         }
       }
-    } else {
-      console.error(`[localClient] /models returned ${res.status}`)
     }
-  } catch (e) {
-    console.error(`[localClient] /models failed:`, e)
+  } catch {
+    // /models not available
   }
 
   return { modelIds, contextWindows }
@@ -118,8 +111,6 @@ async function doFetchModels(): Promise<void> {
       maxTokens: serverMt ?? cw?.maxTokens,
     }
   })
-
-  console.error(`[localClient] loaded ${cachedModels.length} models, serverCw=${serverCw}, serverMt=${serverMt}`)
 }
 
 export async function fetchLocalModels(): Promise<string[]> {
