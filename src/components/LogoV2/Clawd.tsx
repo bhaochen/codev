@@ -15,6 +15,7 @@ export type ClawdPose =
 type Props = {
   pose?: ClawdPose
   gradientStops?: [string, string, ...string[]]
+  suppressIdleAnim?: boolean
 }
 
 // ==================== Art definition ====================
@@ -83,15 +84,41 @@ const INTRO_DURATION = 1500
 const INTRO_SWEEPS = 2
 const BLINK_INTERVAL = 6000
 const BLINK_DURATION = 160
+const FRAME_MS = 60
+
+type Frame = { pose: ClawdPose; offset: number }
+
+function hold(pose: ClawdPose, offset: number, frames: number): Frame[] {
+  return Array.from({ length: frames }, () => ({ pose, offset }))
+}
+
+const JUMP_WAVE: readonly Frame[] = [
+  ...hold('default', 1, 2),
+  ...hold('arms-up', 0, 3),
+  ...hold('default', 0, 1),
+  ...hold('default', 1, 2),
+  ...hold('arms-up', 0, 3),
+  ...hold('default', 0, 1),
+]
+
+const LOOK_AROUND: readonly Frame[] = [
+  ...hold('look-right', 0, 5),
+  ...hold('look-left', 0, 5),
+  ...hold('default', 0, 1),
+]
+
+const IDLE_ANIMS: readonly (readonly Frame[])[] = [JUMP_WAVE, LOOK_AROUND]
+const IDLE_ANIM_DELAY_MIN = 25000
+const IDLE_ANIM_DELAY_MAX = 50000
 
 // ==================== Main component ====================
 
-export function Clawd({ pose = 'default', gradientStops }: Props = {}): React.ReactNode {
+export function Clawd({ pose = 'default', gradientStops, suppressIdleAnim = false }: Props = {}): React.ReactNode {
   const [reducedMotion] = useState(() => getInitialSettings().prefersReducedMotion ?? false)
   const [introDone, setIntroDone] = useState(reducedMotion)
 
   const startRef = useRef<number | null>(null)
-  const [ref, time] = useAnimationFrame(introDone ? null : 33)
+  const [ref, time] = useAnimationFrame(33)
 
   // Set start time at render — same pattern as AnimatedAsterisk
   if (startRef.current === null && !introDone) {
@@ -124,39 +151,86 @@ export function Clawd({ pose = 'default', gradientStops }: Props = {}): React.Re
     return () => clearInterval(intervalId)
   }, [reducedMotion])
 
-  const effectivePose = blinkPose ?? pose
+  // Idle animation (jump-wave / look-around)
+  const runIdleAnim = !suppressIdleAnim && introDone && !reducedMotion
+  const [idleAnim, setIdleAnim] = useState<{
+    frames: readonly Frame[]
+    startTime: number
+  } | null>(null)
+  const nextAnimRef = useRef(0)
+
+  useEffect(() => {
+    if (!runIdleAnim) return
+
+    if (idleAnim !== null) {
+      const elapsed = time - idleAnim.startTime
+      if (elapsed >= idleAnim.frames.length * FRAME_MS) {
+        setIdleAnim(null)
+        nextAnimRef.current =
+          time + IDLE_ANIM_DELAY_MIN + Math.random() * (IDLE_ANIM_DELAY_MAX - IDLE_ANIM_DELAY_MIN)
+      }
+    } else if (nextAnimRef.current > 0 && time >= nextAnimRef.current) {
+      const picked = IDLE_ANIMS[Math.floor(Math.random() * IDLE_ANIMS.length)]!
+      setIdleAnim({ frames: picked, startTime: time })
+    }
+  }, [time, runIdleAnim, idleAnim])
+
+  useEffect(() => {
+    if (runIdleAnim && nextAnimRef.current === 0) {
+      nextAnimRef.current = time + 20000 + Math.random() * 10000
+    }
+  }, [runIdleAnim, time])
+
+  // Clear idle animation state when externally suppressed
+  useEffect(() => {
+    if (suppressIdleAnim) setIdleAnim(null)
+  }, [suppressIdleAnim])
+
+  const hasActiveAnim = !suppressIdleAnim && idleAnim !== null
+  const frameIndex = hasActiveAnim
+    ? Math.min(Math.floor((time - idleAnim.startTime) / FRAME_MS), idleAnim.frames.length - 1)
+    : -1
+  const animFrame = frameIndex >= 0 ? idleAnim!.frames[frameIndex]! : null
+  const bounceOffset = animFrame?.offset ?? 0
+  const animPose = animFrame?.pose
+
+  const effectivePose = animPose ?? blinkPose ?? pose
 
   // Apple Terminal fallback
   if (env.terminal === 'Apple_Terminal') {
     return <AppleTerminalClawd pose={effectivePose} />
   }
 
-  // Decide rendering path
+  // Determine content
+  let innerContent: React.ReactNode
   if (gradientStops && gradientStops.length >= 2) {
     const stops = gradientStops
       .map(s => parseRGB(s))
       .filter((s): s is RGB => s !== null)
     if (stops.length >= 2) {
-      return (
-        <Box ref={ref} flexDirection="column">
-          {renderGradientGrid(effectivePose, stops, gradientPhase)}
-        </Box>
-      )
+      innerContent = renderGradientGrid(effectivePose, stops, gradientPhase)
+    } else {
+      innerContent = renderPlainGrid(effectivePose)
     }
+  } else {
+    innerContent = renderPlainGrid(effectivePose)
   }
 
-  // Fallback: original single-color rendering
-  return <PlainClawd pose={effectivePose} ref={ref} />
+  return (
+    <Box ref={ref} flexDirection="column">
+      <Box marginTop={bounceOffset} flexShrink={0}>
+        {innerContent}
+      </Box>
+    </Box>
+  )
 }
 
 // ==================== Plain (single-color) rendering ====================
 
-type PlainProps = { pose: ClawdPose }
-
-const PlainClawd = React.forwardRef<unknown, PlainProps>(({ pose }, ref) => {
+function renderPlainGrid(pose: ClawdPose): React.ReactNode {
   const p = POSES[pose]
   return (
-    <Box ref={ref} flexDirection="column">
+    <Box flexDirection="column">
       <Text>
         <Text color="clawd_body">{p.r1L}</Text>
         <Text color="clawd_body" backgroundColor="clawd_background">
@@ -174,7 +248,7 @@ const PlainClawd = React.forwardRef<unknown, PlainProps>(({ pose }, ref) => {
       <Text color="clawd_body">{FEET}</Text>
     </Box>
   )
-})
+}
 
 // ==================== Gradient rendering ====================
 

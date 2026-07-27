@@ -87,7 +87,7 @@ export function AnimatedClawd({ gradientStops }: { gradientStops?: [string, stri
   return (
     <Box height={CLAWD_HEIGHT} flexDirection="column" onClick={onClick} ref={ref}>
       <Box marginTop={current.offset} flexShrink={0}>
-        <Clawd pose={current.pose} gradientStops={gradientStops} />
+        <Clawd pose={current.pose} gradientStops={gradientStops} suppressIdleAnim={animStart !== null} />
       </Box>
     </Box>
   )
