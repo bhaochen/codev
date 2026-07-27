@@ -171,8 +171,7 @@ export function Clawd({ pose = 'default', gradientStops, suppressIdleAnim = fals
 
   const onClick = () => {
     if (reducedMotion || clickAnim !== null) return
-    const picked = IDLE_ANIMS[Math.floor(Math.random() * IDLE_ANIMS.length)]!
-    setClickAnim({ frames: picked, startTime: time })
+    setClickAnim({ frames: JUMP_WAVE, startTime: time })
   }
 
   useEffect(() => {
