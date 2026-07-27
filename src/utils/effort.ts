@@ -156,18 +156,32 @@ export function getModelSupportedEfforts(model: string): EffortLevel[] {
   const configs = resolveModelEffortConfigs()
   const canonical = getCanonicalName(model)
 
-  // Exact match first
+  // 1. Exact match from config
   if (configs[canonical]?.levels) {
     return configs[canonical].levels
   }
-  // Prefix match
+  // 2. Prefix match from config
   for (const [key, config] of Object.entries(configs)) {
     if (canonical.startsWith(key) || canonical.includes(key)) {
       if (config.levels) return config.levels
     }
   }
 
-  // Fallback: default to all levels minus 'max' for non-Opus models
+  // 3. NVIDIA provider — read reasoning_options from models.dev cache
+  if (getAPIProvider() === 'nvidia') {
+    const { getNvidiaModelReasoningOptions } = require('../services/api/nvidiaClient.js') as {
+      getNvidiaModelReasoningOptions: (id: string) => string[] | undefined
+    }
+    const nvOpts = getNvidiaModelReasoningOptions(canonical)
+    if (nvOpts && nvOpts.length > 0) {
+      const supported = nvOpts.filter((o): o is EffortLevel =>
+        (EFFORT_LEVELS as readonly string[]).includes(o),
+      )
+      if (supported.length > 0) return supported
+    }
+  }
+
+  // 4. Fallback: default to all levels minus 'max' for non-Opus models
   if (modelNameSupportsMax(model)) {
     return [...EFFORT_LEVELS]
   }

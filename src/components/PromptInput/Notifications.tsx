@@ -319,7 +319,7 @@ function NotificationContent({
             {tokenUsage} tokens
           </Text>
         </Box>}
-      {apiKeyStatus !== 'invalid' && apiKeyStatus !== 'missing' && tokenUsage > 0 && <CtxProgressBar currentTokens={tokenUsage} contextWindowTokens={getEffectiveContextWindowSize(mainLoopModel)} compactionTargetTokens={getEffectiveContextWindowSize(mainLoopModel) - 13_000} utilizationPct={Math.round((tokenUsage / Math.max(1, getEffectiveContextWindowSize(mainLoopModel))) * 100)} />}
+      {apiKeyStatus !== 'invalid' && apiKeyStatus !== 'missing' && tokenUsage > 0 && <CtxProgressBar currentTokens={tokenUsage} contextWindowTokens={getEffectiveContextWindowSize(mainLoopModel)} compactionTargetTokens={getEffectiveContextWindowSize(mainLoopModel)} utilizationPct={Math.round((tokenUsage / Math.max(1, getEffectiveContextWindowSize(mainLoopModel))) * 100)} />}
       {!isBriefOnly && <TokenWarning tokenUsage={tokenUsage} model={mainLoopModel} />}
       {shouldShowAutoUpdater && <AutoUpdaterWrapper verbose={verbose} onAutoUpdaterResult={onAutoUpdaterResult} autoUpdaterResult={autoUpdaterResult} isUpdating={isAutoUpdating} onChangeIsUpdating={onChangeIsUpdating} showSuccessMessage={!isShowingCompactMessage} />}
       {feature('VOICE_MODE') ? voiceEnabled && voiceError && <Box>

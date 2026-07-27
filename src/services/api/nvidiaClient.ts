@@ -13,6 +13,7 @@ type CachedNvidiaModel = {
   id: string
   contextWindow?: number
   maxTokens?: number
+  reasoningOptions?: string[]
 }
 
 /**
@@ -224,6 +225,12 @@ export function getNvidiaModelContextWindow(modelId: string): number | undefined
   return model?.contextWindow
 }
 
+export function getNvidiaModelReasoningOptions(modelId: string): string[] | undefined {
+  if (!cachedNvidiaModels) return undefined
+  const model = cachedNvidiaModels.find(m => m.id === modelId)
+  return model?.reasoningOptions
+}
+
 /**
  * Fetch available models from the NVIDIA API catalog and merge context windows
  * from the models.dev API (which provides limit.context for 74/84 NVIDIA models).
@@ -259,7 +266,7 @@ export async function fetchNvidiaModels(apiKey?: string): Promise<string[]> {
     }
 
     // Fetch context windows from models.dev API (canonical source for context limits)
-    const contextWindows = new Map<string, { contextWindow?: number; maxTokens?: number }>()
+    const contextWindows = new Map<string, { contextWindow?: number; maxTokens?: number; reasoningOptions?: string[] }>()
     try {
       const metaRes = await fetch(MODELS_META_URL, {
         headers: { 'User-Agent': 'opencode/1.15.6 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14' },
@@ -269,9 +276,13 @@ export async function fetchNvidiaModels(apiKey?: string): Promise<string[]> {
         const data = (await metaRes.json()) as any
         const nvidiaModels = data?.nvidia?.models || {}
         for (const [modelId, config] of Object.entries(nvidiaModels) as [string, any][]) {
+          const reasoningOptions = config.reasoning_options?.find(
+            (o: any) => o.type === 'effort',
+          )?.values
           contextWindows.set(modelId, {
             contextWindow: config.limit?.context,
             maxTokens: config.limit?.output,
+            reasoningOptions,
           })
         }
       }
@@ -289,6 +300,7 @@ export async function fetchNvidiaModels(apiKey?: string): Promise<string[]> {
       id,
       contextWindow: contextWindows.get(id)?.contextWindow,
       maxTokens: contextWindows.get(id)?.maxTokens,
+      reasoningOptions: contextWindows.get(id)?.reasoningOptions,
     }))
 
     return modelIds

@@ -49,8 +49,7 @@ export function useContextUsage(): ContextUsageInfo {
   const hasData = percentages.used !== null
 
   // Compaction target is the threshold at which auto-compact triggers
-  const compactionTargetTokens =
-    effectiveWindowSize - 13_000 // AUTOCOMPACT_BUFFER_TOKENS
+  const compactionTargetTokens = effectiveWindowSize
 
   return {
     currentTokens: totalInputTokens,

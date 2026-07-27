@@ -7,7 +7,7 @@ import { Pane } from '../../components/design-system/Pane.js';
 import { Select } from '../../components/CustomSelect/index.js';
 import { useAppState, useSetAppState } from '../../state/AppState.js';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
-import { type EffortValue, getDisplayedEffortLevel, getEffortEnvOverride, getEffortValueDescription, isEffortLevel, toPersistableEffort } from '../../utils/effort.js';
+import { type EffortLevel, type EffortValue, getDisplayedEffortLevel, getEffortEnvOverride, getEffortValueDescription, getModelSupportedEfforts, isEffortLevel, toPersistableEffort } from '../../utils/effort.js';
 import { effortLevelToSymbol } from '../../components/EffortIndicator.js';
 import { updateSettingsForSource } from '../../utils/settings/settings.js';
 const COMMON_HELP_ARGS = ['help', '-h', '--help'];
@@ -169,47 +169,43 @@ function EffortOptionLabel(t0) {
   return t2;
 }
 function EffortPicker(t0) {
-  const $ = _c(14);
+  const $ = _c(16);
   const {
     onDone
   } = t0;
   const setAppState = useSetAppState();
-  let t1;
-  if ($[0] === Symbol.for("react.memo_cache_sentinel")) {
-    t1 = [{
-      label: <Text>Auto</Text>,
-      value: "auto",
-      description: "Default effort level for your model"
-    }, {
-      label: <EffortOptionLabel level="minimal" text="Minimal" />,
-      value: "minimal",
-      description: "Minimal thinking \u2014 fastest responses for simple tasks"
-    }, {
-      label: <EffortOptionLabel level="low" text="Low" />,
-      value: "low",
-      description: "Quick, straightforward implementation"
-    }, {
-      label: <EffortOptionLabel level="medium" text="Medium" />,
-      value: "medium",
-      description: "Balanced approach with standard testing"
-    }, {
-      label: <EffortOptionLabel level="high" text="High" />,
-      value: "high",
-      description: "Comprehensive implementation with extensive testing"
-    }, {
-      label: <EffortOptionLabel level="xhigh" text="Extra High" />,
-      value: "xhigh",
-      description: "Extra high effort \u2014 deeper reasoning for complex tasks"
-    }, {
-      label: <EffortOptionLabel level="max" text="Max" />,
-      value: "max",
-      description: "Maximum capability with deepest reasoning (supported models only)"
-    }];
-    $[0] = t1;
-  } else {
-    t1 = $[0];
-  }
-  const options = t1;
+  const model = useMainLoopModel();
+  const supportedLevels = getModelSupportedEfforts(model);
+  const allOptions = [{
+    label: <Text>Auto</Text>,
+    value: "auto",
+    description: "Default effort level for your model"
+  }, {
+    label: <EffortOptionLabel level="minimal" text="Minimal" />,
+    value: "minimal",
+    description: "Minimal thinking \u2014 fastest responses for simple tasks"
+  }, {
+    label: <EffortOptionLabel level="low" text="Low" />,
+    value: "low",
+    description: "Quick, straightforward implementation"
+  }, {
+    label: <EffortOptionLabel level="medium" text="Medium" />,
+    value: "medium",
+    description: "Balanced approach with standard testing"
+  }, {
+    label: <EffortOptionLabel level="high" text="High" />,
+    value: "high",
+    description: "Comprehensive implementation with extensive testing"
+  }, {
+    label: <EffortOptionLabel level="xhigh" text="Extra High" />,
+    value: "xhigh",
+    description: "Extra high effort \u2014 deeper reasoning for complex tasks"
+  }, {
+    label: <EffortOptionLabel level="max" text="Max" />,
+    value: "max",
+    description: "Maximum capability with deepest reasoning (supported models only)"
+  }];
+  const options = allOptions.filter(o => o.value === 'auto' || supportedLevels.includes(o.value as EffortLevel));
   let t2;
   if ($[1] !== onDone || $[2] !== setAppState) {
     t2 = value => {
