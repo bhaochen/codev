@@ -218,7 +218,8 @@ export function Clawd({ pose = 'default', gradientStops, suppressIdleAnim = fals
 
   return (
     <Box ref={ref} flexDirection="column">
-      <Box marginTop={bounceOffset} flexShrink={0}>
+<<<<<<< HEAD
+      <Box marginTop={bounceOffset} flexShrink={0} flexDirection="column">
         {innerContent}
       </Box>
     </Box>
