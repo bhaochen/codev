@@ -34,7 +34,7 @@ Token 使用量
 | 约束 | 说明 | 代码证据 |
 |------|------|----------|
 | **Token 硬限制** | 超过模型上下文窗口后 API 拒绝请求 | `compact.ts:106-107` 的 `PROMPT_TOO_LONG_ERROR_MESSAGE` |
-| **90% 阈值后性能下降** | 接近窗口上限时，模型的检索精度和推理质量显著下降 | `autoCompact.ts:62` 的 `AUTOCOMPACT_BUFFER_TOKENS = 13_000` 保留缓冲 |
+| **90% 阈值后性能下降** | 接近窗口上限时，模型的检索精度和推理质量显著下降 | `autoCompact.ts:72-86` 的 `getAutoCompactThreshold()` 保留缓冲（同比 25%，上下限 2K–3K） |
 | **Cache 效率衰减** | 大上下文降低 prompt caching 命中率，增加 API 成本和延迟 | `compact.ts:435-438` 的 `tengu_compact_cache_prefix` 实验开关 |
 
 ### 1.3 压缩管道的设计目标
@@ -345,14 +345,16 @@ if (feature('CONTEXT_COLLAPSE')) {
 `shouldAutoCompact()` (第 160 行) 计算：
 
 ```
-阈值 = getEffectiveContextWindowSize(model) - AUTOCOMPACT_BUFFER_TOKENS(13,000)
-     = (contextWindow - min(maxOutputTokens, 20,000)) - 13,000
+阈值 = getEffectiveContextWindowSize(model) - buffer
+     = (contextWindow - min(maxOutputTokens, 20,000)) - buffer
+  buffer = min(max(effectiveWindow × 25%, 2 000), 3 000)
 ```
 
 ```
 getEffectiveContextWindowSize(model) = contextWindow - min(maxOutput, 20,000)
                                                       ↓
-getAutoCompactThreshold(model) = effectiveWindow - 13,000 (AUTOCOMPACT_BUFFER_TOKENS)
+getAutoCompactThreshold(model) = effectiveWindow - buffer
+  buffer = min(max(effectiveWindow × 25%, 2 000), 3 000)
 ```
 
 环境变量覆盖：
@@ -864,7 +866,8 @@ Codev 的压缩实现相比于 Anthropic 官方 Claude Code 有以下主要差�
 | `MAX_COMPACT_STREAMING_RETRIES` | 2 | `compact.ts:131` |
 | `MAX_PTL_RETRIES` | 3 | `compact.ts:228` |
 | `MAX_OUTPUT_TOKENS_FOR_SUMMARY` | 20,000 | `autoCompact.ts:30` |
-| `AUTOCOMPACT_BUFFER_TOKENS` | 13,000 | `autoCompact.ts:62` |
+| `AUTOCOMPACT_BUFFER_TOKENS` | 3,000 (上限) | `autoCompact.ts:62` |
+| `AUTOCOMPACT_BUFFER_PCT` | 25% (同比缩放) | `autoCompact.ts:84-86` |
 | `WARNING_THRESHOLD_BUFFER_TOKENS` | 20,000 | `autoCompact.ts:63` |
 | `ERROR_THRESHOLD_BUFFER_TOKENS` | 20,000 | `autoCompact.ts:64` |
 | `MANUAL_COMPACT_BUFFER_TOKENS` | 3,000 | `autoCompact.ts:65` |

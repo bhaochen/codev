@@ -11,6 +11,7 @@
 
 ## 📢 News
 
+- **2026-07-27** 🦙 Llama.cpp 本地 Provider — 原生 `/models` + `/props` 端点动态发现模型，上下文窗口从 server `-c` 值解析，同比缩放 auto-compact buffer。
 - **2026-07-08** 🖼️ Image Search & Render Hardening — WebSearchTool now exposes an explicit `search_images` flag that routes to SearXNG while Tavily handles general search; ImageShowTool downloads URLs to temp files and passes them to timg by path, fixes kitty protocol concurrency corruption (in-band sequences are now non-concurrent), and computes dimensions from terminal height with aspect-ratio-aware width.
 - **2026-07-04** 🖼️ Inline Terminal Images — Native Kitty graphics protocol rendering via timg; WebSearch, WebFetch, and LocationTool results now display inline images directly in the TUI with cursor-safe hide/show and dynamic row layout.
 - **2026-07-01** 🗺️ LocationTool unlimited search — Amap places search now paginates (1000/page, up to 10000 results); Google Places uses `next_page_token` (up to 60); photo limits removed.
@@ -94,6 +95,19 @@ ln -sf dist/codev ~/.local/bin/codev
 >
 > if you no need free `local-websearch` you can skip config `searxng``
 > and just set`TAVILY_API_KEY` in env
+
+```bash
+# or local llm via llama.cpp
+# /login -> Llama.cpp -> http://127.0.0.1:8001 (default)
+# provider: local, models fetched from /models + /props endpoints
+```
+
+```bash
+# also you need set baseUrl for local provider
+# config in ~/.claude.json
+"localBaseUrl": "http://127.0.0.1:8001",
+"localModelName": "default"
+```
 
 ```bash
 # Maximum_Context_Window = min(CLAUDE_CODE_MAX_CONTEXT_TOKENS, CLAUDE_CODE_AUTO_COMPACT_WINDOW) - 20000

@@ -20,6 +20,7 @@ Codev 支持以下 Provider，按认证方式与协议类型分类：
 | **OpenCode Zen** | API Key 或免费 (public) | `openai_chat` (Fetch Override) | `src/services/api/opencodeClient.ts` |
 | **NVIDIA NIM** | API Key (build.nvidia.com) | `openai_chat` (Fetch Override) | `src/services/api/nvidiaClient.ts` |
 | **Local (Ollama/LM Studio/vLLM)** | 无 (Dummy Key) | `anthropic` 或 `openai_chat` | `src/server/config/providerPresets.json` |
+| **Llama.cpp** | 无 | `anthropic` (Fetch Override) | `src/services/api/localClient.ts` |
 | **DeepSeek, Zhipu GLM, Kimi, MiniMax, 接口AI, 胜算云** | API Key (auth_token) | `anthropic` (Native) | `src/server/config/providerPresets.json` |
 
 ---
@@ -160,7 +161,7 @@ export function createNvidiaFetchOverride():
   (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 ```
 
-该重写在 `getAnthropicClient()` 中按 Provider 选择性注入：
+该重写在 `getAnthropicClient()` 中按 Provider 选择性注入。`local` (Llama.cpp) 则不使用 Fetch Override，仅设置 `baseURL` 和 dummy API Key：
 
 ```typescript
 // src/services/api/client.ts 第 150-163 行
@@ -171,6 +172,7 @@ if (provider === 'opencode') {
 if (provider === 'nvidia') {
   nvidiaFetchOverride = createNvidiaFetchOverride()
 }
+// local provider: 仅设置 baseURL, 无需 Fetch Override
 const resolvedFetch = buildFetch(fetchOverride || opencodeFetchOverride || nvidiaFetchOverride, source)
 ```
 
@@ -363,6 +365,21 @@ function shouldUseDeepSeekReasoningCompat(baseUrl: string): boolean {
 - **兼容性缓存**: `copilotCompatibilityCache` 持久化模型兼容性信息到 `~/.claude.json`
 - **Token 参数自动修复**: 当 API 返回 `"Use 'max_completion_tokens' instead"` 时自动切换参数
 
+### 4.6 Llama.cpp (Local)
+
+**文件**: `src/services/api/localClient.ts`
+
+- **认证**: 无 (无需 API Key)
+- **协议**: `anthropic` (Fetch Override, 复用 `client.ts` 的直连路径)
+- **端点**: 默认 `http://127.0.0.1:8001`，通过 `~/.claude.json` 的 `localBaseUrl` 配置
+- **Model 发现**: 从 Llama.cpp 原生端点获取：
+  - `GET {baseUrl}/models` → `data[].id` + `meta.n_ctx` + `meta.n_ctx_train` + `status.args`
+  - `GET {baseUrl}/props` → `default_generation_settings.n_ctx`（`-c` 参数值）
+- **上下文窗口解析优先级**: `serverCw`（`/props` n_ctx）→ per-model `meta.n_ctx` → `--ctx-size` from `status.args` → `meta.n_ctx_train` → 8192 fallback
+- **后台拉取**: 启动时自动调用 `fetchLocalModels()`，每隔 2 秒轮询缓存直到加载完成
+- **缓存**: 模块级 `cachedModels` 变量，不持久化到磁盘
+- **Model Picker**: `getModelOptionsBase()` 中 `local` provider 优先级高于 `USER_TYPE === 'ant'` 检查
+
 ---
 
 ## 5. Provider 预设系统 (cc-haha)
@@ -468,6 +485,7 @@ flowchart TD
     D -->|opencode| G[firstParty 默认 + opencode 覆盖]
     D -->|openrouter| H[firstParty 默认 + openrouter 覆盖]
     D -->|nvidia| I[所有模型 = NVIDIA_MODEL env / 默认]
+    D -->|local| L[从 /models 端点动态拉取]
     D -->|bedrock| J[拉取 Bedrock 推理配置 → 匹配]
     E --> K[applyModelOverrides]
     F --> K
@@ -537,9 +555,11 @@ graph TB
         A3[src/services/api/client.ts]
         A4[src/services/api/nvidiaClient.ts]
         A5[src/services/api/opencodeClient.ts]
+        A6[src/services/api/localClient.ts]
         A2 -->|getAPIProvider| A3
         A3 -->|createNvidiaFetchOverride| A4
         A3 -->|createOpenCodeFetchOverride| A5
+        A3 -->|set baseURL for local| A6
     end
 
     subgraph "Tier 2: cc-haha Provider 系统"
