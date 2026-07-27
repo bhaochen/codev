@@ -285,12 +285,6 @@ function findSourceProjectRoot(startDir: string): string | null {
 export function resolveCronProjectRoot(
   options: CronCliResolutionOptions = {},
 ): string {
-  const env = options.env ?? process.env
-  const explicitRoot = env.CC_HAHA_ROOT?.trim()
-  if (explicitRoot && isSourceProjectRoot(path.resolve(explicitRoot))) {
-    return path.resolve(explicitRoot)
-  }
-
   const cwdRoot = findSourceProjectRoot(options.cwd ?? process.cwd())
   if (cwdRoot) {
     return cwdRoot
@@ -672,7 +666,6 @@ export class CronScheduler {
       CLAUDE_CODE_ENTRYPOINT: 'sdk-cli',
       CALLER_DIR: workDir,
       PWD: workDir,
-      CC_HAHA_SKIP_DOTENV: '1',
       ...(explicitProviderEnv
         ? {
             CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: '1',
@@ -680,9 +673,6 @@ export class CronScheduler {
           }
         : {}),
       ...(explicitProviderEnv ?? {}),
-      ...(this.shouldMarkManagedOAuth(task.providerId)
-        ? await this.buildOfficialOAuthEnv()
-        : {}),
       ...attributionHeaderEnv,
     }
   }
@@ -696,13 +686,13 @@ export class CronScheduler {
       return true
     }
 
-    const ccHahaDir = path.join(this.getConfigDir(), 'cc-haha')
-    if (existsSync(path.join(ccHahaDir, 'providers.json'))) {
+    const providersDir = path.join(this.getConfigDir(), 'providers')
+    if (existsSync(path.join(providersDir, 'providers.json'))) {
       return true
     }
 
     try {
-      const raw = readFileSync(path.join(ccHahaDir, 'settings.json'), 'utf-8')
+      const raw = readFileSync(path.join(providersDir, 'settings.json'), 'utf-8')
       const parsed = JSON.parse(raw) as { env?: Record<string, string> }
       const env = parsed.env ?? {}
       return Object.entries(env).some(
@@ -716,53 +706,7 @@ export class CronScheduler {
     }
   }
 
-  private shouldMarkManagedOAuth(providerId?: string | null): boolean {
-    if (providerId === null) {
-      return true
-    }
-    if (typeof providerId === 'string') {
-      return false
-    }
-
-    try {
-      const raw = readFileSync(
-        path.join(this.getConfigDir(), 'cc-haha', 'settings.json'),
-        'utf-8',
-      )
-      const parsed = JSON.parse(raw) as { env?: Record<string, string> }
-      const env = parsed.env ?? {}
-      const hasProviderEnv = [
-        'ANTHROPIC_API_KEY',
-        'ANTHROPIC_AUTH_TOKEN',
-        'ANTHROPIC_BASE_URL',
-      ].some(
-        (key) =>
-          typeof env[key] === 'string' && env[key]!.trim().length > 0,
-      )
-      return !hasProviderEnv
-    } catch {
-      return true
-    }
-  }
-
-  private async buildOfficialOAuthEnv(): Promise<Record<string, string>> {
-    const env: Record<string, string> = {
-      CLAUDE_CODE_ENTRYPOINT: 'claude-desktop',
-    }
-    try {
-      const { hahaOAuthService } = await import('./hahaOAuthService.js')
-      const token = await hahaOAuthService.ensureFreshAccessToken()
-      if (token) {
-        env.CLAUDE_CODE_OAUTH_TOKEN = token
-      }
-    } catch (err) {
-      console.error(
-        '[cronScheduler] ensureFreshAccessToken failed:',
-        err instanceof Error ? err.message : err,
-      )
-    }
-    return env
-  }
+  // ─── Cleanup ───────────────────────────────────────────────────────────────
 
   // ─── Cleanup ───────────────────────────────────────────────────────────────
 

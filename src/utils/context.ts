@@ -4,6 +4,8 @@ import { getGlobalConfig } from './config.js'
 import { isEnvTruthy } from './envUtils.js'
 import { getCanonicalName } from './model/model.js'
 import { getModelCapability } from './model/modelCapabilities.js'
+import { MODEL_CONTEXT_WINDOWS_ENV_KEY } from './model/modelContextWindows.js'
+import { getInitialSettings } from './settings/settings.js'
 
 // Model context window size (200k tokens for all models right now)
 export const MODEL_CONTEXT_WINDOW_DEFAULT = 200_000
@@ -94,6 +96,26 @@ export function getContextWindowForModel(
       return antModel.contextWindow
     }
   }
+
+  // Read model context windows from settings (~/.claude/settings.json modelContextWindows)
+  // or from CLAUDE_CODE_MODEL_CONTEXT_WINDOWS env var.
+  // Settings take precedence over env var.
+  const settingsContextWindows = getInitialSettings().modelContextWindows
+  if (settingsContextWindows && Object.keys(settingsContextWindows).length > 0) {
+    const result = resolveContextWindowFromRecord(model, settingsContextWindows)
+    if (result !== undefined) return result
+  }
+  const modelContextWindowsRaw = process.env[MODEL_CONTEXT_WINDOWS_ENV_KEY]
+  if (modelContextWindowsRaw) {
+    try {
+      const modelContextWindows: Record<string, number> = JSON.parse(modelContextWindowsRaw)
+      const result = resolveContextWindowFromRecord(model, modelContextWindows)
+      if (result !== undefined) return result
+    } catch {
+      // Invalid JSON in env var, silently fall through
+    }
+  }
+
   return MODEL_CONTEXT_WINDOW_DEFAULT
 }
 
@@ -175,6 +197,26 @@ export function calculateCurrentContextTokenTotal(
 
   const total = Math.max(estimatedTokens, totalFromAPI)
   return contextWindow !== undefined ? Math.min(total, contextWindow) : total
+}
+
+/**
+ * Resolve a model's context window from a record of model name → context window pairs.
+ * Supports exact model name match and prefix/substring match.
+ */
+function resolveContextWindowFromRecord(
+  model: string,
+  record: Record<string, number>,
+): number | undefined {
+  const canonical = getCanonicalName(model)
+  // Exact match first
+  if (record[canonical]) return record[canonical]
+  // Prefix/substring match
+  for (const [key, value] of Object.entries(record)) {
+    if (canonical.startsWith(key) || canonical.includes(key)) {
+      return value
+    }
+  }
+  return undefined
 }
 
 /**

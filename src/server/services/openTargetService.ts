@@ -397,7 +397,7 @@ async function defaultConvertIconToPng(iconPath: string, size: number): Promise<
     return await readFile(iconPath)
   }
 
-  const tmpDir = await mkdtemp(join(tmpdir(), 'cc-haha-open-target-icon-'))
+  const tmpDir = await mkdtemp(join(tmpdir(), 'open-target-icon-'))
   const outputPath = join(tmpDir, 'icon.png')
   try {
     if (process.platform === 'win32') {
@@ -429,8 +429,8 @@ async function defaultConvertIconToPng(iconPath: string, size: number): Promise<
 async function convertWindowsIconToPng(iconPath: string, outputPath: string): Promise<void> {
   const script = `
 Add-Type -AssemblyName System.Drawing
-$source = $env:CC_HAHA_ICON_SOURCE
-$output = $env:CC_HAHA_ICON_OUTPUT
+$source = $env:CC_ICON_SOURCE
+$output = $env:CC_ICON_OUTPUT
 $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($source)
 if ($null -eq $icon) { exit 2 }
 $bitmap = $icon.ToBitmap()
@@ -449,8 +449,8 @@ $icon.Dispose()
   ], {
     env: {
       ...process.env,
-      CC_HAHA_ICON_SOURCE: iconPath,
-      CC_HAHA_ICON_OUTPUT: outputPath,
+      CC_ICON_SOURCE: iconPath,
+      CC_ICON_OUTPUT: outputPath,
     },
     timeout: 5_000,
     windowsHide: true,

@@ -703,12 +703,67 @@ export const SettingsSchema = lazySchema(() =>
       effortLevel: z
         .enum(
           process.env.USER_TYPE === 'ant'
-            ? ['low', 'medium', 'high', 'max']
-            : ['low', 'medium', 'high'],
+            ? ['minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+            : ['minimal', 'low', 'medium', 'high', 'xhigh'],
         )
         .optional()
         .catch(undefined)
         .describe('Persisted effort level for supported models.'),
+      modelContextWindows: z
+        .record(z.string(), z.number().int().min(8192).max(10000000))
+        .optional()
+        .catch(undefined)
+        .describe(
+          'Per-model context window sizes in tokens (e.g. {"deepseek-v4-pro": 1000000}). ' +
+            'Overrides the default 200k context window for supported models.',
+        ),
+      modelEffortConfigs: z
+        .record(
+          z.string(),
+          z.object({
+            levels: z
+              .array(
+                z.enum([
+                  'minimal',
+                  'low',
+                  'medium',
+                  'high',
+                  'xhigh',
+                  'max',
+                ]),
+              )
+              .min(1)
+              .max(6),
+            defaultLevel: z
+              .enum([
+                'minimal',
+                'low',
+                'medium',
+                'high',
+                'xhigh',
+                'max',
+              ])
+              .optional(),
+            wireMap: z
+              .record(
+                z.enum([
+                  'minimal',
+                  'low',
+                  'medium',
+                  'high',
+                  'xhigh',
+                  'max',
+                ]),
+                z.string(),
+              )
+              .optional(),
+          }),
+        )
+        .optional()
+        .catch(undefined)
+        .describe(
+          'Per-model effort configuration. Defines supported effort levels for each model.',
+        ),
       advisorModel: z
         .string()
         .optional()

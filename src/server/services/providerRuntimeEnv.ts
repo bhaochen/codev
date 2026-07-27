@@ -19,6 +19,7 @@ import {
   buildOpenAIOfficialRuntimeEnv,
   isOpenAIOfficialProviderId,
 } from './openaiOfficialProvider.js'
+import { MODEL_EFFORT_CONFIGS_ENV_KEY } from '../../utils/model/modelContextWindows.js'
 
 export const MANAGED_PROVIDER_ENV_KEYS = [
   'ANTHROPIC_BASE_URL',
@@ -34,6 +35,7 @@ export const MANAGED_PROVIDER_ENV_KEYS = [
   'CLAUDE_CODE_AUTO_COMPACT_WINDOW',
   ATTRIBUTION_HEADER_ENV_KEY,
   MODEL_CONTEXT_WINDOWS_ENV_KEY,
+  MODEL_EFFORT_CONFIGS_ENV_KEY,
   OPENAI_OAUTH_PROVIDER_ENV_KEY,
   OPENAI_CODEX_OAUTH_FILE_ENV_KEY,
 ] as const
@@ -140,6 +142,15 @@ function getPresetModelContextWindows(presetId: string): Record<string, number> 
   return PROVIDER_PRESETS.find((preset) => preset.id === presetId)?.modelContextWindows ?? {}
 }
 
+function getPresetModelEffortConfigs(
+  presetId: string,
+): Record<string, unknown> {
+  return (
+    (PROVIDER_PRESETS.find((preset) => preset.id === presetId)
+      ?.modelEffortConfigs as Record<string, unknown>) ?? {}
+  )
+}
+
 export function buildProviderAuthEnv(
   provider: SavedProvider,
   presetDefaultEnv: Record<string, string>,
@@ -199,6 +210,10 @@ export function buildProviderManagedEnv(
     ...getPresetModelContextWindows(provider.presetId),
     ...(provider.modelContextWindows ?? {}),
   }
+  const modelEffortConfigs = {
+    ...getPresetModelEffortConfigs(provider.presetId),
+    ...(provider.modelEffortConfigs ?? {}),
+  }
 
   const presetDefaultEnv = getPresetDefaultEnv(provider.presetId)
   const customProviderCapabilityEnv =
@@ -219,6 +234,9 @@ export function buildProviderManagedEnv(
     ...(Object.keys(modelContextWindows).length > 0 && {
       [MODEL_CONTEXT_WINDOWS_ENV_KEY]: JSON.stringify(modelContextWindows),
     }),
+    ...(Object.keys(modelEffortConfigs).length > 0 && {
+      [MODEL_EFFORT_CONFIGS_ENV_KEY]: JSON.stringify(modelEffortConfigs),
+    }),
     ANTHROPIC_BASE_URL: baseUrl,
     ...buildProviderAuthEnv(provider, presetDefaultEnv, needsProxy),
     ANTHROPIC_MODEL: models.main,
@@ -234,7 +252,7 @@ export function readActiveProviderManagedEnv(
   options?: { serverPort?: number },
 ): Record<string, string> | null {
   try {
-    const raw = fs.readFileSync(path.join(configDir, 'cc-haha', 'providers.json'), 'utf-8')
+    const raw = fs.readFileSync(path.join(configDir, 'providers', 'providers.json'), 'utf-8')
     const index = normalizeProvidersIndex(JSON.parse(raw))
     if (!index?.activeId) return null
 

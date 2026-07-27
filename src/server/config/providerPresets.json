@@ -38,6 +38,21 @@
       "deepseek-v4-flash": 1000000,
       "deepseek-chat": 1000000,
       "deepseek-reasoner": 1000000
+    },
+    "modelEffortConfigs": {
+      "deepseek-v4-pro": {
+        "levels": ["minimal", "low", "medium", "high", "xhigh", "max"]
+      },
+      "deepseek-v4-flash": {
+        "levels": ["minimal", "low", "medium", "high", "xhigh"]
+      },
+      "deepseek-chat": {
+        "levels": ["minimal", "low", "medium", "high", "xhigh"]
+      },
+      "deepseek-reasoner": {
+        "levels": ["low", "medium", "high"],
+        "defaultLevel": "high"
+      }
     }
   },
   {
@@ -54,15 +69,27 @@
     "needsApiKey": true,
     "websiteUrl": "https://open.bigmodel.cn",
     "apiKeyUrl": "https://www.bigmodel.cn/invite?icode=d41B2qi8Z5xNwTGLNPPF3OZLO2QH3C0EBTSr%2BArzMw4%3D",
-    "promoText": "智谱 GLM 为 cc-haha 用户准备了专属邀请福利，使用此链接注册后可领取新用户权益。",
+    "promoText": "智谱 GLM 为 Claude Code 用户准备了专属邀请福利，使用此链接注册后可领取新用户权益。",
     "authStrategy": "auth_token",
-    "defaultEnv": {
-      "CC_HAHA_SEND_DISABLED_THINKING": "1"
-    },
+    "defaultEnv": {},
     "modelContextWindows": {
       "glm-5.1": 200000,
       "glm-5-turbo": 200000,
       "glm-4.5-air": 128000
+    },
+    "modelEffortConfigs": {
+      "glm-5.1": {
+        "levels": ["low", "medium", "high", "xhigh"],
+        "defaultLevel": "high"
+      },
+      "glm-5-turbo": {
+        "levels": ["low", "medium", "high"],
+        "defaultLevel": "high"
+      },
+      "glm-4.5-air": {
+        "levels": ["low", "medium"],
+        "defaultLevel": "medium"
+      }
     }
   },
   {
@@ -80,9 +107,7 @@
     "websiteUrl": "https://platform.moonshot.cn",
     "apiKeyUrl": "https://platform.kimi.com/console/api-keys",
     "authStrategy": "auth_token",
-    "defaultEnv": {
-      "CC_HAHA_SEND_DISABLED_THINKING": "1"
-    },
+    "defaultEnv": {},
     "modelContextWindows": {
       "kimi-k2.6": 262144,
       "kimi-k2.5": 262144,
@@ -90,6 +115,20 @@
       "kimi-k2-turbo-preview": 262144,
       "kimi-k2-thinking": 262144,
       "kimi-k2-thinking-turbo": 262144
+    },
+    "modelEffortConfigs": {
+      "kimi-k2.6": {
+        "levels": ["low", "medium", "high", "xhigh", "max"],
+        "defaultLevel": "high"
+      },
+      "kimi-k2.5": {
+        "levels": ["low", "medium", "high"],
+        "defaultLevel": "high"
+      },
+      "kimi-k2-thinking": {
+        "levels": ["low", "medium", "high", "xhigh", "max"],
+        "defaultLevel": "high"
+      }
     }
   },
   {
@@ -115,6 +154,12 @@
       "MiniMax-M2.1": 204800,
       "MiniMax-M2.1-highspeed": 204800,
       "MiniMax-M2": 204800
+    },
+    "modelEffortConfigs": {
+      "MiniMax-M2.7": {
+        "levels": ["minimal", "low", "medium", "high", "xhigh", "max"],
+        "defaultLevel": "high"
+      }
     }
   },
   {
@@ -131,7 +176,7 @@
     "needsApiKey": true,
     "websiteUrl": "https://jiekou.ai",
     "apiKeyUrl": "https://jiekou.ai/referral?invited_code=OBNU3K",
-    "promoText": "接口AI为 cc-haha 的用户提供官方资源与稳定高性能体验，订阅包价格为官方 8 折；绑定 GitHub 后还可领取 3 美元优惠券。",
+    "promoText": "接口AI提供官方资源与稳定高性能体验，订阅包价格为官方 8 折；绑定 GitHub 后还可领取 3 美元优惠券。",
     "featured": true,
     "authStrategy": "auth_token",
     "defaultEnv": {
@@ -158,7 +203,7 @@
     "needsApiKey": true,
     "websiteUrl": "https://www.shengsuanyun.com",
     "apiKeyUrl": "https://www.shengsuanyun.com/?from=CH_LEJ88KWR",
-    "promoText": "胜算云为 cc-haha 的用户提供了特别福利，使用此链接注册的新用户可获 10 元模力及首充 10% 赠送！",
+    "promoText": "胜算云为 Claude Code 用户提供了特别福利，使用此链接注册的新用户可获 10 元模力及首充 10% 赠送！",
     "featured": true,
     "authStrategy": "auth_token",
     "defaultEnv": {

@@ -6,18 +6,48 @@ import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/grow
 import { getAPIProvider } from './model/providers.js'
 import { get3PModelCapabilityOverride } from './model/modelSupportOverrides.js'
 import { isEnvTruthy } from './envUtils.js'
+import { getCanonicalName } from './model/model.js'
+import { MODEL_EFFORT_CONFIGS_ENV_KEY } from './model/modelContextWindows.js'
 import type { EffortLevel } from 'src/entrypoints/sdk/runtimeTypes.js'
 
 export type { EffortLevel }
 
 export const EFFORT_LEVELS = [
+  'minimal',
   'low',
   'medium',
   'high',
+  'xhigh',
   'max',
 ] as const satisfies readonly EffortLevel[]
 
 export type EffortValue = EffortLevel | number
+
+/**
+ * Per-model effort configuration, defining supported effort levels
+ * and the mapping from generic effort levels to provider wire values.
+ */
+export interface ModelEffortConfig {
+  levels: EffortLevel[]
+  defaultLevel?: EffortLevel
+  /**
+   * Maps generic effort levels to provider wire values.
+   * Key is the generic EffortLevel, value is the wire format (e.g. 'low' for Anthropic).
+   * The wire value may differ from the key (e.g. 'xhigh' → 'max').
+   */
+  wireMap?: Partial<Record<EffortLevel, string>>
+}
+
+// Default Anthropic API wire mapping for extended effort levels.
+// Anthropic output_config.effort supports: low, medium, high, max
+export const ANTHROPIC_EFFORT_WIRE_MAP: Record<EffortLevel, string> = {
+  minimal: 'low',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'max',
+  max: 'max',
+}
 
 // @[MODEL LAUNCH]: Add the new model to the allowlist if it supports the effort parameter.
 export function modelSupportsEffort(model: string): boolean {
@@ -28,6 +58,15 @@ export function modelSupportsEffort(model: string): boolean {
   const supported3P = get3PModelCapabilityOverride(model, 'effort')
   if (supported3P !== undefined) {
     return supported3P
+  }
+  // Check dynamic model effort config from provider presets
+  const configs = resolveModelEffortConfigs()
+  const canonical = getCanonicalName(model)
+  if (configs[canonical]?.levels) return true
+  for (const [key, config] of Object.entries(configs)) {
+    if ((canonical.startsWith(key) || canonical.includes(key)) && config.levels) {
+      return true
+    }
   }
   // Supported by a subset of Claude 4 models
   if (m.includes('opus-4-6') || m.includes('sonnet-4-6')) {
@@ -55,6 +94,9 @@ export function modelSupportsMaxEffort(model: string): boolean {
   if (supported3P !== undefined) {
     return supported3P
   }
+  // Check dynamic model effort config from provider presets
+  const supported = getModelSupportedEfforts(model)
+  if (supported.includes('max')) return true
   if (model.toLowerCase().includes('opus-4-6')) {
     return true
   }
@@ -62,6 +104,156 @@ export function modelSupportsMaxEffort(model: string): boolean {
     return true
   }
   return false
+}
+
+/**
+ * Resolve per-model effort configuration, merging:
+ * 1. ~/.claude/settings.json modelEffortConfigs (user settings)
+ * 2. CLAUDE_CODE_MODEL_EFFORT_CONFIGS env var
+ * Settings take precedence over env var.
+ */
+function resolveModelEffortConfigs(): Record<string, ModelEffortConfig> {
+  const configs: Record<string, ModelEffortConfig> = {}
+
+  // 1. Env var (lower priority)
+  const raw = process.env[MODEL_EFFORT_CONFIGS_ENV_KEY]
+  if (raw) {
+    try {
+      Object.assign(configs, JSON.parse(raw))
+    } catch {
+      // Invalid JSON, ignore
+    }
+  }
+
+  // 2. Settings (higher priority, overrides env var)
+  const settingsConfigs = getInitialSettings().modelEffortConfigs
+  if (settingsConfigs) {
+    for (const [key, value] of Object.entries(settingsConfigs)) {
+      configs[key] = value as ModelEffortConfig
+    }
+  }
+
+  return configs
+}
+
+/**
+ * Check if a model name suggests it supports 'max' effort (static heuristic,
+ * used as fallback when no dynamic config is available).
+ */
+function modelNameSupportsMax(model: string): boolean {
+  const m = model.toLowerCase()
+  if (m.includes('opus-4-6')) return true
+  if (process.env.USER_TYPE === 'ant' && resolveAntModel(model)) return true
+  return false
+}
+
+/**
+ * Get supported effort levels for a given model.
+ * Checks: 1) model-specific config from env, 2) model id prefix matching,
+ * 3) falls back to default levels (minus 'max' for non-Opus models).
+ */
+export function getModelSupportedEfforts(model: string): EffortLevel[] {
+  const configs = resolveModelEffortConfigs()
+  const canonical = getCanonicalName(model)
+
+  // Exact match first
+  if (configs[canonical]?.levels) {
+    return configs[canonical].levels
+  }
+  // Prefix match
+  for (const [key, config] of Object.entries(configs)) {
+    if (canonical.startsWith(key) || canonical.includes(key)) {
+      if (config.levels) return config.levels
+    }
+  }
+
+  // Fallback: default to all levels minus 'max' for non-Opus models
+  if (modelNameSupportsMax(model)) {
+    return [...EFFORT_LEVELS]
+  }
+  return EFFORT_LEVELS.filter((l) => l !== 'max')
+}
+
+/**
+ * Get the default effort level for a model from config, if any.
+ */
+export function getModelDefaultEffortLevel(
+  model: string,
+): EffortLevel | undefined {
+  const configs = resolveModelEffortConfigs()
+  const canonical = getCanonicalName(model)
+
+  if (configs[canonical]?.defaultLevel) {
+    return configs[canonical].defaultLevel
+  }
+  for (const [key, config] of Object.entries(configs)) {
+    if (canonical.startsWith(key) || canonical.includes(key)) {
+      if (config.defaultLevel) return config.defaultLevel
+    }
+  }
+  return undefined
+}
+
+/**
+ * Clamp a requested effort value to the model's supported range.
+ * If the requested effort is not supported, finds the nearest supported level.
+ */
+export function clampEffortForModel(
+  model: string,
+  effort: EffortValue | undefined,
+): EffortValue | undefined {
+  if (effort === undefined || typeof effort === 'number') {
+    return effort
+  }
+  const supported = getModelSupportedEfforts(model)
+  if (supported.includes(effort)) {
+    return effort
+  }
+  // Find the highest supported effort that does not exceed the requested level
+  const requestedIndex = EFFORT_LEVELS.indexOf(effort)
+  if (requestedIndex === -1) return effort
+  let clamped: EffortLevel | undefined
+  for (const level of supported) {
+    const levelIndex = EFFORT_LEVELS.indexOf(level)
+    if (levelIndex > requestedIndex) break
+    clamped = level
+  }
+  return clamped ?? supported[0]
+}
+
+/**
+ * Map an extended effort level (minimal/low/medium/high/xhigh/max) to the
+ * provider's wire value. Uses model-specific wireMap if available, otherwise
+ * falls back to the default Anthropic mapping.
+ */
+export function mapEffortToWireValue(
+  model: string,
+  effort: EffortValue | undefined,
+): string | undefined {
+  if (effort === undefined || typeof effort === 'number') return undefined
+
+  const configs = resolveModelEffortConfigs()
+  const canonical = getCanonicalName(model)
+
+  // Check model-specific wireMap
+  const findWireMap = (): Partial<Record<EffortLevel, string>> | undefined => {
+    if (configs[canonical]?.wireMap) return configs[canonical].wireMap
+    for (const [key, config] of Object.entries(configs)) {
+      if (
+        (canonical.startsWith(key) || canonical.includes(key)) &&
+        config.wireMap
+      ) {
+        return config.wireMap
+      }
+    }
+    return undefined
+  }
+
+  const wireMap = findWireMap()
+  if (wireMap?.[effort]) return wireMap[effort]
+
+  // Fallback to default Anthropic mapping
+  return ANTHROPIC_EFFORT_WIRE_MAP[effort] ?? effort
 }
 
 export function isEffortLevel(value: string): value is EffortLevel {
@@ -95,7 +287,13 @@ export function parseEffortValue(value: unknown): EffortValue | undefined {
 export function toPersistableEffort(
   value: EffortValue | undefined,
 ): EffortLevel | undefined {
-  if (value === 'low' || value === 'medium' || value === 'high') {
+  if (
+    value === 'minimal' ||
+    value === 'low' ||
+    value === 'medium' ||
+    value === 'high' ||
+    value === 'xhigh'
+  ) {
     return value
   }
   if (value === 'max' && process.env.USER_TYPE === 'ant') {
@@ -159,9 +357,10 @@ export function resolveAppliedEffort(
   }
   const resolved =
     envOverride ?? appStateEffortValue ?? getDefaultEffortForModel(model)
-  // API rejects 'max' on non-Opus-4.6 models — downgrade to 'high'.
-  if (resolved === 'max' && !modelSupportsMaxEffort(model)) {
-    return 'high'
+  // Clamp to model's supported effort range (handles max→high downgrade
+  // and other unsupported levels dynamically via model config).
+  if (typeof resolved === 'string') {
+    return clampEffortForModel(model, resolved)
   }
   return resolved
 }
@@ -207,9 +406,11 @@ export function convertEffortValueToLevel(value: EffortValue): EffortLevel {
     return isEffortLevel(value) ? value : 'high'
   }
   if (process.env.USER_TYPE === 'ant' && typeof value === 'number') {
+    if (value <= 30) return 'minimal'
     if (value <= 50) return 'low'
-    if (value <= 85) return 'medium'
-    if (value <= 100) return 'high'
+    if (value <= 70) return 'medium'
+    if (value <= 85) return 'high'
+    if (value <= 100) return 'xhigh'
     return 'max'
   }
   return 'high'
@@ -223,14 +424,18 @@ export function convertEffortValueToLevel(value: EffortValue): EffortLevel {
  */
 export function getEffortLevelDescription(level: EffortLevel): string {
   switch (level) {
+    case 'minimal':
+      return 'Minimal thinking — fastest responses for simple tasks'
     case 'low':
       return 'Quick, straightforward implementation with minimal overhead'
     case 'medium':
       return 'Balanced approach with standard implementation and testing'
     case 'high':
       return 'Comprehensive implementation with extensive testing and documentation'
+    case 'xhigh':
+      return 'Extra high effort — deeper reasoning for complex tasks'
     case 'max':
-      return 'Maximum capability with deepest reasoning (Opus 4.6 only)'
+      return 'Maximum capability with deepest reasoning (supported models only)'
   }
 }
 

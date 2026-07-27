@@ -928,7 +928,7 @@ export class ConversationService {
   ): Promise<Record<string, string>> {
     // Provider isolation: when Desktop has its own provider config/index,
     // strip inherited provider env vars so the child CLI reads fresh values
-    // from ~/.claude/cc-haha/settings.json instead of stale process.env.
+    // from ~/.claude/providers/settings.json instead of stale process.env.
     //
     // If the user never configured a Desktop provider and only launched the
     // app/server with ANTHROPIC_* env vars, keep those env vars so Windows
@@ -944,7 +944,6 @@ export class ConversationService {
       'ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES',
       'ANTHROPIC_DEFAULT_OPUS_MODEL',
       'ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES',
-      'CC_HAHA_SEND_DISABLED_THINKING',
       'CLAUDE_CODE_AUTO_COMPACT_WINDOW',
       'CLAUDE_CODE_ATTRIBUTION_HEADER',
       'CLAUDE_CODE_MODEL_CONTEXT_WINDOWS',
@@ -954,7 +953,10 @@ export class ConversationService {
 
     const cleanEnv = await getProcessEnvWithTerminalShellEnvironment()
     delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN
-    if (this.shouldStripInheritedProviderEnv(options?.providerId)) {
+
+    const cliConfig = this.readCliGlobalConfig()
+
+    if (options?.providerId !== undefined || (cliConfig?.authProvider !== undefined && cliConfig.authProvider !== 'anthropic' && cliConfig.authProvider !== 'openai')) {
       for (const key of PROVIDER_ENV_KEYS) {
         delete cleanEnv[key]
       }
@@ -979,9 +981,6 @@ export class ConversationService {
       explicitProviderEnv.ANTHROPIC_MODEL = options.model.trim()
     }
 
-    // Check for CLI-managed authProvider (opencode, nvidia, openrouter, local)
-    // These are configured via CLI's /login command and stored in ~/.claude.json
-    const cliConfig = this.readCliGlobalConfig()
     const cliAuthProvider = cliConfig?.authProvider
     const isCliManagedProvider =
       cliAuthProvider !== undefined &&
@@ -1016,41 +1015,12 @@ export class ConversationService {
       CLAUDE_COWORK_MEMORY_PATH_OVERRIDE: this.resolveDesktopAutoMemoryPath(workDir),
       CALLER_DIR: workDir,
       PWD: workDir,
-      ...(sdkUrl
-        ? { CC_HAHA_COMPUTER_USE_HOST_BUNDLE_ID: 'com.claude-code-haha.desktop' }
-        : {}),
-      ...(desktopServerUrl
-        ? { CC_HAHA_DESKTOP_SERVER_URL: desktopServerUrl }
-        : {}),
-      ...(sdkUrl
-        ? {
-            CC_HAHA_DESKTOP_AWAIT_MCP: '1',
-            CC_HAHA_DESKTOP_AWAIT_MCP_TIMEOUT_MS: '5000',
-          }
-        : {}),
-      // Tell the CLI entrypoint to skip project .env loading. Provider env
-      // should come from Desktop-managed config or inherited launch env, not
-      // be reintroduced from the repo's .env file.
-      CC_HAHA_SKIP_DOTENV: '1',
       ...(explicitProviderEnv
         ? { CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: '1' }
         : {}),
-      // "官方" 模式 (cc-haha/settings.json 没 provider env) 下,把 CLI 标记为
-      // managed-OAuth,让它忽略外部 ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN
-      // 残留、只走用户 /login 的 OAuth token。自定义 provider 模式绝不能设,
-      // 否则 CLI 会忽略 provider 的 AUTH_TOKEN、错误地走 OAuth 打到第三方
-      // endpoint。详见 src/utils/auth.ts isManagedOAuthContext()。
       ...(explicitProviderEnv ?? {}),
-      // CLI-managed provider env (opencode/nvidia/openrouter/local from ~/.claude.json)
-      // takes precedence over cc-haha provider env
       ...(cliProviderEnv ?? {}),
       ...networkEnv,
-      // Skip Desktop OAuth when using CLI-managed providers (they handle their own auth)
-      ...(isCliManagedProvider
-        ? {}
-        : this.shouldMarkManagedOAuth(options?.providerId)
-          ? await this.buildOfficialOAuthEnv()
-          : {}),
       ...attributionHeaderEnv,
     }
   }
@@ -1067,131 +1037,6 @@ export class ConversationService {
         AUTO_MEMORY_DIRNAME,
       ) + path.sep
     ).normalize('NFC')
-  }
-
-  /**
-   * 官方模式下构造 CLI 子进程的 auth env:
-   * - CLAUDE_CODE_ENTRYPOINT=claude-desktop 让 CLI 忽略外部残留 ANTHROPIC_* env
-   * - 如果 haha 自管的 oauth.json 里有可用 token,注入 CLAUDE_CODE_OAUTH_TOKEN
-   *   让 CLI 直接拿 env 里的 token,不碰 Keychain,绕开 macOS ACL 静默拒绝
-   *   (这是 DMG 安装 .app 后 403 "Request not allowed" 的唯一根治方案)
-   */
-  private async buildOfficialOAuthEnv(): Promise<Record<string, string>> {
-    const env: Record<string, string> = {
-      CLAUDE_CODE_ENTRYPOINT: 'claude-desktop',
-    }
-    try {
-      // deferred import: avoids instantiating the OAuth singleton on every
-      // ConversationService construction — only loaded when official mode hits.
-      const { hahaOAuthService } = await import('./hahaOAuthService.js')
-      const token = await hahaOAuthService.ensureFreshAccessToken()
-      if (token) {
-        env.CLAUDE_CODE_OAUTH_TOKEN = token
-      }
-    } catch (err) {
-      console.error(
-        '[conversationService] ensureFreshAccessToken failed:',
-        err instanceof Error ? err.message : err,
-      )
-    }
-    return env
-  }
-
-  private shouldStripInheritedProviderEnv(providerId?: string | null): boolean {
-    if (providerId !== undefined) {
-      return true
-    }
-
-    // Check ~/.claude.json first - if CLI has a non-anthropic/non-openai authProvider,
-    // strip inherited env so CLI reads from its own config
-    const cliConfig = this.readCliGlobalConfig()
-    if (cliConfig?.authProvider && cliConfig.authProvider !== 'anthropic' && cliConfig.authProvider !== 'openai') {
-      return true
-    }
-
-    const configDir =
-      process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude')
-    const ccHahaDir = path.join(configDir, 'cc-haha')
-    const providersIndexPath = path.join(ccHahaDir, 'providers.json')
-    const settingsPath = path.join(ccHahaDir, 'settings.json')
-
-    if (fs.existsSync(providersIndexPath)) {
-      return true
-    }
-
-    try {
-      const raw = fs.readFileSync(settingsPath, 'utf-8')
-      const parsed = JSON.parse(raw) as { env?: Record<string, string> }
-      const env = parsed.env ?? {}
-      return [
-        'ANTHROPIC_API_KEY',
-        'ANTHROPIC_BASE_URL',
-        'ANTHROPIC_AUTH_TOKEN',
-        'ANTHROPIC_MODEL',
-        'ANTHROPIC_DEFAULT_HAIKU_MODEL',
-        'ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES',
-        'ANTHROPIC_DEFAULT_SONNET_MODEL',
-        'ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES',
-        'ANTHROPIC_DEFAULT_OPUS_MODEL',
-        'ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES',
-        'CC_HAHA_SEND_DISABLED_THINKING',
-        'CLAUDE_CODE_AUTO_COMPACT_WINDOW',
-        'CLAUDE_CODE_ATTRIBUTION_HEADER',
-        'CLAUDE_CODE_MODEL_CONTEXT_WINDOWS',
-        OPENAI_OAUTH_PROVIDER_ENV_KEY,
-        OPENAI_CODEX_OAUTH_FILE_ENV_KEY,
-      ].some((key) => typeof env[key] === 'string' && env[key]!.trim().length > 0)
-    } catch {
-      return false
-    }
-  }
-
-  /**
-   * 只有当用户处于"官方"模式(没有激活任何自定义 provider)时,才把 CLI 标记为
-   * managed-OAuth。激活自定义 provider 时 settings.json 里有 ANTHROPIC_AUTH_TOKEN;
-   * 这种情况下 CLI 必须按 token 路径走第三方 endpoint,不能被 managed 规则
-   * 强制切 OAuth。
-   *
-   * 默认 (读不到 settings.json) 按"官方"处理 — 即使用户从未用过 cc-haha
-   * provider 管理,也希望官方 OAuth 能正常工作。
-   */
-  private shouldMarkManagedOAuth(providerId?: string | null): boolean {
-    if (providerId === null) {
-      return true
-    }
-    if (typeof providerId === 'string') {
-      return false
-    }
-
-    // Check ~/.claude.json first - if CLI has a non-anthropic/non-openai authProvider,
-    // it manages its own auth, skip Desktop OAuth injection
-    const cliConfig = this.readCliGlobalConfig()
-    if (cliConfig?.authProvider && cliConfig.authProvider !== 'anthropic' && cliConfig.authProvider !== 'openai') {
-      return false
-    }
-
-    const configDir =
-      process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude')
-    const settingsPath = path.join(configDir, 'cc-haha', 'settings.json')
-    try {
-      const raw = fs.readFileSync(settingsPath, 'utf-8')
-      const parsed = JSON.parse(raw) as { env?: Record<string, string> }
-      const env = parsed.env ?? {}
-      if (env[OPENAI_OAUTH_PROVIDER_ENV_KEY] === '1') {
-        return false
-      }
-      const hasProviderEnv = [
-        'ANTHROPIC_API_KEY',
-        'ANTHROPIC_AUTH_TOKEN',
-        'ANTHROPIC_BASE_URL',
-      ].some(
-        (key) =>
-          typeof env[key] === 'string' && env[key]!.trim().length > 0,
-      )
-      return !hasProviderEnv
-    } catch {
-      return true
-    }
   }
 
   private resolveCliArgs(baseArgs: string[]): string[] {
@@ -1232,8 +1077,8 @@ export class ConversationService {
         ...baseArgs,
       ]
     }
-    // Try claude-haha from PATH (installed via npm/pip)
-    return ['claude-haha', ...baseArgs]
+    // No launcher found
+    return baseArgs
   }
 
   private clearStaleLock(sessionId: string): boolean {
@@ -1282,7 +1127,7 @@ export class ConversationService {
       )
     ) {
       return new ConversationStartupError(
-        'Desktop chat could not start because Claude CLI is not authenticated. Run `./bin/claude-haha /login` or provide valid API credentials, then retry.',
+        'Desktop chat could not start because Claude CLI is not authenticated. Run `/login` or provide valid API credentials, then retry.',
         'CLI_AUTH_REQUIRED',
       )
     }

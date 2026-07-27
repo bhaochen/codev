@@ -146,15 +146,14 @@ describe('cron scheduler launcher resolution', () => {
     ])
   })
 
-  it('prefers an explicit CC_HAHA_ROOT when it points at a source checkout', async () => {
+  it('resolves project root from module dir when no source checkout near cwd', async () => {
     const sourceRoot = path.join(tmpDir, 'source')
     await createSourceRoot(sourceRoot)
 
     expect(
       resolveCronProjectRoot({
         cwd: path.join(tmpDir, 'other'),
-        moduleDir: path.join(tmpDir, 'broken', 'src', 'server', 'services'),
-        env: { CC_HAHA_ROOT: sourceRoot },
+        moduleDir: path.join(sourceRoot, 'src', 'server', 'services'),
       }),
     ).toBe(sourceRoot)
   })

@@ -6,13 +6,14 @@ import {
   OPENAI_DEFAULT_SONNET_MODEL,
   getOpenAICodexContextWindowForModel,
 } from '../../services/openaiAuth/models.js'
+import * as path from 'path'
 import { MODEL_CONTEXT_WINDOWS_ENV_KEY } from '../../utils/model/modelContextWindows.js'
-import { getHahaOpenAIOAuthFilePath } from './hahaOpenAIOAuthService.js'
+import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 import type { SavedProvider } from '../types/provider.js'
 
 export const OPENAI_OFFICIAL_PROVIDER_ID = 'openai-official'
 export const OPENAI_OFFICIAL_PROVIDER_NAME = 'ChatGPT Official'
-export const OPENAI_OAUTH_PROVIDER_ENV_KEY = 'CC_HAHA_OPENAI_OAUTH_PROVIDER'
+export const OPENAI_OAUTH_PROVIDER_ENV_KEY = 'CLAUDE_CODE_OPENAI_OAUTH_PROVIDER'
 export const OPENAI_CODEX_OAUTH_FILE_ENV_KEY = 'OPENAI_CODEX_OAUTH_FILE'
 
 export function isOpenAIOfficialProviderId(
@@ -55,7 +56,7 @@ export function buildOpenAIOfficialRuntimeEnv(): Record<string, string> {
   const modelContextWindows = OPENAI_OFFICIAL_PROVIDER.modelContextWindows ?? {}
   return {
     [OPENAI_OAUTH_PROVIDER_ENV_KEY]: '1',
-    [OPENAI_CODEX_OAUTH_FILE_ENV_KEY]: getHahaOpenAIOAuthFilePath(),
+    [OPENAI_CODEX_OAUTH_FILE_ENV_KEY]: path.join(getClaudeConfigHomeDir(), 'providers', 'openai-oauth.json'),
     ...(Object.keys(modelContextWindows).length > 0 && {
       [MODEL_CONTEXT_WINDOWS_ENV_KEY]: JSON.stringify(modelContextWindows),
     }),

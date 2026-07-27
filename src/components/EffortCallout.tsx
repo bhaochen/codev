@@ -104,14 +104,20 @@ export function EffortCallout(t0) {
   let t9;
   if ($[11] === Symbol.for("react.memo_cache_sentinel")) {
     t9 = [{
+      label: <EffortOptionLabel level="minimal" text="Minimal" />,
+      value: "minimal"
+    }, {
+      label: <EffortOptionLabel level="low" text="Low" />,
+      value: "low"
+    }, {
       label: <EffortOptionLabel level="medium" text="Medium (recommended)" />,
       value: "medium"
     }, {
       label: <EffortOptionLabel level="high" text="High" />,
       value: "high"
     }, {
-      label: <EffortOptionLabel level="low" text="Low" />,
-      value: "low"
+      label: <EffortOptionLabel level="xhigh" text="Extra High" />,
+      value: "xhigh"
     }];
     $[11] = t9;
   } else {
@@ -127,21 +133,21 @@ export function EffortCallout(t0) {
   }
   let t11;
   if ($[13] === Symbol.for("react.memo_cache_sentinel")) {
-    t11 = <EffortIndicatorSymbol level="low" />;
+    t11 = <EffortIndicatorSymbol level="minimal" />;
     $[13] = t11;
   } else {
     t11 = $[13];
   }
   let t12;
   if ($[14] === Symbol.for("react.memo_cache_sentinel")) {
-    t12 = <EffortIndicatorSymbol level="medium" />;
+    t12 = <EffortIndicatorSymbol level="low" />;
     $[14] = t12;
   } else {
     t12 = $[14];
   }
   let t13;
   if ($[15] === Symbol.for("react.memo_cache_sentinel")) {
-    t13 = <Box marginBottom={1}><Text dimColor={true}>{t11} low {"\xB7"}{" "}{t12} medium {"\xB7"}{" "}<EffortIndicatorSymbol level="high" /> high</Text></Box>;
+    t13 = <Box marginBottom={1}><Text dimColor={true}>{t11} minimal {"\xB7"}{" "}{t12} low {"\xB7"}{" "}<EffortIndicatorSymbol level="medium" /> medium {"\xB7"}{" "}<EffortIndicatorSymbol level="high" /> high {"\xB7"}{" "}<EffortIndicatorSymbol level="xhigh" /> xhigh</Text></Box>;
     $[15] = t13;
   } else {
     t13 = $[15];

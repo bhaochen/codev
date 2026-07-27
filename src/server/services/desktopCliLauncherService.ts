@@ -18,7 +18,7 @@ import { execFileNoThrow } from '../../utils/execFileNoThrow.js'
 import { getShellConfigPaths } from '../../utils/shellConfig.js'
 import { getUserBinDir } from '../../utils/xdg.js'
 
-const DESKTOP_CLI_NAME = 'claude-haha'
+const DESKTOP_CLI_NAME = 'claude'
 const PATH_BLOCK_START = '# >>> Versper AI Claw PATH >>>'
 const PATH_BLOCK_END = '# <<< Versper AI Claw PATH <<<'
 const WINDOWS_PATH_TARGET = 'Windows User PATH'
@@ -298,7 +298,7 @@ SIDECAR=${quotedSource}
 APP_ROOT=${quotedAppRoot}
 
 if [[ ! -x "$SIDECAR" ]]; then
-  echo "claude-haha launcher could not find bundled sidecar: $SIDECAR" >&2
+  echo "claude launcher could not find bundled sidecar: $SIDECAR" >&2
   exit 127
 fi
 

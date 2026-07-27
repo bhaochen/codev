@@ -22,10 +22,9 @@ describe('ConversationService', () => {
   let originalPath: string | undefined
   let originalShell: string | undefined
   let originalZdotdir: string | undefined
-  let originalDisableTerminalShellEnv: string | undefined
 
   beforeEach(async () => {
-    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cc-haha-conversation-service-'))
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'conversation-service-'))
     originalConfigDir = process.env.CLAUDE_CONFIG_DIR
     originalApiKey = process.env.ANTHROPIC_API_KEY
     originalAuthToken = process.env.ANTHROPIC_AUTH_TOKEN
@@ -40,7 +39,6 @@ describe('ConversationService', () => {
     originalPath = process.env.PATH
     originalShell = process.env.SHELL
     originalZdotdir = process.env.ZDOTDIR
-    originalDisableTerminalShellEnv = process.env.CC_HAHA_DISABLE_TERMINAL_SHELL_ENV
 
     process.env.CLAUDE_CONFIG_DIR = tmpDir
     process.env.ANTHROPIC_API_KEY = 'stale-parent-api-key'
@@ -54,7 +52,7 @@ describe('ConversationService', () => {
     delete process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST
     delete process.env.CLAUDE_CODE_DIAGNOSTICS_FILE
     delete process.env.CLAUDE_CODE_ATTRIBUTION_HEADER
-    process.env.CC_HAHA_DISABLE_TERMINAL_SHELL_ENV = '1'
+
     resetTerminalShellEnvironmentCacheForTests()
   })
 
@@ -101,9 +99,6 @@ describe('ConversationService', () => {
     if (originalZdotdir === undefined) delete process.env.ZDOTDIR
     else process.env.ZDOTDIR = originalZdotdir
 
-    if (originalDisableTerminalShellEnv === undefined) delete process.env.CC_HAHA_DISABLE_TERMINAL_SHELL_ENV
-    else process.env.CC_HAHA_DISABLE_TERMINAL_SHELL_ENV = originalDisableTerminalShellEnv
-
     resetTerminalShellEnvironmentCacheForTests()
     await fs.rm(tmpDir, { recursive: true, force: true })
   })
@@ -140,7 +135,7 @@ describe('ConversationService', () => {
     expect(env.ANTHROPIC_BASE_URL).toBe('https://example.invalid/anthropic')
     expect(env.ANTHROPIC_MODEL).toBe('test-model')
     expect(env.CLAUDE_CODE_ATTRIBUTION_HEADER).toBe('0')
-    expect(env.CLAUDE_CODE_DIAGNOSTICS_FILE).toBe(path.join(tmpDir, 'cc-haha', 'diagnostics', 'cli-diagnostics.jsonl'))
+    expect(env.CLAUDE_CODE_DIAGNOSTICS_FILE).toBe(path.join(tmpDir, 'diagnostics', 'cli-diagnostics.jsonl'))
     expect(env.CLAUDE_COWORK_MEMORY_PATH_OVERRIDE).toBe(
       `${path.join(tmpDir, 'projects', 'D--workspace-code-myself-code-cc-haha', 'memory')}${path.sep}`,
     )
@@ -177,7 +172,6 @@ describe('ConversationService', () => {
       ].join('\n'),
     )
 
-    delete process.env.CC_HAHA_DISABLE_TERMINAL_SHELL_ENV
     process.env.HOME = tmpDir
     process.env.SHELL = shellPath
     process.env.PATH = '/usr/bin:/bin'
@@ -192,21 +186,30 @@ describe('ConversationService', () => {
     expect(env.PATH.split(path.delimiter)).toContain('/usr/bin')
   })
 
-  test('strips inherited provider env when desktop provider config exists', async () => {
-    const ccHahaDir = path.join(tmpDir, 'cc-haha')
-    await fs.mkdir(ccHahaDir, { recursive: true })
-    await fs.writeFile(
-      path.join(ccHahaDir, 'providers.json'),
-      JSON.stringify({ activeId: null, providers: [] }),
-      'utf-8',
-    )
+  test('strips inherited provider env when provider is selected', async () => {
+    const providerService = new ProviderService()
+    const provider = await providerService.addProvider({
+      presetId: 'custom',
+      name: 'Stripping Test',
+      apiKey: 'provider-key',
+      baseUrl: 'https://api.striptest.example',
+      apiFormat: 'anthropic',
+      models: {
+        main: 'test-model',
+        haiku: 'test-model',
+        sonnet: 'test-model',
+        opus: 'test-model',
+      },
+    })
 
     const service = new ConversationService() as any
-    const env = (await service.buildChildEnv('D:\\workspace\\code\\myself_code\\cc-haha')) as Record<string, string>
+    const env = (await service.buildChildEnv('/tmp', undefined, {
+      providerId: provider.id,
+    })) as Record<string, string>
 
-    expect(env.ANTHROPIC_AUTH_TOKEN).toBeUndefined()
-    expect(env.ANTHROPIC_BASE_URL).toBeUndefined()
-    expect(env.ANTHROPIC_MODEL).toBeUndefined()
+    expect(env.ANTHROPIC_AUTH_TOKEN).toBe('provider-key')
+    expect(env.ANTHROPIC_BASE_URL).toBe('https://api.striptest.example')
+    expect(env.ANTHROPIC_MODEL).toBe('test-model')
   })
 
   test('buildChildEnv injects General network timeout and manual proxy for CLI requests', async () => {
@@ -230,56 +233,6 @@ describe('ConversationService', () => {
     expect(env.API_TIMEOUT_MS).toBe('180000')
     expect(env.HTTP_PROXY).toBe('http://127.0.0.1:7890')
     expect(env.HTTPS_PROXY).toBe('http://127.0.0.1:7890')
-  })
-
-  test('buildChildEnv injects CLAUDE_CODE_OAUTH_TOKEN when official mode + haha oauth token exists', async () => {
-    const ccHahaDir = path.join(tmpDir, 'cc-haha')
-    await fs.mkdir(ccHahaDir, { recursive: true })
-    await fs.writeFile(
-      path.join(ccHahaDir, 'settings.json'),
-      JSON.stringify({ env: {} }),
-      'utf-8',
-    )
-
-    const { hahaOAuthService } = await import('../services/hahaOAuthService.js')
-    await hahaOAuthService.saveTokens({
-      accessToken: 'haha-fresh-token',
-      refreshToken: 'haha-refresh-xxx',
-      expiresAt: Date.now() + 30 * 60_000,
-      scopes: ['user:inference'],
-      subscriptionType: 'max',
-    })
-
-    const service = new ConversationService() as any
-    const env = (await service.buildChildEnv('/tmp')) as Record<string, string>
-
-    expect(env.CLAUDE_CODE_ENTRYPOINT).toBe('claude-desktop')
-    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe('haha-fresh-token')
-  })
-
-  test('buildChildEnv does NOT inject CLAUDE_CODE_OAUTH_TOKEN when not official mode', async () => {
-    const ccHahaDir = path.join(tmpDir, 'cc-haha')
-    await fs.mkdir(ccHahaDir, { recursive: true })
-    await fs.writeFile(
-      path.join(ccHahaDir, 'settings.json'),
-      JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: 'custom-provider-token' } }),
-      'utf-8',
-    )
-
-    const { hahaOAuthService } = await import('../services/hahaOAuthService.js')
-    await hahaOAuthService.saveTokens({
-      accessToken: 'haha-token-should-not-be-used',
-      refreshToken: null,
-      expiresAt: null,
-      scopes: [],
-      subscriptionType: null,
-    })
-
-    const service = new ConversationService() as any
-    const env = (await service.buildChildEnv('/tmp')) as Record<string, string>
-
-    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined()
-    expect(env.CLAUDE_CODE_ENTRYPOINT).toBeUndefined()
   })
 
   test('buildChildEnv injects explicit provider runtime env for session-scoped providers', async () => {
@@ -409,66 +362,15 @@ describe('ConversationService', () => {
     expect(env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC).toBe('1')
   })
 
-  test('buildChildEnv can force official auth even when a custom default provider exists', async () => {
-    const ccHahaDir = path.join(tmpDir, 'cc-haha')
-    await fs.mkdir(ccHahaDir, { recursive: true })
-    await fs.writeFile(
-      path.join(ccHahaDir, 'settings.json'),
-      JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: 'custom-provider-token' } }),
-      'utf-8',
-    )
-
-    const { hahaOAuthService } = await import('../services/hahaOAuthService.js')
-    await hahaOAuthService.saveTokens({
-      accessToken: 'forced-official-token',
-      refreshToken: 'forced-official-refresh',
-      expiresAt: Date.now() + 30 * 60_000,
-      scopes: ['user:inference'],
-      subscriptionType: 'max',
-    })
-
-    const service = new ConversationService() as any
-    const env = (await service.buildChildEnv('/tmp', undefined, {
-      providerId: null,
-    })) as Record<string, string>
-
-    expect(env.ANTHROPIC_API_KEY).toBeUndefined()
-    expect(env.CLAUDE_CODE_ENTRYPOINT).toBe('claude-desktop')
-    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe('forced-official-token')
-  })
-
-  test('buildChildEnv does not inject Claude OAuth when ChatGPT Official is active', async () => {
-    const providerService = new ProviderService()
-    await providerService.activateProvider('openai-official')
-
-    const { hahaOAuthService } = await import('../services/hahaOAuthService.js')
-    await hahaOAuthService.saveTokens({
-      accessToken: 'claude-oauth-token-that-must-not-be-used',
-      refreshToken: 'claude-refresh-token',
-      expiresAt: Date.now() + 30 * 60_000,
-      scopes: ['user:inference'],
-      subscriptionType: 'max',
-    })
-
-    const service = new ConversationService() as any
-    const env = (await service.buildChildEnv('/tmp')) as Record<string, string>
-
-    expect(env.ANTHROPIC_API_KEY).toBeUndefined()
-    expect(env.ANTHROPIC_AUTH_TOKEN).toBeUndefined()
-    expect(env.ANTHROPIC_BASE_URL).toBeUndefined()
-    expect(env.CLAUDE_CODE_ENTRYPOINT).toBeUndefined()
-    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined()
-  })
-
   test('buildChildEnv injects ChatGPT Official runtime env for session-scoped provider selection', async () => {
     const service = new ConversationService() as any
     const env = (await service.buildChildEnv('/tmp', undefined, {
       providerId: 'openai-official',
     })) as Record<string, string>
 
-    expect(env.CC_HAHA_OPENAI_OAUTH_PROVIDER).toBe('1')
+    expect(env.CLAUDE_CODE_OPENAI_OAUTH_PROVIDER).toBe('1')
     expect(env.OPENAI_CODEX_OAUTH_FILE).toBe(
-      path.join(tmpDir, 'cc-haha', 'openai-oauth.json'),
+      path.join(tmpDir, 'providers', 'openai-oauth.json'),
     )
     expect(env.ANTHROPIC_MODEL).toBe('gpt-5.3-codex')
     expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('gpt-5.4')
@@ -481,7 +383,7 @@ describe('ConversationService', () => {
   })
 
   test('buildChildEnv does not leak inherited CLAUDE_CODE_OAUTH_TOKEN when official token is unavailable', async () => {
-    const ccHahaDir = path.join(tmpDir, 'cc-haha')
+    const ccHahaDir = path.join(tmpDir, 'providers')
     await fs.mkdir(ccHahaDir, { recursive: true })
     await fs.writeFile(
       path.join(ccHahaDir, 'settings.json'),
@@ -492,21 +394,17 @@ describe('ConversationService', () => {
     const service = new ConversationService() as any
     const env = (await service.buildChildEnv('/tmp')) as Record<string, string>
 
-    expect(env.CLAUDE_CODE_ENTRYPOINT).toBe('claude-desktop')
+    expect(env.CLAUDE_CODE_ENTRYPOINT).toBeUndefined()
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined()
   })
 
-  test('buildChildEnv injects desktop Computer Use host bundle id for sdk sessions', async () => {
+  test('buildChildEnv enables SDK file checkpointing for SDK sessions', async () => {
     const service = new ConversationService() as any
     const env = (await service.buildChildEnv(
       '/tmp',
       'ws://127.0.0.1:3456/sdk/test-session?token=test-token',
     )) as Record<string, string>
 
-    expect(env.CC_HAHA_COMPUTER_USE_HOST_BUNDLE_ID).toBe(
-      'com.claude-code-haha.desktop',
-    )
-    expect(env.CC_HAHA_DESKTOP_SERVER_URL).toBe('http://127.0.0.1:3456')
     expect(env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING).toBe('1')
   })
 
@@ -520,7 +418,7 @@ describe('ConversationService', () => {
       expect(args[2]).toContain('preload.ts')
       expect(args[3]).toContain(path.join('src', 'entrypoints', 'cli.tsx'))
     } else {
-      expect(args[0]).toContain(path.join('bin', 'claude-haha'))
+      expect(args[0]).toBe(process.execPath)
     }
   })
 
@@ -536,17 +434,6 @@ describe('ConversationService', () => {
     expect(args).toContain('--include-partial-messages')
     expect(args).toContain('--sdk-url')
     expect(args).toContain('--replay-user-messages')
-  })
-
-  test('buildChildEnv asks desktop SDK sessions to wait briefly for MCP tools', async () => {
-    const service = new ConversationService() as any
-    const env = (await service.buildChildEnv(
-      '/tmp',
-      'ws://127.0.0.1:3456/sdk/test-session?token=test-token',
-    )) as Record<string, string>
-
-    expect(env.CC_HAHA_DESKTOP_AWAIT_MCP).toBe('1')
-    expect(env.CC_HAHA_DESKTOP_AWAIT_MCP_TIMEOUT_MS).toBe('5000')
   })
 
   test('buildSessionCliArgs forwards the selected runtime model and effort to the CLI process', () => {

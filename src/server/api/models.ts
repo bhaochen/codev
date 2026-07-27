@@ -43,7 +43,7 @@ const DEFAULT_MODELS = [
   },
 ] as const
 
-const EFFORT_LEVELS = ['low', 'medium', 'high', 'max'] as const
+const EFFORT_LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
 
 const DEFAULT_MODEL = 'claude-opus-4-7'
 const DEFAULT_EFFORT = 'medium'
@@ -408,7 +408,7 @@ async function handleCurrentModel(req: Request): Promise<Response> {
       currentModelId = explicitModel || env.ANTHROPIC_MODEL || 'gpt-5.3-codex'
       currentModelName = currentModelId
     } else if (activeProvider) {
-      // Provider is active — only use the provider-managed cc-haha settings.
+      // Provider is active — only use the provider-managed settings.
       // This avoids leaking global ~/.claude/settings.json model choices into
       // the active provider flow.
       const providerEnvModel = env.ANTHROPIC_MODEL

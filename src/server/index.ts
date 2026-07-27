@@ -13,8 +13,6 @@ import { teamWatcher } from './services/teamWatcher.js'
 import { cronScheduler } from './services/cronScheduler.js'
 import { handleProxyRequest } from './proxy/handler.js'
 import { ProviderService } from './services/providerService.js'
-import { handleHahaOAuthCallback } from './api/haha-oauth.js'
-import { handleHahaOpenAIOAuthCallback } from './api/haha-openai-oauth.js'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { OPENAI_CODEX_REDIRECT_PATH } from '../services/openaiAuth/client.js'
@@ -268,17 +266,6 @@ export function startServer(port = PORT, host = HOST) {
           })
           if (upgraded) return undefined
           return new Response('WebSocket upgrade failed', { status: 400 })
-        }
-
-        if (url.pathname === '/callback') {
-          return handleHahaOAuthCallback(url)
-        }
-
-        if (
-          url.pathname === OPENAI_CODEX_REDIRECT_PATH ||
-          url.pathname === '/callback/openai'
-        ) {
-          return handleHahaOpenAIOAuthCallback(url)
         }
 
         // REST API

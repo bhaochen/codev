@@ -429,7 +429,9 @@ function EffortLevelIndicator(t0) {
   return t4;
 }
 function cycleEffortLevel(current: EffortLevel, direction: 'left' | 'right', includeMax: boolean): EffortLevel {
-  const levels: EffortLevel[] = includeMax ? ['low', 'medium', 'high', 'max'] : ['low', 'medium', 'high'];
+  const levels: EffortLevel[] = includeMax
+    ? ['minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+    : ['minimal', 'low', 'medium', 'high', 'xhigh'];
   // If the current level isn't in the cycle (e.g. 'max' after switching to a
   // non-Opus model), clamp to 'high'.
   const idx = levels.indexOf(current);

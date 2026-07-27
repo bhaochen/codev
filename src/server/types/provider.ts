@@ -1,7 +1,7 @@
 /**
  * Provider types — preset-based provider configuration.
  *
- * Providers are stored in ~/.claude/cc-haha/providers.json as a lightweight index.
+ * Providers are stored in ~/.claude/providers/providers.json as a lightweight index.
  * The active provider's env vars are written to ~/.claude/settings.json.
  */
 
@@ -41,6 +41,23 @@ export const ModelContextWindowsSchema = z.record(
   z.string().min(1),
   z.number().int().min(16000).max(10000000),
 )
+const ModelEffortLevelSchema = z.enum([
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+])
+const ModelEffortConfigSchema = z.object({
+  levels: z.array(ModelEffortLevelSchema).min(1).max(6),
+  defaultLevel: ModelEffortLevelSchema.optional(),
+  wireMap: z.record(ModelEffortLevelSchema, z.string()).optional(),
+})
+export const ModelEffortConfigsSchema = z.record(
+  z.string().min(1),
+  ModelEffortConfigSchema,
+)
 
 export const SavedProviderSchema = z.object({
   id: z.string(),
@@ -54,6 +71,7 @@ export const SavedProviderSchema = z.object({
   models: ModelMappingSchema,
   autoCompactWindow: AutoCompactWindowSchema.optional(),
   modelContextWindows: ModelContextWindowsSchema.optional(),
+  modelEffortConfigs: ModelEffortConfigsSchema.optional(),
   notes: z.string().optional(),
 })
 
@@ -74,6 +92,7 @@ export const CreateProviderSchema = z.object({
   models: ModelMappingSchema,
   autoCompactWindow: AutoCompactWindowSchema.optional(),
   modelContextWindows: ModelContextWindowsSchema.optional(),
+  modelEffortConfigs: ModelEffortConfigsSchema.optional(),
   notes: z.string().optional(),
 })
 
@@ -87,6 +106,7 @@ export const UpdateProviderSchema = z.object({
   models: ModelMappingSchema.optional(),
   autoCompactWindow: AutoCompactWindowSchema.nullable().optional(),
   modelContextWindows: ModelContextWindowsSchema.nullable().optional(),
+  modelEffortConfigs: ModelEffortConfigsSchema.nullable().optional(),
   notes: z.string().optional(),
 })
 

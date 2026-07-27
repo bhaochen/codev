@@ -210,7 +210,9 @@ export function SearchableModelPicker({
   }
 
   function cycleEffortLevel(current: EffortLevel, direction: 'left' | 'right', includeMax: boolean): EffortLevel {
-    const levels: EffortLevel[] = includeMax ? ['low', 'medium', 'high', 'max'] : ['low', 'medium', 'high']
+    const levels: EffortLevel[] = includeMax
+      ? ['minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+      : ['minimal', 'low', 'medium', 'high', 'xhigh']
     const idx = levels.indexOf(current)
     const currentIndex = idx !== -1 ? idx : levels.indexOf('high')
     if (direction === 'right') {

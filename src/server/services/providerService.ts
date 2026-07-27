@@ -1,8 +1,8 @@
 /**
  * Provider Service — preset-based provider configuration
  *
- * Storage: ~/.claude/cc-haha/providers.json (lightweight index)
- * Active provider env vars written to ~/.claude/cc-haha/settings.json
+ * Storage: ~/.claude/providers/providers.json (lightweight index)
+ * Active provider env vars written to ~/.claude/providers/settings.json
  * (isolated from the original Claude Code's ~/.claude/settings.json)
  */
 
@@ -21,7 +21,6 @@ import {
   OPENAI_OFFICIAL_PROVIDER,
   isOpenAIOfficialProviderId,
 } from './openaiOfficialProvider.js'
-import { hahaOpenAIOAuthService } from './hahaOpenAIOAuthService.js'
 import {
   CURRENT_PROVIDER_INDEX_SCHEMA_VERSION,
   ensurePersistentStorageUpgraded,
@@ -75,12 +74,12 @@ export class ProviderService {
     return process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude')
   }
 
-  private getCcHahaDir(): string {
-    return path.join(this.getConfigDir(), 'cc-haha')
+  private getStorageDir(): string {
+    return path.join(this.getConfigDir(), 'providers')
   }
 
   private getIndexPath(): string {
-    return path.join(this.getCcHahaDir(), 'providers.json')
+    return path.join(this.getStorageDir(), 'providers.json')
   }
 
   /**
@@ -236,6 +235,7 @@ export class ProviderService {
       models: normalizeModelMapping(input.models),
       ...(input.autoCompactWindow !== undefined && { autoCompactWindow: input.autoCompactWindow }),
       ...(input.modelContextWindows !== undefined && { modelContextWindows: input.modelContextWindows }),
+      ...(input.modelEffortConfigs !== undefined && { modelEffortConfigs: input.modelEffortConfigs }),
       ...(input.notes !== undefined && { notes: input.notes }),
     }
 
@@ -261,6 +261,7 @@ export class ProviderService {
       ...(input.models !== undefined && { models: normalizeModelMapping(input.models) }),
       ...(typeof input.autoCompactWindow === 'number' && { autoCompactWindow: input.autoCompactWindow }),
       ...(input.modelContextWindows !== undefined && input.modelContextWindows !== null && { modelContextWindows: input.modelContextWindows }),
+      ...(input.modelEffortConfigs !== undefined && input.modelEffortConfigs !== null && { modelEffortConfigs: input.modelEffortConfigs }),
       ...(input.notes !== undefined && { notes: input.notes }),
     }
     if (input.autoCompactWindow === null) {
@@ -268,6 +269,9 @@ export class ProviderService {
     }
     if (input.modelContextWindows === null) {
       delete updated.modelContextWindows
+    }
+    if (input.modelEffortConfigs === null) {
+      delete updated.modelEffortConfigs
     }
 
     index.providers[idx] = updated
@@ -391,33 +395,32 @@ export class ProviderService {
 
   /**
    * Check whether any usable auth exists:
-   *  1. A cc-haha provider is active → has auth
+   *  1. A provider is active → has auth
    *  2. Original ~/.claude/settings.json has ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY → has auth
    *  3. process.env already has ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN → has auth
    *  4. None of the above → needs setup
    */
   async checkAuthStatus(): Promise<{
     hasAuth: boolean
-    source: 'cc-haha-provider' | 'openai-oauth' | 'original-settings' | 'env' | 'none'
+    source: 'active-provider' | 'openai-oauth' | 'original-settings' | 'env' | 'none'
     activeProvider?: string
   }> {
-    // 1. Check cc-haha active provider
+    // 1. Check active provider
     const index = await this.readIndex()
     if (index.activeId) {
       if (isOpenAIOfficialProviderId(index.activeId)) {
-        const tokens = await hahaOpenAIOAuthService.ensureFreshTokens()
-        if (tokens?.accessToken && tokens.refreshToken) {
-          return {
-            hasAuth: true,
-            source: 'openai-oauth',
-            activeProvider: OPENAI_OFFICIAL_PROVIDER.name,
+        // Check for existing OpenAI OAuth token file
+        const oauthPath = path.join(this.getConfigDir(), 'providers', 'openai-oauth.json')
+        try {
+          const raw = await fs.readFile(oauthPath, 'utf-8')
+          const tokens = JSON.parse(raw) as { accessToken?: string; expiresAt?: number }
+          if (tokens.accessToken && tokens.expiresAt && tokens.expiresAt > Date.now()) {
+            return { hasAuth: true, source: 'openai-oauth', activeProvider: OPENAI_OFFICIAL_PROVIDER.name }
           }
+        } catch {
+          // File doesn't exist or invalid — no auth
         }
-        return {
-          hasAuth: false,
-          source: 'none',
-          activeProvider: OPENAI_OFFICIAL_PROVIDER.name,
-        }
+        return { hasAuth: false, source: 'none', activeProvider: OPENAI_OFFICIAL_PROVIDER.name }
       }
 
       const provider = index.providers.find(p => p.id === index.activeId)
@@ -426,7 +429,7 @@ export class ProviderService {
         const needsProxy = provider.apiFormat != null && provider.apiFormat !== 'anthropic'
         const authEnv = buildProviderAuthEnv(provider, presetDefaultEnv, needsProxy)
         if (Object.values(authEnv).some(value => value.length > 0)) {
-          return { hasAuth: true, source: 'cc-haha-provider', activeProvider: provider.name }
+          return { hasAuth: true, source: 'active-provider', activeProvider: provider.name }
         }
       }
     }

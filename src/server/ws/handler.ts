@@ -785,12 +785,7 @@ function cleanupSessionRuntimeState(sessionId: string) {
 }
 
 function getPrewarmIdleTimeoutMs(): number {
-  const raw = process.env.CC_HAHA_PREWARM_IDLE_TIMEOUT_MS
-  if (!raw) return DEFAULT_PREWARM_IDLE_TIMEOUT_MS
-  const parsed = Number.parseInt(raw, 10)
-  return Number.isFinite(parsed) && parsed >= 0
-    ? parsed
-    : DEFAULT_PREWARM_IDLE_TIMEOUT_MS
+  return DEFAULT_PREWARM_IDLE_TIMEOUT_MS
 }
 
 function clearPrewarmState(sessionId: string) {
@@ -1746,7 +1741,7 @@ async function getRuntimeSettings(sessionId?: string): Promise<RuntimeSettings> 
 async function getDefaultRuntimeSettings(): Promise<RuntimeSettings> {
   // First check if CLI has an authProvider configured in ~/.claude.json
   // (opencode, nvidia, openrouter, local, etc.) - these take precedence
-  // over cc-haha providers since they are managed by the CLI's /login command
+  // over managed providers since they are configured by the CLI's /login command
   const cliConfig = await readCliGlobalConfig()
   if (cliConfig?.authProvider && cliConfig.authProvider !== 'anthropic' && cliConfig.authProvider !== 'openai') {
     const userSettings = await settingsService.getUserSettings()
@@ -1773,7 +1768,7 @@ async function getDefaultRuntimeSettings(): Promise<RuntimeSettings> {
     }
   }
 
-  // Check if a custom cc-haha provider is active
+  // Check if a custom provider is active
   const { providers, activeId } = await providerService.listProviders()
   let resolvedActiveId = activeId
   if (activeId && !isKnownRuntimeProviderId(activeId, providers)) {
@@ -1799,7 +1794,7 @@ async function getDefaultRuntimeSettings(): Promise<RuntimeSettings> {
 
   let model: string | undefined
   if (resolvedActiveId) {
-    // Provider is active — only consult provider-managed cc-haha settings.
+    // Provider is active — only consult provider-managed settings.
     // Global ~/.claude/settings.json model values must not bleed into provider mode.
     const baseModel =
       typeof modelSettings.model === 'string' && modelSettings.model.trim()

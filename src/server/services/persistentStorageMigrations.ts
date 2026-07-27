@@ -280,16 +280,16 @@ function buildManagedSettingsForMigratedProvider(provider: JsonObject | undefine
 
 async function migrateLegacyRootProviders(
   configDir: string,
-  ccHahaDir: string,
+  providersDir: string,
   report: MigrationReport,
 ): Promise<void> {
-  const targetPath = path.join(ccHahaDir, 'providers.json')
+  const targetPath = path.join(providersDir, 'providers.json')
   try {
     await fs.access(targetPath)
     return
   } catch (error) {
     if (errnoCode(error) !== 'ENOENT') {
-      report.failures.push(`cc-haha/providers.json: ${error instanceof Error ? error.message : String(error)}`)
+      report.failures.push(`providers/providers.json: ${error instanceof Error ? error.message : String(error)}`)
       return
     }
   }
@@ -304,9 +304,9 @@ async function migrateLegacyRootProviders(
     if (!migrated) return
 
     await writeJsonFile(targetPath, migrated)
-    report.migratedEntries.push('providers.json -> cc-haha/providers.json')
+    report.migratedEntries.push('providers.json -> providers/providers.json')
 
-    const settingsPath = path.join(ccHahaDir, 'settings.json')
+    const settingsPath = path.join(providersDir, 'settings.json')
     const settings = await readJsonFile(settingsPath).catch(() => ({ missing: false, value: undefined, raw: '' }))
     if (!settings.missing) return
 
@@ -319,7 +319,7 @@ async function migrateLegacyRootProviders(
     )
     if (managedSettings) {
       await writeJsonFile(settingsPath, managedSettings)
-      report.migratedEntries.push('providers.json -> cc-haha/settings.json')
+      report.migratedEntries.push('providers.json -> providers/settings.json')
     }
   } catch (error) {
     if (error instanceof SyntaxError) {
@@ -332,19 +332,19 @@ async function migrateLegacyRootProviders(
 
 async function runPersistentStorageMigrations(configDir: string): Promise<MigrationReport> {
   const report: MigrationReport = { migratedEntries: [], failures: [] }
-  const ccHahaDir = path.join(configDir, 'cc-haha')
+  const providersDir = path.join(configDir, 'providers')
 
-  await migrateLegacyRootProviders(configDir, ccHahaDir, report)
+  await migrateLegacyRootProviders(configDir, providersDir, report)
 
   await migrateJsonEntry(
-    path.join(ccHahaDir, 'providers.json'),
-    'cc-haha/providers.json',
+    path.join(providersDir, 'providers.json'),
+    'providers/providers.json',
     report,
     migrateProvidersIndex,
   )
   await migrateJsonEntry(
-    path.join(ccHahaDir, 'settings.json'),
-    'cc-haha/settings.json',
+    path.join(providersDir, 'settings.json'),
+    'providers/settings.json',
     report,
     migrateManagedSettings,
   )

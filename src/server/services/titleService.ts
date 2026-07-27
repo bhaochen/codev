@@ -9,7 +9,6 @@
 import { ProviderService } from './providerService.js'
 import { SettingsService } from './settingsService.js'
 import { sessionService } from './sessionService.js'
-import { hahaOpenAIOAuthService } from './hahaOpenAIOAuthService.js'
 import { isOpenAIOfficialProviderId } from './openaiOfficialProvider.js'
 import { OPENAI_CODEX_API_ENDPOINT } from '../../services/openaiAuth/client.js'
 import { resolveOpenAICodexModel } from '../../services/openaiAuth/models.js'
@@ -121,48 +120,10 @@ export async function generateTitle(
 }
 
 async function generateOpenAIOfficialTitle(
-  trimmed: string,
-  model: string,
+  _trimmed: string,
+  _model: string,
 ): Promise<string | null> {
-  const tokens = await hahaOpenAIOAuthService.ensureFreshTokens()
-  if (!tokens?.accessToken) return null
-
-  const mappedModel = resolveOpenAICodexModel(model)
-  const requestBody = anthropicToOpenaiResponses({
-    model: mappedModel,
-    max_tokens: TITLE_MAX_OUTPUT_TOKENS,
-    system: TITLE_SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: trimmed.slice(0, 2000) }],
-    stream: true,
-    thinking: { type: 'disabled' },
-  })
-  requestBody.stream = true
-  requestBody.max_output_tokens = TITLE_MAX_OUTPUT_TOKENS
-
-  const headers = new Headers()
-  headers.set('Content-Type', 'application/json')
-  headers.set('Authorization', `Bearer ${tokens.accessToken}`)
-  if (tokens.accountId) {
-    headers.set('ChatGPT-Account-Id', tokens.accountId)
-  }
-
-  const response = await fetch(OPENAI_CODEX_API_ENDPOINT, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(requestBody),
-    signal: AbortSignal.timeout(15_000),
-  })
-
-  if (!response.ok || !response.body) return null
-
-  const body = await openaiResponsesStreamToAnthropicResponse(
-    response.body,
-    mappedModel,
-  )
-  const text = body.content.find((b) => b.type === 'text')?.text
-  if (!text) return null
-
-  return parseGeneratedTitleText(text)
+  return null
 }
 
 export function parseGeneratedTitleText(text: string): string | null {

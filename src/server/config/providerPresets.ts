@@ -13,6 +13,21 @@ const ModelMappingSchema = z.object({
   opus: z.string(),
 })
 
+const ModelEffortLevelSchema = z.enum([
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+])
+
+const ModelEffortConfigSchema = z.object({
+  levels: z.array(ModelEffortLevelSchema).min(1).max(6),
+  defaultLevel: ModelEffortLevelSchema.optional(),
+  wireMap: z.record(ModelEffortLevelSchema, z.string()).optional(),
+})
+
 const ProviderPresetSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -29,6 +44,10 @@ const ProviderPresetSchema = z.object({
   modelContextWindows: z.record(
     z.string().min(1),
     z.number().int().min(16000).max(10000000),
+  ).optional(),
+  modelEffortConfigs: z.record(
+    z.string().min(1),
+    ModelEffortConfigSchema,
   ).optional(),
 })
 
