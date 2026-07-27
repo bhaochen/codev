@@ -44,7 +44,6 @@ function getCachePath(): string {
 }
 
 function isModelCapabilitiesEligible(): boolean {
-  if (process.env.USER_TYPE !== 'ant') return false
   if (getAPIProvider() !== 'firstParty') return false
   if (!isFirstPartyAnthropicBaseUrl()) return false
   return true
@@ -72,10 +71,18 @@ const loadCache = memoize(
   path => path,
 )
 
+let _refreshing = false
+
 export function getModelCapability(model: string): ModelCapability | undefined {
   if (!isModelCapabilitiesEligible()) return undefined
   const cached = loadCache(getCachePath())
-  if (!cached || cached.length === 0) return undefined
+  if (!cached || cached.length === 0) {
+    if (!_refreshing) {
+      _refreshing = true
+      void refreshModelCapabilities().finally(() => { _refreshing = false })
+    }
+    return undefined
+  }
   const m = model.toLowerCase()
   const exact = cached.find(c => c.id.toLowerCase() === m)
   if (exact) return exact

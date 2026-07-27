@@ -20,6 +20,7 @@ import { ensureDesktopCliLauncherInstalled } from './services/desktopCliLauncher
 import { enableConfigs } from '../utils/config.js'
 import { diagnosticsService } from './services/diagnosticsService.js'
 import { ensurePersistentStorageUpgraded } from './services/persistentStorageMigrations.js'
+import { refreshModelCapabilities } from '../utils/model/modelCapabilities.js'
 import { handleStaticH5Request } from './staticH5.js'
 import { classifyH5Request, shouldBlockDisabledH5Access, shouldRequireH5Token } from './h5AccessPolicy.js'
 import { H5AccessService } from './services/h5AccessService.js'
@@ -123,6 +124,7 @@ export function startServer(port = PORT, host = HOST) {
   enableConfigs()
   diagnosticsService.installConsoleCapture()
   diagnosticsService.installProcessCapture()
+  void refreshModelCapabilities()
   ProviderService.setServerPort(port)
   const localConnectHost =
     host === '0.0.0.0' || host === '127.0.0.1' || host === 'localhost'

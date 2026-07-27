@@ -291,6 +291,10 @@ async function main(): Promise<void> {
   startCapturingEarlyInput();
   profileCheckpoint('cli_before_main_import');
   const {
+    refreshModelCapabilities
+  } = await import('../utils/model/modelCapabilities.js');
+  void refreshModelCapabilities()
+  const {
     main: cliMain
   } = await import('../main.js');
   profileCheckpoint('cli_after_main_import');
