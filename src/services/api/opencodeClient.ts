@@ -15,7 +15,15 @@ const GITHUB_RELEASE_URL = 'https://api.github.com/repos/anomalyco/opencode/rele
 // 安全兜底的初始 User-Agent
 let dynamicUserAgent = 'opencode/1.15.6 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14'
 
-let cachedModels: Array<{ id: string; name?: string; isFree: boolean }> | null = null
+type CachedOpencodeModel = {
+  id: string
+  name?: string
+  isFree: boolean
+  contextWindow?: number
+  maxTokens?: number
+}
+
+let cachedModels: CachedOpencodeModel[] | null = null
 let fetchPromise: Promise<void> | null = null
 
 export async function fetchOpencodeModels(): Promise<void> {
@@ -86,6 +94,8 @@ export async function fetchOpencodeModels(): Promise<void> {
           id: modelId,
           name: config.name || modelId,
           isFree: isFreeModel,
+          contextWindow: config.limit?.context,
+          maxTokens: config.limit?.output,
         })
       }
 
@@ -95,9 +105,9 @@ export async function fetchOpencodeModels(): Promise<void> {
       if (!cachedModels) {
         // 网络极端崩溃情况下的硬编码兜底保护
         cachedModels = [
-          { id: 'big-pickle', name: 'Big Pickle', isFree: true },
-          { id: 'deepseek-v4-flash-free', name: 'DeepSeek V4 Flash Free', isFree: true },
-          { id: 'nemotron-3-super-free', name: 'Nemotron 3 Super Free', isFree: true }
+          { id: 'big-pickle', name: 'Big Pickle', isFree: true, contextWindow: 200_000, maxTokens: 32_000 },
+          { id: 'deepseek-v4-flash-free', name: 'DeepSeek V4 Flash Free', isFree: true, contextWindow: 200_000, maxTokens: 32_000 },
+          { id: 'nemotron-3-super-free', name: 'Nemotron 3 Super Free', isFree: true, contextWindow: 200_000, maxTokens: 32_000 },
         ]
       }
     } finally {
@@ -108,8 +118,20 @@ export async function fetchOpencodeModels(): Promise<void> {
   await fetchPromise
 }
 
-export function getCachedOpencodeModels(): Array<{ id: string; name?: string; isFree: boolean }> {
+export function getCachedOpencodeModels(): CachedOpencodeModel[] {
   return cachedModels || []
+}
+
+export function getOpencodeModelContextWindow(modelId: string): number | undefined {
+  if (!cachedModels) return undefined
+  const model = cachedModels.find(m => m.id === modelId)
+  return model?.contextWindow
+}
+
+export function getOpencodeModelMaxTokens(modelId: string): number | undefined {
+  if (!cachedModels) return undefined
+  const model = cachedModels.find(m => m.id === modelId)
+  return model?.maxTokens
 }
 
 type OpenAIMessage = {

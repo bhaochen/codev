@@ -44,7 +44,8 @@ function getCachePath(): string {
 }
 
 function isModelCapabilitiesEligible(): boolean {
-  if (getAPIProvider() !== 'firstParty') return false
+  const provider = getAPIProvider()
+  if (provider !== 'firstParty' && provider !== null) return false
   if (!isFirstPartyAnthropicBaseUrl()) return false
   return true
 }

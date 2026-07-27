@@ -5,6 +5,8 @@ import { isEnvTruthy } from './envUtils.js'
 import { getCanonicalName } from './model/model.js'
 import { getModelCapability } from './model/modelCapabilities.js'
 import { MODEL_CONTEXT_WINDOWS_ENV_KEY } from './model/modelContextWindows.js'
+import { getAPIProvider } from './model/providers.js'
+import { getOpencodeModelContextWindow } from '../services/api/opencodeClient.js'
 import { getInitialSettings } from './settings/settings.js'
 
 // Model context window size (200k tokens for all models right now)
@@ -82,6 +84,12 @@ export function getContextWindowForModel(
       return MODEL_CONTEXT_WINDOW_DEFAULT
     }
     return cap.max_input_tokens
+  }
+
+  // OpenCode provider — read context window from models.dev cache
+  if (getAPIProvider() === 'opencode') {
+    const ocCtx = getOpencodeModelContextWindow(model)
+    if (ocCtx) return ocCtx
   }
 
   if (betas?.includes(CONTEXT_1M_BETA_HEADER) && modelSupports1M(model)) {
