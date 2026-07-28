@@ -120,7 +120,7 @@ const command = {
     // Get default branch and enhanced PR attribution
     const [defaultBranch, prAttribution] = await Promise.all([
       getDefaultBranch(),
-      getEnhancedPRAttribution(context.getAppState),
+      getEnhancedPRAttribution(),
     ])
     let promptContent = getPromptContent(defaultBranch, prAttribution)
 
