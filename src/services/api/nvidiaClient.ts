@@ -3,7 +3,10 @@ import { getNvidiaBaseUrl } from '../../utils/model/providers.js'
 import {
   convertAnthropicMessagesToOpenAI,
   convertAnthropicToolsToOpenAI,
+  convertOpenAIResponseToAnthropic,
   convertOpenAIStreamToAnthropic,
+  createAnthropicErrorResponse,
+  estimateTokensForAnthropicBody,
   type AnthropicMessage,
 } from './copilotClient.js'
 
@@ -44,13 +47,17 @@ export function createNvidiaFetchOverride(): (input: RequestInfo | URL, init?: R
   return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = input instanceof URL ? input.href : typeof input === 'string' ? input : input.url
 
-    // Only intercept Messages API calls
-    if (!url.includes('/messages') && !url.includes('/v1/')) {
+    const pathname = new URL(url).pathname
+    // Only intercept Messages API calls — precise path matching avoids
+    // swallowing unrelated requests that happen to contain /v1/
+    const isMessagesPath =
+      pathname.endsWith('/messages') || pathname.includes('/messages/')
+    const isModelsPath = pathname.endsWith('/models')
+    if (!isMessagesPath && !isModelsPath) {
       return fetch(input, init)
     }
 
-    // Stub out token counting and model listing
-    if (url.includes('/count_tokens') || url.includes('/models')) {
+    if (isModelsPath) {
       return new Response(JSON.stringify({ input_tokens: 0 }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -66,6 +73,19 @@ export function createNvidiaFetchOverride(): (input: RequestInfo | URL, init?: R
       } catch {
         return fetch(input, init)
       }
+    }
+
+    // count_tokens: local estimate instead of 0 (0 breaks context budgeting/compact)
+    if (pathname.endsWith('/count_tokens')) {
+      return new Response(
+        JSON.stringify({
+          input_tokens: estimateTokensForAnthropicBody(anthropicBody),
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      )
     }
 
     const systemBlocks = anthropicBody.system as
@@ -103,6 +123,12 @@ export function createNvidiaFetchOverride(): (input: RequestInfo | URL, init?: R
       stream: isStreaming,
     }
 
+    // Ask the server to return a usage chunk in streaming mode, otherwise
+    // output token accounting is always 0
+    if (isStreaming) {
+      requestBody.stream_options = { include_usage: true }
+    }
+
     if (anthropicBody.max_tokens) {
       requestBody.max_tokens = anthropicBody.max_tokens
     }
@@ -131,62 +157,31 @@ export function createNvidiaFetchOverride(): (input: RequestInfo | URL, init?: R
     })
 
     if (!nvidiaResponse.ok) {
-      return nvidiaResponse
+      return createAnthropicErrorResponse(nvidiaResponse)
     }
 
     if (!isStreaming) {
       const data = (await nvidiaResponse.json()) as {
-        id: string
-        choices: Array<{
-          message: {
-            role: string
-            content: string | null
+        id?: string
+        choices?: Array<{
+          message?: {
+            content?: string | null
+            reasoning_content?: string | null
             tool_calls?: Array<{
               id: string
               function: { name: string; arguments: string }
             }>
           }
-          finish_reason: string
+          finish_reason?: string | null
         }>
-        usage?: { prompt_tokens: number; completion_tokens: number }
+        usage?: { prompt_tokens?: number; completion_tokens?: number }
       }
 
-      const choice = data.choices[0]
-      const anthropicContent: Array<{
-        type: string
-        text?: string
-        id?: string
-        name?: string
-        input?: unknown
-      }> = []
-
-      if (choice?.message?.content) {
-        anthropicContent.push({ type: 'text', text: choice.message.content })
-      }
-
-      if (choice?.message?.tool_calls) {
-        for (const tc of choice.message.tool_calls) {
-          anthropicContent.push({
-            type: 'tool_use',
-            id: tc.id,
-            name: tc.function.name,
-            input: JSON.parse(tc.function.arguments || '{}'),
-          })
-        }
-      }
-
-      const anthropicResponse = {
-        id: data.id || `msg_nvidia_${Date.now()}`,
-        type: 'message',
-        role: 'assistant',
-        content: anthropicContent,
-        model: selectedModel,
-        stop_reason: choice?.finish_reason === 'tool_calls' ? 'tool_use' : 'end_turn',
-        usage: {
-          input_tokens: data.usage?.prompt_tokens || 0,
-          output_tokens: data.usage?.completion_tokens || 0,
-        },
-      }
+      const anthropicResponse = convertOpenAIResponseToAnthropic(
+        data,
+        selectedModel,
+        'nvidia',
+      )
 
       return new Response(JSON.stringify(anthropicResponse), {
         status: 200,

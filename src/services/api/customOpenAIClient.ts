@@ -2,7 +2,10 @@ import { getGlobalConfig, type ConnectedProviderInfo } from '../../utils/config.
 import {
   convertAnthropicMessagesToOpenAI,
   convertAnthropicToolsToOpenAI,
+  convertOpenAIResponseToAnthropic,
   convertOpenAIStreamToAnthropic,
+  createAnthropicErrorResponse,
+  estimateTokensForAnthropicBody,
   type AnthropicMessage,
 } from './copilotClient.js'
 
@@ -60,11 +63,16 @@ export function createCustomOpenAIFetchOverride(
   return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = input instanceof URL ? input.href : typeof input === 'string' ? input : input.url
 
-    if (!url.includes('/messages') && !url.includes('/v1/')) {
+    const pathname = new URL(url).pathname
+    // 只拦截 Messages 系列端点；精确判断避免误伤含 /v1/ 的其他请求
+    const isMessagesPath =
+      pathname.endsWith('/messages') || pathname.includes('/messages/')
+    const isModelsPath = pathname.endsWith('/models')
+    if (!isMessagesPath && !isModelsPath) {
       return fetch(input, init)
     }
 
-    if (url.includes('/count_tokens') || url.includes('/models')) {
+    if (isModelsPath) {
       return new Response(JSON.stringify({ input_tokens: 0 }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -80,6 +88,19 @@ export function createCustomOpenAIFetchOverride(
       } catch {
         return fetch(input, init)
       }
+    }
+
+    // count_tokens：本地估算，替代 0（0 会让上下文预算/compact 失效）
+    if (pathname.endsWith('/count_tokens')) {
+      return new Response(
+        JSON.stringify({
+          input_tokens: estimateTokensForAnthropicBody(anthropicBody),
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      )
     }
 
     const systemBlocks = anthropicBody.system as
@@ -114,6 +135,11 @@ export function createCustomOpenAIFetchOverride(
       stream: isStreaming,
     }
 
+    // 流式时让服务端回传 usage chunk，否则 output_tokens 统计恒为 0
+    if (isStreaming) {
+      requestBody.stream_options = { include_usage: true }
+    }
+
     if (anthropicBody.max_tokens) {
       requestBody.max_tokens = anthropicBody.max_tokens
     }
@@ -139,62 +165,31 @@ export function createCustomOpenAIFetchOverride(
     })
 
     if (!openaiResponse.ok) {
-      return openaiResponse
+      return createAnthropicErrorResponse(openaiResponse)
     }
 
     if (!isStreaming) {
       const data = (await openaiResponse.json()) as {
-        id: string
-        choices: Array<{
-          message: {
-            role: string
-            content: string | null
+        id?: string
+        choices?: Array<{
+          message?: {
+            content?: string | null
+            reasoning_content?: string | null
             tool_calls?: Array<{
               id: string
               function: { name: string; arguments: string }
             }>
           }
-          finish_reason: string
+          finish_reason?: string | null
         }>
-        usage?: { prompt_tokens: number; completion_tokens: number }
+        usage?: { prompt_tokens?: number; completion_tokens?: number }
       }
 
-      const choice = data.choices[0]
-      const anthropicContent: Array<{
-        type: string
-        text?: string
-        id?: string
-        name?: string
-        input?: unknown
-      }> = []
-
-      if (choice?.message?.content) {
-        anthropicContent.push({ type: 'text', text: choice.message.content })
-      }
-
-      if (choice?.message?.tool_calls) {
-        for (const tc of choice.message.tool_calls) {
-          anthropicContent.push({
-            type: 'tool_use',
-            id: tc.id,
-            name: tc.function.name,
-            input: JSON.parse(tc.function.arguments || '{}'),
-          })
-        }
-      }
-
-      const anthropicResponse = {
-        id: data.id || `msg_custom_openai_${Date.now()}`,
-        type: 'message',
-        role: 'assistant',
-        content: anthropicContent,
-        model: openaiModelId,
-        stop_reason: choice?.finish_reason === 'tool_calls' ? 'tool_use' : 'end_turn',
-        usage: {
-          input_tokens: data.usage?.prompt_tokens || 0,
-          output_tokens: data.usage?.completion_tokens || 0,
-        },
-      }
+      const anthropicResponse = convertOpenAIResponseToAnthropic(
+        data,
+        openaiModelId,
+        'custom_openai',
+      )
 
       return new Response(JSON.stringify(anthropicResponse), {
         status: 200,

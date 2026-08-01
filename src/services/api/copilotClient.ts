@@ -323,6 +323,11 @@ function buildCopilotChatRequestBody(params: {
     stream: params.isStreaming,
   }
 
+  // 流式时让服务端回传 usage chunk，否则 output_tokens 统计恒为 0
+  if (params.isStreaming) {
+    requestBody.stream_options = { include_usage: true }
+  }
+
   if (params.maxTokens) {
     requestBody[params.outputTokenParam] = params.maxTokens
   }
@@ -515,15 +520,16 @@ async function sendCopilotChatCompletion(params: {
   return response
 }
 
-type OpenAIMessage = {
+export type OpenAIMessage = {
   role: 'system' | 'user' | 'assistant' | 'tool'
-  content: string | Array<{ type: string; text?: string; image_url?: { url: string } }>
+  content: string | Array<{ type: string; text?: string; image_url?: { url: string } }> | null
   tool_calls?: Array<{
     id: string
     type: 'function'
     function: { name: string; arguments: string }
   }>
   tool_call_id?: string
+  reasoning_content?: string
 }
 
 type OpenAITool = {
@@ -548,6 +554,107 @@ export type AnthropicMessage = {
   content: string | AnthropicContentBlock[]
 }
 
+/**
+ * 追加一条 OpenAI 消息，若上一条是 assistant 且当前也是 assistant 则合并
+ * （OpenAI 规范要求 user/assistant 交替，Anthropic 历史里可能出现连续 assistant 回合）。
+ */
+function pushMergedAssistant(
+  result: OpenAIMessage[],
+  msg: OpenAIMessage,
+): void {
+  const last = result[result.length - 1]
+  if (last && last.role === 'assistant' && msg.role === 'assistant') {
+    const newText = msg.content
+    if (typeof newText === 'string' && newText) {
+      last.content =
+        typeof last.content === 'string' && last.content
+          ? `${last.content}\n${newText}`
+          : newText
+    }
+    if (msg.reasoning_content) {
+      last.reasoning_content = last.reasoning_content
+        ? `${last.reasoning_content}\n${msg.reasoning_content}`
+        : msg.reasoning_content
+    }
+    if (msg.tool_calls && msg.tool_calls.length > 0) {
+      last.tool_calls = [...(last.tool_calls || []), ...msg.tool_calls]
+    }
+    return
+  }
+  result.push(msg)
+}
+
+function base64ImageUrl(source: {
+  type?: string
+  media_type?: string
+  data?: string
+}): string | undefined {
+  if (source?.type !== 'base64' || !source.media_type || !source.data) {
+    return undefined
+  }
+  return `data:${source.media_type};base64,${source.data}`
+}
+
+/**
+ * Anthropic document 块无法直接映射到 OpenAI 格式。文本型 source 提取为 text，
+ * 其余（base64 PDF 等）无法表达则丢弃，但保证不中断转换。
+ */
+function extractDocumentText(
+  doc: { source?: { type?: string; data?: unknown } },
+): string | undefined {
+  const src = doc?.source
+  if (src?.type === 'text' && typeof src.data === 'string') {
+    return src.data
+  }
+  return undefined
+}
+
+/**
+ * 规范化 tool_result 的 content：纯文本返回字符串；含图片时返回
+ * text + image_url 数组（OpenAI 的 tool message 支持数组 content）。
+ */
+function normalizeToolResultContent(
+  content: unknown,
+): string | Array<{ type: string; text?: string; image_url?: { url: string } }> {
+  if (typeof content === 'string') {
+    return content
+  }
+  if (!Array.isArray(content)) {
+    return ''
+  }
+  const textParts: string[] = []
+  const parts: Array<{ type: string; text?: string; image_url?: { url: string } }> = []
+  let hasImage = false
+  for (const c of content as Array<{
+    type?: string
+    text?: string
+    source?: { type?: string; media_type?: string; data?: string }
+  }>) {
+    if (c?.type === 'text') {
+      textParts.push(c.text ?? '')
+      parts.push({ type: 'text', text: c.text ?? '' })
+    } else if (c?.type === 'image') {
+      const url = base64ImageUrl(c.source ?? {})
+      if (url) {
+        hasImage = true
+        parts.push({ type: 'image_url', image_url: { url } })
+      }
+    } else if (c?.type === 'document') {
+      const text = extractDocumentText(c as unknown as {
+        source?: { type?: string; data?: unknown }
+      })
+      if (text) {
+        textParts.push(text)
+        parts.push({ type: 'text', text })
+      }
+    }
+  }
+  if (hasImage) {
+    return parts
+  }
+  return textParts.join('\n')
+}
+
 export function convertAnthropicMessagesToOpenAI(
   messages: AnthropicMessage[],
   systemPrompt?: string,
@@ -560,7 +667,13 @@ export function convertAnthropicMessagesToOpenAI(
 
   for (const msg of messages) {
     if (typeof msg.content === 'string') {
-      result.push({ role: msg.role, content: msg.content })
+      pushMergedAssistant(result, { role: msg.role, content: msg.content })
+      continue
+    }
+
+    // 异常输入（content 非 string 非数组）：保留消息避免破坏对话配对
+    if (!Array.isArray(msg.content)) {
+      pushMergedAssistant(result, { role: msg.role, content: null })
       continue
     }
 
@@ -572,25 +685,30 @@ export function convertAnthropicMessagesToOpenAI(
         if (block.type === 'text') {
           parts.push({ type: 'text', text: (block as { type: 'text'; text: string }).text })
         } else if (block.type === 'image') {
-          const imgBlock = block as { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
-          parts.push({
-            type: 'image_url',
-            image_url: { url: `data:${imgBlock.source.media_type};base64,${imgBlock.source.data}` },
+          const imgBlock = block as {
+            type: 'image'
+            source?: { type?: string; media_type?: string; data?: string }
+          }
+          const url = base64ImageUrl(imgBlock.source ?? {})
+          if (url) {
+            parts.push({ type: 'image_url', image_url: { url } })
+          }
+        } else if (block.type === 'document') {
+          const text = extractDocumentText(block as unknown as {
+            source?: { type?: string; data?: unknown }
           })
+          if (text) {
+            parts.push({ type: 'text', text })
+          }
         } else if (block.type === 'tool_result') {
-          const trBlock = block as { type: 'tool_result'; tool_use_id: string; content: string | Array<{ type: string; text?: string }> }
-          let content = ''
-          if (typeof trBlock.content === 'string') {
-            content = trBlock.content
-          } else if (Array.isArray(trBlock.content)) {
-            content = trBlock.content
-              .filter(c => c.type === 'text')
-              .map(c => c.text || '')
-              .join('\n')
+          const trBlock = block as {
+            type: 'tool_result'
+            tool_use_id: string
+            content: unknown
           }
           toolResults.push({
             role: 'tool',
-            content,
+            content: normalizeToolResultContent(trBlock.content),
             tool_call_id: trBlock.tool_use_id,
           })
         }
@@ -598,15 +716,22 @@ export function convertAnthropicMessagesToOpenAI(
 
       if (toolResults.length > 0) {
         result.push(...toolResults)
+        // OpenAI 要求每条 tool 消息后紧跟一条 user 消息，缺了会 400。
         if (parts.length > 0) {
           result.push({ role: 'user', content: parts.length === 1 && parts[0].type === 'text' ? parts[0].text! : parts })
+        } else {
+          result.push({ role: 'user', content: '' })
         }
       } else if (parts.length > 0) {
         result.push({ role: 'user', content: parts.length === 1 && parts[0].type === 'text' ? parts[0].text! : parts })
+      } else {
+        // 空 content：保留占位，防止消息被静默丢弃破坏后续配对
+        result.push({ role: 'user', content: '' })
       }
     } else if (msg.role === 'assistant') {
       const textParts: string[] = []
       const toolCalls: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }> = []
+      let reasoningContent: string | undefined
 
       for (const block of msg.content) {
         if (block.type === 'text') {
@@ -618,20 +743,27 @@ export function convertAnthropicMessagesToOpenAI(
             type: 'function',
             function: {
               name: tuBlock.name,
-              arguments: JSON.stringify(tuBlock.input),
+              arguments: JSON.stringify(tuBlock.input ?? {}),
             },
           })
+        } else if (block.type === 'thinking') {
+          const thinking = (block as { type: 'thinking'; thinking: string }).thinking
+          reasoningContent = reasoningContent ? `${reasoningContent}\n${thinking}` : thinking
         }
+        // redacted_thinking / server_tool_use 等无法映射的块忽略
       }
 
       const assistantMsg: OpenAIMessage = {
         role: 'assistant',
-        content: textParts.join('\n') || '',
+        content: textParts.join('\n') || null,
+      }
+      if (reasoningContent) {
+        assistantMsg.reasoning_content = reasoningContent
       }
       if (toolCalls.length > 0) {
         assistantMsg.tool_calls = toolCalls
       }
-      result.push(assistantMsg)
+      pushMergedAssistant(result, assistantMsg)
     }
   }
 
@@ -651,10 +783,232 @@ export function convertAnthropicToolsToOpenAI(
   }))
 }
 
+/**
+ * 从 Anthropic 请求体估算 input tokens（chars/4，图片/文档按 2000 计，
+ * 与 tokenEstimation.ts 的 roughTokenCountEstimationForBlock 保持一致）。
+ * 用于替代 count_tokens stub 的 0 —— 0 会让 codev 的上下文预算/compact 全部失效。
+ */
+export function estimateTokensForAnthropicBody(body: {
+  system?: unknown
+  messages?: unknown
+  tools?: unknown
+}): number {
+  let total = 0
+  const roughCount = (text: string): number => Math.round(text.length / 4)
+
+  if (typeof body.system === 'string') {
+    total += roughCount(body.system)
+  } else if (Array.isArray(body.system)) {
+    for (const b of body.system) {
+      if (b && typeof b === 'object' && typeof (b as { text?: unknown }).text === 'string') {
+        total += roughCount((b as { text: string }).text)
+      }
+    }
+  }
+
+  if (Array.isArray(body.tools)) {
+    for (const t of body.tools) {
+      if (!t || typeof t !== 'object') continue
+      const tool = t as { name?: unknown; description?: unknown; input_schema?: unknown }
+      if (typeof tool.name === 'string') total += roughCount(tool.name)
+      if (typeof tool.description === 'string') total += roughCount(tool.description)
+      if (tool.input_schema !== undefined) {
+        total += roughCount(JSON.stringify(tool.input_schema))
+      }
+    }
+  }
+
+  const countBlocks = (blocks: unknown): void => {
+    if (!Array.isArray(blocks)) return
+    for (const block of blocks) {
+      if (!block || typeof block !== 'object') continue
+      const b = block as {
+        type?: unknown
+        text?: unknown
+        thinking?: unknown
+        data?: unknown
+        name?: unknown
+        input?: unknown
+        content?: unknown
+      }
+      switch (b.type) {
+        case 'text':
+          total += roughCount(typeof b.text === 'string' ? b.text : '')
+          break
+        case 'thinking':
+          total += roughCount(typeof b.thinking === 'string' ? b.thinking : '')
+          break
+        case 'redacted_thinking':
+          total += roughCount(typeof b.data === 'string' ? b.data : '')
+          break
+        case 'image':
+        case 'document':
+          total += 2000
+          break
+        case 'tool_use':
+          total += roughCount(
+            (typeof b.name === 'string' ? b.name : '') +
+              JSON.stringify(b.input ?? {}),
+          )
+          break
+        case 'tool_result':
+          if (typeof b.content === 'string') {
+            total += roughCount(b.content)
+          } else if (Array.isArray(b.content)) {
+            for (const c of b.content) {
+              if (typeof c === 'string') {
+                total += roughCount(c)
+              } else if (c && typeof c === 'object') {
+                const cc = c as { type?: unknown; text?: unknown; data?: unknown }
+                if (cc.type === 'image' || cc.type === 'document') {
+                  total += 2000
+                } else if (typeof cc.text === 'string') {
+                  total += roughCount(cc.text)
+                }
+              }
+            }
+          }
+          break
+        default:
+          total += roughCount(JSON.stringify(b))
+      }
+    }
+  }
+
+  if (Array.isArray(body.messages)) {
+    for (const msg of body.messages) {
+      if (!msg || typeof msg !== 'object') continue
+      const m = msg as { content?: unknown }
+      if (typeof m.content === 'string') {
+        total += roughCount(m.content)
+      } else {
+        countBlocks(m.content)
+      }
+    }
+  }
+
+  return total
+}
+
+type OpenAIResponseShape = {
+  id?: string
+  choices?: Array<{
+    message?: {
+      content?: string | null
+      reasoning_content?: string | null
+      tool_calls?: Array<{
+        id: string
+        function: { name: string; arguments: string }
+      }>
+    }
+    finish_reason?: string | null
+  }>
+  usage?: { prompt_tokens?: number; completion_tokens?: number }
+}
+
+/**
+ * 将 OpenAI 非流式响应转换为 Anthropic Messages 格式（含 thinking/reasoning
+ * 与 tool_use），四个 provider 的 fetch override 共用。
+ */
+export function convertOpenAIResponseToAnthropic(
+  data: OpenAIResponseShape,
+  model: string,
+  idPrefix: string,
+): Record<string, unknown> {
+  const choice = data.choices?.[0]
+  const anthropicContent: Array<{
+    type: string
+    text?: string
+    thinking?: string
+    id?: string
+    name?: string
+    input?: unknown
+  }> = []
+
+  if (choice?.message?.reasoning_content) {
+    anthropicContent.push({
+      type: 'thinking',
+      thinking: choice.message.reasoning_content,
+    })
+  }
+
+  if (choice?.message?.content) {
+    anthropicContent.push({ type: 'text', text: choice.message.content })
+  }
+
+  if (choice?.message?.tool_calls) {
+    for (const tc of choice.message.tool_calls) {
+      let input: unknown = {}
+      try {
+        input = JSON.parse(tc.function.arguments || '{}')
+      } catch {
+        // 参数不是合法 JSON 时退化为空对象，避免整个响应解析失败
+      }
+      anthropicContent.push({
+        type: 'tool_use',
+        id: tc.id,
+        name: tc.function.name,
+        input,
+      })
+    }
+  }
+
+  return {
+    id: data.id || `msg_${idPrefix}_${Date.now()}`,
+    type: 'message',
+    role: 'assistant',
+    content: anthropicContent,
+    model,
+    stop_reason: choice?.finish_reason === 'tool_calls' ? 'tool_use' : 'end_turn',
+    usage: {
+      input_tokens: data.usage?.prompt_tokens || 0,
+      output_tokens: data.usage?.completion_tokens || 0,
+    },
+  }
+}
+
+/**
+ * 把 OpenAI 错误响应（{error:{message,type}}）转换为 Anthropic SDK 能解析的
+ * 错误格式（{"type":"error","error":{...}}），否则 SDK 解析失败导致错误信息错乱。
+ */
+export async function createAnthropicErrorResponse(
+  openaiResponse: Response,
+): Promise<Response> {
+  let message = openaiResponse.statusText || 'Request failed'
+  let type = 'api_error'
+  try {
+    const text = await openaiResponse.text()
+    if (text) {
+      const parsed = JSON.parse(text) as {
+        error?: { message?: unknown; type?: unknown }
+      }
+      const err = parsed.error
+      if (err) {
+        if (typeof err.message === 'string' && err.message) {
+          message = err.message
+        }
+        if (typeof err.type === 'string' && err.type) {
+          type = err.type
+        }
+      }
+    }
+  } catch {
+    // body 不是 JSON —— 保留默认 message
+  }
+  return new Response(
+    JSON.stringify({ type: 'error', error: { type, message } }),
+    {
+      status: openaiResponse.status,
+      headers: { 'Content-Type': 'application/json' },
+    },
+  )
+}
+
+
 export type CopilotStreamEvent =
   | { type: 'message_start'; message: { id: string; type: 'message'; role: 'assistant'; model: string; content: []; usage: { input_tokens: number; output_tokens: number } } }
-  | { type: 'content_block_start'; index: number; content_block: { type: 'text'; text: string } }
-  | { type: 'content_block_delta'; index: number; delta: { type: 'text_delta'; text: string } }
+  | { type: 'content_block_start'; index: number; content_block: { type: 'text'; text: string } | { type: 'thinking'; thinking: string } | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> } }
+  | { type: 'content_block_delta'; index: number; delta: { type: 'text_delta'; text: string } | { type: 'thinking_delta'; thinking: string } | { type: 'input_json_delta'; partial_json: string } }
   | { type: 'content_block_stop'; index: number }
   | { type: 'message_delta'; delta: { stop_reason: string }; usage: { output_tokens: number } }
   | { type: 'message_stop' }
@@ -731,9 +1085,11 @@ export async function* streamCopilotRequest(
         const data = line.slice(6).trim()
         if (data === '[DONE]') {
           if (hasStartedContent) {
-            yield { type: 'content_block_stop', index: contentIndex - 1 }
+            yield { type: 'content_block_stop', index: contentIndex }
+            contentIndex++
+            hasStartedContent = false
           }
-          for (const [idx, tc] of toolCalls) {
+          for (const [idx] of toolCalls) {
             yield {
               type: 'content_block_stop',
               index: contentIndex + idx,
@@ -752,6 +1108,7 @@ export async function* streamCopilotRequest(
           choices?: Array<{
             delta?: {
               content?: string | null
+              reasoning_content?: string | null
               tool_calls?: Array<{
                 index: number
                 id?: string
@@ -779,6 +1136,21 @@ export async function* streamCopilotRequest(
 
         const delta = choice.delta
 
+        if (delta.reasoning_content != null && delta.reasoning_content !== '') {
+          yield {
+            type: 'content_block_start',
+            index: contentIndex,
+            content_block: { type: 'thinking', thinking: '' },
+          }
+          yield {
+            type: 'content_block_delta',
+            index: contentIndex,
+            delta: { type: 'thinking_delta', thinking: delta.reasoning_content },
+          }
+          yield { type: 'content_block_stop', index: contentIndex }
+          contentIndex++
+        }
+
         if (delta.content != null && delta.content !== '') {
           if (!hasStartedContent) {
             hasStartedContent = true
@@ -804,24 +1176,31 @@ export async function* streamCopilotRequest(
                 hasStartedContent = false
               }
               currentToolCallIndex = tc.index
+              const toolBlockIndex = contentIndex + tc.index
               toolCalls.set(tc.index, {
                 id: tc.id,
                 name: tc.function?.name || '',
                 arguments: tc.function?.arguments || '',
               })
-              const toolBlockIndex = hasStartedContent ? contentIndex + 1 + tc.index : contentIndex + tc.index
               yield {
-                type: 'content_block_start' as const,
+                type: 'content_block_start',
                 index: toolBlockIndex,
                 content_block: {
-                  type: 'text',
-                  text: '',
-                } as any,
+                  type: 'tool_use',
+                  id: tc.id,
+                  name: tc.function?.name || '',
+                  input: {},
+                },
               }
             } else if (tc.function?.arguments) {
               const existing = toolCalls.get(tc.index)
               if (existing) {
                 existing.arguments += tc.function.arguments
+                yield {
+                  type: 'content_block_delta',
+                  index: contentIndex + tc.index,
+                  delta: { type: 'input_json_delta', partial_json: tc.function.arguments },
+                }
               }
             }
           }
@@ -830,6 +1209,8 @@ export async function* streamCopilotRequest(
         if (choice.finish_reason) {
           if (hasStartedContent) {
             yield { type: 'content_block_stop', index: contentIndex }
+            contentIndex++
+            hasStartedContent = false
           }
           yield {
             type: 'message_delta',
@@ -845,6 +1226,9 @@ export async function* streamCopilotRequest(
     reader.releaseLock()
   }
 
+  if (hasStartedContent) {
+    yield { type: 'content_block_stop', index: contentIndex }
+  }
   yield {
     type: 'message_delta',
     delta: { stop_reason: 'end_turn' },
@@ -866,11 +1250,16 @@ export function createCopilotFetchOverride(
   return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = input instanceof URL ? input.href : typeof input === 'string' ? input : input.url
 
-    if (!url.includes('/messages') && !url.includes('/v1/')) {
+    const pathname = new URL(url).pathname
+    // 只拦截 Messages 系列端点；精确判断避免误伤含 /v1/ 的其他请求
+    const isMessagesPath =
+      pathname.endsWith('/messages') || pathname.includes('/messages/')
+    const isModelsPath = pathname.endsWith('/models')
+    if (!isMessagesPath && !isModelsPath) {
       return fetch(input, init)
     }
 
-    if (url.includes('/count_tokens') || url.includes('/models')) {
+    if (isModelsPath) {
       return new Response(JSON.stringify({ input_tokens: 0 }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -884,6 +1273,19 @@ export function createCopilotFetchOverride(
       } catch {
         return fetch(input, init)
       }
+    }
+
+    // count_tokens：本地估算，替代 0（0 会让上下文预算/compact 失效）
+    if (pathname.endsWith('/count_tokens')) {
+      return new Response(
+        JSON.stringify({
+          input_tokens: estimateTokensForAnthropicBody(anthropicBody),
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      )
     }
 
     const systemBlocks = anthropicBody.system as Array<{ type: string; text: string }> | string | undefined
@@ -920,62 +1322,31 @@ export function createCopilotFetchOverride(
     })
 
     if (!copilotResponse.ok) {
-      return copilotResponse
+      return createAnthropicErrorResponse(copilotResponse)
     }
 
     if (!isStreaming) {
-      const data = await copilotResponse.json() as {
-        id: string
-        choices: Array<{
-          message: {
-            role: string
-            content: string | null
+      const data = (await copilotResponse.json()) as {
+        id?: string
+        choices?: Array<{
+          message?: {
+            content?: string | null
+            reasoning_content?: string | null
             tool_calls?: Array<{
               id: string
               function: { name: string; arguments: string }
             }>
           }
-          finish_reason: string
+          finish_reason?: string | null
         }>
-        usage?: { prompt_tokens: number; completion_tokens: number }
+        usage?: { prompt_tokens?: number; completion_tokens?: number }
       }
 
-      const choice = data.choices[0]
-      const anthropicContent: Array<{
-        type: string
-        text?: string
-        id?: string
-        name?: string
-        input?: unknown
-      }> = []
-
-      if (choice?.message?.content) {
-        anthropicContent.push({ type: 'text', text: choice.message.content })
-      }
-
-      if (choice?.message?.tool_calls) {
-        for (const tc of choice.message.tool_calls) {
-          anthropicContent.push({
-            type: 'tool_use',
-            id: tc.id,
-            name: tc.function.name,
-            input: JSON.parse(tc.function.arguments || '{}'),
-          })
-        }
-      }
-
-      const anthropicResponse = {
-        id: data.id || `msg_copilot_${Date.now()}`,
-        type: 'message',
-        role: 'assistant',
-        content: anthropicContent,
-        model: copilotModelId,
-        stop_reason: choice?.finish_reason === 'tool_calls' ? 'tool_use' : 'end_turn',
-        usage: {
-          input_tokens: data.usage?.prompt_tokens || 0,
-          output_tokens: data.usage?.completion_tokens || 0,
-        },
-      }
+      const anthropicResponse = convertOpenAIResponseToAnthropic(
+        data,
+        copilotModelId,
+        'copilot',
+      )
 
       return new Response(JSON.stringify(anthropicResponse), {
         status: 200,
@@ -996,6 +1367,17 @@ export function createCopilotFetchOverride(
   }
 }
 
+/**
+ * 将 OpenAI 兼容的 SSE 流转换为 Anthropic Messages 流式事件。
+ *
+ * 修复点（相对旧实现）：
+ * - 发送 message_start（客户端在 content_block_stop 时要求 partialMessage 非空）
+ * - tool_use 的 content_block_start 用正确的 tool_use 类型
+ * - tool 参数增量以 input_json_delta 转发（否则客户端 tool_use.input 永远为空）
+ * - 支持 reasoning_content → thinking 块
+ * - 索引追踪修正（text/thinking 块在关闭时递增，tool 块用 contentIndex + 序号）
+ * - usage 统计支持流末的 usage chunk（需配合 stream_options.include_usage）
+ */
 export function convertOpenAIStreamToAnthropic(
   openaiStream: ReadableStream,
   model: string,
@@ -1003,12 +1385,74 @@ export function convertOpenAIStreamToAnthropic(
   const encoder = new TextEncoder()
   const decoder = new TextDecoder()
 
-  let messageId = `msg_${Date.now()}`
+  const messageId = `msg_${Date.now()}`
+  // 下一个可用的 Anthropic content block index；块在 start 时占用、关闭时递增
   let contentIndex = 0
   let hasStartedContent = false
+  let hasReasoningBlock = false
+  let hasSentMessageStart = false
   let currentToolCallIndex = -1
   const toolCalls: Map<number, { id: string; name: string; arguments: string }> = new Map()
   let totalOutputTokens = 0
+  let inputTokens = 0
+
+  // JSON.stringify 会把换行等转义成反斜杠序列（无真实换行字节），
+  // 因此嵌入 SSE data 行是安全的；slice(1,-1) 去掉引号得到 JSON 字符串字面量。
+  const jsonEscape = (s: string): string => JSON.stringify(s).slice(1, -1)
+
+  function sendMessageStart(
+    controller: ReadableStreamDefaultController<Uint8Array>,
+  ): void {
+    if (hasSentMessageStart) return
+    hasSentMessageStart = true
+    controller.enqueue(
+      encoder.encode(
+        `event: message_start\ndata: {"type":"message_start","message":{"id":"${messageId}","type":"message","role":"assistant","content":[],"model":"${model}","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":${inputTokens},"output_tokens":0}}}\n\n`,
+      ),
+    )
+  }
+
+  function closeTextBlock(
+    controller: ReadableStreamDefaultController<Uint8Array>,
+  ): void {
+    if (!hasStartedContent) return
+    controller.enqueue(
+      encoder.encode(`event: content_block_stop\ndata: {"index":${contentIndex}}\n\n`),
+    )
+    contentIndex++
+    hasStartedContent = false
+  }
+
+  function closeReasoningBlock(
+    controller: ReadableStreamDefaultController<Uint8Array>,
+  ): void {
+    if (!hasReasoningBlock) return
+    controller.enqueue(
+      encoder.encode(`event: content_block_stop\ndata: {"index":${contentIndex}}\n\n`),
+    )
+    contentIndex++
+    hasReasoningBlock = false
+  }
+
+  function sendStreamEnd(
+    controller: ReadableStreamDefaultController<Uint8Array>,
+    stopReason?: string,
+  ): void {
+    if (!hasSentMessageStart) return
+    closeTextBlock(controller)
+    closeReasoningBlock(controller)
+    for (const [idx] of toolCalls) {
+      controller.enqueue(
+        encoder.encode(`event: content_block_stop\ndata: {"index":${contentIndex + idx}}\n\n`),
+      )
+    }
+    controller.enqueue(
+      encoder.encode(
+        `event: message_delta\ndata: {"delta":{"stop_reason":"${stopReason || (toolCalls.size > 0 ? 'tool_use' : 'end_turn')}"},"usage":{"output_tokens":${totalOutputTokens}}}\n\n`,
+      ),
+    )
+    controller.enqueue(encoder.encode('event: message_stop\ndata: {}\n\n'))
+  }
 
   return new ReadableStream({
     async start(controller) {
@@ -1029,20 +1473,7 @@ export function convertOpenAIStreamToAnthropic(
             if (!line.startsWith('data: ')) continue
             const data = line.slice(6).trim()
             if (data === '[DONE]') {
-              if (hasStartedContent) {
-                controller.enqueue(encoder.encode(`event: content_block_stop\ndata: {"index":${contentIndex - 1}}\n\n`))
-              }
-              for (const [idx, tc] of toolCalls) {
-                controller.enqueue(
-                  encoder.encode(`event: content_block_stop\ndata: {"index":${contentIndex + idx}}\n\n`),
-                )
-              }
-              controller.enqueue(
-                encoder.encode(
-                  `event: message_delta\ndata: {"delta":{"stop_reason":"${toolCalls.size > 0 ? 'tool_use' : 'end_turn'}"},"usage":{"output_tokens":${totalOutputTokens}}}\n\n`,
-                ),
-              )
-              controller.enqueue(encoder.encode('event: message_stop\ndata: {}\n\n'))
+              sendStreamEnd(controller)
               return
             }
 
@@ -1050,6 +1481,7 @@ export function convertOpenAIStreamToAnthropic(
               choices?: Array<{
                 delta?: {
                   content?: string | null
+                  reasoning_content?: string | null
                   tool_calls?: Array<{
                     index: number
                     id?: string
@@ -1059,7 +1491,11 @@ export function convertOpenAIStreamToAnthropic(
                 }
                 finish_reason?: string | null
               }>
-              usage?: { completion_tokens?: number; prompt_tokens?: number; total_tokens?: number }
+              usage?: {
+                completion_tokens?: number
+                prompt_tokens?: number
+                total_tokens?: number
+              }
             }
 
             try {
@@ -1068,18 +1504,43 @@ export function convertOpenAIStreamToAnthropic(
               continue
             }
 
+            // usage 可出现在任意 chunk（include_usage 时通常紧跟流末）
+            if (chunk.usage?.prompt_tokens) {
+              inputTokens = chunk.usage.prompt_tokens
+            }
             if (chunk.usage?.completion_tokens) {
               totalOutputTokens = chunk.usage.completion_tokens
             }
+
+            sendMessageStart(controller)
 
             const choice = chunk.choices?.[0]
             if (!choice?.delta) continue
 
             const delta = choice.delta
 
+            // reasoning_content → thinking 块
+            if (delta.reasoning_content != null && delta.reasoning_content !== '') {
+              if (!hasReasoningBlock) {
+                hasReasoningBlock = true
+                controller.enqueue(
+                  encoder.encode(
+                    `event: content_block_start\ndata: {"index":${contentIndex},"content_block":{"type":"thinking","thinking":""}}\n\n`,
+                  ),
+                )
+              }
+              controller.enqueue(
+                encoder.encode(
+                  `event: content_block_delta\ndata: {"index":${contentIndex},"delta":{"type":"thinking_delta","thinking":"${jsonEscape(delta.reasoning_content)}"}}\n\n`,
+                ),
+              )
+            }
+
+            // content → text 块
             if (delta.content != null && delta.content !== '') {
               if (!hasStartedContent) {
                 hasStartedContent = true
+                closeReasoningBlock(controller)
                 controller.enqueue(
                   encoder.encode(
                     `event: content_block_start\ndata: {"index":${contentIndex},"content_block":{"type":"text","text":""}}\n\n`,
@@ -1088,60 +1549,73 @@ export function convertOpenAIStreamToAnthropic(
               }
               controller.enqueue(
                 encoder.encode(
-                  `event: content_block_delta\ndata: {"index":${contentIndex},"delta":{"type":"text_delta","text":"${JSON.stringify(delta.content).slice(1, -1)}"}}\n\n`,
+                  `event: content_block_delta\ndata: {"index":${contentIndex},"delta":{"type":"text_delta","text":"${jsonEscape(delta.content)}"}}\n\n`,
                 ),
               )
             }
 
+            // tool_calls → tool_use 块
             if (delta.tool_calls) {
               for (const tc of delta.tool_calls) {
                 if (tc.id) {
+                  // 新 tool call：关闭当前 text 块（仅第一个 tool call 时）
                   if (hasStartedContent && currentToolCallIndex === -1) {
-                    controller.enqueue(
-                      encoder.encode(`event: content_block_stop\ndata: {"index":${contentIndex}}\n\n`),
-                    )
-                    contentIndex++
-                    hasStartedContent = false
+                    closeTextBlock(controller)
                   }
                   currentToolCallIndex = tc.index
+                  const toolBlockIndex = contentIndex + tc.index
                   toolCalls.set(tc.index, {
                     id: tc.id,
                     name: tc.function?.name || '',
                     arguments: tc.function?.arguments || '',
                   })
-                  const toolBlockIndex =
-                    hasStartedContent ? contentIndex + 1 + tc.index : contentIndex + tc.index
                   controller.enqueue(
                     encoder.encode(
-                      `event: content_block_start\ndata: {"index":${toolBlockIndex},"content_block":{"type":"text","text":""}}\n\n`,
+                      `event: content_block_start\ndata: {"index":${toolBlockIndex},"content_block":{"type":"tool_use","id":"${tc.id}","name":"${tc.function?.name || ''}","input":{}}}\n\n`,
                     ),
                   )
                 } else if (tc.function?.arguments) {
                   const existing = toolCalls.get(tc.index)
                   if (existing) {
                     existing.arguments += tc.function.arguments
+                    // 参数增量必须以 input_json_delta 转发，否则客户端累积不到工具参数
+                    controller.enqueue(
+                      encoder.encode(
+                        `event: content_block_delta\ndata: {"index":${contentIndex + tc.index},"delta":{"type":"input_json_delta","partial_json":"${jsonEscape(tc.function.arguments)}"}}\n\n`,
+                      ),
+                    )
                   }
                 }
               }
             }
 
             if (choice.finish_reason) {
-              if (hasStartedContent) {
-                controller.enqueue(
-                  encoder.encode(`event: content_block_stop\ndata: {"index":${contentIndex}}\n\n`),
-                )
-              }
-              controller.enqueue(
-                encoder.encode(
-                  `event: message_delta\ndata: {"delta":{"stop_reason":"${choice.finish_reason === 'tool_calls' ? 'tool_use' : 'end_turn'}"},"usage":{"output_tokens":${totalOutputTokens}}}\n\n`,
-                ),
+              sendStreamEnd(
+                controller,
+                choice.finish_reason === 'tool_calls' ? 'tool_use' : 'end_turn',
               )
-              controller.enqueue(encoder.encode('event: message_stop\ndata: {}\n\n'))
               return
             }
           }
         }
+        // 流自然结束（provider 未发 [DONE]）
+        sendStreamEnd(controller)
       } finally {
+        // 兜底：若流在 message_start 前就结束（异常/空流），补发最小序列，
+        // 否则客户端 content_block_stop 时找不到 partialMessage 会抛错。
+        try {
+          if (!hasSentMessageStart) {
+            sendMessageStart(controller)
+            controller.enqueue(
+              encoder.encode(
+                'event: message_delta\ndata: {"delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":0}}\n\n',
+              ),
+            )
+            controller.enqueue(encoder.encode('event: message_stop\ndata: {}\n\n'))
+          }
+        } catch {
+          // controller 可能已 error/closed
+        }
         reader.releaseLock()
         controller.close()
       }
