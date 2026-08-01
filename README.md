@@ -142,6 +142,7 @@ ln -sf dist/codev ~/.local/bin/codev
   # CN girl voice
   "voiceLanguage": "zh-CN",
   "voiceTTSVoice": "zh-CN-XiaoxiaoNeural"
+  # or "voiceTTSVoice": "zh-CN-XiaoyiNeural",
 }
 ```
 
