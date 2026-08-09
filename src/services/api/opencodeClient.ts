@@ -8,7 +8,7 @@ import {
   createAnthropicErrorResponse,
   estimateTokensForAnthropicBody,
   type AnthropicMessage,
-} from './copilotClient.js'
+} from '@ant/model-provider'
 
 const OPENCODE_BASE_URL = 'https://opencode.ai/zen/v1'
 // 核心进化：引入云端元数据和 GitHub 动态版本追溯终点

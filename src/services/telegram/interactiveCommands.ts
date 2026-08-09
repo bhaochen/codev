@@ -21,7 +21,7 @@ import { fetchCopilotModels } from '../api/copilotClient.js'
 import {
   fetchAnthropicCompatibleModelIds,
   fetchOpenAICompatibleModelIds,
-} from '../api/customOpenAIClient.js'
+} from '../api/openai/index.js'
 import { telegramService } from './TelegramService.js'
 import type {
   TelegramCallbackEvent,

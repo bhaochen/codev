@@ -8,7 +8,7 @@ import {
   createAnthropicErrorResponse,
   estimateTokensForAnthropicBody,
   type AnthropicMessage,
-} from './copilotClient.js'
+} from '@ant/model-provider'
 
 const MODELS_META_URL = 'https://models.dev/api.json'
 

@@ -200,7 +200,7 @@ flowchart LR
 
 ### 3.4 消息格式转换
 
-核心转换函数族位于 `src/services/api/copilotClient.ts`：
+核心转换函数族位于共享包 `packages/@ant/model-provider`（进程内 provider 桥接层，`opencodeClient`/`nvidiaClient`/`openaiClient` 共用）：
 
 ```
 Anthropic → OpenAI:
@@ -343,27 +343,26 @@ function shouldUseDeepSeekReasoningCompat(baseUrl: string): boolean {
 - **Base URL**: `/backend-api/codex` (从 `OPENAI_CODEX_API_ENDPOINT` 派生)
 - **Model 列表**: 来自 `src/services/openaiAuth/models.ts` 的 `OPENAI_CODEX_MODEL_CATALOG`
 
-### 4.4 自定义 OpenAI 兼容 Provider
+### 4.4 OpenAI 兼容直连 (openai provider)
 
-**文件**: `src/services/api/customOpenAIClient.ts`
+**目录**: `src/services/api/openai/`（转换管线来自 `@ant/model-provider`）
 
-- **认证**: `ConnectedProviderInfo.apiKey` → `Bearer <key>`
-- **协议**: `openai_chat` (Chat Completions)
-- **Model**: 使用 `custom-openai:<modelId>` 前缀选择
-- **Model 拉取**: `fetchOpenAICompatibleModelIds()` 从 `/v1/models` 获取
-- **适用场景**: vLLM, Together AI, Groq 等任何 OpenAI 兼容端点
+- **认证**: `OPENAI_API_KEY` → `Bearer <key>`（本地端点可缺省）; `OPENAI_BASE_URL` 指定端点
+- **协议**: `openai_chat` (Chat Completions) — 经 fetch override 拦截 Anthropic `/messages` 转换
+- **Model**: `resolveOpenAIModel()`（`OPENAI_MODEL` > `OPENAI_DEFAULT_*_MODEL` > 默认映射 > 透传）
+- **Thinking**: `OPENAI_ENABLE_THINKING` 或模型名含 `deepseek`/`mimo` 自动开启；
+  请求体同时发送 `thinking`/`enable_thinking`/`chat_template_kwargs` 三套格式，
+  `reasoning_content` 思维流映射为 Anthropic thinking 块（含空字符串往返）
+- **Model 拉取**: telegram `/connect` 用 `fetchOpenAICompatibleModelIds()` 从 `/v1/models` 获取
+- **适用场景**: OpenAI 官方、DeepSeek、vLLM、Ollama 等任何 OpenAI Chat Completions 端点
 
-### 4.5 GitHub Copilot
+### 4.5 GitHub Copilot (模型列表)
 
-**文件**: `src/services/api/copilotClient.ts` (原 copilotClient，现已演化为通用转换库)
+**文件**: `src/services/api/copilotClient.ts`（仅保留模型发现，chat 链已清理）
 
 - **认证**: OAuth Token (通过 `connectedProviders['github-copilot']`)
-- **协议**: `openai_chat`
-- **端点**: `https://api.githubcopilot.com/chat/completions`
-- **特殊头**: `Openai-Intent: conversation-edits`, `x-initiator: user`
 - **Model 发现**: 双源策略 — 优先从 Copilot API 获取，fallback 到 `models.dev/api.json`
-- **兼容性缓存**: `copilotCompatibilityCache` 持久化模型兼容性信息到 `~/.claude.json`
-- **Token 参数自动修复**: 当 API 返回 `"Use 'max_completion_tokens' instead"` 时自动切换参数
+- **用途**: telegram `/connect` 流程预览可用模型
 
 ### 4.6 Llama.cpp (Local)
 
@@ -588,7 +587,8 @@ graph TB
         D4[openaiResponsesToAnthropic]
         D5[openaiChatStreamToAnthropic]
         D6[openaiResponsesStreamToAnthropic]
-        D7[copilotClient.ts - 通用转换]
+        D7[@ant/model-provider - 通用转换]
+        D8[src/services/api/openai - OpenAI 直连]
     end
 
     subgraph "OAuth 2.0 流程"

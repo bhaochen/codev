@@ -1,5 +1,8 @@
 node_modules/
-packages/
+packages/*
+!packages/@ant/
+packages/@ant/*
+!packages/@ant/model-provider/
 dist/
 .codex
 Codev

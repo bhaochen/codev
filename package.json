@@ -3,7 +3,8 @@
   "version": "2.2.0",
   "private": true,
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "packages/@ant/*"
   ],
   "description": "Codev — Co-Dev with AI via Terminal.",
   "type": "module",
@@ -19,6 +20,7 @@
     "dev": "bun run ./scripts/dev.ts"
   },
   "dependencies": {
+    "@ant/model-provider": "workspace:*",
     "@alcalzone/ansi-tokenize": "^0.3.0",
     "@anthropic-ai/bedrock-sdk": "^0.26.4",
     "@anthropic-ai/claude-agent-sdk": "^0.2.87",

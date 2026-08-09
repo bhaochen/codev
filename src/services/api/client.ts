@@ -10,7 +10,6 @@ import {
   refreshAndGetAwsCredentials,
   refreshGcpCredentialsIfNeeded,
   getOpenRouterApiKey,
-  getOpenAIApiKey,
   getLocalBaseUrl,
   getOpenCodeApiKey,
   getOpenCodeModelName,
@@ -21,12 +20,13 @@ import {
   getAPIProvider,
   isFirstPartyAnthropicBaseUrl,
   getOpenRouterBaseUrl,
-  getOpenAIBaseUrl,
   getOpencodeBaseUrl,
 } from 'src/utils/model/providers.js'
 import { getProxyFetchOptions } from 'src/utils/proxy.js'
 import { createOpenCodeFetchOverride, fetchOpencodeModels } from './opencodeClient.js'
 import { createNvidiaFetchOverride } from './nvidiaClient.js'
+import { createOpenAIFetchOverride } from './openai/openaiClient.js'
+import { resolveOpenAIModel } from '@ant/model-provider'
 import {
   getIsNonInteractiveSession,
   getSessionId,
@@ -38,6 +38,8 @@ import {
   getVertexRegionForModel,
   isEnvTruthy,
 } from '../../utils/envUtils.js'
+
+const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini'
 
 /**
  * Environment variables for different client types:
@@ -162,7 +164,17 @@ export async function getAnthropicClient({
     nvidiaFetchOverride = createNvidiaFetchOverride()
   }
 
-  const resolvedFetch = buildFetch(fetchOverride || opencodeFetchOverride || nvidiaFetchOverride, source)
+  // For OpenAI provider, use custom fetch to convert Anthropic format to OpenAI Chat
+  // Completions format and talk directly to the OpenAI-compatible endpoint
+  // (OPENAI_API_KEY / OPENAI_BASE_URL). Supports OpenAI official, DeepSeek,
+  // vLLM, Ollama etc. including thinking (reasoning_content) round-trips.
+  let openaiFetchOverride: ClientOptions['fetch'] | undefined
+  if (provider === 'openai') {
+    const resolvedModel = resolveOpenAIModel(model || DEFAULT_OPENAI_MODEL)
+    openaiFetchOverride = createOpenAIFetchOverride(resolvedModel)
+  }
+
+  const resolvedFetch = buildFetch(fetchOverride || opencodeFetchOverride || nvidiaFetchOverride || openaiFetchOverride, source)
 
   const ARGS = {
     defaultHeaders,
@@ -347,13 +359,11 @@ export async function getAnthropicClient({
     }
   }
 
-  // Handle OpenAI
+  // Handle OpenAI - uses custom fetch override to convert Anthropic format to
+  // OpenAI Chat Completions format. No baseURL needed — the fetch override
+  // handles the endpoint directly (OPENAI_API_KEY / OPENAI_BASE_URL).
   if (provider === 'openai') {
-    const openAIApiKey = getOpenAIApiKey()
-    if (openAIApiKey) {
-      clientConfig.apiKey = openAIApiKey
-      clientConfig.baseURL = getOpenAIBaseUrl()
-    }
+    clientConfig.apiKey = 'openai-compatible'
   }
 
   // Handle Local
