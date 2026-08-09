@@ -126,15 +126,15 @@ install_deps() {
 build_binary() {
   info "Building Codev (all experimental features enabled)..."
   cd "$INSTALL_DIR"
-  bun run build:dev:full
-  ok "Binary built: $INSTALL_DIR/Codev"
+  bun run build
+  ok "Binary built: $INSTALL_DIR/dist/codev"
 }
 
 link_binary() {
   local link_dir="$HOME/.local/bin"
   mkdir -p "$link_dir"
 
-  ln -sf "$INSTALL_DIR/Codev" "$link_dir/codev"
+  ln -sf "$INSTALL_DIR/dist/codev" "$link_dir/codev"
   ok "Symlinked: $link_dir/codev"
 
   if ! echo "$PATH" | tr ':' '\n' | grep -qx "$link_dir"; then
@@ -178,6 +178,6 @@ printf "  ${BOLD}Or log in with Claude.ai:${RESET}\n"
 printf "    ${CYAN}codev /login${RESET}\n"
 echo ""
 printf "  ${DIM}Source: $INSTALL_DIR${RESET}\n"
-printf "  ${DIM}Binary: $INSTALL_DIR/Codev${RESET}\n"
+printf "  ${DIM}Binary: $INSTALL_DIR/dist/codev${RESET}\n"
 printf "  ${DIM}Link:   ~/.local/bin/codev${RESET}\n"
 echo ""

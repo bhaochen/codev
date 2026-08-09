@@ -1,16 +1,15 @@
 {
-  "name": "claude-code-source-snapshot",
+  "name": "codev",
   "version": "2.2.0",
   "private": true,
   "workspaces": [
     "packages/*"
   ],
-  "description": "Reconstructed Bun CLI workspace for the Claude Code source snapshot.",
+  "description": "Codev — Co-Dev with AI via Terminal.",
   "type": "module",
   "packageManager": "bun@1.3.11",
   "bin": {
-    "claude": "./cli",
-    "claude-source": "./cli"
+    "codev": "./dist/codev"
   },
   "engines": {
     "bun": ">=1.3.11"
