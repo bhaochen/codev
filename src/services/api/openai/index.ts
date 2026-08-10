@@ -29,3 +29,12 @@ export {
   fetchOpenAICompatibleModelIds,
   fetchAnthropicCompatibleModelIds,
 } from './models.js'
+export { queryModelOpenAI } from './queryModelOpenAI.js'
+export {
+  isChatGPTAuthEnabled,
+  requestChatGPTDeviceCode,
+  completeChatGPTDeviceLogin,
+  getValidChatGPTAuth,
+  type ChatGPTDeviceCode,
+  type ChatGPTAuth,
+} from './chatgptAuth.js'

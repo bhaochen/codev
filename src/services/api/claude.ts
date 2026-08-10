@@ -1026,6 +1026,15 @@ async function* queryModel(
   StreamEvent | AssistantMessage | SystemAPIErrorMessage,
   void
 > {
+  // OpenAI 一等 query 路径：不走 Anthropic SDK（不再需要 fetch-override 桥接），
+  // 直接消费同一份 messages/systemPrompt/tools/options，产出相同事件形状。
+  // 动态 import 避免 claude.ts ↔ openai/index.ts 的循环依赖。
+  if (getAPIProvider() === 'openai') {
+    const { queryModelOpenAI } = await import('./openai/index.js')
+    yield* queryModelOpenAI(messages, systemPrompt, tools, signal, options)
+    return
+  }
+
   // Check cheap conditions first — the off-switch await blocks on GrowthBook
   // init (~10ms). For non-Opus models (haiku, sonnet) this skips the await
   // entirely. Subscribers don't hit this path at all.
