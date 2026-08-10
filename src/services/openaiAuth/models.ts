@@ -50,6 +50,43 @@ export const OPENAI_CODEX_MODEL_CATALOG: OpenAIModelCatalogEntry[] = [
     description: 'Fastest for quick tasks',
     descriptionForModel: 'GPT-5.4 Mini - fastest for quick tasks',
   },
+  {
+    value: 'gpt-5.3-codex-spark',
+    label: 'GPT-5.3 Codex Spark',
+    description: 'Ultra-fast coding model',
+    descriptionForModel: 'GPT-5.3 Codex Spark - ultra-fast coding model',
+  },
+  {
+    value: 'gpt-5.2',
+    label: 'GPT-5.2',
+    description: 'Optimized for professional work and long-running agents',
+    descriptionForModel:
+      'GPT-5.2 - optimized for professional work and long-running agents',
+  },
+  {
+    value: 'gpt-5.2-codex',
+    label: 'GPT-5.2 Codex',
+    description: 'Coding-optimized model',
+    descriptionForModel: 'GPT-5.2 Codex - coding-optimized model',
+  },
+  {
+    value: 'gpt-5.1-codex',
+    label: 'GPT-5.1 Codex',
+    description: 'Coding-optimized model',
+    descriptionForModel: 'GPT-5.1 Codex - coding-optimized model',
+  },
+  {
+    value: 'gpt-5.1-codex-max',
+    label: 'GPT-5.1 Codex Max',
+    description: 'High-capability coding model',
+    descriptionForModel: 'GPT-5.1 Codex Max - high-capability coding model',
+  },
+  {
+    value: 'gpt-5.1-codex-mini',
+    label: 'GPT-5.1 Codex Mini',
+    description: 'Fast coding model',
+    descriptionForModel: 'GPT-5.1 Codex Mini - fast coding model',
+  },
 ]
 
 export function isOpenAIResponsesModel(model: string): boolean {
@@ -92,26 +129,58 @@ export function resolveOpenAICodexModel(model: string): string {
 
 export function getOpenAIModelDisplayName(model: string): string | null {
   switch (model.trim().toLowerCase()) {
+    case 'gpt-5.6':
+      return 'GPT-5.6'
+    case 'gpt-5.6-sol':
+      return 'GPT-5.6 Sol'
+    case 'gpt-5.6-terra':
+      return 'GPT-5.6 Terra'
+    case 'gpt-5.6-luna':
+      return 'GPT-5.6 Luna'
+    case 'gpt-5.5':
+      return 'GPT-5.5'
+    case 'gpt-5.5-pro':
+      return 'GPT-5.5 Pro'
+    case 'gpt-5.4':
+      return 'GPT-5.4'
+    case 'gpt-5.4-pro':
+      return 'GPT-5.4 Pro'
+    case 'gpt-5.4-mini':
+      return 'GPT-5.4 Mini'
+    case 'gpt-5.4-nano':
+      return 'GPT-5.4 Nano'
     case 'gpt-5.3-codex':
       return 'GPT-5.3 Codex'
     case 'gpt-5.3-codex-spark':
       return 'GPT-5.3 Codex Spark'
-    case 'gpt-5.5':
-      return 'GPT-5.5'
-    case 'gpt-5.4':
-      return 'GPT-5.4'
-    case 'gpt-5.4-mini':
-      return 'GPT-5.4 Mini'
+    case 'gpt-5.3-chat-latest':
+      return 'GPT-5.3 Chat'
     case 'gpt-5.2':
       return 'GPT-5.2'
+    case 'gpt-5.2-pro':
+      return 'GPT-5.2 Pro'
+    case 'gpt-5.2-chat-latest':
+      return 'GPT-5.2 Chat'
     case 'gpt-5.2-codex':
       return 'GPT-5.2 Codex'
+    case 'gpt-5.1':
+      return 'GPT-5.1'
     case 'gpt-5.1-codex':
       return 'GPT-5.1 Codex'
     case 'gpt-5.1-codex-max':
       return 'GPT-5.1 Codex Max'
     case 'gpt-5.1-codex-mini':
       return 'GPT-5.1 Codex Mini'
+    case 'gpt-5':
+      return 'GPT-5'
+    case 'gpt-5-pro':
+      return 'GPT-5 Pro'
+    case 'gpt-5-mini':
+      return 'GPT-5 Mini'
+    case 'gpt-5-nano':
+      return 'GPT-5 Nano'
+    case 'gpt-5-codex':
+      return 'GPT-5 Codex'
     default:
       return null
   }

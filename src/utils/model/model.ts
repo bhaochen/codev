@@ -15,6 +15,7 @@ import {
   isTeamPremiumSubscriber,
   getOpenCodeModelName,
 } from '../auth.js'
+import { getOpenAIModelDisplayName } from '../../services/openaiAuth/models.js'
 import {
   has1mContext,
   is1mContextDisabled,
@@ -449,6 +450,16 @@ export function renderModelSetting(setting: ModelName | ModelAlias): string {
 
 // @[MODEL LAUNCH]: Add display name cases for the new model (base + [1m] variant if applicable).
 export function getPublicModelDisplayName(model: ModelName): string | null {
+  // OpenAI provider maps the Claude model strings (haiku45/sonnet46/opus46) to GPT
+  // IDs (e.g. gpt-5.4-mini). Those IDs would otherwise match the Claude switch arms
+  // below and render as "Haiku 4.5" / "Sonnet 4.6" — show the GPT marketing name instead.
+  if (getAPIProvider() === 'openai') {
+    const openAiName = getOpenAIModelDisplayName(model)
+    if (openAiName) {
+      return openAiName
+    }
+  }
+
   // Check OpenCode Zen models first (before getModelStrings() which maps them to aliases)
   if (model === 'big-pickle') return 'Big Pickle'
   if (model === 'gpt-5-nano') return 'GPT 5 Nano'

@@ -173,15 +173,6 @@ function getCustomSonnetOption(): ModelOption | undefined {
 function getSonnet46Option(): ModelOption {
   const provider = getAPIProvider()
   const is3P = provider !== 'firstParty'
-  if (provider === 'openai') {
-    return {
-      value: getModelStrings().sonnet46,
-      label: 'GPT-5.4',
-      description: 'GPT-5.4 · Recommended for most coding tasks',
-      descriptionForModel:
-        'GPT-5.4 - recommended for most coding and agentic tasks on OpenAI',
-    }
-  }
   return {
     value: is3P ? getModelStrings().sonnet46 : 'sonnet',
     label: 'Sonnet',
@@ -220,15 +211,6 @@ function getOpus41Option(): ModelOption {
 function getOpus46Option(fastMode = false): ModelOption {
   const provider = getAPIProvider()
   const is3P = provider !== 'firstParty'
-  if (provider === 'openai') {
-    return {
-      value: getModelStrings().opus46,
-      label: 'GPT-5.4',
-      description: 'GPT-5.4 · Most capable OpenAI coding model',
-      descriptionForModel:
-        'GPT-5.4 - most capable OpenAI model for complex coding work',
-    }
-  }
   return {
     value: is3P ? getModelStrings().opus46 : 'opus',
     label: 'Opus',
@@ -298,15 +280,6 @@ function getCustomHaikuOption(): ModelOption | undefined {
 function getHaiku45Option(): ModelOption {
   const provider = getAPIProvider()
   const is3P = provider !== 'firstParty'
-  if (provider === 'openai') {
-    return {
-      value: getModelStrings().haiku45,
-      label: 'GPT-5.4 Mini',
-      description: 'GPT-5.4 Mini · Fastest OpenAI option for quick answers',
-      descriptionForModel:
-        'GPT-5.4 Mini - fastest OpenAI option for quick answers and lightweight tasks',
-    }
-  }
   return {
     value: 'haiku',
     label: 'Haiku',
@@ -319,15 +292,6 @@ function getHaiku45Option(): ModelOption {
 function getHaiku35Option(): ModelOption {
   const provider = getAPIProvider()
   const is3P = provider !== 'firstParty'
-  if (provider === 'openai') {
-    return {
-      value: getModelStrings().haiku35,
-      label: 'GPT-5.4 Mini',
-      description: 'GPT-5.4 Mini · Fastest OpenAI option for simple tasks',
-      descriptionForModel:
-        'GPT-5.4 Mini - fastest OpenAI option for simple tasks and lightweight requests',
-    }
-  }
   return {
     value: 'haiku',
     label: 'Haiku',
@@ -509,13 +473,23 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
     return payg1POptions
   }
 
-  // OpenAI API: Default (GPT-5.4) + GPT-5.4 + GPT-5.4 Mini
+  // OpenAI API: Default + GPT model list fetched from models.dev (mirrors the
+  // codex CLI). No static fallback — the picker stays empty until the fetch
+  // succeeds, so a stale list can't masquerade as fresh models.dev data.
   if (getAPIProvider() === 'openai') {
-    const openAIOptions = [getDefaultOptionForUser(fastMode)]
-    openAIOptions.push(getSonnet46Option())
-    openAIOptions.push(getOpus46Option(fastMode))
-    openAIOptions.push(getHaiku45Option())
-    return openAIOptions
+    // Trigger background fetch of OpenAI models (non-blocking)
+    void import('./openaiModels.js').then(({ startOpenAIModelsFetch }) => {
+      startOpenAIModelsFetch()
+    })
+
+    const { getCachedOpenAIModels } = require('./openaiModels.js')
+    const models = getCachedOpenAIModels()
+
+    if (models && models.length > 0) {
+      return [getDefaultOptionForUser(fastMode), ...models]
+    }
+
+    return [getDefaultOptionForUser(fastMode)]
   }
 
   // NVIDIA API: Show dynamically fetched models from the NVIDIA API catalog

@@ -170,6 +170,45 @@ export function SearchableModelPicker({
             }
           }, 60000)
         }
+
+        if (provider === 'openai' && modelOptions.length <= 1) {
+          let retryCount = 0
+          const MAX_RETRIES = 5
+
+          async function tryFetch(): Promise<void> {
+            const { fetchOpenAIModels } = await import('../utils/model/openaiModels.js')
+            await fetchOpenAIModels()
+          }
+          void tryFetch()
+
+          pollTimer = setInterval(async () => {
+            if (!mounted) {
+              if (pollTimer) clearInterval(pollTimer)
+              return
+            }
+            try {
+              const { hasOpenAIModelsCache } = await import('../utils/model/openaiModels.js')
+              if (hasOpenAIModelsCache()) {
+                if (mounted) {
+                  setAppState(prev => ({ ...prev, authVersion: prev.authVersion + 1 }))
+                }
+                if (pollTimer) clearInterval(pollTimer)
+              } else if (retryCount < MAX_RETRIES) {
+                retryCount++
+                void tryFetch()
+              }
+            } catch (error) {
+              console.error('Error checking OpenAI models cache:', error)
+              if (pollTimer) clearInterval(pollTimer)
+            }
+          }, 2000)
+          setTimeout(() => {
+            if (pollTimer && mounted) {
+              clearInterval(pollTimer)
+              pollTimer = null
+            }
+          }, 60000)
+        }
       } catch (error) {
         console.error('Error checking API provider:', error)
       }

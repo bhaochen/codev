@@ -101,6 +101,9 @@ export async function call(
           } else if (provider === 'local') {
             const { fetchLocalModels } = await import('../../services/api/localClient.js')
             await fetchLocalModels()
+          } else if (provider === 'openai') {
+            const { fetchOpenAIModels } = await import('../../utils/model/openaiModels.js')
+            await fetchOpenAIModels()
           }
 
           // Clear cached model strings so they re-initialize with the new provider
