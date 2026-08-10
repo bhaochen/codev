@@ -621,7 +621,7 @@ export default class Ink {
     const optimized = optimize(diff);
     const optimizeMs = performance.now() - tOptimize;
     const hasDiff = optimized.length > 0;
-    if (this.altScreenActive && hasDiff) {
+    if (this.altScreenActive) {
       // Prepend CSI H to anchor the physical cursor to (0,0) so
       // log-update's relative moves compute from a known spot (self-healing
       // against out-of-band cursor drift, see the ALT_SCREEN_ANCHOR_CURSOR
@@ -632,6 +632,14 @@ export default class Ink {
       // BSU/ESU protects content atomicity but iTerm2's guide tracks cursor
       // position independently. Parking at bottom (not 0,0) keeps the guide
       // where the user's attention is.
+      //
+      // CSI H is emitted EVERY frame, even when diff is empty. An idle frame
+      // (spinner tick with no content change) used to skip it, but any
+      // out-of-band cursor perturbation during that window — selection drag,
+      // tmux pane redraw, terminal scrollbar — leaves the next non-empty
+      // diff's relative moves drifting from a stale physical-cursor start,
+      // and content paints to wrong columns. Always anchoring costs one CSI H
+      // (~5 bytes) per idle frame in exchange for self-healing guarantees.
       //
       // After resize, prepend ERASE_SCREEN too. The diff only writes cells
       // that changed; cells where new=blank and prev-buffer=blank get skipped
@@ -647,7 +655,12 @@ export default class Ink {
       } else {
         optimized.unshift(CURSOR_HOME_PATCH);
       }
-      optimized.push(this.altScreenParkPatch);
+      // Only park the cursor (altScreenParkPatch) when the diff actually
+      // moved it — on empty diffs the cursor is still at (0,0) from the
+      // prepended CSI H, and re-parking would be a wasted cursor row jump.
+      if (hasDiff) {
+        optimized.push(this.altScreenParkPatch);
+      }
     }
 
     // Native cursor positioning: park the terminal cursor at the declared
