@@ -58,8 +58,16 @@ const version = getDevVersion(pkg.version)
 
 mkdirSync(dirname(outfile), { recursive: true })
 
+// 注意：不要用 '@ant/*' 通配 —— 会把真实存在的 @ant/model-provider
+// 也排除出 bundle。这里逐项列出已不存在的残留 @ant 包（computer-use 等
+// 已被精简移除，仅剩动态 require 的 dead code），它们必须 external，
+// 否则 bun build 会因无法解析而报错。
 const externals = [
-  '@ant/*',
+  '@ant/claude-for-chrome-mcp',
+  '@ant/computer-use-input',
+  '@ant/computer-use-mcp',
+  '@ant/computer-use-mcp/*',
+  '@ant/computer-use-swift',
   'audio-capture-napi',
   'image-processor-napi',
   'modifiers-napi',
