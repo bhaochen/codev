@@ -404,14 +404,36 @@ export async function* queryModelOpenAI(
       } as unknown as StreamEvent
     }
 
-    // 9. Safety: 若流提前结束（无 message_delta/message_stop），把最后一条消息
-    //    的 usage / stop_reason 补写，保证 cost 统计做账
+    // 9. Safety: 流异常中断（无 message_delta/message_stop）时的兜底。
+    //    OpenAI 兼容端点正常完成必然带 finish_reason（→ message_delta）；
+    //    走到这里仍拿不到 stop_reason，意味着后端在未下发 finish_reason 的
+    //    情况下直接掐断了流（DeepSeek 免费档等常见）。此时不能静默按
+    //    end_turn 结束——被截断的回复会被当成完整 turn 直接 drop（表现为
+    //    「回复到一半断了就不再继续」）。改为按 max_tokens 截断处理并发
+    //    max_output_tokens 错误消息，触发 query.ts 的「Resume directly」
+    //    恢复路径（query.ts:1188）。整条流零输出（空流被掐）同样会走到这里，
+    //    一样触发恢复而不是静默结束。
+    //    若最后一条消息含 tool_use 则不改也不报：tool 会照常执行进入下一轮
+    //    （needsFollowUp 已是 true，此处 max_tokens 恢复只在无 tool 时命中）。
     const lastMsg = newMessages.at(-1) as
       | (AssistantMessage & { message: BetaMessage })
       | undefined
-    if (lastMsg && stopReason === null && usage.output_tokens > 0) {
-      lastMsg.message.usage = usage as BetaUsage
-      lastMsg.message.stop_reason = 'end_turn' as BetaStopReason
+    const lastHasToolUse =
+      (lastMsg?.message.content ?? []).some(
+        block => (block as { type?: string }).type === 'tool_use',
+      ) ?? false
+    if (stopReason === null && !lastHasToolUse) {
+      if (lastMsg) {
+        lastMsg.message.usage = usage as BetaUsage
+        lastMsg.message.stop_reason = 'max_tokens' as BetaStopReason
+      }
+      yield createAssistantAPIErrorMessage({
+        content: `OpenAI response exceeded the ${maxTokens} output token maximum. ${OPENAI_MAX_TOKENS_HINT}`,
+        apiError: 'max_output_tokens',
+        error: 'max_output_tokens' as unknown as Parameters<
+          typeof createAssistantAPIErrorMessage
+        >[0]['error'],
+      })
     }
   } catch (error) {
     if (isAbortError(error)) {

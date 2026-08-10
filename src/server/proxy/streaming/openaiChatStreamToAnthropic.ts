@@ -522,12 +522,17 @@ function finalizeStream(state: StreamState): void {
     state.heldMessageDelta = null
   }
 
-  // Emit message_delta if never sent (e.g., stream ended without finish_reason)
+  // Emit message_delta if never sent (e.g., stream ended without finish_reason).
+  // Map to max_tokens (NOT end_turn): an OpenAI-compatible endpoint that EOFs
+  // before sending finish_reason means the reply was cut — downstream clients
+  // (claude.ts) treat stop_reason 'max_tokens' as truncation and run the
+  // "Resume directly" recovery. Treating it as end_turn silently drops the
+  // truncated reply as a complete turn.
   if (!state.messageDeltaSent) {
     state.messageDeltaSent = true
     enqueue(state, 'message_delta', {
       type: 'message_delta',
-      delta: { stop_reason: 'end_turn', stop_sequence: null },
+      delta: { stop_reason: 'max_tokens', stop_sequence: null },
       usage: { output_tokens: 0 },
     })
   }
