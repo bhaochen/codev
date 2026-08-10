@@ -109,6 +109,10 @@ export async function call(
           // Clear cached model strings so they re-initialize with the new provider
           const { clearModelStrings } = await import('../../utils/model/modelStrings.js')
           clearModelStrings()
+          // OpenAI models are keyed to the current credential (api-key vs codex
+          // subscription); drop any stale list so the pre-fetch above re-fetches.
+          const { clearOpenAIModelsCache } = await import('../../utils/model/openaiModels.js')
+          clearOpenAIModelsCache()
 
           // Increment authVersion to trigger re-fetching of auth-dependent data
           context.setAppState(prev => ({
