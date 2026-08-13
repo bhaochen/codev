@@ -6,7 +6,7 @@
 ![CLI](https://img.shields.io/badge/-CLI-000000?style=flat-square&logo=gnu-bash&logoColor=white)
 
 <div align="center">
-  <video src="assets/codev.mp4" alt="Codev" controls width="80%"></video>
+  <img src="assets/codev.gif" alt="Codev" width="80%">
 </div>
 
 ## 📢 News
