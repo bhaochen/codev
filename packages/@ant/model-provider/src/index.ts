@@ -66,4 +66,9 @@ export {
 export { createAnthropicErrorResponse } from './shared/openaiErrorResponse.js'
 
 // OpenAi 模型映射
-export { resolveOpenAIModel } from './providers/openai/modelMapping.js'
+export {
+  resolveOpenAIModel,
+  openAIModelSupportsImages,
+  resolveOpenAIModelSupportsImages,
+  resetModelsDevCache,
+} from './providers/openai/modelMapping.js'

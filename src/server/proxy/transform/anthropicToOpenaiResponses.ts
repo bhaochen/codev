@@ -12,16 +12,19 @@ import type {
   OpenAIResponsesInputItem,
   OpenAIChatContentPart,
 } from './types.js'
+import { resolveOpenAIModelSupportsImages } from '@ant/model-provider'
 
 /**
  * Convert Anthropic Messages request to OpenAI Responses API request.
  */
-export function anthropicToOpenaiResponses(body: AnthropicRequest): OpenAIResponsesRequest {
+export async function anthropicToOpenaiResponses(body: AnthropicRequest): Promise<OpenAIResponsesRequest> {
   const input: OpenAIResponsesInputItem[] = []
 
   // Convert messages to input items
+  // 纯文本模型（o1/o3、DeepSeek 等）收到 image_url 会被上游 400 拒绝
+  const supportsImages = await resolveOpenAIModelSupportsImages(body.model)
   for (const msg of body.messages) {
-    convertMessageToInputItems(msg, input)
+    convertMessageToInputItems(msg, input, supportsImages)
   }
 
   const result: OpenAIResponsesRequest = {
@@ -81,7 +84,11 @@ export function anthropicToOpenaiResponses(body: AnthropicRequest): OpenAIRespon
   return result
 }
 
-function convertMessageToInputItems(msg: AnthropicMessage, output: OpenAIResponsesInputItem[]): void {
+function convertMessageToInputItems(
+  msg: AnthropicMessage,
+  output: OpenAIResponsesInputItem[],
+  supportsImages: boolean,
+): void {
   const content = msg.content
 
   // Simple string content
@@ -97,11 +104,16 @@ function convertMessageToInputItems(msg: AnthropicMessage, output: OpenAIRespons
 
   // Collect text/image parts and handle tool blocks separately
   const contentParts: (string | OpenAIChatContentPart)[] = []
+  let droppedImage = false
 
   for (const block of content) {
     if (block.type === 'text') {
       contentParts.push(block.text)
     } else if (block.type === 'image') {
+      if (!supportsImages) {
+        droppedImage = true
+        continue
+      }
       contentParts.push({
         type: 'image_url',
         image_url: { url: `data:${block.source.media_type};base64,${block.source.data}` },
@@ -148,6 +160,9 @@ function convertMessageToInputItems(msg: AnthropicMessage, output: OpenAIRespons
     if (flatContent) {
       output.push({ type: 'message', role: msg.role, content: flatContent })
     }
+  } else if (droppedImage) {
+    // 纯图片消息被丢图后保留空占位，避免破坏后续消息配对
+    output.push({ type: 'message', role: msg.role, content: '' })
   }
 }
 

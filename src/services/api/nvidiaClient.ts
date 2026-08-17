@@ -7,6 +7,7 @@ import {
   convertOpenAIStreamToAnthropic,
   createAnthropicErrorResponse,
   estimateTokensForAnthropicBody,
+  resolveOpenAIModelSupportsImages,
   type AnthropicMessage,
 } from '@ant/model-provider'
 
@@ -103,7 +104,14 @@ export function createNvidiaFetchOverride(): (input: RequestInfo | URL, init?: R
     }
 
     const anthropicMessages = (anthropicBody.messages || []) as AnthropicMessage[]
-    const openaiMessages = convertAnthropicMessagesToOpenAI(anthropicMessages, systemPrompt)
+    const selectedModel = (anthropicBody.model as string) || NVIDIA_MODEL
+    // models.dev 判定（带缓存），纯文本模型丢弃历史图片而不是发 image_url
+    const supportsImages = await resolveOpenAIModelSupportsImages(selectedModel)
+    const openaiMessages = convertAnthropicMessagesToOpenAI(
+      anthropicMessages,
+      systemPrompt,
+      { supportsImages },
+    )
 
     const anthropicTools = (anthropicBody.tools || []) as Array<{
       name: string
@@ -113,9 +121,6 @@ export function createNvidiaFetchOverride(): (input: RequestInfo | URL, init?: R
     const openaiTools = anthropicTools.length > 0 ? convertAnthropicToolsToOpenAI(anthropicTools) : undefined
 
     const isStreaming = anthropicBody.stream === true
-
-    // Use the model from the user's selection, falling back to the env var / default
-    const selectedModel = (anthropicBody.model as string) || NVIDIA_MODEL
 
     const requestBody: Record<string, unknown> = {
       model: selectedModel,

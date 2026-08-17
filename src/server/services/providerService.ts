@@ -621,10 +621,10 @@ export class ProviderService {
       let upstreamUrl: string
       let transformedBody: unknown
       if (format === 'openai_chat') {
-        transformedBody = anthropicToOpenaiChat(anthropicReq)
+        transformedBody = await anthropicToOpenaiChat(anthropicReq)
         upstreamUrl = `${base}/v1/chat/completions`
       } else {
-        transformedBody = anthropicToOpenaiResponses(anthropicReq)
+        transformedBody = await anthropicToOpenaiResponses(anthropicReq)
         upstreamUrl = `${base}/v1/responses`
       }
       const proxyOptions = getProxyFetchOptions({ proxyUrl: getManualNetworkProxyUrl(networkSettings) })

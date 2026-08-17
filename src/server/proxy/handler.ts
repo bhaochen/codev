@@ -120,7 +120,7 @@ async function handleOpenaiChat(
   proxyUrl: string | undefined,
 ): Promise<Response> {
   const deepSeekCompatible = shouldUseDeepSeekReasoningCompat(baseUrl)
-  const transformed = anthropicToOpenaiChat(body, {
+  const transformed = await anthropicToOpenaiChat(body, {
     roundTripReasoningContent: deepSeekCompatible,
     passThinkingToggle: deepSeekCompatible,
   })
@@ -191,7 +191,7 @@ async function handleOpenaiResponses(
   aiRequestTimeoutMs: number,
   proxyUrl: string | undefined,
 ): Promise<Response> {
-  const transformed = anthropicToOpenaiResponses(body)
+  const transformed = await anthropicToOpenaiResponses(body)
   const url = `${baseUrl}/v1/responses`
   const proxyOptions = getProxyFetchOptions({ proxyUrl })
 

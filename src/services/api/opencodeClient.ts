@@ -7,6 +7,7 @@ import {
   convertOpenAIStreamToAnthropic,
   createAnthropicErrorResponse,
   estimateTokensForAnthropicBody,
+  resolveOpenAIModelSupportsImages,
   type AnthropicMessage,
 } from '@ant/model-provider'
 
@@ -224,7 +225,13 @@ export function createOpenCodeFetchOverride(
     }
 
     const anthropicMessages = (anthropicBody.messages || []) as AnthropicMessage[]
-    const openaiMessages = convertAnthropicMessagesToOpenAI(anthropicMessages, systemPrompt)
+    // models.dev 判定（带缓存），纯文本模型丢弃历史图片而不是发 image_url
+    const supportsImages = await resolveOpenAIModelSupportsImages(modelName)
+    const openaiMessages = convertAnthropicMessagesToOpenAI(
+      anthropicMessages,
+      systemPrompt,
+      { supportsImages },
+    )
 
     // =================================================================
     // 🎯 核心修复：在这里对转换完的 openaiMessages 强行挂载鉴权暗桩

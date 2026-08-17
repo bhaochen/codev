@@ -19,6 +19,14 @@ import type {
 export interface ConvertMessagesOptions {
   /** 保留 thinking 块为 reasoning_content。现在恒为 true，保留参数仅为兼容。 */
   enableThinking?: boolean
+  /**
+   * 目标模型是否接受图像输入。为 false 时丢弃历史中的 image 块（连同
+   * tool_result 内的图片），而不是转成 image_url —— 纯文本模型（o1/o3、
+   * DeepSeek 等）收到 image_url 会被上游以
+   * `unknown variant `image_url`, expected `text`` 400 拒绝。
+   * 缺省视为 true（保持既有行为）。
+   */
+  supportsImages?: boolean
 }
 
 /** OpenAI 要求 user/assistant 交替；Anthropic 历史可能含连续 assistant 回合，需合并。 */
@@ -74,9 +82,11 @@ function extractDocumentText(
 /**
  * 规范化 tool_result 的 content：纯文本返回字符串；含图片时返回
  * text + image_url 数组（OpenAI 的 tool message 支持数组 content）。
+ * supportsImages=false 时丢弃图片，只保留文本。
  */
 function normalizeToolResultContent(
   content: unknown,
+  supportsImages: boolean,
 ): string | Array<{ type: string; text?: string; image_url?: { url: string } }> {
   if (typeof content === 'string') {
     return content
@@ -98,7 +108,7 @@ function normalizeToolResultContent(
       parts.push({ type: 'text', text: c.text ?? '' })
     } else if (c?.type === 'image') {
       const url = base64ImageUrl(c.source ?? {})
-      if (url) {
+      if (url && supportsImages) {
         hasImage = true
         parts.push({ type: 'image_url', image_url: { url } })
       }
@@ -120,7 +130,9 @@ function normalizeToolResultContent(
 
 export function convertInternalUserMessage(
   msg: AnthropicMessage,
+  options?: ConvertMessagesOptions,
 ): OpenAIMessage[] {
+  const supportsImages = options?.supportsImages !== false
   if (typeof msg.content === 'string') {
     return [{ role: 'user', content: msg.content }]
   }
@@ -139,6 +151,7 @@ export function convertInternalUserMessage(
         text: String((block as { text: string }).text ?? ''),
       })
     } else if (block.type === 'image') {
+      if (!supportsImages) continue
       const url = base64ImageUrl(
         (
           block as {
@@ -161,6 +174,7 @@ export function convertInternalUserMessage(
         role: 'tool',
         content: normalizeToolResultContent(
           (block as { content: unknown }).content,
+          supportsImages,
         ),
         tool_call_id: (block as { tool_use_id: string }).tool_use_id,
       })
@@ -261,12 +275,12 @@ export function convertInternalAssistantMessage(
  *
  * @param messages  Anthropic Messages API 的消息（已解析自请求体）
  * @param systemPrompt  system 文本（若有则前置为 system 消息）
- * @param _options  保留参数；thinking 块现在恒被保留为 reasoning_content
+ * @param options  enableThinking 保留 thinking 块；supportsImages=false 时丢弃图片
  */
 export function convertAnthropicMessagesToOpenAI(
   messages: AnthropicMessage[],
   systemPrompt?: string,
-  _options?: ConvertMessagesOptions,
+  options?: ConvertMessagesOptions,
 ): OpenAIMessage[] {
   const result: OpenAIMessage[] = []
 
@@ -276,7 +290,7 @@ export function convertAnthropicMessagesToOpenAI(
 
   for (const msg of messages) {
     if (msg.role === 'user') {
-      for (const m of convertInternalUserMessage(msg)) {
+      for (const m of convertInternalUserMessage(msg, options)) {
         pushMergedAssistant(result, m)
       }
     } else if (msg.role === 'assistant') {

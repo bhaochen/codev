@@ -22,6 +22,7 @@ import {
   convertOpenAIStreamToAnthropic,
   createAnthropicErrorResponse,
   estimateTokensForAnthropicBody,
+  resolveOpenAIModelSupportsImages,
   type AnthropicMessage,
 } from '@ant/model-provider'
 import {
@@ -133,9 +134,12 @@ export function createOpenAIFetchOverride(
     }
 
     const anthropicMessages = (anthropicBody.messages || []) as AnthropicMessage[]
+    // models.dev 判定（带缓存），纯文本模型丢弃历史图片而不是发 image_url
+    const supportsImages = await resolveOpenAIModelSupportsImages(resolvedModel)
     const openaiMessages = convertAnthropicMessagesToOpenAI(
       anthropicMessages,
       systemPrompt,
+      { supportsImages },
     )
 
     const anthropicTools = (anthropicBody.tools || []) as Array<{

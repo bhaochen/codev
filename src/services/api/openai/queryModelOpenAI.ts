@@ -31,6 +31,7 @@ import {
   convertAnthropicToolsToOpenAI,
   parseOpenAIStream,
   resolveOpenAIModel,
+  resolveOpenAIModelSupportsImages,
   type AnthropicMessage,
   type OpenAIStreamChunk,
 } from '@ant/model-provider'
@@ -188,13 +189,18 @@ export async function* queryModelOpenAI(
 
     // 5. Convert messages and tools to OpenAI format
     const enableThinking = isOpenAIThinkingEnabled(openaiModel)
+    // models.dev 判定（带缓存），纯文本模型丢弃历史图片而不是发 image_url
+    const supportsImages = await resolveOpenAIModelSupportsImages(openaiModel)
     const openAIConvertibleMessages = messagesForAPI.filter(
       isOpenAIConvertibleMessage,
     )
     const openaiMessages = convertAnthropicMessagesToOpenAI(
       openAIConvertibleMessages.map(toAnthropicMessage),
       systemPrompt?.join('\n'),
-      { enableThinking },
+      {
+        enableThinking,
+        supportsImages,
+      },
     )
     const openaiTools = convertAnthropicToolsToOpenAI(
       standardTools.map(t => ({

@@ -2,63 +2,103 @@
  * Unit tests for proxy protocol transformation
  */
 
-import { describe, test, expect } from 'bun:test'
+import { describe, test, expect, beforeAll, afterAll } from 'bun:test'
+import {
+  convertAnthropicMessagesToOpenAI,
+  openAIModelSupportsImages,
+  resolveOpenAIModelSupportsImages,
+  resetModelsDevCache,
+} from '@ant/model-provider'
 import { anthropicToOpenaiChat } from '../proxy/transform/anthropicToOpenaiChat.js'
 import { anthropicToOpenaiResponses } from '../proxy/transform/anthropicToOpenaiResponses.js'
 import { openaiChatToAnthropic } from '../proxy/transform/openaiChatToAnthropic.js'
 import { openaiResponsesToAnthropic } from '../proxy/transform/openaiResponsesToAnthropic.js'
 import type { AnthropicRequest, OpenAIChatResponse, OpenAIResponsesResponse } from '../proxy/transform/types.js'
 
+// Stub models.dev so transform tests are deterministic（不碰真实网络）。
+// 只用 `test-org/` 前缀的模型名，避免与真实数据耦合。
+const REAL_FETCH = globalThis.fetch
+beforeAll(() => {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url =
+      typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url
+    if (url === 'https://models.dev/api.json') {
+      return new Response(
+        JSON.stringify({
+          'test-org': {
+            models: {
+              'test-org/qwen-vl': { modalities: { input: ['text', 'image'] } },
+              'test-org/plain-llm': { modalities: { input: ['text'] } },
+              'bare-model': { modalities: { input: ['text', 'image'] } },
+            },
+          },
+        }),
+        { status: 200 },
+      )
+    }
+    return REAL_FETCH(input, init)
+  }) as typeof fetch
+  resetModelsDevCache()
+})
+afterAll(() => {
+  globalThis.fetch = REAL_FETCH
+  resetModelsDevCache()
+})
+
 // ─── anthropicToOpenaiChat ──────────────────────────────────────
 
 describe('anthropicToOpenaiChat', () => {
-  test('basic text message', () => {
+  test('basic text message', async () => {
     const req: AnthropicRequest = {
       model: 'gpt-4',
       max_tokens: 1024,
       messages: [{ role: 'user', content: 'Hello' }],
     }
-    const result = anthropicToOpenaiChat(req)
+    const result = await anthropicToOpenaiChat(req)
     expect(result.model).toBe('gpt-4')
     expect(result.max_tokens).toBeUndefined()
     expect(result.messages).toEqual([{ role: 'user', content: 'Hello' }])
   })
 
-  test('system prompt string', () => {
+  test('system prompt string', async () => {
     const req: AnthropicRequest = {
       model: 'gpt-4',
       max_tokens: 100,
       system: 'You are helpful',
       messages: [{ role: 'user', content: 'Hi' }],
     }
-    const result = anthropicToOpenaiChat(req)
+    const result = await anthropicToOpenaiChat(req)
     expect(result.messages[0]).toEqual({ role: 'system', content: 'You are helpful' })
     expect(result.messages[1]).toEqual({ role: 'user', content: 'Hi' })
   })
 
-  test('system prompt array', () => {
+  test('system prompt array', async () => {
     const req: AnthropicRequest = {
       model: 'gpt-4',
       max_tokens: 100,
       system: [{ type: 'text', text: 'Part 1' }, { type: 'text', text: 'Part 2' }],
       messages: [{ role: 'user', content: 'Hi' }],
     }
-    const result = anthropicToOpenaiChat(req)
+    const result = await anthropicToOpenaiChat(req)
     expect(result.messages[0]).toEqual({ role: 'system', content: 'Part 1\nPart 2' })
   })
 
-  test('stop_sequences → stop', () => {
+  test('stop_sequences → stop', async () => {
     const req: AnthropicRequest = {
       model: 'gpt-4',
       max_tokens: 100,
       stop_sequences: ['END', 'STOP'],
       messages: [{ role: 'user', content: 'Hi' }],
     }
-    const result = anthropicToOpenaiChat(req)
+    const result = await anthropicToOpenaiChat(req)
     expect(result.stop).toEqual(['END', 'STOP'])
   })
 
-  test('tools conversion', () => {
+  test('tools conversion', async () => {
     const req: AnthropicRequest = {
       model: 'gpt-4',
       max_tokens: 100,
@@ -69,14 +109,14 @@ describe('anthropicToOpenaiChat', () => {
         input_schema: { type: 'object', properties: { city: { type: 'string' } } },
       }],
     }
-    const result = anthropicToOpenaiChat(req)
+    const result = await anthropicToOpenaiChat(req)
     expect(result.tools).toHaveLength(1)
     expect(result.tools![0].type).toBe('function')
     expect(result.tools![0].function.name).toBe('get_weather')
     expect(result.tools![0].function.parameters).toEqual({ type: 'object', properties: { city: { type: 'string' } } })
   })
 
-  test('filters BatchTool', () => {
+  test('filters BatchTool', async () => {
     const req: AnthropicRequest = {
       model: 'gpt-4',
       max_tokens: 100,
@@ -86,41 +126,41 @@ describe('anthropicToOpenaiChat', () => {
         { name: 'real_tool', input_schema: {} },
       ],
     }
-    const result = anthropicToOpenaiChat(req)
+    const result = await anthropicToOpenaiChat(req)
     expect(result.tools).toHaveLength(1)
     expect(result.tools![0].function.name).toBe('real_tool')
   })
 
-  test('tool_choice conversion', () => {
+  test('tool_choice conversion', async () => {
     const req: AnthropicRequest = {
       model: 'gpt-4',
       max_tokens: 100,
       messages: [{ role: 'user', content: 'Hi' }],
       tool_choice: { type: 'any' },
     }
-    const result = anthropicToOpenaiChat(req)
+    const result = await anthropicToOpenaiChat(req)
     expect(result.tool_choice).toBe('required')
   })
 
-  test('tool_choice type=tool', () => {
+  test('tool_choice type=tool', async () => {
     const req: AnthropicRequest = {
       model: 'gpt-4',
       max_tokens: 100,
       messages: [{ role: 'user', content: 'Hi' }],
       tool_choice: { type: 'tool', name: 'get_weather' },
     }
-    const result = anthropicToOpenaiChat(req)
+    const result = await anthropicToOpenaiChat(req)
     expect(result.tool_choice).toEqual({ type: 'function', function: { name: 'get_weather' } })
   })
 
-  test('thinking budget → reasoning_effort', () => {
+  test('thinking budget → reasoning_effort', async () => {
     const lowReq: AnthropicRequest = {
       model: 'gpt-4',
       max_tokens: 100,
       messages: [{ role: 'user', content: 'Hi' }],
       thinking: { type: 'enabled', budget_tokens: 512 },
     }
-    expect(anthropicToOpenaiChat(lowReq).reasoning_effort).toBe('low')
+    expect((await anthropicToOpenaiChat(lowReq)).reasoning_effort).toBe('low')
 
     const medReq: AnthropicRequest = {
       model: 'gpt-4',
@@ -128,7 +168,7 @@ describe('anthropicToOpenaiChat', () => {
       messages: [{ role: 'user', content: 'Hi' }],
       thinking: { type: 'enabled', budget_tokens: 4096 },
     }
-    expect(anthropicToOpenaiChat(medReq).reasoning_effort).toBe('medium')
+    expect((await anthropicToOpenaiChat(medReq)).reasoning_effort).toBe('medium')
 
     const highReq: AnthropicRequest = {
       model: 'gpt-4',
@@ -136,10 +176,10 @@ describe('anthropicToOpenaiChat', () => {
       messages: [{ role: 'user', content: 'Hi' }],
       thinking: { type: 'enabled', budget_tokens: 16000 },
     }
-    expect(anthropicToOpenaiChat(highReq).reasoning_effort).toBe('high')
+    expect((await anthropicToOpenaiChat(highReq)).reasoning_effort).toBe('high')
   })
 
-  test('passes explicit thinking toggle for DeepSeek-compatible chat proxies', () => {
+  test('passes explicit thinking toggle for DeepSeek-compatible chat proxies', async () => {
     const req: AnthropicRequest = {
       model: 'deepseek-v4-flash',
       max_tokens: 100,
@@ -147,11 +187,11 @@ describe('anthropicToOpenaiChat', () => {
       thinking: { type: 'disabled' },
     }
 
-    expect(anthropicToOpenaiChat(req).thinking).toBeUndefined()
-    expect(anthropicToOpenaiChat(req, { passThinkingToggle: true }).thinking).toEqual({ type: 'disabled' })
+    expect((await anthropicToOpenaiChat(req)).thinking).toBeUndefined()
+    expect((await anthropicToOpenaiChat(req, { passThinkingToggle: true })).thinking).toEqual({ type: 'disabled' })
   })
 
-  test('assistant message with tool_use', () => {
+  test('assistant message with tool_use', async () => {
     const req: AnthropicRequest = {
       model: 'gpt-4',
       max_tokens: 100,
@@ -163,7 +203,7 @@ describe('anthropicToOpenaiChat', () => {
         ],
       }],
     }
-    const result = anthropicToOpenaiChat(req)
+    const result = await anthropicToOpenaiChat(req)
     const msg = result.messages[0]
     expect(msg.role).toBe('assistant')
     expect(msg.content).toBe('Let me check')
@@ -173,7 +213,7 @@ describe('anthropicToOpenaiChat', () => {
     expect(msg.tool_calls![0].function.arguments).toBe('{"city":"NYC"}')
   })
 
-  test('round-trips assistant thinking as reasoning_content for DeepSeek tool-call history', () => {
+  test('round-trips assistant thinking as reasoning_content for DeepSeek tool-call history', async () => {
     const req: AnthropicRequest = {
       model: 'deepseek-v4-pro',
       max_tokens: 100,
@@ -188,10 +228,10 @@ describe('anthropicToOpenaiChat', () => {
       }],
     }
 
-    const defaultResult = anthropicToOpenaiChat(req)
+    const defaultResult = await anthropicToOpenaiChat(req)
     expect(defaultResult.messages[0].reasoning_content).toBeUndefined()
 
-    const result = anthropicToOpenaiChat(req, { roundTripReasoningContent: true })
+    const result = await anthropicToOpenaiChat(req, { roundTripReasoningContent: true })
     const msg = result.messages[0]
     expect(msg.role).toBe('assistant')
     expect(msg.content).toBe('Let me check that.')
@@ -199,7 +239,7 @@ describe('anthropicToOpenaiChat', () => {
     expect(msg.tool_calls?.[0].id).toBe('call_1')
   })
 
-  test('user message with tool_result', () => {
+  test('user message with tool_result', async () => {
     const req: AnthropicRequest = {
       model: 'gpt-4',
       max_tokens: 100,
@@ -210,15 +250,16 @@ describe('anthropicToOpenaiChat', () => {
         ],
       }],
     }
-    const result = anthropicToOpenaiChat(req)
+    const result = await anthropicToOpenaiChat(req)
     expect(result.messages[0].role).toBe('tool')
     expect(result.messages[0].tool_call_id).toBe('tc_1')
     expect(result.messages[0].content).toBe('Sunny, 72°F')
   })
 
-  test('image content conversion', () => {
+  test('image content conversion', async () => {
+    // gpt-4o 走内置 vision 快路径（不依赖 models.dev 网络查询）
     const req: AnthropicRequest = {
-      model: 'gpt-4',
+      model: 'gpt-4o',
       max_tokens: 100,
       messages: [{
         role: 'user',
@@ -227,17 +268,48 @@ describe('anthropicToOpenaiChat', () => {
         ],
       }],
     }
-    const result = anthropicToOpenaiChat(req)
+    const result = await anthropicToOpenaiChat(req)
     const content = result.messages[0].content as Array<{ type: string; image_url?: { url: string } }>
     expect(content[0].type).toBe('image_url')
     expect(content[0].image_url!.url).toBe('data:image/png;base64,abc123')
+  })
+
+  test('text-only model (o3) drops image blocks', async () => {
+    const req: AnthropicRequest = {
+      model: 'o3',
+      max_tokens: 100,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'describe this bar chart' },
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'abc123' } },
+        ],
+      }],
+    }
+    const result = await anthropicToOpenaiChat(req)
+    expect(result.messages[0].content).toBe('describe this bar chart')
+  })
+
+  test('image-only message to text-only model keeps empty placeholder', async () => {
+    const req: AnthropicRequest = {
+      model: 'deepseek-chat',
+      max_tokens: 100,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'abc123' } },
+        ],
+      }],
+    }
+    const result = await anthropicToOpenaiChat(req)
+    expect(result.messages[0]).toEqual({ role: 'user', content: '' })
   })
 })
 
 // ─── openaiChatToAnthropic ──────────────────────────────────────
 
 describe('openaiChatToAnthropic', () => {
-  test('basic text response', () => {
+  test('basic text response', async () => {
     const res: OpenAIChatResponse = {
       id: 'chatcmpl-1',
       object: 'chat.completion',
@@ -259,7 +331,7 @@ describe('openaiChatToAnthropic', () => {
     expect(result.usage.output_tokens).toBe(5)
   })
 
-  test('tool_calls response', () => {
+  test('tool_calls response', async () => {
     const res: OpenAIChatResponse = {
       id: 'chatcmpl-2',
       object: 'chat.completion',
@@ -290,7 +362,7 @@ describe('openaiChatToAnthropic', () => {
     }
   })
 
-  test('tool_calls response preserves object arguments from local proxies', () => {
+  test('tool_calls response preserves object arguments from local proxies', async () => {
     const res: OpenAIChatResponse = {
       id: 'chatcmpl-write',
       object: 'chat.completion',
@@ -325,7 +397,7 @@ describe('openaiChatToAnthropic', () => {
     }
   })
 
-  test('finish_reason mapping', () => {
+  test('finish_reason mapping', async () => {
     const make = (reason: string) => ({
       id: 'x', object: 'chat.completion', created: 0, model: 'gpt-4',
       choices: [{ index: 0, message: { role: 'assistant', content: 'hi' }, finish_reason: reason }],
@@ -337,7 +409,7 @@ describe('openaiChatToAnthropic', () => {
     expect(openaiChatToAnthropic(make('content_filter'), 'gpt-4').stop_reason).toBe('end_turn')
   })
 
-  test('empty choices', () => {
+  test('empty choices', async () => {
     const res: OpenAIChatResponse = {
       id: 'x', object: 'chat.completion', created: 0, model: 'gpt-4',
       choices: [],
@@ -347,7 +419,7 @@ describe('openaiChatToAnthropic', () => {
     expect(result.stop_reason).toBe('end_turn')
   })
 
-  test('cached tokens mapping', () => {
+  test('cached tokens mapping', async () => {
     const res: OpenAIChatResponse = {
       id: 'x', object: 'chat.completion', created: 0, model: 'gpt-4',
       choices: [{ index: 0, message: { role: 'assistant', content: 'hi' }, finish_reason: 'stop' }],
@@ -366,14 +438,14 @@ describe('openaiChatToAnthropic', () => {
 // ─── anthropicToOpenaiResponses ─────────────────────────────────
 
 describe('anthropicToOpenaiResponses', () => {
-  test('basic message', () => {
+  test('basic message', async () => {
     const req: AnthropicRequest = {
       model: 'gpt-4o',
       max_tokens: 1024,
       system: 'Be helpful',
       messages: [{ role: 'user', content: 'Hello' }],
     }
-    const result = anthropicToOpenaiResponses(req)
+    const result = await anthropicToOpenaiResponses(req)
     expect(result.model).toBe('gpt-4o')
     expect(result.instructions).toBe('Be helpful')
     expect(result.store).toBe(false)
@@ -382,7 +454,7 @@ describe('anthropicToOpenaiResponses', () => {
     expect(result.input).toEqual([{ type: 'message', role: 'user', content: 'Hello' }])
   })
 
-  test('tools conversion uses top-level name', () => {
+  test('tools conversion uses top-level name', async () => {
     const req: AnthropicRequest = {
       model: 'gpt-4o',
       max_tokens: 100,
@@ -393,7 +465,7 @@ describe('anthropicToOpenaiResponses', () => {
         input_schema: { type: 'object', properties: { city: { type: 'string' } } },
       }],
     }
-    const result = anthropicToOpenaiResponses(req)
+    const result = await anthropicToOpenaiResponses(req)
     expect(result.tools).toHaveLength(1)
     expect(result.tools![0]).toEqual({
       type: 'function',
@@ -403,7 +475,7 @@ describe('anthropicToOpenaiResponses', () => {
     })
   })
 
-  test('tool_use lifted to function_call', () => {
+  test('tool_use lifted to function_call', async () => {
     const req: AnthropicRequest = {
       model: 'gpt-4o',
       max_tokens: 100,
@@ -414,7 +486,7 @@ describe('anthropicToOpenaiResponses', () => {
         ],
       }],
     }
-    const result = anthropicToOpenaiResponses(req)
+    const result = await anthropicToOpenaiResponses(req)
     const fc = result.input.find((i) => i.type === 'function_call')
     expect(fc).toBeDefined()
     if (fc && fc.type === 'function_call') {
@@ -424,7 +496,7 @@ describe('anthropicToOpenaiResponses', () => {
     }
   })
 
-  test('tool_result lifted to function_call_output', () => {
+  test('tool_result lifted to function_call_output', async () => {
     const req: AnthropicRequest = {
       model: 'gpt-4o',
       max_tokens: 100,
@@ -435,7 +507,7 @@ describe('anthropicToOpenaiResponses', () => {
         ],
       }],
     }
-    const result = anthropicToOpenaiResponses(req)
+    const result = await anthropicToOpenaiResponses(req)
     const fco = result.input.find((i) => i.type === 'function_call_output')
     expect(fco).toBeDefined()
     if (fco && fco.type === 'function_call_output') {
@@ -444,34 +516,50 @@ describe('anthropicToOpenaiResponses', () => {
     }
   })
 
-  test('thinking → reasoning', () => {
+  test('thinking → reasoning', async () => {
     const req: AnthropicRequest = {
       model: 'gpt-4o',
       max_tokens: 100,
       messages: [{ role: 'user', content: 'Hi' }],
       thinking: { type: 'enabled', budget_tokens: 10000 },
     }
-    const result = anthropicToOpenaiResponses(req)
+    const result = await anthropicToOpenaiResponses(req)
     expect(result.reasoning).toEqual({ effort: 'high' })
   })
 
-  test('stop_sequences dropped', () => {
+  test('stop_sequences dropped', async () => {
     const req: AnthropicRequest = {
       model: 'gpt-4o',
       max_tokens: 100,
       messages: [{ role: 'user', content: 'Hi' }],
       stop_sequences: ['END'],
     }
-    const result = anthropicToOpenaiResponses(req)
+    const result = await anthropicToOpenaiResponses(req)
     expect((result as Record<string, unknown>).stop).toBeUndefined()
     expect((result as Record<string, unknown>).stop_sequences).toBeUndefined()
+  })
+
+  test('text-only model (o1) drops image blocks', async () => {
+    const req: AnthropicRequest = {
+      model: 'o1',
+      max_tokens: 100,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'describe this chart' },
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'abc123' } },
+        ],
+      }],
+    }
+    const result = await anthropicToOpenaiResponses(req)
+    expect(result.input).toEqual([{ type: 'message', role: 'user', content: 'describe this chart' }])
   })
 })
 
 // ─── openaiResponsesToAnthropic ─────────────────────────────────
 
 describe('openaiResponsesToAnthropic', () => {
-  test('basic text response', () => {
+  test('basic text response', async () => {
     const res: OpenAIResponsesResponse = {
       id: 'resp_1',
       object: 'response',
@@ -492,7 +580,7 @@ describe('openaiResponsesToAnthropic', () => {
     expect(result.usage.output_tokens).toBe(5)
   })
 
-  test('function_call → tool_use', () => {
+  test('function_call → tool_use', async () => {
     const res: OpenAIResponsesResponse = {
       id: 'resp_2',
       object: 'response',
@@ -516,7 +604,7 @@ describe('openaiResponsesToAnthropic', () => {
     }
   })
 
-  test('function_call preserves object arguments from local proxies', () => {
+  test('function_call preserves object arguments from local proxies', async () => {
     const res: OpenAIResponsesResponse = {
       id: 'resp_write',
       object: 'response',
@@ -542,7 +630,7 @@ describe('openaiResponsesToAnthropic', () => {
     }
   })
 
-  test('reasoning → thinking', () => {
+  test('reasoning → thinking', async () => {
     const res: OpenAIResponsesResponse = {
       id: 'resp_3',
       object: 'response',
@@ -563,7 +651,7 @@ describe('openaiResponsesToAnthropic', () => {
     expect(result.content[1].type).toBe('text')
   })
 
-  test('status incomplete → max_tokens', () => {
+  test('status incomplete → max_tokens', async () => {
     const res: OpenAIResponsesResponse = {
       id: 'resp_4',
       object: 'response',
@@ -576,7 +664,7 @@ describe('openaiResponsesToAnthropic', () => {
     expect(result.stop_reason).toBe('max_tokens')
   })
 
-  test('empty output', () => {
+  test('empty output', async () => {
     const res: OpenAIResponsesResponse = {
       id: 'resp_5',
       object: 'response',
@@ -587,5 +675,116 @@ describe('openaiResponsesToAnthropic', () => {
     }
     const result = openaiResponsesToAnthropic(res, 'gpt-4o')
     expect(result.content).toEqual([{ type: 'text', text: '' }])
+  })
+})
+
+// ─── openAIModelSupportsImages ──────────────────────────────────
+
+describe('openAIModelSupportsImages', () => {
+  test('vision models keep images', async () => {
+    for (const m of ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.5', 'gpt-5', 'gpt-5.1-codex-max', 'o4-mini']) {
+      expect(openAIModelSupportsImages(m)).toBe(true)
+    }
+  })
+
+  test('text-only models drop images', async () => {
+    for (const m of ['o1', 'o1-mini', 'o3', 'o3-mini', 'deepseek-chat', 'deepseek-reasoner', 'deepseek-v4-pro']) {
+      expect(openAIModelSupportsImages(m)).toBe(false)
+    }
+  })
+
+  test('OPENAI_TEXT_ONLY_MODELS forces custom text-only models', async () => {
+    const prev = process.env.OPENAI_TEXT_ONLY_MODELS
+    process.env.OPENAI_TEXT_ONLY_MODELS = 'mymodel'
+    try {
+      expect(openAIModelSupportsImages('mymodel-v3')).toBe(false)
+      // 只影响匹配子串的模型，不波及其他模型
+      expect(openAIModelSupportsImages('gpt-4o')).toBe(true)
+    } finally {
+      if (prev === undefined) {
+        delete process.env.OPENAI_TEXT_ONLY_MODELS
+      } else {
+        process.env.OPENAI_TEXT_ONLY_MODELS = prev
+      }
+    }
+  })
+})
+
+// ─── resolveOpenAIModelSupportsImages (models.dev) ──────────────
+
+describe('resolveOpenAIModelSupportsImages (models.dev)', () => {
+  test('exact match from stubbed catalog — vision', async () => {
+    expect(await resolveOpenAIModelSupportsImages('test-org/qwen-vl')).toBe(true)
+  })
+
+  test('exact match from stubbed catalog — text-only', async () => {
+    expect(await resolveOpenAIModelSupportsImages('test-org/plain-llm')).toBe(false)
+  })
+
+  test('bare id exact match', async () => {
+    expect(await resolveOpenAIModelSupportsImages('bare-model')).toBe(true)
+  })
+
+  test('suffix match without org prefix', async () => {
+    expect(await resolveOpenAIModelSupportsImages('qwen-vl')).toBe(true)
+    expect(await resolveOpenAIModelSupportsImages('plain-llm')).toBe(false)
+  })
+
+  test('fast-path overrides never hit models.dev', async () => {
+    expect(await resolveOpenAIModelSupportsImages('o4-mini')).toBe(true)
+    expect(await resolveOpenAIModelSupportsImages('deepseek-chat')).toBe(false)
+  })
+
+  test('unknown model defaults to supporting images', async () => {
+    expect(await resolveOpenAIModelSupportsImages('custom-unknown-llm')).toBe(true)
+  })
+})
+
+// ─── convertAnthropicMessagesToOpenAI supportsImages ────────────
+
+describe('convertAnthropicMessagesToOpenAI supportsImages', () => {
+  test('supportsImages=false drops user image blocks and tool_result images', async () => {
+    const messages = [{
+      role: 'user',
+      content: [
+        { type: 'text', text: 'see screenshot' },
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'abc123' } },
+      ],
+    }]
+    const result = convertAnthropicMessagesToOpenAI(messages as never[], '', { supportsImages: false })
+    expect(result).toEqual([{ role: 'user', content: 'see screenshot' }])
+  })
+
+  test('supportsImages=false drops images inside tool_result', async () => {
+    const messages = [{
+      role: 'user',
+      content: [
+        {
+          type: 'tool_result',
+          tool_use_id: 'tc_1',
+          content: [
+            { type: 'text', text: 'results:' },
+            { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'abc123' } },
+          ],
+        },
+      ],
+    }]
+    const result = convertAnthropicMessagesToOpenAI(messages as never[], '', { supportsImages: false })
+    expect(result).toEqual([
+      { role: 'tool', content: 'results:', tool_call_id: 'tc_1' },
+      { role: 'user', content: '' },
+    ])
+  })
+
+  test('default keeps images (current behavior)', async () => {
+    const messages = [{
+      role: 'user',
+      content: [
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'abc123' } },
+      ],
+    }]
+    const result = convertAnthropicMessagesToOpenAI(messages as never[], '')
+    const content = result[0]!.content as Array<{ type: string; image_url?: { url: string } }>
+    expect(content[0].type).toBe('image_url')
   })
 })

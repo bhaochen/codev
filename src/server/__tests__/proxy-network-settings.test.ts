@@ -60,7 +60,11 @@ describe('proxy network settings', () => {
     const originalFetch = globalThis.fetch
     const originalTimeout = AbortSignal.timeout
     const timeoutCalls: number[] = []
-    globalThis.fetch = mock(async (_url: string | URL | Request, _init?: RequestInit) => {
+    globalThis.fetch = mock(async (url: string | URL | Request, _init?: RequestInit) => {
+      // model-main 走不到内置快路径，转换时查一次 models.dev（带 15s 超时）
+      if (String(url) === 'https://models.dev/api.json') {
+        return Response.json({})
+      }
       return new Response(JSON.stringify({
         id: 'chatcmpl-network-timeout',
         object: 'chat.completion',
@@ -99,7 +103,8 @@ describe('proxy network settings', () => {
       const res = await handleProxyRequest(req, new URL(req.url))
 
       expect(res.status).toBe(200)
-      expect(timeoutCalls).toEqual([45_000])
+      // 最后一次超时来自上游请求，须用配置的 aiRequestTimeoutMs
+      expect(timeoutCalls.at(-1)).toBe(45_000)
     } finally {
       AbortSignal.timeout = originalTimeout
       globalThis.fetch = originalFetch
@@ -136,7 +141,10 @@ describe('proxy network settings', () => {
     const originalFetch = globalThis.fetch
     const originalTimeout = AbortSignal.timeout
     const timeoutCalls: number[] = []
-    globalThis.fetch = mock(async (_url: string | URL | Request, _init?: RequestInit) => {
+    globalThis.fetch = mock(async (url: string | URL | Request, _init?: RequestInit) => {
+      if (String(url) === 'https://models.dev/api.json') {
+        return Response.json({})
+      }
       return new Response(JSON.stringify({
         id: 'resp-network-timeout',
         status: 'completed',
@@ -173,7 +181,7 @@ describe('proxy network settings', () => {
       const res = await handleProxyRequest(req, new URL(req.url))
 
       expect(res.status).toBe(200)
-      expect(timeoutCalls).toEqual([45_000])
+      expect(timeoutCalls.at(-1)).toBe(45_000)
     } finally {
       AbortSignal.timeout = originalTimeout
       globalThis.fetch = originalFetch
@@ -210,7 +218,10 @@ describe('proxy network settings', () => {
     const originalFetch = globalThis.fetch
     const originalTimeout = AbortSignal.timeout
     const timeoutCalls: number[] = []
-    globalThis.fetch = mock(async (_url: string | URL | Request, _init?: RequestInit) => {
+    globalThis.fetch = mock(async (url: string | URL | Request, _init?: RequestInit) => {
+      if (String(url) === 'https://models.dev/api.json') {
+        return Response.json({})
+      }
       return new Response(
         new ReadableStream({
           start(controller) {
@@ -247,7 +258,7 @@ describe('proxy network settings', () => {
       const res = await handleProxyRequest(req, new URL(req.url))
 
       expect(res.status).toBe(200)
-      expect(timeoutCalls).toEqual([180_000])
+      expect(timeoutCalls.at(-1)).toBe(180_000)
     } finally {
       AbortSignal.timeout = originalTimeout
       globalThis.fetch = originalFetch

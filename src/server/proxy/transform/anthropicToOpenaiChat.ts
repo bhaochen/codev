@@ -14,14 +14,15 @@ import type {
   OpenAIToolCall,
   OpenAITool,
 } from './types.js'
+import { resolveOpenAIModelSupportsImages } from '@ant/model-provider'
 
 /**
  * Convert Anthropic Messages request to OpenAI Chat Completions request.
  */
-export function anthropicToOpenaiChat(
+export async function anthropicToOpenaiChat(
   body: AnthropicRequest,
   options: { roundTripReasoningContent?: boolean; passThinkingToggle?: boolean } = {},
-): OpenAIChatRequest {
+): Promise<OpenAIChatRequest> {
   const messages: OpenAIChatMessage[] = []
 
   // Convert system prompt
@@ -35,8 +36,10 @@ export function anthropicToOpenaiChat(
   }
 
   // Convert messages
+  // 纯文本模型（o1/o3、DeepSeek 等）收到 image_url 会被上游 400 拒绝
+  const supportsImages = await resolveOpenAIModelSupportsImages(body.model)
   for (const msg of body.messages) {
-    convertMessage(msg, messages, options)
+    convertMessage(msg, messages, options, supportsImages)
   }
 
   // Build request
@@ -100,6 +103,7 @@ function convertMessage(
   msg: AnthropicMessage,
   output: OpenAIChatMessage[],
   options: { roundTripReasoningContent?: boolean },
+  supportsImages: boolean,
 ): void {
   const content = msg.content
 
@@ -116,20 +120,29 @@ function convertMessage(
   }
 
   if (msg.role === 'user') {
-    convertUserMessage(content, output)
+    convertUserMessage(content, output, supportsImages)
   } else {
     convertAssistantMessage(content, output, options)
   }
 }
 
-function convertUserMessage(blocks: AnthropicContentBlock[], output: OpenAIChatMessage[]): void {
+function convertUserMessage(
+  blocks: AnthropicContentBlock[],
+  output: OpenAIChatMessage[],
+  supportsImages: boolean,
+): void {
   // Separate tool_result blocks from other content
   const contentParts: OpenAIChatContentPart[] = []
+  let droppedImage = false
 
   for (const block of blocks) {
     if (block.type === 'text') {
       contentParts.push({ type: 'text', text: block.text })
     } else if (block.type === 'image') {
+      if (!supportsImages) {
+        droppedImage = true
+        continue
+      }
       const url = `data:${block.source.media_type};base64,${block.source.data}`
       contentParts.push({ type: 'image_url', image_url: { url } })
     } else if (block.type === 'tool_result') {
@@ -154,6 +167,9 @@ function convertUserMessage(blocks: AnthropicContentBlock[], output: OpenAIChatM
         ? contentParts[0].text
         : contentParts,
     })
+  } else if (droppedImage) {
+    // 纯图片消息被丢图后保留空占位，避免破坏后续消息配对
+    output.push({ role: 'user', content: '' })
   }
 }
 
