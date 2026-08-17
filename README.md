@@ -11,6 +11,8 @@
 
 ## 📢 News
 
+- **2026-08-10** 🧩 OpenAI First-Class Support — true direct Anthropic→OpenAI conversion via the shared `@ant/model-provider` package (thinking/reasoning supported everywhere); native `/login` flow for the ChatGPT subscription backend; dynamic model list loaded from real endpoints (`codex /models` + `api-key /models`).
+- **2026-08-10** ⚙️ Full Headless `-p` Mode — complete non-SDK headless implementation with `text`/`json`/`stream-json` output and result-driven exit codes.
 - **2026-07-27** 🦙 Llama.cpp Local Provider — native `/models` + `/props` endpoint based dynamic model discovery, context window parsed from the server `-c` value, auto-compact buffer scaled proportionally.
 - **2026-07-08** 🖼️ Image Search & Render Hardening — WebSearchTool now exposes an explicit `search_images` flag that routes to SearXNG while Tavily handles general search; ImageShowTool downloads URLs to temp files and passes them to timg by path, fixes kitty protocol concurrency corruption (in-band sequences are now non-concurrent), and computes dimensions from terminal height with aspect-ratio-aware width.
 - **2026-07-04** 🖼️ Inline Terminal Images — Native Kitty graphics protocol rendering via timg; WebSearch, WebFetch, and LocationTool results now display inline images directly in the TUI with cursor-safe hide/show and dynamic row layout.
