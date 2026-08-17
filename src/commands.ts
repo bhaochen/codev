@@ -188,6 +188,7 @@ import rateLimitOptions from './commands/rate-limit-options/index.js'
 import statusline from './commands/statusline.js'
 import effort from './commands/effort/index.js'
 import stats from './commands/stats/index.js'
+import { benchmark, benchmarkNonInteractive } from './commands/benchmark/index.js'
 // insights.ts is 113KB (3200 lines, includes diffLines/html rendering). Lazy
 // shim defers the heavy module until /insights is actually invoked.
 const usageReport: Command = {
@@ -322,6 +323,8 @@ const COMMANDS = memoize((): Command[] => [
   usage,
   usageReport,
   vim,
+  benchmark,
+  benchmarkNonInteractive,
   ...(webCmd ? [webCmd] : []),
   ...(forkCmd ? [forkCmd] : []),
   ...(buddy ? [buddy] : []),

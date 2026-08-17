@@ -27,3 +27,6 @@ __pycache__/
 .venv/
 venv/
 env/
+
+# /benchmark generated run artifacts
+.codev-benchmarks/

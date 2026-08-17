@@ -11,6 +11,7 @@
 
 ## 📢 News
 
+- **2026-08-18** 🎯 `/benchmark` — deepsearch benchmark command (OpenSeeker ReAct search loop + trajectory saving, ABSeeker step scoring, LongSeeker context management analysis). Run `{id, query, gt}` datasets headlessly or live in the TUI.
 - **2026-08-10** 🧩 OpenAI First-Class Support — true direct Anthropic→OpenAI conversion via the shared `@ant/model-provider` package (thinking/reasoning supported everywhere); native `/login` flow for the ChatGPT subscription backend; dynamic model list loaded from real endpoints (`codex /models` + `api-key /models`).
 - **2026-08-10** ⚙️ Full Headless `-p` Mode — complete non-SDK headless implementation with `text`/`json`/`stream-json` output and result-driven exit codes.
 - **2026-07-27** 🦙 Llama.cpp Local Provider — native `/models` + `/props` endpoint based dynamic model discovery, context window parsed from the server `-c` value, auto-compact buffer scaled proportionally.
