@@ -124,7 +124,6 @@ CLI 入口由 **Commander.js** 解析命令行参数，随后启动 **REPL**（�
 | `/branch` | - | 分支管理 |
 | `/files` | - | 显示会话中跟踪的文件 |
 | `/commit` | ant 内部 | 创建 Git 提交 |
-| `/commit-push` | ant 内部 | 提交并推送 |
 | `/commit-push-pr` | ant 内部 | 提交、推送、创建 PR |
 | `/fork` | feature 控制 | Fork 子代理 |
 | `/buddy` | feature 控制 | 协作编程伙伴 |

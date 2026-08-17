@@ -9,7 +9,6 @@ import feedback from './commands/feedback/index.js'
 import clear from './commands/clear/index.js'
 import color from './commands/color/index.js'
 import commit from './commands/commit.js'
-import commitPush from './commands/commit-push.js'
 import copy from './commands/copy/index.js'
 import desktop from './commands/desktop/index.js'
 import commitPushPr from './commands/commit-push-pr.js'
@@ -231,7 +230,6 @@ export const INTERNAL_ONLY_COMMANDS = [
   breakCache,
   bughunter,
   commit,
-  commitPush,
   commitPushPr,
   ctx_viz,
   goodClaude,
