@@ -816,7 +816,11 @@ export function shouldRenderStatically(message: RenderableMessage, streamingTool
       {
         // api errors always render dynamically, since we hide
         // them as soon as we see another non-error message.
-        return message.subtype !== 'api_error';
+        // local_command too: local command output (e.g. /benchmark
+        // live progress) updates its transcript content in place.
+        // isStatic would otherwise skip re-render forever (Message
+        // memo bails when both prev and next are static).
+        return message.subtype !== 'api_error' && message.subtype !== 'local_command';
       }
     case 'grouped_tool_use':
       {
