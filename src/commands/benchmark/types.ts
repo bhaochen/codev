@@ -89,6 +89,8 @@ export type ContextAnalysis = {
 export type BenchmarkRun = {
   datasetName: string
   model: string
+  /** LLM-as-judge / 步级打分模型（复用 agent 模型时与 model 相同） */
+  judgeModel?: string
   maxSteps: number
   startedAt: string
   durationMs: number

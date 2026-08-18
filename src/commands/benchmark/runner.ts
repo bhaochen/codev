@@ -14,6 +14,7 @@ import { join, resolve } from 'path'
 import { runAgent } from './agent.js'
 import { analyzeContextFromSteps } from './ctx.js'
 import { loadDataset } from './datasets.js'
+import { buildInlineReport } from './report.js'
 import { judgeTrajectory } from './judge.js'
 import { scoreTrajectory } from './score.js'
 import { getMainLoopModel } from '../../utils/model/model.js'
@@ -26,7 +27,10 @@ import type {
 /** /benchmark 命令行参数 */
 export type BenchmarkArgs = {
   dataset: string
+  /** agent（ReAct 搜索循环）模型 */
   model: string
+  /** LLM-as-judge / 步级打分模型；留空则复用 model */
+  judgeModel: string
   maxSteps: number
   limit: number
   out: string
@@ -64,6 +68,7 @@ export function parseBenchmarkArgs(raw: string): BenchmarkArgs {
   const args: BenchmarkArgs = {
     dataset: 'deepsearch-demo',
     model: getMainLoopModel(),
+    judgeModel: '',
     maxSteps: 8,
     limit: Infinity,
     out: '',
@@ -87,6 +92,11 @@ export function parseBenchmarkArgs(raw: string): BenchmarkArgs {
       case '--model': {
         const v = tokens[++i]
         if (v) args.model = v
+        break
+      }
+      case '--judge-model': {
+        const v = tokens[++i]
+        if (v) args.judgeModel = v
         break
       }
       case '--out': {
@@ -164,7 +174,7 @@ export async function runBenchmark(
     emit({
       ...base,
       phase: 'loading',
-      message: `model=${args.model}, max-steps=${args.maxSteps}`,
+      message: `model=${args.model}${args.judgeModel ? ` judge=${args.judgeModel}` : ''}, max-steps=${args.maxSteps}`,
     })
 
     // ---- Phase 1: 跑 agent（OpenSeeker 的 ReAct tool loop）----
@@ -196,10 +206,11 @@ export async function runBenchmark(
 
     // ---- Phase 2: LLM-as-judge 评测（OpenSeeker eval.py）----
     if (args.judge) {
+      const judgeModel = args.judgeModel || args.model
       emit({ ...base, phase: 'evaluating', current: 0 })
       for (let i = 0; i < results.length; i++) {
         const t = results[i]!
-        t.judged = await judgeTrajectory(t, { model: args.model })
+        t.judged = await judgeTrajectory(t, { model: judgeModel })
         await writeTrajectory(runDir, t)
         emit({
           ...base,
@@ -215,10 +226,11 @@ export async function runBenchmark(
 
     // ---- Phase 3: ABSeeker 式步级打分 ----
     if (args.score) {
+      const judgeModel = args.judgeModel || args.model
       emit({ ...base, phase: 'scoring', current: 0 })
       for (let i = 0; i < results.length; i++) {
         const t = results[i]!
-        t.stepScores = await scoreTrajectory(t, { model: args.model })
+        t.stepScores = await scoreTrajectory(t, { model: judgeModel })
         await writeTrajectory(runDir, t)
         emit({
           ...base,
@@ -243,6 +255,7 @@ export async function runBenchmark(
     const run: BenchmarkRun = {
       datasetName,
       model: args.model,
+      judgeModel: args.judgeModel || args.model,
       maxSteps: args.maxSteps,
       startedAt,
       durationMs: Date.now() - startedMs,
@@ -313,73 +326,7 @@ function summarizeTrajectory(t: Trajectory) {
   }
 }
 
-export type RunSummary = {
-  correct: number
-  total: number
-  sumScore: number
-  avgSteps: number
-  avgCtxTokens: number
-  avgTimeMs: number
-}
-
-export function summarizeRun(run: BenchmarkRun): RunSummary {
-  const judged = run.trajectories.filter(t => t.judged !== null)
-  const correct = judged.filter(t => t.judged?.correct).length
-  const sumScore = judged.reduce((a, t) => a + (t.judged?.score ?? 0), 0)
-  const n = Math.max(1, run.trajectories.length)
-  const avgSteps = run.trajectories.reduce((a, t) => a + Math.max(1, t.steps.length), 0) / n
-  const avgCtxTokens =
-    run.trajectories.reduce((a, t) => a + (t.steps.at(-1)?.contextTokensAfter ?? 0), 0) / n
-  const avgTimeMs = run.trajectories.reduce((a, t) => a + t.durationMs, 0) / n
-  return { correct, total: run.trajectories.length, sumScore, avgSteps, avgCtxTokens, avgTimeMs }
-}
-
-/** 最终文本报告（headless 模式输出 / UI onDone 摘要复用） */
+/** 最终文本报告（headless 模式输出 / UI 复用） */
 export function buildReportText(run: BenchmarkRun): string {
-  const s = summarizeRun(run)
-  const lines: string[] = []
-  lines.push(`Benchmark report — ${run.datasetName}`)
-  lines.push(`model: ${run.model}   max-steps: ${run.maxSteps}`)
-  lines.push(
-    `accuracy: ${s.correct}/${s.total} (${((s.correct / Math.max(1, s.total)) * 100).toFixed(1)}%)   avg score: ${(s.sumScore / Math.max(1, s.total)).toFixed(2)}`,
-  )
-  lines.push(
-    `avg steps: ${s.avgSteps.toFixed(1)}   avg ctx: ${Math.round(s.avgCtxTokens).toLocaleString()} tok   avg time: ${(s.avgTimeMs / 1000).toFixed(1)}s`,
-  )
-  lines.push('')
-  lines.push(
-    `${'ID'.padEnd(22)} corr  score  steps  ctx(tok)  question`,
-  )
-  for (const t of run.trajectories) {
-    const mark = t.judged === null ? '·' : t.judged.correct ? '✔' : '✘'
-    const score = t.judged === null ? '—' : t.judged.score.toFixed(1)
-    const ctx = (t.steps.at(-1)?.contextTokensAfter ?? 0).toLocaleString()
-    lines.push(
-      `${t.id.padEnd(22)} ${mark.padEnd(4)} ${score.padStart(5)} ${String(t.steps.length).padStart(5)} ${ctx.padStart(9)}  ${truncateQuery(t.query)}`,
-    )
-    if (t.error) lines.push(`      note: ${t.error}`)
-  }
-  lines.push('')
-  lines.push('LongSeeker context suggestions:')
-  const anySuggestion = run.trajectories.some(
-    t => analyzeContextFromSteps(t).suggestions.length > 0,
-  )
-  if (!anySuggestion) {
-    lines.push('  none')
-  } else {
-    for (const t of run.trajectories) {
-      for (const sug of analyzeContextFromSteps(t).suggestions) {
-        lines.push(
-          `  ${t.id} · ${sug.kind} @step ${sug.step} (${sug.contextTokens.toLocaleString()} tok): ${sug.reason}`,
-        )
-      }
-    }
-  }
-  lines.push('')
-  lines.push(`trajectories saved to: ${run.runDir}`)
-  return lines.join('\n')
-}
-
-function truncateQuery(q: string): string {
-  return q.length > 60 ? `${q.slice(0, 58)}…` : q
+  return buildInlineReport(run)
 }
