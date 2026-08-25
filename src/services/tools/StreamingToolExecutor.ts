@@ -130,8 +130,11 @@ export class StreamingToolExecutor {
     let speculativeHit: SpecValue | undefined
     if (isSpeculatable(toolDefinition) && parsedInput?.success) {
       const key = specKey(block.name, parsedInput.data)
-      const hit = this.specStore.claim(key)
-      if (hit) speculativeHit = hit
+      if (this.budget.canDispatch(this.specStore)) {
+        this.budget.recordDispatch()
+        const hit = this.specStore.claim(key)
+        if (hit) speculativeHit = hit
+      }
     }
 
     this.tools.push({

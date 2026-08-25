@@ -208,6 +208,23 @@ export class SpecStore {
     }
     this._store.clear()
   }
+
+  /** Aggregate metrics across all specs ever dispatched. */
+  get stats() {
+    let dispatched = 0
+    let claimed = 0
+    let evicted = 0
+    let failed = 0
+    for (const queue of this._store.values()) {
+      for (const spec of queue) {
+        dispatched++
+        if (spec.state === 'claimed') claimed++
+        else if (spec.state === 'evicted') evicted++
+        else if (spec.state === 'failed') failed++
+      }
+    }
+    return { dispatched, claimed, evicted, failed, inflight: this.inflightCount }
+  }
 }
 
 // ---------------------------------------------------------------------------
