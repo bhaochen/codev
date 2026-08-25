@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { randomUUID, type UUID } from 'node:crypto'
 import { useEffect, useState } from 'react'
 import figures from 'figures'
 import { Ansi, Box, Text, useInput } from '../../ink.js'
@@ -7,8 +8,13 @@ import type {
   LocalJSXCommandContext,
   LocalJSXCommandOnDone,
 } from '../../types/command.js'
-import type { Message } from '../../types/message.js'
-import { createCommandInputMessage } from '../../utils/messages.js'
+import type { AssistantMessage, Message, UserMessage } from '../../types/message.js'
+import {
+  createAssistantMessage,
+  createCommandInputMessage,
+  createUserMessage,
+} from '../../utils/messages.js'
+import { BENCHMARK_TOOL_NAME } from '../../tools/BenchmarkTool.js'
 import {
   parseBenchmarkArgs,
   runBenchmark,
@@ -237,9 +243,15 @@ function runBenchmarkToTranscript(
     )
   }
 
-  // 结束时把 live 进度消息替换为最终报告（纯 local_command 文本，避免多余的 tool_use 渲染）
+  // 结束时把 live 进度消息替换为最终报告：以 benchmark 工具的 tool_use/tool_result
+  // 形式注入，从而复用 Messages 的 expandedKeys + verbose 点击展开机制（与 WebFetch 一致）
   const finishWithReport = (report: string) => {
-    patchLive(report)
+    const { assistant, user } = buildBenchmarkReportMessages(args, report)
+    setMessages(prev => [
+      ...prev.filter(m => m.uuid !== liveUuid),
+      assistant as unknown as Message,
+      user as unknown as Message,
+    ])
   }
 
   runBenchmark({
@@ -272,4 +284,45 @@ function runBenchmarkToTranscript(
       const msg = err instanceof Error ? err.message : String(err)
       patchLive(`benchmark eval failed: ${msg}`)
     })
+}
+
+/**
+ * 构造最终报告的 tool_use/tool_result 消息对：assistant 的 tool_use
+ * (name=benchmark) 与 user 的 tool_result 通过同一 tool_use_id 配对，
+ * tool_result 同时设置 toolUseResult 供 Messages 的 isResultTruncated 判断，
+ * 从而在 transcript 中复用 expandedKeys + verbose 点击展开机制。
+ */
+function buildBenchmarkReportMessages(
+  args: BenchmarkArgs,
+  report: string,
+): { assistant: AssistantMessage; user: UserMessage } {
+  const toolUseId = `toolu_${randomUUID().replaceAll('-', '')}`
+  const assistant = createAssistantMessage({
+    content: [
+      {
+        type: 'tool_use',
+        id: toolUseId,
+        name: BENCHMARK_TOOL_NAME,
+        input: {
+          dataset: args.dataset,
+          ...(args.model ? { model: args.model } : {}),
+          ...(args.judgeModel ? { judgeModel: args.judgeModel } : {}),
+          ...(args.maxSteps ? { maxSteps: args.maxSteps } : {}),
+          ...(Number.isFinite(args.limit) ? { limit: args.limit } : {}),
+        },
+      },
+    ],
+  })
+  const user = createUserMessage({
+    content: [
+      {
+        type: 'tool_result',
+        tool_use_id: toolUseId,
+        content: [{ type: 'text', text: report }],
+      },
+    ],
+    toolUseResult: report,
+    sourceToolAssistantUUID: assistant.uuid as UUID,
+  })
+  return { assistant, user }
 }
