@@ -254,7 +254,7 @@ describe('buildInlineReport', () => {
         }),
       ],
     })
-    expect(report).toContain('deepsearch benchmark report')
+    expect(report).toContain('benchmark report')
     expect(report).toContain('judge: j')
     expect(report).toContain('▍metrics')
     expect(report).toContain('▍per-question')

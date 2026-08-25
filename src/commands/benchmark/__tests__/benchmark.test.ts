@@ -3,7 +3,6 @@ import { estimateTokens, stripTags, truncate } from '../estimate.js'
 import { analyzeContextFromSteps } from '../ctx.js'
 import { WORKING_CONTEXT_TARGET } from '../types.js'
 import type { StepScore, Trajectory } from '../types.js'
-import { buildReportToolResultMessages } from '../benchmark.js'
 
 describe('estimateTokens', () => {
   test('english ~4 chars/token', () => {
@@ -110,81 +109,5 @@ describe('analyzeContextFromSteps', () => {
     const analysis = analyzeContextFromSteps(mkTrajectory(steps))
     expect(analysis.thresholdExceededAtStep).toBe(1)
     expect(analysis.suggestions.some(s => s.kind === 'compress')).toBe(true)
-  })
-})
-
-describe('buildReportToolResultMessages', () => {
-  const args = {
-    dataset: 'deepsearch-demo',
-    model: 'openai/gpt-oss-120b',
-    judgeModel: '',
-    maxSteps: 8,
-    limit: Infinity,
-  }
-
-  test('produces a paired assistant tool_use + user tool_result', () => {
-    const { toolUseId, assistant, user } = buildReportToolResultMessages(
-      args,
-      '📊 deepsearch benchmark report — deepsearch-demo\n...',
-    )
-    expect(toolUseId.startsWith('toolu_')).toBe(true)
-
-    const toolUse = assistant.message.content[0]
-    expect(toolUse).toMatchObject({
-      type: 'tool_use',
-      name: 'deepsearch',
-      input: {
-        dataset: 'deepsearch-demo',
-        model: 'openai/gpt-oss-120b',
-        maxSteps: 8,
-      },
-    })
-
-    const toolResult = user.message.content[0]
-    expect(toolResult).toMatchObject({
-      type: 'tool_result',
-      tool_use_id: toolUseId,
-    })
-    // user 消息通过 sourceToolAssistantUUID 关联到 assistant（配对不被 strip）
-    expect(user.sourceToolAssistantUUID).toBe(assistant.uuid)
-  })
-
-  test('includes judgeModel only when set and different from model', () => {
-    const withJudge = buildReportToolResultMessages(
-      { ...args, judgeModel: 'judge-x' },
-      'r',
-    )
-    const input = withJudge.assistant.message.content[0]
-    expect(input.type === 'tool_use' && input.input).toMatchObject({
-      judgeModel: 'judge-x',
-    })
-
-    const sameAsModel = buildReportToolResultMessages(
-      { ...args, judgeModel: args.model },
-      'r',
-    )
-    const input2 = sameAsModel.assistant.message.content[0]
-    expect(
-      input2.type === 'tool_use' &&
-        'judgeModel' in (input2.input as Record<string, unknown>),
-    ).toBe(false)
-  })
-
-  test('includes limit only when finite', () => {
-    const finite = buildReportToolResultMessages(
-      { ...args, limit: 2 },
-      'r',
-    )
-    const input = finite.assistant.message.content[0]
-    expect(input.type === 'tool_use' && input.input).toMatchObject({
-      limit: 2,
-    })
-
-    const infinite = buildReportToolResultMessages(args, 'r')
-    const input2 = infinite.assistant.message.content[0]
-    expect(
-      input2.type === 'tool_use' &&
-        'limit' in (input2.input as Record<string, unknown>),
-    ).toBe(false)
   })
 })

@@ -1,5 +1,4 @@
 import * as React from 'react'
-import { randomUUID, type UUID } from 'node:crypto'
 import { useEffect, useState } from 'react'
 import figures from 'figures'
 import { Ansi, Box, Text, useInput } from '../../ink.js'
@@ -8,13 +7,8 @@ import type {
   LocalJSXCommandContext,
   LocalJSXCommandOnDone,
 } from '../../types/command.js'
-import type { AssistantMessage, Message, UserMessage } from '../../types/message.js'
-import {
-  createAssistantMessage,
-  createCommandInputMessage,
-  createUserMessage,
-} from '../../utils/messages.js'
-import { getMainLoopModel } from '../../utils/model/model.js'
+import type { Message } from '../../types/message.js'
+import { createCommandInputMessage } from '../../utils/messages.js'
 import {
   parseBenchmarkArgs,
   runBenchmark,
@@ -202,50 +196,6 @@ function BenchmarkClearView({ onClose }: { onClose: LocalJSXCommandOnDone }) {
 
 function truncate(s: string, n: number): string {
   return s.length > n ? `${s.slice(0, n - 1)}…` : s
-}
-
-/**
- * 构造最终报告的 tool result 消息对。assistant 的 tool_use 与 user 的
- * tool_result 通过同一 tool_use_id 配对，UI 渲染为一次 DeepSearch 工具
- * 调用及其结果。纯函数便于单元测试。
- */
-export function buildReportToolResultMessages(
-  args: Pick<
-    BenchmarkArgs,
-    'dataset' | 'model' | 'judgeModel' | 'maxSteps' | 'limit'
-  >,
-  report: string,
-): { toolUseId: string; assistant: AssistantMessage; user: UserMessage } {
-  const toolUseId = `toolu_${randomUUID().replaceAll('-', '')}`
-  const assistant = createAssistantMessage({
-    content: [
-      {
-        type: 'tool_use',
-        id: toolUseId,
-        name: 'deepsearch',
-        input: {
-          dataset: args.dataset,
-          model: args.model,
-          ...(args.judgeModel && args.judgeModel !== args.model
-            ? { judgeModel: args.judgeModel }
-            : {}),
-          maxSteps: args.maxSteps,
-          ...(Number.isFinite(args.limit) ? { limit: args.limit } : {}),
-        },
-      },
-    ],
-  })
-  const user = createUserMessage({
-    content: [
-      {
-        type: 'tool_result',
-        tool_use_id: toolUseId,
-        content: [{ type: 'text', text: report }],
-      },
-    ],
-    sourceToolAssistantUUID: assistant.uuid as UUID,
-  })
-  return { toolUseId, assistant, user }
 }
 
 function runBenchmarkToTranscript(

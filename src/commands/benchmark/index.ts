@@ -6,7 +6,7 @@ export const benchmark: Command = {
   name: 'benchmark',
   description:
     '/benchmark 雷达图：模型维度对比（显示命令）。用法：/benchmark（显示已保存雷达图） | /benchmark eval [dataset] [--model X] ...（测试当前模型并保存维度图） | /benchmark clear（清除历史）',
-  argumentHint: '[eval [dataset] [--model X] [--judge-model Y] [--max-steps N] [--limit N] | show | clear]',
+  argumentHint: '[eval | show | clear]',
   isEnabled: () => !getIsNonInteractiveSession(),
   load: () => import('./benchmark.js'),
 }

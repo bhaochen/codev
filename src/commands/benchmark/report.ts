@@ -244,7 +244,7 @@ export function buildInlineReport(
 ): string {
   const m = metricsOf(run)
   const lines: string[] = []
-  lines.push(`deepsearch benchmark report — ${run.datasetName}`)
+  lines.push(`benchmark report — ${run.datasetName}`)
   lines.push(
     `agent: ${run.model}${run.judgeModel && run.judgeModel !== run.model ? `   judge: ${run.judgeModel}` : ''}   max-steps: ${run.maxSteps}   saved: ${run.runDir}`,
   )
