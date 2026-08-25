@@ -14,7 +14,8 @@ import { join, resolve } from 'path'
 import { runAgent } from './agent.js'
 import { analyzeContextFromSteps } from './ctx.js'
 import { loadDataset } from './datasets.js'
-import { buildInlineReport } from './report.js'
+import { buildInlineReport, metricsOf } from './report.js'
+import type { RadarSeries } from './radar.js'
 import { judgeTrajectory } from './judge.js'
 import { scoreTrajectory } from './score.js'
 import { getMainLoopModel } from '../../utils/model/model.js'
@@ -36,6 +37,8 @@ export type BenchmarkArgs = {
   out: string
   judge: boolean
   score: boolean
+  /** 叠加对比的历史 run 数量；0 = 不对比 */
+  compare: number
 }
 
 export type BenchmarkPhase =
@@ -74,6 +77,7 @@ export function parseBenchmarkArgs(raw: string): BenchmarkArgs {
     out: '',
     judge: true,
     score: true,
+    compare: 0,
   }
   const positional: string[] = []
   for (let i = 0; i < tokens.length; i++) {
@@ -110,6 +114,11 @@ export function parseBenchmarkArgs(raw: string): BenchmarkArgs {
       case '--no-score':
         args.score = false
         break
+      case '--compare': {
+        const v = Number(tokens[++i])
+        args.compare = Number.isNaN(v) || v <= 0 ? 4 : v
+        break
+      }
       default:
         if (!t.startsWith('--')) positional.push(t)
     }
@@ -262,14 +271,18 @@ export async function runBenchmark(
       trajectories: results,
       runDir,
     }
+    const metrics = metricsOf(run)
     await writeFile(
       join(runDir, 'eval_results.json'),
       JSON.stringify(
         {
           dataset: datasetName,
           model: run.model,
+          judgeModel: run.judgeModel,
+          maxSteps: run.maxSteps,
           startedAt,
           durationMs: run.durationMs,
+          metrics,
           trajectories: results.map(summarizeTrajectory),
         },
         null,
@@ -327,6 +340,9 @@ function summarizeTrajectory(t: Trajectory) {
 }
 
 /** 最终文本报告（headless 模式输出 / UI 复用） */
-export function buildReportText(run: BenchmarkRun): string {
-  return buildInlineReport(run)
+export function buildReportText(
+  run: BenchmarkRun,
+  opts: { compare?: RadarSeries[] } = {},
+): string {
+  return buildInlineReport(run, opts)
 }

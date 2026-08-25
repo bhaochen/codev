@@ -261,5 +261,35 @@ describe('buildInlineReport', () => {
     expect(report).toContain('▍per-question')
     expect(report).toContain('▍context growth per step')
     expect(report).toContain('▍context meta-op suggestions')
+    expect(report).toContain('▍radar')
+  })
+
+  test('includes radar section with compare series overlaid', () => {
+    const report = buildInlineReport(
+      {
+        datasetName: 'd',
+        model: 'm',
+        judgeModel: 'j',
+        maxSteps: 4,
+        startedAt: '',
+        durationMs: 0,
+        runDir: 'x',
+        trajectories: [
+          mkTrajectory({
+            id: 't',
+            steps: mkSteps(2),
+            judged: { correct: true, score: 8, rationale: '' },
+          }),
+        ],
+      },
+      {
+        compare: [
+          { name: 'prev', values: [80, 6, 90, 5, 8000, 22000, 5] },
+        ],
+      },
+    )
+    expect(report).toContain('▍radar')
+    expect(report).toContain('prev')
+    expect(report).toContain('Accuracy')
   })
 })

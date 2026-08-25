@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { useState } from 'react'
+import { randomUUID, type UUID } from 'node:crypto'
 import figures from 'figures'
 import { Box, Text, useInput } from '../../ink.js'
 import type {
@@ -7,8 +8,12 @@ import type {
   LocalJSXCommandContext,
   LocalJSXCommandOnDone,
 } from '../../types/command.js'
-import type { Message } from '../../types/message.js'
-import { createCommandInputMessage } from '../../utils/messages.js'
+import type { AssistantMessage, Message, UserMessage } from '../../types/message.js'
+import {
+  createAssistantMessage,
+  createCommandInputMessage,
+  createUserMessage,
+} from '../../utils/messages.js'
 import { getMainLoopModel } from '../../utils/model/model.js'
 import {
   parseBenchmarkArgs,
@@ -16,6 +21,7 @@ import {
   type BenchmarkArgs,
 } from './runner.js'
 import { buildInlineReport, buildLiveProgressText } from './report.js'
+import { loadComparisonSeries } from './radar.js'
 
 /**
  * /benchmark —— 交互式 UI（配置面板 + 对话区注入）。
@@ -43,6 +49,7 @@ type FieldKey =
   | 'limit'
   | 'judge'
   | 'score'
+  | 'compare'
   | 'run'
 
 const FIELD_ORDER: FieldKey[] = [
@@ -53,6 +60,7 @@ const FIELD_ORDER: FieldKey[] = [
   'limit',
   'judge',
   'score',
+  'compare',
   'run',
 ]
 
@@ -79,6 +87,11 @@ const FIELD_META: Record<
   limit: { label: 'limit', hint: '0 = all questions', kind: 'number' },
   judge: { label: 'llm-as-judge', hint: 'OpenSeeker eval', kind: 'toggle' },
   score: { label: 'step scoring', hint: 'ABSeeker per-step', kind: 'toggle' },
+  compare: {
+    label: 'compare',
+    hint: 'overlay previous runs as radar polygons',
+    kind: 'toggle',
+  },
   run: { label: '▶ RUN', hint: 'enter to start', kind: 'run' },
 }
 
@@ -90,6 +103,7 @@ type PanelValues = {
   limit: string
   judge: boolean
   score: boolean
+  compare: boolean
 }
 
 type Props = {
@@ -107,6 +121,7 @@ export function BenchmarkConfigPanel({ onClose, setMessages, initial }: Props) {
     limit: initial.limit === Infinity ? '0' : String(initial.limit),
     judge: initial.judge,
     score: initial.score,
+    compare: initial.compare > 0,
   }))
   const [focus, setFocus] = useState(0)
 
@@ -125,6 +140,7 @@ export function BenchmarkConfigPanel({ onClose, setMessages, initial }: Props) {
       out: '',
       judge: values.judge,
       score: values.score,
+      compare: values.compare ? 4 : 0,
     }
     // 关掉配置面板（跳过 REPL 默认的 transcript 注入，我们自己注入）
     onClose(undefined, { display: 'skip' })
@@ -235,8 +251,55 @@ export function BenchmarkConfigPanel({ onClose, setMessages, initial }: Props) {
 /**
  * 面板关闭后：把运行注入对话框 transcript。
  * header 一条静态消息 + 一条随 onProgress 原地替换的 live 消息，
- * 结束时 live 替换为完整报告（表格 / 折线图 / 指标 / 建议）。
+ * 结束时 live 替换为 deepsearch 工具的 tool result 消息对
+ * （assistant tool_use + user tool_result），报告以工具结果样式展示，
+ * 主 agent 也能以 tool result 形式读到完整报告。
  */
+
+/**
+ * 构造最终报告的 tool result 消息对。assistant 的 tool_use 与 user 的
+ * tool_result 通过同一 tool_use_id 配对，UI 渲染为一次 DeepSearch 工具
+ * 调用及其结果。纯函数便于单元测试。
+ */
+export function buildReportToolResultMessages(
+  args: Pick<
+    BenchmarkArgs,
+    'dataset' | 'model' | 'judgeModel' | 'maxSteps' | 'limit'
+  >,
+  report: string,
+): { toolUseId: string; assistant: AssistantMessage; user: UserMessage } {
+  const toolUseId = `toolu_${randomUUID().replaceAll('-', '')}`
+  const assistant = createAssistantMessage({
+    content: [
+      {
+        type: 'tool_use',
+        id: toolUseId,
+        name: 'deepsearch',
+        input: {
+          dataset: args.dataset,
+          model: args.model,
+          ...(args.judgeModel && args.judgeModel !== args.model
+            ? { judgeModel: args.judgeModel }
+            : {}),
+          maxSteps: args.maxSteps,
+          ...(Number.isFinite(args.limit) ? { limit: args.limit } : {}),
+        },
+      },
+    ],
+  })
+  const user = createUserMessage({
+    content: [
+      {
+        type: 'tool_result',
+        tool_use_id: toolUseId,
+        content: [{ type: 'text', text: report }],
+      },
+    ],
+    sourceToolAssistantUUID: assistant.uuid as UUID,
+  })
+  return { toolUseId, assistant, user }
+}
+
 function runBenchmarkToTranscript(
   setMessages: LocalJSXCommandContext['setMessages'],
   args: BenchmarkArgs,
@@ -281,6 +344,16 @@ function runBenchmarkToTranscript(
     )
   }
 
+  // 结束时把 live 进度消息替换为 tool result 消息对（报告以工具结果展示）
+  const finishWithReport = (report: string) => {
+    const { assistant, user } = buildReportToolResultMessages(args, report)
+    setMessages(prev => [
+      ...prev.filter(m => m.uuid !== liveUuid),
+      assistant as unknown as Message,
+      user as unknown as Message,
+    ])
+  }
+
   runBenchmark({
     args,
     onProgress: p => {
@@ -300,7 +373,13 @@ function runBenchmarkToTranscript(
       )
     },
   })
-    .then(run => patchLive(buildInlineReport(run)))
+    .then(async run => {
+      const compare =
+        args.compare > 0
+          ? await loadComparisonSeries(run, args.compare).catch(() => [])
+          : []
+      finishWithReport(buildInlineReport(run, { compare }))
+    })
     .catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err)
       patchLive(`✘ /benchmark failed: ${msg}`)

@@ -3,6 +3,7 @@
  * 跑完整个 benchmark 直接输出文本报告。
  */
 import { buildReportText, parseBenchmarkArgs, runBenchmark } from './runner.js'
+import { loadComparisonSeries } from './radar.js'
 import type { LocalCommandCall } from '../../types/command.js'
 
 export const call: LocalCommandCall = async (args, context) => {
@@ -13,7 +14,11 @@ export const call: LocalCommandCall = async (args, context) => {
       args: parsed,
       // headless 不进 UI，直接等待最终结果
     })
-    return { type: 'text', value: buildReportText(run) }
+    const compare =
+      parsed.compare > 0
+        ? await loadComparisonSeries(run, parsed.compare).catch(() => [])
+        : []
+    return { type: 'text', value: buildReportText(run, { compare }) }
   } catch (err) {
     return {
       type: 'text',

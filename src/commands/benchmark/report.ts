@@ -6,6 +6,7 @@
  */
 import { plot as asciichart } from 'asciichart'
 import { analyzeContextFromSteps } from './ctx.js'
+import { RADAR_AXES, radarSeriesFromRun, renderRadar, type RadarSeries } from './radar.js'
 import type { BenchmarkRun, Trajectory } from './types.js'
 
 /** 聚合指标 */
@@ -248,7 +249,10 @@ export function buildLiveProgressText(p: {
 }
 
 /** 最终报告（注入对话区的完整块） */
-export function buildInlineReport(run: BenchmarkRun): string {
+export function buildInlineReport(
+  run: BenchmarkRun,
+  opts: { compare?: RadarSeries[] } = {},
+): string {
   const m = metricsOf(run)
   const lines: string[] = []
   lines.push(`📊 deepsearch benchmark report — ${run.datasetName}`)
@@ -283,5 +287,9 @@ export function buildInlineReport(run: BenchmarkRun): string {
   lines.push('')
   lines.push('▍context meta-op suggestions (LongSeeker)')
   lines.push(...suggestionsLines(run))
+  lines.push('')
+  lines.push('▍radar — multi-dimensional profile (shared scale, ↑ = better)')
+  const series = [radarSeriesFromRun(run), ...(opts.compare ?? [])]
+  lines.push(renderRadar(RADAR_AXES, series))
   return lines.join('\n')
 }
