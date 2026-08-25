@@ -28,7 +28,9 @@ import {
   loadComparisonSeries,
   loadSavedProfiles,
   PALETTE,
-  renderRadarAxisTable,
+  radarOverall,
+  radarStatsLine,
+  radarTableRows,
   renderRadarChart,
   type RadarSeries,
 } from './radar.js'
@@ -106,7 +108,7 @@ function BenchmarkRadarView({ onClose }: { onClose: LocalJSXCommandOnDone }) {
   return <RadarView series={profiles} onClose={onClose} />
 }
 
-/** 彩色雷达图 + 图例 + 每轴数值表 */
+/** 彩色雷达图 + 模型指标面板（左图右表，整体带边框） */
 function RadarView({
   series,
   onClose,
@@ -116,28 +118,68 @@ function RadarView({
 }) {
   const colored = renderRadarChart(RADAR_AXES, series, { colorize: true })
   useInput(() => onClose())
+  const n = series.length
   return (
     <Box flexDirection="column" paddingX={1}>
-      <Text bold>
-        /benchmark · radar — {series.length} model profile{series.length > 1 ? 's' : ''}
-      </Text>
-      <Ansi>{colored}</Ansi>
-      <Box flexDirection="column" marginTop={1}>
-        {series.map((s, i) => (
-          <Text
-            key={i}
-            color={RADAR_PALETTE_INK[i % RADAR_PALETTE_INK.length]!}
-          >
-            {PALETTE[i % PALETTE.length]} {truncate(s.name, 44)}
-          </Text>
-        ))}
+      <Box borderStyle="round" flexDirection="column" paddingX={1}>
+        <Box flexDirection="row" justifyContent="space-between">
+          <Text bold color="accent">/benchmark · radar</Text>
+          <Text color="subtle">{n} model{n > 1 ? 's' : ''}</Text>
+        </Box>
+        <Box flexDirection="row" marginTop={1}>
+          <Box flexShrink={0}>
+            <Ansi>{colored}</Ansi>
+          </Box>
+          <Box flexDirection="column" marginLeft={2}>
+            {series.map((_s, i) => (
+              <ModelMetrics key={i} series={series} index={i} last={i === n - 1} />
+            ))}
+          </Box>
+        </Box>
+        <Box flexDirection="row" justifyContent="space-between" marginTop={1}>
+          <Text color="subtle" dimColor>{radarStatsLine(series, 0)}</Text>
+          <Text color="subtle" dimColor>press any key to close</Text>
+        </Box>
       </Box>
-      <Text color="subtle" marginTop={1}>
-        {renderRadarAxisTable(RADAR_AXES, series)}
-      </Text>
-      <Text color="subtle" dimColor marginTop={1}>
-        press any key to close
-      </Text>
+    </Box>
+  )
+}
+
+/** 单个模型的指标卡：模型名 + Overall + 三列指标表（轴字母 / 维度 / 百分比 / 原始值） */
+function ModelMetrics({
+  series,
+  index,
+  last,
+}: {
+  series: RadarSeries[]
+  index: number
+  last: boolean
+}) {
+  const s = series[index]!
+  const color = RADAR_PALETTE_INK[index % RADAR_PALETTE_INK.length]!
+  const glyph = PALETTE[index % PALETTE.length]!
+  const overall = radarOverall(RADAR_AXES, series, index)
+  const rows = radarTableRows(RADAR_AXES, series, index)
+  const labelW = Math.max(...rows.map(r => r.label.length))
+  const scoreW = Math.max(...rows.map(r => r.score.length))
+  const rawW = Math.max(...rows.map(r => r.raw.length))
+  const divider = '─'.repeat(labelW + scoreW + rawW + 7)
+  return (
+    <Box flexDirection="column" marginBottom={last ? 0 : 1}>
+      <Box flexDirection="row" justifyContent="space-between">
+        <Text bold color={color}>{glyph} {truncate(s.name, 28)}</Text>
+        <Text color="accent">Overall {overall.toFixed(1)}</Text>
+      </Box>
+      <Text color="subtle">{divider}</Text>
+      {rows.map(r => (
+        <Box key={r.letter} flexDirection="row">
+          <Text color="subtle">{r.letter}  </Text>
+          <Text>{r.label.padEnd(labelW)}  </Text>
+          <Text color="accent">{r.score.padStart(scoreW)}</Text>
+          <Text>  </Text>
+          <Text dimColor>{r.raw.padStart(rawW)}</Text>
+        </Box>
+      ))}
     </Box>
   )
 }

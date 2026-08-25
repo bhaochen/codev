@@ -11,7 +11,7 @@ import {
   clearHistory,
   loadComparisonSeries,
   loadSavedProfiles,
-  renderRadar,
+  renderRadarReport,
 } from './radar.js'
 import type { LocalCommandCall } from '../../types/command.js'
 
@@ -45,7 +45,7 @@ export const call: LocalCommandCall = async (args, context) => {
           'no saved benchmark profiles yet — run `benchmark eval` to add one',
       }
     }
-    return { type: 'text', value: renderRadar(RADAR_AXES, profiles) }
+    return { type: 'text', value: renderRadarReport(RADAR_AXES, profiles) }
   } catch (err) {
     return {
       type: 'text',

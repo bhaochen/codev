@@ -42,9 +42,9 @@ function fmtTok(v: number): string {
  * 前 3 个为质量维度（越高越好），后 4 个为效率/速度维度（越低越好 → 反转）。
  */
 export const RADAR_AXES: RadarAxis[] = [
-  { key: 'accuracy', label: 'Accuracy', max: 100, lowerIsBetter: false, formatRaw: v => `${v.toFixed(0)}%` },
+  { key: 'accuracy', label: 'Accuracy', max: 100, lowerIsBetter: false, formatRaw: v => `${v.toFixed(0)}/100` },
   { key: 'score', label: 'Avg Score', max: 10, lowerIsBetter: false, formatRaw: v => `${v.toFixed(1)}/10` },
-  { key: 'honest', label: 'Honest Rate', max: 100, lowerIsBetter: false, formatRaw: v => `${v.toFixed(0)}%` },
+  { key: 'honest', label: 'Honest Rate', max: 100, lowerIsBetter: false, formatRaw: v => `${v.toFixed(0)}/100` },
   { key: 'steps', label: 'Step Eff.', max: 16, lowerIsBetter: true, formatRaw: v => `${v.toFixed(0)} steps` },
   { key: 'ctx', label: 'Ctx Eff.', max: 40_000, lowerIsBetter: true, formatRaw: v => `${fmtTok(v)} tok` },
   { key: 'tokens', label: 'Token Eff.', max: 120_000, lowerIsBetter: true, formatRaw: v => `${fmtTok(v)} tok` },
@@ -271,31 +271,83 @@ export function renderRadarChart(
   return rows.join('\n')
 }
 
-/**
- * 渲染「每轴 × 各 run 归一化百分比」数值表（不含顶部模型名行）。
- * 当前 run（序列 0）额外显示原始值，方便读数为绝对值。
- */
-export function renderRadarAxisTable(axes: RadarAxis[], series: RadarSeries[]): string {
+/** 单模型（series[index]）的雷达指标行：轴字母 / 维度名 / 归一化百分比 / 原始值 */
+export function radarTableRows(
+  axes: RadarAxis[],
+  series: RadarSeries[],
+  index = 0,
+): { letter: string; label: string; score: string; raw: string }[] {
   const { norm } = radarNormalize(axes, series)
-  // 先构造每格文本，再按列对齐，避免序列 0 带 (raw) 后缀时各行列错位
-  const rows = axes.map((ax, i) => {
-    const letter = String.fromCharCode(LETTER_BASE + i)
-    const cells = series.map((s, si) => {
-      const f = norm[si]![i]!
-      const pct = `${Math.round(f * 100)}%`
-      return si === 0 ? `${pct} (${ax.formatRaw(s.values[i] ?? 0)})` : pct
-    })
-    return { letter, label: ax.label, cells }
+  const rowNorm = norm[index] ?? norm[0]!
+  const s = series[index] ?? series[0]!
+  return axes.map((ax, i) => ({
+    letter: String.fromCharCode(LETTER_BASE + i),
+    label: ax.label,
+    score: `${Math.round(rowNorm[i]! * 100)}%`,
+    raw: ax.formatRaw(s.values[i] ?? 0),
+  }))
+}
+
+/** 单模型 Overall：7 轴归一化百分比的均值（用于模型头部总览） */
+export function radarOverall(axes: RadarAxis[], series: RadarSeries[], index = 0): number {
+  const { norm } = radarNormalize(axes, series)
+  const row = norm[index] ?? norm[0]!
+  const sum = axes.reduce((a, _ax, i) => a + (row[i] ?? 0) * 100, 0)
+  return sum / axes.length
+}
+
+/** 单模型底部统计行（耗时 / token / ctx / steps），用于面板 footer */
+export function radarStatsLine(series: RadarSeries[], index = 0): string {
+  const v = (series[index] ?? series[0]!).values
+  const steps = v[3] ?? 0
+  const ctx = v[4] ?? 0
+  const tokens = v[5] ?? 0
+  const speed = v[6] ?? 0
+  return `${speed.toFixed(1)}s · ${fmtTok(tokens)} tok · ${fmtTok(ctx)} tok · ${steps.toFixed(0)} steps`
+}
+
+/**
+ * 渲染「轴字母 / 维度名 / 百分比 / 原始值」三列纯文本表格（headless / transcript）。
+ * 百分比与原始值右对齐，去掉旧的 `75% (75%)` 内联写法，信息层级更清晰。
+ */
+export function renderRadarAxisTable(
+  axes: RadarAxis[],
+  series: RadarSeries[],
+  index = 0,
+): string {
+  const rows = radarTableRows(axes, series, index)
+  const labelW = Math.max(...rows.map(r => r.label.length))
+  const scoreW = Math.max(...rows.map(r => r.score.length))
+  const rawW = Math.max(...rows.map(r => r.raw.length))
+  return rows
+    .map(
+      r =>
+        ` ${r.letter}  ${r.label.padEnd(labelW)}  ${r.score.padStart(scoreW)}  ${r.raw.padStart(rawW)}`,
+    )
+    .join('\n')
+}
+
+/** headless / 文本报告完整雷达展示：图表 + 每个模型的 Overall 与指标表（Card 风格） */
+export function renderRadarReport(axes: RadarAxis[], series: RadarSeries[]): string {
+  const chart = renderRadarChart(axes, series)
+  const blocks = series.map((s, i) => {
+    const glyph = PALETTE[i % PALETTE.length]!
+    const overall = radarOverall(axes, series, i)
+    const rows = radarTableRows(axes, series, i)
+    const labelW = Math.max(...rows.map(r => r.label.length))
+    const scoreW = Math.max(...rows.map(r => r.score.length))
+    const rawW = Math.max(...rows.map(r => r.raw.length))
+    const divider = '─'.repeat(labelW + scoreW + rawW + 7)
+    const table = rows
+      .map(
+        r =>
+          ` ${r.letter}  ${r.label.padEnd(labelW)}  ${r.score.padStart(scoreW)}  ${r.raw.padStart(rawW)}`,
+      )
+      .join('\n')
+    return `${glyph} ${truncate(s.name, 28)}   Overall ${overall.toFixed(1)}\n${divider}\n${table}`
   })
-  const colW = series.map((_, si) => Math.max(...rows.map(r => r.cells[si]!.length)))
-  const lines = rows.map(r => {
-    const label = r.label.padEnd(11)
-    const cells = series
-      .map((_, si) => r.cells[si]!.padStart(colW[si]!))
-      .join('   ')
-    return `  ${r.letter} ${label} ${cells}`
-  })
-  return lines.join('\n')
+  const header = `/benchmark · radar — ${series.length} model${series.length > 1 ? 's' : ''}`
+  return `${header}\n\n${chart}\n\n${blocks.join('\n\n')}`
 }
 
 /**

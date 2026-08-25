@@ -7,8 +7,11 @@ import {
   clearHistory,
   loadSavedProfiles,
   radarNormalize,
+  radarOverall,
   radarSeriesFromRun,
+  radarTableRows,
   renderRadar,
+  renderRadarAxisTable,
   renderRadarChart,
   renderRadarLegend,
 } from '../radar.js'
@@ -154,6 +157,34 @@ describe('renderRadarLegend', () => {
     const legend = renderRadarLegend(RADAR_AXES, [radarSeriesFromRun(mkRun())])
     expect(legend).toContain('Accuracy')
     expect(legend).toContain('%')
+  })
+})
+
+describe('radar metric rows / overall / table', () => {
+  test('radarTableRows produces A–G 3-col rows, raw as X/100 for accuracy', () => {
+    const rows = radarTableRows(RADAR_AXES, [radarSeriesFromRun(mkRun())])
+    expect(rows.length).toBe(7)
+    expect(rows[0]!.letter).toBe('A')
+    expect(rows[0]!.label).toBe('Accuracy')
+    // 新格式：Score 为百分比，Raw 为 50/100（不再内联 ` (50%)`）
+    expect(rows[0]!.score).toMatch(/^\d+%$/)
+    expect(rows[0]!.raw).toBe('50/100')
+  })
+
+  test('renderRadarAxisTable right-aligns and drops inline parens', () => {
+    const t = renderRadarAxisTable(RADAR_AXES, [radarSeriesFromRun(mkRun())])
+    expect(t).not.toContain('(')
+    expect(t).toContain('50/100')
+    // 数字列右对齐：第二行的百分比起点应与其上、下行对齐
+    const lines = t.split('\n')
+    const scoreCol = (l: string) => l.replace(/^ [A-G]  /, '').split(/\s+/)[1] ?? ''
+    expect(scoreCol(lines[0]!)).toMatch(/^\d+%$/)
+  })
+
+  test('radarOverall is mean of axis percentages within (0,100]', () => {
+    const o = radarOverall(RADAR_AXES, [radarSeriesFromRun(mkRun())])
+    expect(o).toBeGreaterThan(0)
+    expect(o).toBeLessThanOrEqual(100)
   })
 })
 
