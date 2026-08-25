@@ -80,7 +80,6 @@ import { ReadMcpResourceTool } from './tools/ReadMcpResourceTool/ReadMcpResource
 import { ToolSearchTool } from './tools/ToolSearchTool/ToolSearchTool.js'
 import { DebugSessionTool } from './tools/DebugSessionTool.js'
 import { ImageShowTool } from './tools/ImageShowTool/ImageShowTool.js'
-import { DeepSearchTool } from './tools/DeepSearchTool/DeepSearchTool.js'
 import { BenchmarkTool } from './tools/BenchmarkTool.js'
 import { LocationTool } from './tools/LocationTool/LocationTool.js'
 import { EnterPlanModeTool } from './tools/EnterPlanModeTool/EnterPlanModeTool.js'
@@ -256,9 +255,7 @@ export function getAllBaseTools(): Tools {
     ImageShowTool,
     // Location & mapping tool — uses Amap (China) or Google Maps (international)
     LocationTool,
-    // DeepSearch — run a deep research benchmark and return its report as tool result
-    DeepSearchTool,
-    // Benchmark — render /benchmark eval reports (collapsed, click to expand)
+    // Benchmark — render /benchmark reports (collapsed, click to expand)
     BenchmarkTool,
     ListMcpResourcesTool,
     ReadMcpResourceTool,
