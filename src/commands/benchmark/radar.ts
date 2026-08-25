@@ -14,8 +14,8 @@
  *
  * 纯函数、无副作用，便于单元测试；比较用的历史 run 由 loadComparisonSeries 读取。
  */
-import { basename, dirname, join } from 'node:path'
-import { readdir, readFile } from 'node:fs/promises'
+import { basename, dirname, join, resolve } from 'node:path'
+import { readdir, readFile, rm } from 'node:fs/promises'
 import { metricsOf, type RunMetrics } from './report.js'
 import type { BenchmarkRun } from './types.js'
 
@@ -123,7 +123,26 @@ const GRID = '.'
 const SPOKE = '·'
 const LETTER_BASE = 65 // 'A'
 
-export type RadarOptions = { radius?: number; rings?: number }
+/**
+ * 每根多边形线的颜色。
+ * - ANSI 码用于注入 `<Ansi>` 组件渲染（交互式 /benchmark show 命令）
+ * - Ink 颜色名用于 React `<Text color>` 图例
+ * 顺序一致，保证图与图例颜色对应。
+ */
+export const RADAR_PALETTE_ANSI = [31, 32, 33, 34, 35, 36, 37, 91, 92, 93, 94, 95, 96, 97]
+export const RADAR_PALETTE_INK = [
+  'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white',
+  'redBright', 'greenBright', 'yellowBright', 'blueBright', 'magentaBright', 'cyanBright', 'whiteBright',
+] as const
+
+/** 由模型名稳定地映射到一种颜色（不同模型 → 不同颜色的线） */
+export function radarColorIndex(name: string): number {
+  let h = 0
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0
+  return h % RADAR_PALETTE_ANSI.length
+}
+
+export type RadarOptions = { radius?: number; rings?: number; colorize?: boolean }
 
 /**
  * 渲染 ASCII 雷达图本体（不含图例）。
@@ -145,16 +164,29 @@ export function renderRadarChart(
   const W = 2 * R + 3
   const H = 2 * Ry + 3
   const grid: string[][] = Array.from({ length: H }, () => new Array<string>(W).fill(' '))
+  const color: (number | null)[][] = Array.from({ length: H }, () =>
+    new Array<number | null>(W).fill(null),
+  )
 
   const angle = (i: number) => -Math.PI / 2 + (i * 2 * Math.PI) / N
   const point = (i: number, frac: number): [number, number] => [
     Math.round(cx + Math.cos(angle(i)) * R * frac),
     Math.round(cy + Math.sin(angle(i)) * Ry * frac),
   ]
-  const set = (x: number, y: number, ch: string) => {
-    if (y >= 0 && y < H && x >= 0 && x < W) grid[y]![x] = ch
+  const set = (x: number, y: number, ch: string, ci?: number | null) => {
+    if (y >= 0 && y < H && x >= 0 && x < W) {
+      grid[y]![x] = ch
+      if (ci != null) color[y]![x] = ci
+    }
   }
-  const line = (x0: number, y0: number, x1: number, y1: number, ch: string) => {
+  const line = (
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+    ch: string,
+    ci?: number | null,
+  ) => {
     const dx = Math.abs(x1 - x0)
     const dy = Math.abs(y1 - y0)
     const sx = x0 < x1 ? 1 : -1
@@ -163,7 +195,7 @@ export function renderRadarChart(
     let x = x0
     let y = y0
     for (;;) {
-      set(x, y, ch)
+      set(x, y, ch, ci)
       if (x === x1 && y === y1) break
       const e2 = 2 * err
       if (e2 > -dy) {
@@ -191,7 +223,7 @@ export function renderRadarChart(
     const [x, y] = point(i, 1)
     line(cx, cy, x, y, SPOKE)
   }
-  // 序列多边形（叠加，每个序列一个字符）
+  // 序列多边形（叠加，每个序列一个字符 + 一种颜色）
   const { norm } = radarNormalize(axes, series)
   series.forEach((_s, si) => {
     const ch = PALETTE[si % PALETTE.length]!
@@ -199,9 +231,9 @@ export function renderRadarChart(
     for (let i = 0; i < N; i++) {
       const [x1, y1] = verts[i]!
       const [x2, y2] = verts[(i + 1) % N]!
-      line(x1, y1, x2, y2, ch)
+      line(x1, y1, x2, y2, ch, si)
     }
-    for (const [x, y] of verts) set(x, y, ch)
+    for (const [x, y] of verts) set(x, y, ch, si)
   })
   // 轴顶点字母（A/B/C…，覆盖在最上层做方位标记）
   for (let i = 0; i < N; i++) {
@@ -210,22 +242,30 @@ export function renderRadarChart(
   }
   set(cx, cy, '+')
 
-  return grid.map(row => row.join('').replace(/\s+$/, '')).join('\n')
+  return grid
+    .map((row, y) => {
+      const lineOut = row
+        .map((ch, x) => {
+          const ci = color[y]![x]
+          if (opts.colorize && ci != null) {
+            const code = RADAR_PALETTE_ANSI[ci % RADAR_PALETTE_ANSI.length]!
+            return `\x1b[${code}m${ch}\x1b[0m`
+          }
+          return ch
+        })
+        .join('')
+      return lineOut.replace(/\s+$/, '')
+    })
+    .join('\n')
 }
 
 /**
- * 渲染图例 + 每轴数值表。
- * 当前 run（序列 0）显示归一化百分比 + 原始值；其余对比 run 只显示百分比，
- * 方便在同一刻度上横向比较。
+ * 渲染「每轴 × 各 run 归一化百分比」数值表（不含顶部模型名行）。
+ * 当前 run（序列 0）额外显示原始值，方便读数为绝对值。
  */
-export function renderRadarLegend(axes: RadarAxis[], series: RadarSeries[]): string {
+export function renderRadarAxisTable(axes: RadarAxis[], series: RadarSeries[]): string {
   const { norm } = radarNormalize(axes, series)
   const lines: string[] = []
-  const names = series.map(
-    (s, i) => `${PALETTE[i % PALETTE.length]} ${truncate(s.name, 20)}`,
-  )
-  lines.push(`  ${names.join('   ')}`)
-  lines.push('')
   axes.forEach((ax, i) => {
     const letter = String.fromCharCode(LETTER_BASE + i)
     const cells = series.map((s, si) => {
@@ -237,6 +277,17 @@ export function renderRadarLegend(axes: RadarAxis[], series: RadarSeries[]): str
     lines.push(`  ${letter} ${ax.label.padEnd(11)} ${cells.join('   ')}`)
   })
   return lines.join('\n')
+}
+
+/**
+ * 渲染图例（顶部模型名行 + 每轴数值表）。
+ * 用于文本报告 / headless 展示；交互式 show 命令用彩色图例自行渲染模型名。
+ */
+export function renderRadarLegend(axes: RadarAxis[], series: RadarSeries[]): string {
+  const names = series.map(
+    (s, i) => `${PALETTE[i % PALETTE.length]} ${truncate(s.name, 20)}`,
+  )
+  return `  ${names.join('   ')}\n\n${renderRadarAxisTable(axes, series)}`
 }
 
 /** 雷达图 + 图例的完整区块 */
@@ -252,26 +303,31 @@ function truncate(s: string, n: number): string {
   return s.length > n ? `${s.slice(0, n - 1)}…` : s
 }
 
+/** benchmark 历史根目录（每次 eval 落盘于此） */
+export function benchmarksDir(): string {
+  return resolve(process.cwd(), '.codev-benchmarks')
+}
+
 /**
- * 读取同一 dataset 下的历史 run（来自 .codev-benchmarks/<run>/eval_results.json），
- * 构造可叠加的对比序列。跳过当前 run 与缺 metrics 的旧 run。
- * 对应 Kiln compare 页「Compare Run Configurations」里选取多个 run config 叠加。
+ * 读取历史 run 目录下的 eval_results.json，构造可叠加的雷达序列。
+ * - dataset：可选过滤（仅同 dataset）
+ * - exclude：可选排除某个 run 目录（当前 run 自身）
+ * - limit：可选截断（最近的优先）
+ * 跳过缺 metrics 的旧 run（本次改动前未持久化 metrics 的历史）。
  */
-export async function loadComparisonSeries(
-  run: BenchmarkRun,
-  limit = 4,
+async function readSavedRuns(
+  base: string,
+  opts: { dataset?: string; exclude?: string; limit?: number } = {},
 ): Promise<RadarSeries[]> {
-  const base = dirname(run.runDir)
   let entries: string[]
   try {
     entries = await readdir(base)
   } catch {
     return []
   }
-  const self = basename(run.runDir)
-  const candidates: { metrics: RunMetrics; name: string }[] = []
+  const out: RadarSeries[] = []
   for (const name of entries) {
-    if (name === self || name === '') continue
+    if (name === '' || (opts.exclude && name === opts.exclude)) continue
     try {
       const raw = await readFile(join(base, name, 'eval_results.json'), 'utf8')
       const data = JSON.parse(raw) as {
@@ -280,19 +336,60 @@ export async function loadComparisonSeries(
         startedAt?: string
         metrics?: RunMetrics
       }
-      if (data.dataset !== run.datasetName) continue
+      if (opts.dataset && data.dataset !== opts.dataset) continue
       if (!data.metrics) continue
-      candidates.push({
-        metrics: data.metrics,
-        name: shortRunName(data.model ?? '?', data.startedAt ?? ''),
-      })
+      out.push(radarSeriesFromMetrics(data.metrics, shortRunName(data.model ?? '?', data.startedAt ?? '')))
     } catch {
       // 非 run 目录或不可读 → 跳过
     }
   }
-  // 最近的优先
-  candidates.sort((a, b) => b.name.localeCompare(a.name))
-  return candidates.slice(0, limit).map(c => radarSeriesFromMetrics(c.metrics, c.name))
+  // 最近的优先（按 dir 名里的时间戳，fallback 到模型名）
+  out.sort((a, b) => b.name.localeCompare(a.name))
+  return opts.limit ? out.slice(0, opts.limit) : out
+}
+
+/**
+ * 读取同一 dataset 下的历史 run，构造可叠加的对比序列（排除当前 run）。
+ * 对应 Kiln compare 页「Compare Run Configurations」里选取多个 run config 叠加。
+ */
+export function loadComparisonSeries(
+  run: BenchmarkRun,
+  limit = 4,
+): Promise<RadarSeries[]> {
+  return readSavedRuns(dirname(run.runDir), {
+    dataset: run.datasetName,
+    exclude: basename(run.runDir),
+    limit,
+  })
+}
+
+/** 读取所有已保存的模型 profile（用于 /benchmark 直接展示雷达图） */
+export function loadSavedProfiles(
+  limit?: number,
+  baseDir: string = benchmarksDir(),
+): Promise<RadarSeries[]> {
+  return readSavedRuns(baseDir, { limit })
+}
+
+/** 清空所有历史（/benchmark clear）。返回被移除的 run 目录数。 */
+export async function clearHistory(baseDir: string = benchmarksDir()): Promise<number> {
+  let entries: string[]
+  try {
+    entries = await readdir(baseDir)
+  } catch {
+    return 0
+  }
+  let removed = 0
+  for (const name of entries) {
+    if (name === '') continue
+    try {
+      await rm(join(baseDir, name), { recursive: true, force: true })
+      removed++
+    } catch {
+      // 忽略单个删除失败
+    }
+  }
+  return removed
 }
 
 function shortRunName(model: string, startedAt: string): string {

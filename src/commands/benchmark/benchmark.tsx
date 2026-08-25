@@ -1,8 +1,8 @@
 import * as React from 'react'
-import { useState } from 'react'
 import { randomUUID, type UUID } from 'node:crypto'
+import { useEffect, useState } from 'react'
 import figures from 'figures'
-import { Box, Text, useInput } from '../../ink.js'
+import { Ansi, Box, Text, useInput } from '../../ink.js'
 import type {
   LocalJSXCommandCall,
   LocalJSXCommandContext,
@@ -21,240 +21,146 @@ import {
   type BenchmarkArgs,
 } from './runner.js'
 import { buildInlineReport, buildLiveProgressText } from './report.js'
-import { loadComparisonSeries } from './radar.js'
+import {
+  RADAR_AXES,
+  RADAR_PALETTE_INK,
+  clearHistory,
+  loadSavedProfiles,
+  radarColorIndex,
+  radarSeriesFromRun,
+  renderRadarAxisTable,
+  renderRadarChart,
+  type RadarSeries,
+} from './radar.js'
 
 /**
- * /benchmark —— 交互式 UI（配置面板 + 对话区注入）。
+ * /benchmark —— 雷达图驱动的 benchmark 命令。
  *
- * 这块 JSX 区域是 benchmark 的「配置面板」：数据集 / agent 模型 /
- * LLM-as-judge 模型 / max-steps / limit / judge / score。
- * 按 ▶ RUN 后面板关闭，运行进度与最终报告（指标、表格、context 折线图、
- * LongSeeker 建议）通过 context.setMessages 直接注入对话框 transcript。
+ * 子命令：
+ *   /benchmark           直接显示已保存的雷达图（各模型一条彩色线）
+ *   /benchmark eval     对当前模型跑 benchmark 并把维度图存入历史
+ *   /benchmark clear    清空所有历史
+ *
+ * 参考 Kiln compare_radar_chart：每轴一个评测维度，每个多边形一次 run，
+ * 不同模型用不同颜色区分。交互式展示走 Ink <Ansi> 上色；注入 transcript 的
+ * 文本报告保持无颜色（用不同字符区分线），以兼容文本渲染路径。
  */
 export const call: LocalJSXCommandCall = async (onDone, context, args) => {
-  return (
-    <BenchmarkConfigPanel
-      onClose={onDone}
-      setMessages={context.setMessages}
-      initial={parseBenchmarkArgs(args)}
-    />
-  )
-}
-
-type FieldKey =
-  | 'dataset'
-  | 'model'
-  | 'judgeModel'
-  | 'maxSteps'
-  | 'limit'
-  | 'judge'
-  | 'score'
-  | 'compare'
-  | 'run'
-
-const FIELD_ORDER: FieldKey[] = [
-  'dataset',
-  'model',
-  'judgeModel',
-  'maxSteps',
-  'limit',
-  'judge',
-  'score',
-  'compare',
-  'run',
-]
-
-const FIELD_META: Record<
-  FieldKey,
-  { label: string; hint?: string; kind: 'text' | 'number' | 'toggle' | 'run' }
-> = {
-  dataset: {
-    label: 'dataset',
-    hint: 'builtin: deepsearch-demo · or path/to/dataset.json',
-    kind: 'text',
-  },
-  model: {
-    label: 'agent model',
-    hint: 'ReAct search loop',
-    kind: 'text',
-  },
-  judgeModel: {
-    label: 'judge model',
-    hint: 'LLM-as-judge + step scoring · blank = agent',
-    kind: 'text',
-  },
-  maxSteps: { label: 'max steps', hint: 'per question', kind: 'number' },
-  limit: { label: 'limit', hint: '0 = all questions', kind: 'number' },
-  judge: { label: 'llm-as-judge', hint: 'OpenSeeker eval', kind: 'toggle' },
-  score: { label: 'step scoring', hint: 'ABSeeker per-step', kind: 'toggle' },
-  compare: {
-    label: 'compare',
-    hint: 'overlay previous runs as radar polygons',
-    kind: 'toggle',
-  },
-  run: { label: '▶ RUN', hint: 'enter to start', kind: 'run' },
-}
-
-type PanelValues = {
-  dataset: string
-  model: string
-  judgeModel: string
-  maxSteps: string
-  limit: string
-  judge: boolean
-  score: boolean
-  compare: boolean
-}
-
-type Props = {
-  onClose: LocalJSXCommandOnDone
-  setMessages: LocalJSXCommandContext['setMessages']
-  initial: BenchmarkArgs
-}
-
-export function BenchmarkConfigPanel({ onClose, setMessages, initial }: Props) {
-  const [values, setValues] = useState<PanelValues>(() => ({
-    dataset: initial.dataset,
-    model: initial.model,
-    judgeModel: initial.judgeModel,
-    maxSteps: String(initial.maxSteps),
-    limit: initial.limit === Infinity ? '0' : String(initial.limit),
-    judge: initial.judge,
-    score: initial.score,
-    compare: initial.compare > 0,
-  }))
-  const [focus, setFocus] = useState(0)
-
-  const setField = (k: FieldKey, v: string | boolean) =>
-    setValues(prev => ({ ...prev, [k]: v }))
-
-  const start = () => {
-    const maxSteps = Math.max(1, parseInt(values.maxSteps, 10) || 8)
-    const limitRaw = parseInt(values.limit, 10)
-    const args: BenchmarkArgs = {
-      dataset: values.dataset.trim() || 'deepsearch-demo',
-      model: values.model.trim() || getMainLoopModel(),
-      judgeModel: values.judgeModel.trim(),
-      maxSteps,
-      limit: Number.isNaN(limitRaw) || limitRaw <= 0 ? Infinity : limitRaw,
-      out: '',
-      judge: values.judge,
-      score: values.score,
-      compare: values.compare ? 4 : 0,
-    }
-    // 关掉配置面板（跳过 REPL 默认的 transcript 注入，我们自己注入）
-    onClose(undefined, { display: 'skip' })
-    runBenchmarkToTranscript(setMessages, args)
+  const sp = args.trim().split(/\s+/).filter(Boolean)
+  const sub = (sp[0] ?? '').toLowerCase()
+  if (sub === 'clear') return <BenchmarkClearView onClose={onDone} />
+  if (sub === 'eval') {
+    const parsed = parseBenchmarkArgs(sp.slice(1).join(' '))
+    // 关掉命令 UI（跳过 REPL 默认的 transcript 注入，由 runBenchmarkToTranscript 自行注入）
+    onDone(undefined, { display: 'skip' })
+    runBenchmarkToTranscript(context.setMessages, parsed)
+    return <Box />
   }
+  return <BenchmarkRadarView onClose={onDone} />
+}
 
-  useInput((input, key) => {
-    if (key.escape || (key.ctrl && (input === 'c' || input === 'd'))) {
-      onClose(undefined, { display: 'skip' })
-      return
-    }
-    const field = FIELD_ORDER[focus]!
-    if (key.upArrow) {
-      setFocus((focus - 1 + FIELD_ORDER.length) % FIELD_ORDER.length)
-      return
-    }
-    if (key.downArrow || key.tab) {
-      setFocus((focus + 1) % FIELD_ORDER.length)
-      return
-    }
-    if (field === 'run') {
-      if (key.return || input === ' ') start()
-      return
-    }
-    if (key.return) {
-      if (field === 'judge' || field === 'score') setField(field, !values[field])
-      setFocus((focus + 1) % FIELD_ORDER.length)
-      return
-    }
-    if (field === 'judge' || field === 'score') {
-      if (input === ' ') setField(field, !values[field])
-      return
-    }
-    // text / number 字段
-    if (key.backspace) {
-      setField(field, String(values[field]).slice(0, -1))
-      return
-    }
-    if (input && !key.ctrl && !key.meta) {
-      if (field === 'maxSteps' || field === 'limit') {
-        if (/^\d$/.test(input)) setField(field, String(values[field]) + input)
-      } else {
-        setField(field, String(values[field]) + input)
-      }
-    }
-  })
+/**
+ * 直接展示雷达图：加载所有已保存的模型 profile，用彩色线叠加渲染。
+ */
+function BenchmarkRadarView({ onClose }: { onClose: LocalJSXCommandOnDone }) {
+  const [profiles, setProfiles] = useState<RadarSeries[] | null>(null)
+  const [err, setErr] = useState<string | null>(null)
 
-  const f = FIELD_ORDER[focus]!
+  useEffect(() => {
+    loadSavedProfiles()
+      .then(setProfiles)
+      .catch(e => setErr(e instanceof Error ? e.message : String(e)))
+  }, [])
 
-  return (
-    <Box flexDirection="column" paddingX={1} width={64}>
-      <Box flexDirection="column" marginBottom={1}>
-        <Text bold>/benchmark · deepsearch benchmark config</Text>
+  useInput(() => onClose())
+
+  if (err) {
+    return (
+      <Box paddingX={1} flexDirection="column">
+        <Text color="red">radar error: {err}</Text>
+      </Box>
+    )
+  }
+  if (!profiles) {
+    return (
+      <Box paddingX={1}>
+        <Text color="subtle">loading radar…</Text>
+      </Box>
+    )
+  }
+  if (profiles.length === 0) {
+    return (
+      <Box paddingX={1} flexDirection="column">
+        <Text bold>/benchmark · radar</Text>
         <Text color="subtle">
-          ReAct search loop (OpenSeeker) + LLM-as-judge + ABSeeker step scoring
-          + LongSeeker context analysis
+          no saved profiles yet — run <Text color="accent">/benchmark eval</Text> to add one
         </Text>
-      </Box>
-
-      <Box flexDirection="column">
-        {FIELD_ORDER.map((k, i) => {
-          const meta = FIELD_META[k]!
-          const selected = i === focus
-          return (
-            <Box key={k} flexDirection="column" marginBottom={selected ? 0 : 1}>
-              <Box>
-                <Box width={14}><Text color="subtle">{meta.label}</Text></Box>
-                {meta.kind === 'toggle' ? (
-                  <Text bold={selected}>
-                    [{' '}
-                    <Text color={values[k] ? 'success' : 'subtle'}>
-                      {values[k] ? 'x' : ' '}
-                    </Text>{' '}
-                    ]
-                  </Text>
-                ) : (
-                  <Text
-                    bold={selected}
-                    color={selected && meta.kind !== 'run' ? 'accent' : undefined}
-                    wrap="truncate"
-                  >
-                    {meta.kind === 'run'
-                      ? meta.label
-                      : String(values[k]) || '(empty)'}
-                  </Text>
-                )}
-              </Box>
-              {selected && meta.hint && (
-                <Text color="subtle" dimColor marginLeft={14}>
-                  {meta.hint}
-                </Text>
-              )}
-            </Box>
-          )
-        })}
-      </Box>
-
-      <Box marginTop={1}>
         <Text color="subtle" dimColor>
-          {figures.arrowUp}/{figures.arrowDown} move · type to edit · space
-          toggle · enter {f === 'run' ? 'run' : 'next'} · esc close
+          press any key to close
         </Text>
       </Box>
+    )
+  }
+  return <RadarView series={profiles} onClose={onClose} />
+}
+
+/** 彩色雷达图 + 图例 + 每轴数值表 */
+function RadarView({
+  series,
+  onClose,
+}: {
+  series: RadarSeries[]
+  onClose: LocalJSXCommandOnDone
+}) {
+  const colored = renderRadarChart(RADAR_AXES, series, { colorize: true })
+  useInput(() => onClose())
+  return (
+    <Box flexDirection="column" paddingX={1}>
+      <Text bold>
+        /benchmark · radar — {series.length} model profile{series.length > 1 ? 's' : ''}
+      </Text>
+      <Ansi>{colored}</Ansi>
+      <Box flexDirection="column" marginTop={1}>
+        {series.map((s, i) => (
+          <Text
+            key={i}
+            color={RADAR_PALETTE_INK[radarColorIndex(s.name) % RADAR_PALETTE_INK.length]!}
+          >
+            ● {truncate(s.name, 44)}
+          </Text>
+        ))}
+      </Box>
+      <Text color="subtle" marginTop={1}>
+        {renderRadarAxisTable(RADAR_AXES, series)}
+      </Text>
+      <Text color="subtle" dimColor marginTop={1}>
+        press any key to close
+      </Text>
     </Box>
   )
 }
 
-/**
- * 面板关闭后：把运行注入对话框 transcript。
- * header 一条静态消息 + 一条随 onProgress 原地替换的 live 消息，
- * 结束时 live 替换为 deepsearch 工具的 tool result 消息对
- * （assistant tool_use + user tool_result），报告以工具结果样式展示，
- * 主 agent 也能以 tool result 形式读到完整报告。
- */
+/** /benchmark clear：清空历史 */
+function BenchmarkClearView({ onClose }: { onClose: LocalJSXCommandOnDone }) {
+  const [msg, setMsg] = useState<string | null>(null)
+  useEffect(() => {
+    clearHistory()
+      .then(n => setMsg(`cleared ${n} saved benchmark profile${n === 1 ? '' : 's'}`))
+      .catch(e => setMsg(`clear failed: ${e instanceof Error ? e.message : String(e)}`))
+  }, [])
+  useInput(() => {
+    if (msg) onClose()
+  })
+  return (
+    <Box paddingX={1}>
+      <Text color="subtle">{msg ?? 'clearing history…'}</Text>
+    </Box>
+  )
+}
+
+function truncate(s: string, n: number): string {
+  return s.length > n ? `${s.slice(0, n - 1)}…` : s
+}
 
 /**
  * 构造最终报告的 tool result 消息对。assistant 的 tool_use 与 user 的
@@ -385,3 +291,7 @@ function runBenchmarkToTranscript(
       patchLive(`✘ /benchmark failed: ${msg}`)
     })
 }
+
+// 保留供 headless / 其他调用方使用
+export { radarSeriesFromRun }
+import { loadComparisonSeries } from './radar.js'
