@@ -9,30 +9,19 @@ import { readFile } from 'fs/promises'
 import { isAbsolute, resolve } from 'path'
 import type { BenchmarkItem } from './types.js'
 
+/**
+ * 内置 demo 数据集：覆盖不同检索难度，用于验证 benchmark 流程本身。
+ * 格式：{id, query, gt}（gt 兼容 gold / answer 字段）。
+ */
 const DEMO: BenchmarkItem[] = [
-  {
-    id: 'demo-1',
-    query: 'Who was the first woman to win the Fields Medal? Give a one-line answer.',
-    gt: 'Maryam Mirzakhani',
-  },
-  {
-    id: 'demo-2',
-    query:
-      'Bob Dylan won the 2016 Nobel Prize in Literature. In what year was his album "Highway 61 Revisited" released?',
-    gt: '1965',
-  },
-  {
-    id: 'demo-3',
-    query:
-      'The musical "Hamilton" opened on Broadway in 2015. Which Founding Father is the show’s protagonist?',
-    gt: 'Alexander Hamilton',
-  },
-  {
-    id: 'demo-4',
-    query:
-      'The 2023 film "Oppenheimer" was directed by which filmmaker who also directed "The Dark Knight" trilogy?',
-    gt: 'Christopher Nolan',
-  },
+  // 单跳事实（简单）
+  { id: 'single-hop-science',   query: 'Who was the first woman to win the Fields Medal? Give a one-line answer.',                    gt: 'Maryam Mirzakhani' },
+  { id: 'single-hop-history',   query: 'In what year did the Berlin Wall fall? One-line answer with year only.',                     gt: '1989' },
+  // 双跳推理（中等）
+  { id: 'multi-hop-tech',       query: 'The programming language Python was created by the founder of which organization that also hosts PyCon?',  gt: 'Python Software Foundation' },
+  { id: 'multi-hop-science',    query: 'CRISPR gene editing was pioneered by a scientist at which university that also discovered the double-helix structure of DNA?', gt: 'UC Berkeley' },
+  // 否定/易错（需要诚实作答）
+  { id: 'unanswerable',         query: 'What was the exact score of the first-ever chess game played on the Moon? Answer concisely.',   gt: 'no verified record of a chess game played on the Moon' },
 ]
 
 /** 内置数据集清单 */
