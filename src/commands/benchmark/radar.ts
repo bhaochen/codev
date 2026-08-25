@@ -119,8 +119,6 @@ export function radarNormalize(axes: RadarAxis[], series: RadarSeries[]): RadarN
 }
 
 export const PALETTE = ['■', '□', '▲', '△', '◆', '●', '★', '✦']
-const GRID = '.'
-const SPOKE = '·'
 const LETTER_BASE = 65 // 'A'
 
 /**
@@ -139,8 +137,10 @@ export type RadarOptions = { radius?: number; rings?: number; colorize?: boolean
 
 /**
  * 渲染 ASCII 雷达图本体（不含图例）。
- * 通过字符网格 + Bresenham 画线实现：同心多边形网格 + 放射轴 + 叠加的序列多边形。
- * 纵向半径取横向的一半以补偿终端字符约 2:1 的宽高比，使多边形视觉上接近圆形。
+ * 采用 Braille（盲文点阵）栅格：每个字符承载 2×4 点，而盲文点在终端中等宽高比，
+ * 因此无需像纯字符网格那样按 2:1 压扁，雷达图视觉上更接近正圆、线条更细更清晰。
+ * 参考 MapSCII / Plotille 的终端高分辨率渲染思路。
+ * 序列多边形按 series 顺序叠加，颜色与图例一致（同屏各模型颜色互异）。
  */
 export function renderRadarChart(
   axes: RadarAxis[],
@@ -149,109 +149,126 @@ export function renderRadarChart(
 ): string {
   const N = axes.length
   if (N < 3) return '(need ≥3 axes for radar)'
-  const R = opts.radius ?? 22
-  const Ry = Math.max(4, Math.round(R / 2))
-  const rings = opts.rings ?? 4
-  const cx = R + 1
-  const cy = Ry + 1
-  const W = 2 * R + 3
-  const H = 2 * Ry + 3
-  const grid: string[][] = Array.from({ length: H }, () => new Array<string>(W).fill(' '))
-  const color: (number | null)[][] = Array.from({ length: H }, () =>
-    new Array<number | null>(W).fill(null),
-  )
+  const R = opts.radius ?? 22 // 半径（盲文点）
+  const rings = opts.rings ?? 3
+  const M = 6 // 外圈留白，用于放置轴字母
+  const cx = R + M
+  const cy = R + M
+  const WD = 2 * cx + 8 // 点阵宽
+  const HD = 2 * cy + 6 // 点阵高
+  const Wc = Math.ceil(WD / 2)
+  const Hc = Math.ceil(HD / 4)
+  const dots = new Uint8Array(WD * HD)
+  const cellColor: (number | null)[] = new Array(Wc * Hc).fill(null)
+  const labels: (string | null)[] = new Array(Wc * Hc).fill(null)
 
   const angle = (i: number) => -Math.PI / 2 + (i * 2 * Math.PI) / N
-  const point = (i: number, frac: number): [number, number] => [
-    Math.round(cx + Math.cos(angle(i)) * R * frac),
-    Math.round(cy + Math.sin(angle(i)) * Ry * frac),
-  ]
-  const set = (x: number, y: number, ch: string, ci?: number | null) => {
-    if (y >= 0 && y < H && x >= 0 && x < W) {
-      grid[y]![x] = ch
-      if (ci != null) color[y]![x] = ci
-    }
+  const fx = (i: number, frac: number) => cx + Math.cos(angle(i)) * R * frac
+  const fy = (i: number, frac: number) => cy + Math.sin(angle(i)) * R * frac
+
+  const setDot = (dx: number, dy: number, ci: number | null) => {
+    if (dx < 0 || dx >= WD || dy < 0 || dy >= HD) return
+    dots[dy * WD + dx] = 1
+    if (ci != null) cellColor[(dy >> 2) * Wc + (dx >> 1)] = ci
   }
-  const line = (
-    x0: number,
-    y0: number,
-    x1: number,
-    y1: number,
-    ch: string,
-    ci?: number | null,
+  const bline = (
+    x0: number, y0: number, x1: number, y1: number, ci: number | null,
   ) => {
-    const dx = Math.abs(x1 - x0)
-    const dy = Math.abs(y1 - y0)
-    const sx = x0 < x1 ? 1 : -1
-    const sy = y0 < y1 ? 1 : -1
+    let x = Math.round(x0)
+    let y = Math.round(y0)
+    const X = Math.round(x1)
+    const Y = Math.round(y1)
+    const dx = Math.abs(X - x)
+    const dy = Math.abs(Y - y)
+    const sx = x < X ? 1 : -1
+    const sy = y < Y ? 1 : -1
     let err = dx - dy
-    let x = x0
-    let y = y0
     for (;;) {
-      set(x, y, ch, ci)
-      if (x === x1 && y === y1) break
+      setDot(x, y, ci)
+      if (x === X && y === Y) break
       const e2 = 2 * err
-      if (e2 > -dy) {
-        err -= dy
-        x += sx
-      }
-      if (e2 < dx) {
-        err += dx
-        y += sy
-      }
+      if (e2 > -dy) { err -= dy; x += sx }
+      if (e2 < dx) { err += dx; y += sy }
     }
   }
 
-  // 同心多边形网格
+  // 同心多边形网格（无颜色，作为底纹）
   for (let r = 1; r <= rings; r++) {
     const frac = r / rings
     for (let i = 0; i < N; i++) {
-      const [x1, y1] = point(i, frac)
-      const [x2, y2] = point((i + 1) % N, frac)
-      line(x1, y1, x2, y2, GRID)
+      bline(
+        fx(i, frac), fy(i, frac),
+        fx((i + 1) % N, frac), fy((i + 1) % N, frac),
+        null,
+      )
     }
   }
   // 放射轴（中心 → 各轴顶点）
-  for (let i = 0; i < N; i++) {
-    const [x, y] = point(i, 1)
-    line(cx, cy, x, y, SPOKE)
-  }
-  // 序列多边形（叠加，每个序列一个字符 + 一种颜色）
+  for (let i = 0; i < N; i++) bline(cx, cy, fx(i, 1), fy(i, 1), null)
+  // 序列多边形（叠加，按 series 顺序分配颜色）
   const { norm } = radarNormalize(axes, series)
   series.forEach((_s, si) => {
-    const ch = PALETTE[si % PALETTE.length]!
-    // 按 series 顺序分配颜色，保证同屏各模型颜色互异（与图例一致）
     const ci = si
-    const verts = norm[si]!.map((f, i) => point(i, f)) as [number, number][]
+    const verts = norm[si]!.map((f, i) => [fx(i, f), fy(i, f)] as [number, number])
     for (let i = 0; i < N; i++) {
       const [x1, y1] = verts[i]!
       const [x2, y2] = verts[(i + 1) % N]!
-      line(x1, y1, x2, y2, ch, ci)
+      bline(x1, y1, x2, y2, ci)
     }
-    for (const [x, y] of verts) set(x, y, ch, ci)
+    for (const [x, y] of verts) setDot(Math.round(x), Math.round(y), ci)
   })
-  // 轴顶点字母（A/B/C…，覆盖在最上层做方位标记）
+  // 轴顶点字母（置于外圈外侧）
   for (let i = 0; i < N; i++) {
-    const [x, y] = point(i, 1)
-    set(x, y, String.fromCharCode(LETTER_BASE + i))
+    const lx = Math.round(fx(i, 1.16))
+    const ly = Math.round(fy(i, 1.16))
+    if (lx >= 0 && lx < WD && ly >= 0 && ly < HD) {
+      labels[(ly >> 2) * Wc + (lx >> 1)] = String.fromCharCode(LETTER_BASE + i)
+    }
   }
-  set(cx, cy, '+')
+  labels[(cy >> 2) * Wc + (cx >> 1)] = '+'
 
-  return grid
-    .map((row, y) => {
-      const lineOut = row
-        .map((ch, x) => {
-          const ci = color[y]![x]
-          if (opts.colorize && ci != null) {
-            const code = RADAR_PALETTE_ANSI[ci % RADAR_PALETTE_ANSI.length]!
-            return `\x1b[${code}m${ch}\x1b[0m`
-          }
-          return ch
-        })
-        .join('')
-      return lineOut.replace(/\s+$/, '')
-    })
-    .join('\n')
+  const BRAILLE_BIT = [
+    [0x01, 0x08],
+    [0x02, 0x10],
+    [0x04, 0x20],
+    [0x40, 0x80],
+  ]
+  const rows: string[] = []
+  for (let r = 0; r < Hc; r++) {
+    let line = ''
+    for (let c = 0; c < Wc; c++) {
+      const idx = r * Wc + c
+      const label = labels[idx]
+      if (label) {
+        line += label
+        continue
+      }
+      let bits = 0
+      for (let row = 0; row < 4; row++) {
+        for (let col = 0; col < 2; col++) {
+          const dx = c * 2 + col
+          const dy = r * 4 + row
+          if (dots[dy * WD + dx]) bits |= BRAILLE_BIT[row]![col]!
+        }
+      }
+      if (bits === 0) {
+        line += ' '
+      } else {
+        const ch = String.fromCharCode(0x2800 + bits)
+        const ci = cellColor[idx]
+        if (opts.colorize && ci != null) {
+          const code = RADAR_PALETTE_ANSI[ci % RADAR_PALETTE_ANSI.length]!
+          line += `\x1b[${code}m${ch}\x1b[0m`
+        } else {
+          line += ch
+        }
+      }
+    }
+    rows.push(line.replace(/\s+$/, ''))
+  }
+  while (rows.length && rows[rows.length - 1] === '') rows.pop()
+  while (rows.length && rows[0] === '') rows.shift()
+  return rows.join('\n')
 }
 
 /**
