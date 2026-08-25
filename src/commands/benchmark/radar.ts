@@ -118,7 +118,7 @@ export function radarNormalize(axes: RadarAxis[], series: RadarSeries[]): RadarN
   return { norm, bounds }
 }
 
-const PALETTE = ['■', '□', '▲', '△', '◆', '●', '★', '✦']
+export const PALETTE = ['■', '□', '▲', '△', '◆', '●', '★', '✦']
 const GRID = '.'
 const SPOKE = '·'
 const LETTER_BASE = 65 // 'A'
@@ -260,16 +260,23 @@ export function renderRadarChart(
  */
 export function renderRadarAxisTable(axes: RadarAxis[], series: RadarSeries[]): string {
   const { norm } = radarNormalize(axes, series)
-  const lines: string[] = []
-  axes.forEach((ax, i) => {
+  // 先构造每格文本，再按列对齐，避免序列 0 带 (raw) 后缀时各行列错位
+  const rows = axes.map((ax, i) => {
     const letter = String.fromCharCode(LETTER_BASE + i)
     const cells = series.map((s, si) => {
       const f = norm[si]![i]!
       const pct = `${Math.round(f * 100)}%`
-      if (si === 0) return `${pct} (${ax.formatRaw(s.values[i] ?? 0)})`
-      return pct
+      return si === 0 ? `${pct} (${ax.formatRaw(s.values[i] ?? 0)})` : pct
     })
-    lines.push(`  ${letter} ${ax.label.padEnd(11)} ${cells.join('   ')}`)
+    return { letter, label: ax.label, cells }
+  })
+  const colW = series.map((_, si) => Math.max(...rows.map(r => r.cells[si]!.length)))
+  const lines = rows.map(r => {
+    const label = r.label.padEnd(11)
+    const cells = series
+      .map((_, si) => r.cells[si]!.padStart(colW[si]!))
+      .join('   ')
+    return `  ${r.letter} ${label} ${cells}`
   })
   return lines.join('\n')
 }
