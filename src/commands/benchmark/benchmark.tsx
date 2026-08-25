@@ -36,8 +36,8 @@ import {
  * /benchmark —— 雷达图驱动的 benchmark 命令。
  *
  * 子命令：
- *   /benchmark           直接显示已保存的雷达图（各模型一条彩色线）
- *   /benchmark eval     对当前模型跑 benchmark 并把维度图存入历史
+ *   /benchmark           对当前模型跑 benchmark 并把维度图存入历史（默认）
+ *   /benchmark show     直接显示已保存的雷达图（各模型一条彩色线）
  *   /benchmark clear    清空所有历史
  *
  * 参考 Kiln compare_radar_chart：每轴一个评测维度，每个多边形一次 run，
@@ -48,14 +48,13 @@ export const call: LocalJSXCommandCall = async (onDone, context, args) => {
   const sp = args.trim().split(/\s+/).filter(Boolean)
   const sub = (sp[0] ?? '').toLowerCase()
   if (sub === 'clear') return <BenchmarkClearView onClose={onDone} />
-  if (sub === 'eval') {
-    const parsed = parseBenchmarkArgs(sp.slice(1).join(' '))
-    // 关掉命令 UI（跳过 REPL 默认的 transcript 注入，由 runBenchmarkToTranscript 自行注入）
-    onDone(undefined, { display: 'skip' })
-    runBenchmarkToTranscript(context.setMessages, parsed)
-    return <Box />
-  }
-  return <BenchmarkRadarView onClose={onDone} />
+  if (sub === 'show') return <BenchmarkRadarView onClose={onDone} />
+  // 默认（含旧用法 eval）：对当前模型跑 benchmark 并把维度图存入历史
+  const parsed = parseBenchmarkArgs(sub === 'eval' ? sp.slice(1).join(' ') : sp.join(' '))
+  // 关掉命令 UI（跳过 REPL 默认的 transcript 注入，由 runBenchmarkToTranscript 自行注入）
+  onDone(undefined, { display: 'skip' })
+  runBenchmarkToTranscript(context.setMessages, parsed)
+  return <Box />
 }
 
 /**
@@ -92,7 +91,7 @@ function BenchmarkRadarView({ onClose }: { onClose: LocalJSXCommandOnDone }) {
       <Box paddingX={1} flexDirection="column">
         <Text bold>/benchmark · radar</Text>
         <Text color="subtle">
-          no saved profiles yet — run <Text color="accent">/benchmark eval</Text> to add one
+          no saved profiles yet — run <Text color="accent">/benchmark</Text> to add one
         </Text>
         <Text color="subtle" dimColor>
           press any key to close
