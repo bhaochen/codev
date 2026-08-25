@@ -346,7 +346,7 @@ export function renderRadarReport(axes: RadarAxis[], series: RadarSeries[]): str
       .join('\n')
     return `${glyph} ${truncate(s.name, 28)}   Overall ${overall.toFixed(1)}\n${divider}\n${table}`
   })
-  const header = `/benchmark · radar — ${series.length} model${series.length > 1 ? 's' : ''}`
+  const header = `${series.length} model${series.length > 1 ? 's' : ''}`
   return `${header}\n\n${chart}\n\n${blocks.join('\n\n')}`
 }
 

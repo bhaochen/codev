@@ -95,7 +95,6 @@ function BenchmarkRadarView({ onClose }: { onClose: LocalJSXCommandOnDone }) {
   if (profiles.length === 0) {
     return (
       <Box paddingX={1} flexDirection="column">
-        <Text bold>/benchmark · radar</Text>
         <Text color="subtle">
           no saved profiles yet — run <Text color="accent">/benchmark eval</Text> to add one
         </Text>
@@ -122,8 +121,7 @@ function RadarView({
   return (
     <Box flexDirection="column" paddingX={1}>
       <Box borderStyle="round" flexDirection="column" paddingX={1}>
-        <Box flexDirection="row" justifyContent="space-between">
-          <Text bold color="accent">/benchmark · radar</Text>
+        <Box flexDirection="row">
           <Text color="subtle">{n} model{n > 1 ? 's' : ''}</Text>
         </Box>
         <Box flexDirection="row" marginTop={1}>
