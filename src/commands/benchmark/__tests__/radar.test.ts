@@ -121,21 +121,27 @@ describe('radarNormalize', () => {
 })
 
 describe('renderRadarChart', () => {
-  test('renders concentric grid + spokes + overlay for single run', () => {
+  test('renders braille grid + spokes + overlay for single run', () => {
     const chart = renderRadarChart(RADAR_AXES, [radarSeriesFromRun(mkRun())])
     expect(chart).toContain('A') // axis letters present
-    expect(chart).toContain('.') // grid rings
-    expect(chart).toContain('■') // series polygon marker
     expect(chart).toContain('+') // center
+    expect(chart).toMatch(/[\u2800-\u28FF]/) // braille dots drawn
   })
 
-  test('overlays multiple series with distinct markers', () => {
-    const chart = renderRadarChart(RADAR_AXES, [
-      radarSeriesFromRun(mkRun()),
-      { name: 'other', values: [100, 10, 100, 1, 1000, 1000, 1] },
-    ])
-    expect(chart).toContain('■')
-    expect(chart).toContain('□')
+  test('overlays multiple series with distinct colors', () => {
+    const colored = renderRadarChart(
+      RADAR_AXES,
+      [
+        { name: 'm-a', values: [100, 10, 100, 1, 1000, 1000, 1] },
+        { name: 'm-b', values: [80, 6, 90, 5, 8000, 20000, 5] },
+      ],
+      { colorize: true },
+    )
+    expect(colored).toMatch(/[⠀-⣿]/)
+    const codes = new Set(
+      [...colored.matchAll(/\x1b\[(\d+)m/g)].map(m => m[1]!),
+    )
+    expect(codes.size).toBeGreaterThanOrEqual(2)
   })
 
   test('rejects <3 axes', () => {
