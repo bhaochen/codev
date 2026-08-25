@@ -52,15 +52,14 @@ export const call: LocalJSXCommandCall = async (onDone, context, args) => {
   const sp = args.trim().split(/\s+/).filter(Boolean)
   const sub = (sp[0] ?? '').toLowerCase()
   if (sub === 'clear') return <BenchmarkClearView onClose={onDone} />
-  if (sub === 'eval') {
-    const parsed = parseBenchmarkArgs(sp.slice(1).join(' '))
-    // 关掉命令 UI（跳过 REPL 默认的 transcript 注入，由 runBenchmarkToTranscript 自行注入）
-    onDone(undefined, { display: 'skip' })
-    runBenchmarkToTranscript(context.setMessages, parsed)
-    return <Box />
-  }
-  // 默认（含 show 别名）：直接显示已保存的雷达图
-  return <BenchmarkRadarView onClose={onDone} />
+  if (sub === 'show') return <BenchmarkRadarView onClose={onDone} />
+  // 默认：/benchmark 单独使用即等于 eval（跑 benchmark 并保存维度图）。
+  // 也兼容 /benchmark eval 别名与直接传 dataset/参数。show 才看雷达图。
+  const parsed = parseBenchmarkArgs(sub === 'eval' ? sp.slice(1).join(' ') : args.trim())
+  // 关掉命令 UI（跳过 REPL 默认的 transcript 注入，由 runBenchmarkToTranscript 自行注入）
+  onDone(undefined, { display: 'skip' })
+  runBenchmarkToTranscript(context.setMessages, parsed)
+  return <Box />
 }
 
 /**

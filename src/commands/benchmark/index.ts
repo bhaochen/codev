@@ -5,8 +5,8 @@ export const benchmark: Command = {
   type: 'local-jsx',
   name: 'benchmark',
   description:
-    '/benchmark 雷达图：模型维度对比（显示命令）。用法：/benchmark（显示已保存雷达图） | /benchmark eval [dataset] [--model X] ...（测试当前模型并保存维度图） | /benchmark clear（清除历史）',
-  argumentHint: '[eval | show | clear]',
+    '/benchmark：测试当前模型并保存维度图。用法：/benchmark [dataset] [--model X] [--judge-model Y] [--max-steps N] [--limit N]（默认跑 eval，保存维度图） | /benchmark show（显示已保存雷达图） | /benchmark clear（清除历史）',
+  argumentHint: '[[dataset] [--model X] [--judge-model Y] [--max-steps N] [--limit N] | show | clear]',
   isEnabled: () => !getIsNonInteractiveSession(),
   load: () => import('./benchmark.js'),
 }
@@ -16,7 +16,7 @@ export const benchmarkNonInteractive: Command = {
   name: 'benchmark',
   supportsNonInteractive: true,
   description:
-    '/benchmark 雷达图（headless）：默认显示已保存雷达图，benchmark eval 测试并保存，benchmark clear 清除历史',
+    '/benchmark（headless）：默认跑 eval 并保存维度图，benchmark show 显示已保存雷达图，benchmark clear 清除历史',
   get isHidden() {
     return !getIsNonInteractiveSession()
   },

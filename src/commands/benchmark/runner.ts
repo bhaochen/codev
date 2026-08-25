@@ -38,7 +38,7 @@ export type BenchmarkArgs = {
   judge: boolean
   score: boolean
   /** 叠加对比的历史 run 数量；0 = 不对比 */
-  compare: number
+  compare?: number
 }
 
 export type BenchmarkPhase =
