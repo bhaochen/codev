@@ -4,8 +4,9 @@ import type { Command } from '../../commands.js'
 export const benchmark: Command = {
   type: 'local-jsx',
   name: 'benchmark',
-  description: 'Run a deepsearch benchmark: ReAct search loop, trajectory scoring, context analysis',
-  argumentHint: '[dataset] [--model X] [--judge-model Y] [--max-steps N] [--limit N] [--out DIR]',
+  description:
+    '/benchmark 雷达图：模型维度对比。用法：/benchmark（显示已保存雷达图） | /benchmark eval [dataset] [--model X] ...（测试当前模型并保存维度图） | /benchmark clear（清除历史）',
+  argumentHint: '[eval [dataset] [--model X] [--judge-model Y] [--max-steps N] [--limit N] | clear]',
   isEnabled: () => !getIsNonInteractiveSession(),
   load: () => import('./benchmark.js'),
 }
@@ -14,7 +15,8 @@ export const benchmarkNonInteractive: Command = {
   type: 'local',
   name: 'benchmark',
   supportsNonInteractive: true,
-  description: 'Run a deepsearch benchmark and print the report',
+  description:
+    '/benchmark 雷达图（headless）：benchmark 显示已保存雷达图，benchmark eval 测试并保存，benchmark clear 清除历史',
   get isHidden() {
     return !getIsNonInteractiveSession()
   },

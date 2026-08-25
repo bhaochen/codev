@@ -135,13 +135,6 @@ export const RADAR_PALETTE_INK = [
   'redBright', 'greenBright', 'yellowBright', 'blueBright', 'magentaBright', 'cyanBright', 'whiteBright',
 ] as const
 
-/** 由模型名稳定地映射到一种颜色（不同模型 → 不同颜色的线） */
-export function radarColorIndex(name: string): number {
-  let h = 0
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0
-  return h % RADAR_PALETTE_ANSI.length
-}
-
 export type RadarOptions = { radius?: number; rings?: number; colorize?: boolean }
 
 /**
@@ -227,13 +220,15 @@ export function renderRadarChart(
   const { norm } = radarNormalize(axes, series)
   series.forEach((_s, si) => {
     const ch = PALETTE[si % PALETTE.length]!
+    // 按 series 顺序分配颜色，保证同屏各模型颜色互异（与图例一致）
+    const ci = si
     const verts = norm[si]!.map((f, i) => point(i, f)) as [number, number][]
     for (let i = 0; i < N; i++) {
       const [x1, y1] = verts[i]!
       const [x2, y2] = verts[(i + 1) % N]!
-      line(x1, y1, x2, y2, ch, si)
+      line(x1, y1, x2, y2, ch, ci)
     }
-    for (const [x, y] of verts) set(x, y, ch, si)
+    for (const [x, y] of verts) set(x, y, ch, ci)
   })
   // 轴顶点字母（A/B/C…，覆盖在最上层做方位标记）
   for (let i = 0; i < N; i++) {
@@ -317,7 +312,7 @@ export function benchmarksDir(): string {
  */
 async function readSavedRuns(
   base: string,
-  opts: { dataset?: string; exclude?: string; limit?: number } = {},
+  opts: { dataset?: string; exclude?: string; limit?: number; dedupeByModel?: boolean } = {},
 ): Promise<RadarSeries[]> {
   let entries: string[]
   try {
@@ -325,12 +320,13 @@ async function readSavedRuns(
   } catch {
     return []
   }
-  const out: RadarSeries[] = []
+  type RawRun = { model: string; startedAt: string; metrics: RunMetrics }
+  const raw: RawRun[] = []
   for (const name of entries) {
     if (name === '' || (opts.exclude && name === opts.exclude)) continue
     try {
-      const raw = await readFile(join(base, name, 'eval_results.json'), 'utf8')
-      const data = JSON.parse(raw) as {
+      const file = await readFile(join(base, name, 'eval_results.json'), 'utf8')
+      const data = JSON.parse(file) as {
         dataset?: string
         model?: string
         startedAt?: string
@@ -338,14 +334,32 @@ async function readSavedRuns(
       }
       if (opts.dataset && data.dataset !== opts.dataset) continue
       if (!data.metrics) continue
-      out.push(radarSeriesFromMetrics(data.metrics, shortRunName(data.model ?? '?', data.startedAt ?? '')))
+      raw.push({
+        model: data.model ?? '?',
+        startedAt: data.startedAt ?? '',
+        metrics: { ...data.metrics },
+      })
     } catch {
       // 非 run 目录或不可读 → 跳过
     }
   }
-  // 最近的优先（按 dir 名里的时间戳，fallback 到模型名）
-  out.sort((a, b) => b.name.localeCompare(a.name))
-  return opts.limit ? out.slice(0, opts.limit) : out
+  let series: RadarSeries[]
+  if (opts.dedupeByModel) {
+    // 每个模型仅保留最新一次 run（按 startedAt），profile 名即模型名 → 颜色按模型稳定
+    const byModel = new Map<string, RawRun>()
+    for (const r of raw) {
+      const cur = byModel.get(r.model)
+      if (!cur || r.startedAt > cur.startedAt) byModel.set(r.model, r)
+    }
+    series = [...byModel.values()].map(r => radarSeriesFromMetrics(r.metrics, r.model))
+  } else {
+    series = raw.map(r =>
+      radarSeriesFromMetrics(r.metrics, shortRunName(r.model, r.startedAt)),
+    )
+  }
+  // 模型名字典序稳定排序
+  series.sort((a, b) => b.name.localeCompare(a.name))
+  return opts.limit ? series.slice(0, opts.limit) : series
 }
 
 /**
@@ -368,7 +382,7 @@ export function loadSavedProfiles(
   limit?: number,
   baseDir: string = benchmarksDir(),
 ): Promise<RadarSeries[]> {
-  return readSavedRuns(baseDir, { limit })
+  return readSavedRuns(baseDir, { limit, dedupeByModel: true })
 }
 
 /** 清空所有历史（/benchmark clear）。返回被移除的 run 目录数。 */

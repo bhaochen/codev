@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test'
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   RADAR_AXES,
+  clearHistory,
+  loadSavedProfiles,
   radarNormalize,
   radarSeriesFromRun,
   renderRadar,
@@ -8,6 +13,7 @@ import {
   renderRadarLegend,
 } from '../radar.js'
 import type { BenchmarkRun, Trajectory } from '../types.js'
+import type { RunMetrics } from '../report.js'
 
 function mkTrajectory(overrides: Partial<Trajectory> = {}): Trajectory {
   return {
@@ -154,5 +160,94 @@ describe('renderRadar', () => {
     expect(out).toContain('■')
     expect(out).toContain('□')
     expect(out).toContain('Accuracy')
+  })
+})
+
+describe('renderRadarChart colorize', () => {
+  test('emits ANSI escapes only when colorize=true', () => {
+    const colored = renderRadarChart(RADAR_AXES, [radarSeriesFromRun(mkRun())], {
+      colorize: true,
+    })
+    expect(colored).toContain('\x1b[')
+    const plain = renderRadarChart(RADAR_AXES, [radarSeriesFromRun(mkRun())])
+    expect(plain).not.toContain('\x1b[')
+  })
+
+  test('distinct models get distinct colors (matches legend order)', () => {
+    const series = [
+      { name: 'model-a', values: [100, 10, 100, 1, 1000, 1000, 1] },
+      { name: 'model-b', values: [80, 6, 90, 5, 8000, 20000, 5] },
+      { name: 'model-c', values: [60, 4, 70, 8, 16000, 40000, 9] },
+    ]
+    const colored = renderRadarChart(RADAR_AXES, series, { colorize: true })
+    // 3 个模型 → 3 种 ANSI 颜色码；图与图例按同一 series 顺序取色，必然互异
+    const codes = new Set(
+      [...colored.matchAll(/\x1b\[(\d+)m/g)].map(m => m[1]!),
+    )
+    expect(codes.size).toBeGreaterThanOrEqual(3)
+  })
+})
+
+describe('loadSavedProfiles / clearHistory', () => {
+  function mkMetrics(overrides: Partial<RunMetrics> = {}): RunMetrics {
+    return {
+      correct: 1,
+      total: 2,
+      accuracyPct: 50,
+      avgScore: 5,
+      avgSteps: 2.5,
+      avgCtxTokens: 5000,
+      avgTokensIn: 250,
+      avgTokensOut: 125,
+      avgTimeSec: 2,
+      peakCtxTokens: 6000,
+      honestAnswers: 50,
+      ...overrides,
+    }
+  }
+
+  async function writeRun(
+    base: string,
+    dir: string,
+    model: string,
+    startedAt: string,
+    m: RunMetrics,
+  ): Promise<void> {
+    await mkdir(join(base, dir), { recursive: true })
+    await writeFile(
+      join(base, dir, 'eval_results.json'),
+      JSON.stringify({ dataset: 'deepsearch-demo', model, startedAt, metrics: m }),
+      'utf8',
+    )
+  }
+
+  test('dedupes by model and names profile by model (latest kept)', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'codev-bench-'))
+    try {
+      await writeRun(base, 'run-1', 'model-a', '2026-01-01T00:00:00Z', mkMetrics({ accuracyPct: 80 }))
+      await writeRun(base, 'run-2', 'model-a', '2026-02-01T00:00:00Z', mkMetrics({ accuracyPct: 90 }))
+      await writeRun(base, 'run-3', 'model-b', '2026-01-01T00:00:00Z', mkMetrics({ accuracyPct: 70 }))
+      const profiles = await loadSavedProfiles(undefined, base)
+      expect(profiles.length).toBe(2) // model-a + model-b
+      const a = profiles.find(p => p.name === 'model-a')!
+      expect(a).toBeDefined()
+      // 同名模型只保留最新一次 run（accuracy 90）
+      expect(a.values[0]).toBeCloseTo(90)
+      expect(profiles.some(p => p.name === 'model-b')).toBe(true)
+    } finally {
+      await rm(base, { recursive: true, force: true })
+    }
+  })
+
+  test('clearHistory removes all saved run dirs', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'codev-bench-'))
+    try {
+      await writeRun(base, 'run-1', 'model-a', '2026-01-01T00:00:00Z', mkMetrics())
+      const removed = await clearHistory(base)
+      expect(removed).toBe(1)
+      expect((await loadSavedProfiles(undefined, base)).length).toBe(0)
+    } finally {
+      await rm(base, { recursive: true, force: true })
+    }
   })
 })

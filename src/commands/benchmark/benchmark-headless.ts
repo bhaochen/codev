@@ -1,24 +1,51 @@
 /**
  * /benchmark —— headless（-p / 非交互）模式。
- * 跑完整个 benchmark 直接输出文本报告。
+ * 与交互式命令一致的子命令：
+ *   benchmark           直接显示已保存的雷达图（各模型一条彩色线）
+ *   benchmark eval     对当前模型跑 benchmark 并把维度图存入历史
+ *   benchmark clear    清空所有历史
  */
 import { buildReportText, parseBenchmarkArgs, runBenchmark } from './runner.js'
-import { loadComparisonSeries } from './radar.js'
+import {
+  RADAR_AXES,
+  clearHistory,
+  loadComparisonSeries,
+  loadSavedProfiles,
+  renderRadar,
+} from './radar.js'
 import type { LocalCommandCall } from '../../types/command.js'
 
 export const call: LocalCommandCall = async (args, context) => {
   void context
+  const sp = args.trim().split(/\s+/).filter(Boolean)
+  const sub = (sp[0] ?? '').toLowerCase()
   try {
-    const parsed = parseBenchmarkArgs(args)
-    const run = await runBenchmark({
-      args: parsed,
-      // headless 不进 UI，直接等待最终结果
-    })
-    const compare =
-      parsed.compare > 0
-        ? await loadComparisonSeries(run, parsed.compare).catch(() => [])
-        : []
-    return { type: 'text', value: buildReportText(run, { compare }) }
+    if (sub === 'clear') {
+      const n = await clearHistory()
+      return {
+        type: 'text',
+        value: `cleared ${n} saved benchmark profile${n === 1 ? '' : 's'}`,
+      }
+    }
+    if (sub === 'eval') {
+      const parsed = parseBenchmarkArgs(sp.slice(1).join(' '))
+      const run = await runBenchmark({ args: parsed })
+      const compare =
+        parsed.compare > 0
+          ? await loadComparisonSeries(run, parsed.compare).catch(() => [])
+          : []
+      return { type: 'text', value: buildReportText(run, { compare }) }
+    }
+    // 默认：直接显示已保存的雷达图
+    const profiles = await loadSavedProfiles()
+    if (profiles.length === 0) {
+      return {
+        type: 'text',
+        value:
+          'no saved benchmark profiles yet — run `benchmark eval` to add one',
+      }
+    }
+    return { type: 'text', value: renderRadar(RADAR_AXES, profiles) }
   } catch (err) {
     return {
       type: 'text',

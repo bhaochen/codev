@@ -25,9 +25,8 @@ import {
   RADAR_AXES,
   RADAR_PALETTE_INK,
   clearHistory,
+  loadComparisonSeries,
   loadSavedProfiles,
-  radarColorIndex,
-  radarSeriesFromRun,
   renderRadarAxisTable,
   renderRadarChart,
   type RadarSeries,
@@ -124,7 +123,7 @@ function RadarView({
         {series.map((s, i) => (
           <Text
             key={i}
-            color={RADAR_PALETTE_INK[radarColorIndex(s.name) % RADAR_PALETTE_INK.length]!}
+            color={RADAR_PALETTE_INK[i % RADAR_PALETTE_INK.length]!}
           >
             ● {truncate(s.name, 44)}
           </Text>
@@ -291,7 +290,3 @@ function runBenchmarkToTranscript(
       patchLive(`✘ /benchmark failed: ${msg}`)
     })
 }
-
-// 保留供 headless / 其他调用方使用
-export { radarSeriesFromRun }
-import { loadComparisonSeries } from './radar.js'
