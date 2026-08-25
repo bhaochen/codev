@@ -212,8 +212,7 @@ describe('buildLiveProgressText', () => {
       currentAction: '',
       message: 'model=m',
     })
-    expect(text).toContain('/benchmark')
-    expect(text).toContain('deepsearch-demo')
+    expect(text).toContain('benchmark')
     expect(text).toContain('model=m')
   })
 
@@ -255,7 +254,7 @@ describe('buildInlineReport', () => {
         }),
       ],
     })
-    expect(report).toContain('📊 deepsearch benchmark report')
+    expect(report).toContain('deepsearch benchmark report')
     expect(report).toContain('judge: j')
     expect(report).toContain('▍metrics')
     expect(report).toContain('▍per-question')

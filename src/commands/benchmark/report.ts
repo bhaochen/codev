@@ -218,19 +218,8 @@ export function buildLiveProgressText(p: {
   currentAction: string
   message?: string
 }): string {
-  const phaseIcon: Record<string, string> = {
-    loading: '…',
-    running: '▸',
-    evaluating: '⚖',
-    scoring: 'Σ',
-    analyzing: '◈',
-    done: '✔',
-    error: '✘',
-  }
-  const icon = phaseIcon[p.phase] ?? '·'
-  const header = `${icon} /benchmark · ${p.datasetName}`
   if (p.phase === 'loading' || !p.current) {
-    return `${header}${p.message ? ` · ${p.message}` : ''}`
+    return `benchmark${p.message ? ` — ${p.message}` : ''}`
   }
   const action =
     p.currentAction === 'search_web'
@@ -245,7 +234,7 @@ export function buildLiveProgressText(p: {
               ? 'scoring steps'
               : p.currentAction
   const ctx = ((p.currentCtxTokens ?? 0) / 1000).toFixed(1)
-  return `${header}\n(${p.current}/${p.total}) ${p.currentId} · step ${p.currentSteps} · ${action} · ctx ${ctx}k tok`
+  return `(${p.current}/${p.total}) ${p.currentId} · step ${p.currentSteps} · ${action} · ctx ${ctx}k tok`
 }
 
 /** 最终报告（注入对话区的完整块） */
@@ -255,7 +244,7 @@ export function buildInlineReport(
 ): string {
   const m = metricsOf(run)
   const lines: string[] = []
-  lines.push(`📊 deepsearch benchmark report — ${run.datasetName}`)
+  lines.push(`deepsearch benchmark report — ${run.datasetName}`)
   lines.push(
     `agent: ${run.model}${run.judgeModel && run.judgeModel !== run.model ? `   judge: ${run.judgeModel}` : ''}   max-steps: ${run.maxSteps}   saved: ${run.runDir}`,
   )

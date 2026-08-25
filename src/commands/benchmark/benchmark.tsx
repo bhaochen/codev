@@ -252,7 +252,6 @@ function runBenchmarkToTranscript(
   setMessages: LocalJSXCommandContext['setMessages'],
   args: BenchmarkArgs,
 ): void {
-  const header = createCommandInputMessage(`🔬 /benchmark · ${args.dataset}`)
   const live = createCommandInputMessage(
     buildLiveProgressText({
       phase: 'loading',
@@ -268,11 +267,7 @@ function runBenchmarkToTranscript(
     }),
   )
   const liveUuid = live.uuid
-  setMessages(prev => [
-    ...prev,
-    header as unknown as Message,
-    live as unknown as Message,
-  ])
+  setMessages(prev => [...prev, live as unknown as Message])
 
   const patchLive = (content: string) => {
     setMessages(prev =>
@@ -292,14 +287,9 @@ function runBenchmarkToTranscript(
     )
   }
 
-  // 结束时把 live 进度消息替换为 tool result 消息对（报告以工具结果展示）
+  // 结束时把 live 进度消息替换为最终报告（纯 local_command 文本，避免多余的 tool_use 渲染）
   const finishWithReport = (report: string) => {
-    const { assistant, user } = buildReportToolResultMessages(args, report)
-    setMessages(prev => [
-      ...prev.filter(m => m.uuid !== liveUuid),
-      assistant as unknown as Message,
-      user as unknown as Message,
-    ])
+    patchLive(report)
   }
 
   runBenchmark({
@@ -330,6 +320,6 @@ function runBenchmarkToTranscript(
     })
     .catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err)
-      patchLive(`✘ /benchmark failed: ${msg}`)
+      patchLive(`benchmark eval failed: ${msg}`)
     })
 }
