@@ -376,6 +376,9 @@ export const FileReadTool = buildTool({
   isReadOnly() {
     return true
   },
+  speculatable: true,
+  pure: true,
+  deterministic: true,
   toAutoClassifierInput(input) {
     return input.file_path
   },

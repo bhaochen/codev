@@ -10,6 +10,14 @@ import { BASH_TOOL_NAME } from '../../tools/BashTool/toolName.js'
 import type { AssistantMessage, Message } from '../../types/message.js'
 import { createChildAbortController } from '../../utils/abortController.js'
 import { runToolUse } from './toolExecution.js'
+import {
+  SpecStore,
+  BudgetTracker,
+  specKey,
+  isSpeculatable,
+  AbortSpeculationError,
+  type SpecValue,
+} from './speculation.js'
 
 type MessageUpdate = {
   message?: Message
@@ -29,6 +37,9 @@ type TrackedTool = {
   // Progress messages are stored separately and yielded immediately
   pendingProgress: Message[]
   contextModifiers?: Array<(context: ToolUseContext) => ToolUseContext>
+  // Speculative execution (spec-ptc)
+  speculativeHit?: SpecValue
+  specKey?: ReturnType<typeof specKey>
 }
 
 /**
@@ -49,6 +60,9 @@ export class StreamingToolExecutor {
   private discarded = false
   // Signal to wake up getRemainingResults when progress is available
   private progressAvailableResolve?: () => void
+  // Speculative execution (spec-ptc)
+  private specStore = new SpecStore()
+  private budget = new BudgetTracker()
 
   constructor(
     private readonly toolDefinitions: Tools,
@@ -111,16 +125,33 @@ export class StreamingToolExecutor {
           }
         })()
       : false
+
+    // Speculative claim: try to claim an existing speculative result
+    let speculativeHit: SpecValue | undefined
+    if (isSpeculatable(toolDefinition) && parsedInput?.success) {
+      const key = specKey(block.name, parsedInput.data)
+      const hit = this.specStore.claim(key)
+      if (hit) speculativeHit = hit
+    }
+
     this.tools.push({
       id: block.id,
       block,
       assistantMessage,
-      status: 'queued',
+      status: speculativeHit ? 'completed' : 'queued',
       isConcurrencySafe,
       pendingProgress: [],
+      speculativeHit,
+      specKey:
+        isSpeculatable(toolDefinition) && parsedInput?.success
+          ? specKey(block.name, parsedInput.data)
+          : undefined,
     })
 
-    void this.processQueue()
+    // If speculative hit, result is ready immediately — no need to process queue
+    if (!speculativeHit) {
+      void this.processQueue()
+    }
   }
 
   /**
@@ -385,6 +416,23 @@ export class StreamingToolExecutor {
       tool.status = 'completed'
       this.updateInterruptibleState()
 
+      // Register speculative result for future claim/adopt (spec-ptc)
+      if (tool.specKey && messages.length > 0 && !thisToolErrored) {
+        const resultMsg = messages.find(m => m.type === 'user')
+        if (resultMsg?.type === 'user') {
+          const toolResult = resultMsg.message.content
+          const text = Array.isArray(toolResult)
+            ? toolResult
+                .filter((b): b is Extract<typeof b, { type: 'tool_result' }> => b.type === 'tool_result')
+                .map(b => (typeof b.content === 'string' ? b.content : JSON.stringify(b.content)))
+                .join('\n')
+            : typeof toolResult === 'string'
+              ? toolResult
+              : ''
+          this.specStore.dispatch(tool.specKey, Promise.resolve(text))
+        }
+      }
+
       // NOTE: we currently don't support context modifiers for concurrent
       //       tools. None are actively being used, but if we want to use
       //       them in concurrent tools, we need to support that here.
@@ -409,7 +457,7 @@ export class StreamingToolExecutor {
    * Maintains order where necessary
    * Also yields any pending progress messages immediately
    */
-  *getCompletedResults(): Generator<MessageUpdate, void> {
+  async *getCompletedResults(): AsyncGenerator<MessageUpdate, void> {
     if (this.discarded) {
       return
     }
@@ -422,6 +470,20 @@ export class StreamingToolExecutor {
       }
 
       if (tool.status === 'yielded') {
+        continue
+      }
+
+      // Speculative hit: yield cached result immediately
+      if (tool.status === 'completed' && tool.speculativeHit) {
+        tool.status = 'yielded'
+        const text = (await tool.speculativeHit.force()) as string
+        const msg = createUserMessage({
+          content: [{ type: 'tool_result', content: text, tool_use_id: tool.id }],
+          toolUseResult: text,
+          sourceToolAssistantUUID: tool.assistantMessage.uuid,
+        })
+        yield { message: msg, newContext: this.toolUseContext }
+        markToolUseAsComplete(this.toolUseContext, tool.id)
         continue
       }
 

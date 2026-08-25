@@ -402,6 +402,19 @@ export type Tool<
   isConcurrencySafe(input: z.infer<Input>): boolean
   isEnabled(): boolean
   isReadOnly(input: z.infer<Input>): boolean
+  /**
+   * Speculative execution metadata (spec-ptc).
+   *
+   * - `speculatable` — tool may be dispatched speculatively during streaming
+   *   before the full tool_use block is available. Requires `pure: true`.
+   * - `pure` — tool has no observable side effects; safe to execute early.
+   * - `deterministic` — same input always yields the same output.
+   *
+   * All default to `undefined` (falsy = not speculatable).
+   */
+  speculatable?: boolean
+  pure?: boolean
+  deterministic?: boolean
   /** Defaults to false. Only set when the tool performs irreversible operations (delete, overwrite, send). */
   isDestructive?(input: z.infer<Input>): boolean
   /**

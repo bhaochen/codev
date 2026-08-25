@@ -79,6 +79,9 @@ export const GlobTool = buildTool({
   isReadOnly() {
     return true
   },
+  speculatable: true,
+  pure: true,
+  deterministic: true,
   toAutoClassifierInput(input) {
     return input.pattern
   },
