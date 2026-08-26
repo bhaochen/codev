@@ -276,6 +276,8 @@ function getUsingYourToolsSection(enabledTools: Set<string>): string {
   // irrelevant — REPL's own prompt covers how to call them from scripts.
   if (isReplModeEnabled()) {
     const items = [
+      `The Read, Write, Edit, Glob, Grep, and Bash tools are NOT available as direct tool calls. You MUST use the REPL tool to access them via \`await callTool("ToolName", input)\`. For example: \`await callTool("Glob", { pattern: "**/*.ts" })\``,
+      `Do NOT attempt to call Read, Write, Edit, Glob, Grep, or Bash directly — they will fail. Always go through the REPL tool.`,
       taskToolName
         ? `Break down and manage your work with the ${taskToolName} tool. These tools are helpful for planning your work and helping the user track your progress. Mark each task as completed as soon as you are done with the task. Do not batch up multiple tasks before marking them as completed.`
         : null,
