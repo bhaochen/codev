@@ -133,7 +133,10 @@ export class StreamingToolExecutor {
       if (this.budget.canDispatch(this.specStore)) {
         this.budget.recordDispatch()
         const hit = this.specStore.claim(key)
-        if (hit) speculativeHit = hit
+        if (hit) {
+          speculativeHit = hit
+          console.error(`[spec-ptc] HIT ${block.name}#${key.argsHash.slice(0, 8)}`)
+        }
       }
     }
 
@@ -433,6 +436,7 @@ export class StreamingToolExecutor {
               ? toolResult
               : ''
           this.specStore.dispatch(tool.specKey, Promise.resolve(text))
+          console.error(`[spec-ptc] DISPATCH ${tool.block.name}#${tool.specKey.argsHash.slice(0, 8)} (${this.specStore.inflightCount} inflight)`)
         }
       }
 
@@ -479,6 +483,7 @@ export class StreamingToolExecutor {
       // Speculative hit: yield cached result immediately
       if (tool.status === 'completed' && tool.speculativeHit) {
         tool.status = 'yielded'
+        console.error(`[spec-ptc] YIELD ${tool.block.name}#${tool.specKey?.argsHash.slice(0, 8)} (skipped execution)`)
         const text = (await tool.speculativeHit.force()) as string
         const msg = createUserMessage({
           content: [{ type: 'tool_result', content: text, tool_use_id: tool.id }],
