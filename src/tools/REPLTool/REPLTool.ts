@@ -71,15 +71,26 @@ When REPL mode is active, primitive tools are only accessible through this tool.
 
 The REPL runs in a VM context with tool APIs available as functions. Use \`await callTool(name, input)\` to call tools. Results include { data, toolName, isError }.
 
+Available tools (case-insensitive):
+- "Glob" — find files by pattern. Input: { pattern: "src/**/*.ts" }
+- "Grep" — search file contents. Input: { pattern: "regex", path: "src/" }
+- "Read" — read file contents. Input: { file_path: "path/to/file" }
+- "Write" — write file. Input: { file_path: "path", content: "text" }
+- "Edit" — edit file. Input: { file_path: "path", old_string: "a", new_string: "b" }
+- "Bash" — run shell command. Input: { command: "ls -la" }
+
 Example:
 \`\`\`js
-const files = await callTool("glob", { pattern: "**/*.ts" });
+const files = await callTool("Glob", { pattern: "src/**/*.ts" });
 console.log("Found files:", files.data);
-const content = await callTool("read", { file_path: "src/index.ts" });
+const content = await callTool("Read", { file_path: "src/index.ts" });
 console.log(content.data.slice(0, 200));
+const result = await callTool("Bash", { command: "echo hello" });
+console.log(result.data);
 \`\`\`
 
-State persists across calls — variables set in one call are available in the next.`
+State persists across calls — variables set in one call are available in the next.
+Do NOT use require(), import(), eval(), process, Bun, or globalThis — they are blocked.`
   },
 
   isConcurrencySafe() {

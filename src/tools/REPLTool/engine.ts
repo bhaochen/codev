@@ -233,7 +233,14 @@ export class ReplEngine {
       toolName: string,
       input: Record<string, unknown> = {},
     ): Promise<CallToolResult> => {
-      const tool = findToolByName(self.tools, toolName)
+      // 大小写不敏感回退查找 — LLM 常写 "glob" 而非 "Glob"
+      let tool = findToolByName(self.tools, toolName)
+      if (!tool) {
+        const lower = toolName.toLowerCase()
+        tool = self.tools.find(
+          t => t.name.toLowerCase() === lower,
+        )
+      }
       if (!tool) {
         return {
           data: `Error: Tool "${toolName}" not found`,
