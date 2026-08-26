@@ -285,9 +285,12 @@ export class ReplEngine {
         )
 
         // 构造结果文本
+        // String(对象) 会变成 "[object Object]"，需要按类型正确序列化
         const resultText =
           typeof result === 'object' && result !== null && 'data' in result
-            ? String((result as { data: unknown }).data)
+            ? (typeof (result as { data: unknown }).data === 'string'
+                ? (result as { data: string }).data
+                : JSON.stringify((result as { data: unknown }).data, null, 2))
             : typeof result === 'string'
               ? result
               : JSON.stringify(result, null, 2)
