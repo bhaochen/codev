@@ -133,11 +133,12 @@ const SnipTool = feature('HISTORY_SNIP')
 const ListPeersTool = feature('UDS_INBOX')
   ? require('./tools/ListPeersTool/ListPeersTool.js').ListPeersTool
   : null
+// NOTE: no IIFE here - Bun compile miscompiles a 'return require(...)' in
+// this branch into an undefined symbol (returnFW) once the flag activates.
+// Bundled-workflow init lives inside WorkflowTool.js instead.
 const WorkflowTool = feature('WORKFLOW_SCRIPTS')
-  ? (() => {
-      require('./tools/WorkflowTool/bundled/index.js').initBundledWorkflows()
-      return require('./tools/WorkflowTool/WorkflowTool.js').WorkflowTool
-    })()
+  ? (require('./tools/WorkflowTool/WorkflowTool.js') as typeof import('./tools/WorkflowTool/WorkflowTool.js'))
+      .WorkflowTool
   : null
 /* eslint-enable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
 import type { ToolPermissionContext } from './Tool.js'

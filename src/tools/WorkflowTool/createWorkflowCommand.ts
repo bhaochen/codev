@@ -1,34 +1,77 @@
-// @generated stub from scan-missing-imports
-// 该文件自动生成，对应 ant-internal 的 feature() gated 模块。
-// 所有外部 build 的代码路径在 DCE 后都不会真的执行这里的代码，这只是
-// bun build resolver 的占位符。
-const __target = function noop() {}
-const __handler: ProxyHandler<any> = {
-  get(_t, prop) {
-    if (prop === '__esModule') return true
-    if (prop === 'default') return new Proxy(__target, __handler)
-    if (prop === Symbol.toPrimitive) return () => undefined
-    if (prop === Symbol.iterator) return function* () {}
-    if (prop === Symbol.asyncIterator) return async function* () {}
-    if (prop === 'then') return undefined
-    return new Proxy(__target, __handler)
-  },
-  apply() {
-    return new Proxy(__target, __handler)
-  },
-  construct() {
-    return new Proxy(__target, __handler)
-  },
+import type { Command, LocalCommandCall } from '../../types/command.js'
+import { trackWorkflowRun } from '../../tasks/LocalWorkflowTask/LocalWorkflowTask.js'
+import { getWorkflowRuntime } from '../../workflows/runtime.js'
+import { discoverWorkflows, loadWorkflow } from '../../workflows/loader.js'
+
+/**
+ * Parse "[task words...] --input-json {...}" into the run input object.
+ * The plain text lands under "task"; --input-json keys are merged on top.
+ */
+export function parseStartArgs(args: string): Record<string, unknown> {
+  const marker = '--input-json'
+  const idx = args.indexOf(marker)
+  if (idx === -1) {
+    return args.trim() ? { task: args.trim() } : {}
+  }
+  const taskText = args.slice(0, idx).trim()
+  const jsonText = args.slice(idx + marker.length).trim()
+  let extra: unknown
+  try {
+    extra = JSON.parse(jsonText)
+  } catch (error) {
+    throw new Error(
+      `--input-json is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+  if (extra === null || typeof extra !== 'object' || Array.isArray(extra)) {
+    throw new Error('--input-json must be a JSON object')
+  }
+  return { ...(taskText ? { task: taskText } : {}), ...(extra as Record<string, unknown>) }
 }
-const stub: any = new Proxy(__target, __handler)
-export default stub
-export const __stubMissing = true
-// 兼容常见的命名导出 —— 没列在这里的也会通过 default Proxy 兜底
-export const createCachedMCState = stub
-export const isCachedMicrocompactEnabled = stub
-export const isModelSupportedForCacheEditing = stub
-export const getCachedMCConfig = stub
-export const markToolsSentToAPI = stub
-export const resetCachedMCState = stub
-export const checkProtectedNamespace = stub
-export const getCoordinatorUserContext = stub
+
+function nameFromPath(path: string): string {
+  return path
+    .split('/')
+    .pop()!
+    .replace(/\.workflow\.(?:ts|tsx|mjs|js)$/, '')
+}
+
+function makeCallFor(workflowName: string): LocalCommandCall {
+  return async (args, context) => {
+    const runtime = getWorkflowRuntime()
+    // Lazy session recovery the first time any workflow command runs.
+    await runtime.recover()
+    const recovered = runtime.getStatus()
+    if (recovered) trackWorkflowRun(context.setAppState, recovered)
+
+    const input = parseStartArgs(args)
+    const message = await runtime.start(workflowName, input)
+    const status = runtime.getStatus()
+    if (status) trackWorkflowRun(context.setAppState, status)
+    return { type: 'text', value: message }
+  }
+}
+
+/** One slash command per discovered workflow file. */
+export async function getWorkflowCommands(cwd?: string): Promise<Command[]> {
+  const { workflows } = await discoverWorkflows(cwd ? { cwd } : {})
+  const commands: Command[] = []
+  for (const entry of workflows) {
+    let description: string | undefined
+    try {
+      description = (await loadWorkflow(entry.path)).description
+    } catch {
+      description = `(broken) ${entry.name}`
+    }
+    commands.push({
+      type: 'local',
+      supportsNonInteractive: false,
+      name: entry.name,
+      kind: 'workflow',
+      description: description ?? `Run the "${entry.name}" workflow`,
+      argumentHint: '[task] [--input-json {}]',
+      load: async () => ({ call: makeCallFor(entry.name) }),
+    })
+  }
+  return commands
+}

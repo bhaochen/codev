@@ -41,4 +41,5 @@ export const FULL_EXPERIMENTAL_FEATURES: readonly string[] = [
   'UNATTENDED_RETRY',
   'VERIFICATION_AGENT',
   'VOICE_MODE',
+  'WORKFLOW_SCRIPTS',
 ]
