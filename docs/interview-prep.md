@@ -294,6 +294,74 @@ if (feature("VOICE_MODE")) {
 
 ---
 
+### Q: 投机工具执行（Speculative Execution）是怎么工作的?
+
+灵感来自 CPU 分支预测：把"模型生成 tool 参数"与"工具执行"两段串行阶段重叠。
+实现分两层（spec-ptc 项目移植）：
+
+**Layer 1 — SpecStore 缓存回放**（`src/services/tools/speculation.ts`）
+
+- `SpecKey = (toolName, sha256(args)[0..16])` 唯一标识一次调用
+- 工具完成后结果入 FIFO store；后续相同参数的调用在 `addTool()` 时
+  `claim()` 直接领走缓存，跳过执行
+- 多重度安全：同 key N 次调用 → N 个队列条目，每个只能被 claim 一次
+- 预算封顶：`maxInflight=5`、`maxDispatchesPerTurn=20`（BudgetTracker）
+
+**Layer 2 — 流式投机 dispatch**（`StreamingSpecDispatcher.ts`）
+
+- LLM 以 `input_json_delta` 分片流出 tool input；
+  用增量 brace-depth 扫描（字符串/转义感知）检测 JSON 何时闭合
+- JSON 完整即异步投机执行，等真正 `content_block_stop` 到达时
+  `claim()` 命中 → 0ms yield
+- 只对 `speculatable && pure` 的工具启用（Read/Grep/Glob）—
+  **pure 是硬门槛**：投机调用可能永远不被正式使用，有副作用的工具会出事故
+
+**核心权衡:**
+
+```
+延迟收益（省掉等待+重复执行） vs 浪费算力（押注失败的投机）
+正确性永不受损：claim miss 只是回退正常路径，最坏情况多花预算内的一次执行
+```
+
+**追问: 为什么用 FIFO 队列而不是 Map<key, result>?**
+多重度语义。两次相同 Read 各自消耗一个条目，避免共享同一结果的竞态。
+
+---
+
+### Q: REPL 沙箱是如何设计的?
+
+REPL Tool 让模型在 Bun `node:vm` 沙箱里写 JS，通过 `await callTool("Grep", {...})`
+批量调用 primitive tools（详见 [repl-tool 文档](tools/repl-tool.md)）。
+
+**三层沙箱防御:**
+
+```
+1. 白名单 context 注入   — 只绑定 JSON/Math/Promise 等 30+ 安全全局，
+                            未列出的（process/require）根本不存在
+2. Proxy get 拦截        — eval/Function/import/globalThis 显式抛 ReferenceError
+3. codeGeneration 关闭    — strings:false 禁 new Function 动态编译, wasm:false
+```
+
+**Bun node:vm 的坑（实战细节加分项）:**
+
+async IIFE 包装内的 `var` 声明不会持久化到 vm context（函数作用域问题），
+但 REPL 的核心诉求恰恰是跨调用变量持久化。解法是双路径执行：
+
+- 检测无 top-level await → 同步直接执行，var 自然持久化
+- 有 top-level await → async 包装 + 正则提取 var 名手动注入 context
+
+**为什么不用 worker/子进程隔离?**
+callTool 需要直接访问 ToolUseContext 与已注册的工具对象；跨进程要序列化
+一切且丢失同步 timeout 能力。node:vm 是"防呆"级而非安全边界级 — 真正的
+防线是 primitive 工具白名单 + 外层权限系统仍管控 REPL 整体。
+
+**与投机执行的联动:**
+REPL 天然减少投机需求（一段代码内 N 次 callTool 无需等模型逐个生成）；
+同时它是 Layer 3 Shadow Execution 的目标宿主 — 流式输出代码时在语句边界
+fork 影子 VM 提前执行。
+
+---
+
 ### Q: 错误恢复策略有哪些?
 
 一个多层级、渐进式的错误恢复系统:
@@ -710,5 +778,5 @@ Friend VRM 的场景是 Agent → Avatar 的单向广播, SSE 是最优解。如
 
 ---
 
-> 最后更新: 2026-06-22
-> 基于 Codev main branch (commit 835ff5a)
+> 最后更新: 2026-08-26
+> 基于 Codev main branch (commit 6f33190)

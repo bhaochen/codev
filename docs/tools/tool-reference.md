@@ -141,13 +141,21 @@
 
 ---
 
+## 批量执行与评测
+
+| 工具名称 | 分类 | 用途描述 | 关键参数 |
+|----------|------|----------|----------|
+| **REPL** (REPLTool) | 批量 | 在 Bun `node:vm` 沙箱中执行 JavaScript，通过 `await callTool(name, input)` 调用 primitive tools（Read/Write/Edit/Glob/Grep/Bash）。变量跨调用持久化；`isTransparentWrapper` 使 UI 只显示内部工具调用。REPL 启用时隐藏 `REPL_ONLY_TOOLS` 中的原始工具 | `code` (必填) |
+| **Benchmark** (BenchmarkTool) | 评测 | 渲染 `/benchmark` deepsearch 评测报告（折叠、点击展开） | 取决于报告数据 |
+
+---
+
 ## Ant 内部工具
 
 以下工具仅在 `USER_TYPE=ant` 的内部构建中可用，公开构建中被过滤：
 
 | 工具名称 | 分类 | 用途描述 |
 |----------|------|----------|
-| **REPLTool** | Ant 内部 | REPL 模式的 VM 执行器。在 REPL 模式下包装 Bash/Read/Edit 等工具 |
 | **TungstenTool** | Ant 内部 | Tungsten 内部工具 |
 | **SuggestBackgroundPRTool** | Ant 内部 | 后台 PR 建议工具 |
 | **CtxInspectTool** | Ant 内部 | 上下文折叠检查（CONTEXT_COLLAPSE） |

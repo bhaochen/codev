@@ -226,7 +226,22 @@ type TrackedTool = {
 
 进度消息通过 `pendingProgress` 队列立即 yield（第 368-374 行），并通过 `progressAvailableResolve` 信号唤醒 `getRemainingResults()`。
 
-### 3.2 非流式工具执行 (runTools)
+### 3.2 投机工具执行（spec-ptc）
+
+**文件**: `src/services/tools/speculation.ts`、`src/services/tools/StreamingSpecDispatcher.ts`
+
+StreamingToolExecutor 内建两层投机执行（详见 [speculative-execution.md](speculative-execution.md)）：
+
+- **Layer 1 — SpecStore/BudgetTracker**: 工具执行完成后把结果按
+  `(toolName, argsHash)` 存入 FIFO store；后续相同调用在 `addTool()`
+  时 `claim()` 直接命中，跳过真实执行。仅对 `speculatable && pure`
+  的工具生效（当前为 Read/Grep/Glob）。
+- **Layer 2 — StreamingSpecDispatcher**: 挂接 claude.ts streaming loop
+  （content_block_start / input_json_delta / content_block_stop 三处 hook），
+  用增量 brace-depth 追踪检测 partial JSON 何时完整，完整即异步投机执行。
+  预算约束：最多 5 个 inflight、每 turn 20 次 dispatch。
+
+### 3.3 非流式工具执行 (runTools)
 
 **文件**: `src/services/tools/toolOrchestration.ts`
 

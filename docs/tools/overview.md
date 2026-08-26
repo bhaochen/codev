@@ -271,6 +271,20 @@ WebSearchTool 支持两个搜索后端：
 
 ---
 
+### REPLTool
+
+在 Bun `node:vm` 沙箱中执行 JavaScript 的批量操作引擎（默认启用，`CODEV_REPL=0` 关闭）。详见 [REPL Tool 深度解析](repl-tool.md)。
+
+- **输入参数**: `code` (必填) — JS 代码，通过 `await callTool(name, input)` 调用 primitive tools
+- **行为**: 单次调用内完成多步批量操作；变量跨调用持久化（会话级 engineCache）
+- **primitive 工具集**: Read / Write / Edit / Glob / Grep / Bash（大小写不敏感查找）
+- **透明包装**: `isTransparentWrapper()=true`，UI 只显示内部 tool 调用与进度
+- **注册联动**: REPL 启用时从工具池隐藏 `REPL_ONLY_TOOLS`（即上述 primitive 工具），并在系统提示词中告知模型必须经 REPL 调用
+
+### BenchmarkTool
+
+渲染 `/benchmark` deepsearch 评测报告（雷达图、表格、步级指标），结果折叠、点击展开。
+
 ### LocationTool
 
 地理位置与地图搜索工具。根据地区自动选择地图服务商：
