@@ -174,6 +174,11 @@ const WELCOME_LOGO_MODE_LABELS: Record<string, string> = {
   condensed: 'Condensed',
   full: 'Full',
 }
+const FULLSCREEN_MODE_LABELS: Record<string, string> = {
+  auto: 'Auto',
+  fullscreen: 'Fullscreen',
+  window: 'Window',
+}
 
 export function Config({
   onClose,
@@ -372,6 +377,28 @@ export function Config({
         const mode = welcomeLogoMode as 'auto' | 'condensed' | 'full'
         saveGlobalConfig(current => ({ ...current, welcomeLogoMode: mode }))
         setGlobalConfig({ ...getGlobalConfig(), welcomeLogoMode: mode })
+      },
+    },
+    {
+      id: 'fullscreenMode',
+      label: 'Terminal display',
+      value: globalConfig.fullscreenMode ?? 'auto',
+      options: ['auto', 'fullscreen', 'window'],
+      type: 'enum' as const,
+      onChange(fullscreenMode: string) {
+        const mode = fullscreenMode as 'auto' | 'fullscreen' | 'window'
+        saveGlobalConfig(current => ({ ...current, fullscreenMode: mode }))
+        setGlobalConfig({ ...getGlobalConfig(), fullscreenMode: mode })
+      },
+    },
+    {
+      id: 'replEnabled',
+      label: 'REPL',
+      value: globalConfig.replEnabled ?? true,
+      type: 'boolean' as const,
+      onChange(replEnabled: boolean) {
+        saveGlobalConfig(current => ({ ...current, replEnabled }))
+        setGlobalConfig({ ...getGlobalConfig(), replEnabled })
       },
     },
     {
@@ -2202,6 +2229,15 @@ export function Config({
                                   setting.value.toString()
                                 ] ??
                                   setting.value.toString()}
+                            ) : setting.id === 'fullscreenMode' ? (
+                              <Text
+                                color={isSelected ? 'suggestion' : undefined}
+                              >
+                                {FULLSCREEN_MODE_LABELS[
+                                  setting.value.toString()
+                                ] ??
+                                  setting.value.toString()}
+                              </Text>
                               </Text>
                             ) : setting.id === 'theme' ? (
                               <Text

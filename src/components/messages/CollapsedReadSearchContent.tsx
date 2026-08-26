@@ -18,6 +18,7 @@ import { CtrlOToExpand } from '../CtrlOToExpand.js';
 import { useSelectedMessageBg } from '../messageActions.js';
 import { PrBadge } from '../PrBadge.js';
 import { ToolUseLoader } from '../ToolUseLoader.js';
+import { RawToolResultMessage } from './RawToolResultMessage.js';
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const teamMemCollapsed = feature('TEAMMEM') ? require('./teamMemCollapsed.js') as typeof import('./teamMemCollapsed.js') : null;
@@ -57,7 +58,9 @@ function VerboseToolUse(t0) {
     bb0: {
       const tool = findToolByName(tools, content.name) ?? findToolByName(getReplPrimitiveTools(), content.name);
       if (!tool) {
-        t2 = null;
+        const resultMsg = lookups.toolResultByToolUseID.get(content.id);
+        const rawToolResult = resultMsg?.type === "user" ? resultMsg.toolUseResult : undefined;
+        t2 = rawToolResult === undefined ? null : <RawToolResultMessage result={rawToolResult} />;
         break bb0;
       }
       let t3;
@@ -113,11 +116,11 @@ function VerboseToolUse(t0) {
       } else {
         t8 = $[23];
       }
-      t1 = <Box key={content.id} flexDirection="column" marginTop={1} backgroundColor={bg}><Box flexDirection="row">{t8}<Text><Text bold={true}>{userFacingName}</Text>{toolUseMessage && <Text>({toolUseMessage})</Text>}</Text>{input && tool.renderToolUseTag?.(input)}</Box>{isResolved && !isError && toolResult !== undefined && <Box>{tool.renderToolResultMessage?.(toolResult, [], {
+      t1 = <Box key={content.id} flexDirection="column" marginTop={1} backgroundColor={bg}><Box flexDirection="row">{t8}<Text><Text bold={true}>{userFacingName}</Text>{toolUseMessage && <Text>({toolUseMessage})</Text>}</Text>{input && tool.renderToolUseTag?.(input)}</Box>{isResolved && !isError && (toolResult !== undefined ? <Box>{tool.renderToolResultMessage?.(toolResult, [], {
             verbose: true,
             tools,
             theme
-          })}</Box>}</Box>;
+          })}</Box> : rawToolResult !== undefined ? <RawToolResultMessage result={rawToolResult} /> : null)}</Box>;
     }
     $[0] = bg;
     $[1] = content.id;

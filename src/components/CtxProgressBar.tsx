@@ -1,6 +1,6 @@
 import { Box, Text } from '../ink.js'
 
-const CONTEXT_BAR_WIDTH = 20
+const CONTEXT_BAR_WIDTH = 18
 
 type ContextFillBand = 'green' | 'orange' | 'red'
 
@@ -97,29 +97,41 @@ export function CtxProgressBar({
     contextWindowTokens,
     compactionTargetTokens,
   )
+  const formattedCurrent = formatTokenCount(currentTokens)
   const formattedWindow = formatTokenCount(contextWindowTokens)
 
   return (
-    <Box>
-      <Text dimColor>ctx [</Text>
-      {cells.map((cell, i) => {
-        let cellColor: string
-        if (cell.isMarker) {
-          cellColor = '#a78bfa'
-        } else if (cell.isFill) {
-          cellColor = color
-        } else {
-          cellColor = undefined
-        }
-        return (
-          <Text key={i} color={cellColor} dimColor={!cellColor}>
-            {cell.ch}
-          </Text>
-        )
-      })}
-      <Text dimColor>] </Text>
-      <Text color={color}>{pct}%</Text>
-      <Text dimColor> [{formattedWindow}]</Text>
+    <Box flexShrink={0} height={1}>
+      <Text wrap="truncate">
+        <Text color="#67e8f9" bold>
+          Context
+        </Text>
+        <Text dimColor> </Text>
+        <Text dimColor>[</Text>
+        {cells.map((cell, i) => {
+          let cellColor: string
+          if (cell.isMarker) {
+            cellColor = '#a78bfa'
+          } else if (cell.isFill) {
+            cellColor = color
+          } else {
+            cellColor = undefined
+          }
+          return (
+            <Text key={i} color={cellColor} dimColor={!cellColor}>
+              {cell.ch}
+            </Text>
+          )
+        })}
+        <Text dimColor>] </Text>
+        <Text color={color} bold>
+          {pct}%
+        </Text>
+        <Text dimColor>
+          {' '}
+          · {formattedCurrent}/{formattedWindow}
+        </Text>
+      </Text>
     </Box>
   )
 }

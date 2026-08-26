@@ -1,5 +1,6 @@
 import { spawnSync } from 'child_process'
 import { getIsInteractive } from '../bootstrap/state.js'
+import { getGlobalConfig, isConfigReadingAllowed } from './config.js'
 import { logForDebugging } from './debug.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
 import { execFileNoThrow } from './execFileNoThrow.js'
@@ -105,14 +106,19 @@ export function _resetTmuxControlModeProbeForTesting(): void {
 }
 
 /**
- * Runtime env-var check only. Fullscreen (alt-screen + virtualized scrollback)
- * is enabled by default. Set CLAUDE_CODE_NO_FLICKER=0 to opt out.
+ * Fullscreen (alt-screen + virtualized scrollback) is enabled by default.
+ * The environment variable takes precedence over the config setting.
  */
 export function isFullscreenEnvEnabled(): boolean {
   // Explicit user opt-out always wins.
   if (isEnvDefinedFalsy(process.env.CLAUDE_CODE_NO_FLICKER)) return false
   // Explicit opt-in overrides auto-detection (escape hatch).
   if (isEnvTruthy(process.env.CLAUDE_CODE_NO_FLICKER)) return true
+  const configuredMode = isConfigReadingAllowed()
+    ? getGlobalConfig().fullscreenMode ?? 'auto'
+    : 'auto'
+  if (configuredMode === 'window') return false
+  if (configuredMode === 'fullscreen') return true
   // Auto-disable under tmux -CC: alt-screen + mouse tracking corrupts
   // terminal state on double-click and mouse wheel is dead.
   if (isTmuxControlMode()) {

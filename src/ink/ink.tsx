@@ -336,12 +336,15 @@ export default class Ink {
     }
 
     // Re-render the React tree with updated props so the context value changes.
-    // React's commit phase will call onComputeLayout() to recalculate yoga layout
-    // with the new dimensions, then call onRender() to render the updated frame.
-    // We don't call scheduleRender() here because that would render before the
-    // layout is updated, causing a mismatch between viewport and content dimensions.
+    // React's commit phase recalculates Yoga with the new dimensions. Cancel
+    // any throttled render queued before the resize, then paint immediately;
+    // otherwise that stale frame can win the race and briefly render with the
+    // old viewport, leaving wrapped content shifted or clipped.
     if (this.currentNode !== null) {
+      this.scheduleRender.cancel?.();
       this.render(this.currentNode);
+      this.scheduleRender.cancel?.();
+      this.onRender();
     }
   };
   resolveExitPromise: () => void = () => {};

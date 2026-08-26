@@ -1,4 +1,8 @@
 import { isEnvDefinedFalsy, isEnvTruthy } from '../../utils/envUtils.js'
+import {
+  getGlobalConfig,
+  isConfigReadingAllowed,
+} from '../../utils/config.js'
 import { AGENT_TOOL_NAME } from '../AgentTool/constants.js'
 import { BASH_TOOL_NAME } from '../BashTool/toolName.js'
 import { FILE_EDIT_TOOL_NAME } from '../FileEditTool/constants.js'
@@ -11,12 +15,16 @@ export const REPL_TOOL_NAME = 'REPL'
 
 /**
  * REPL mode is default-on for interactive CLI sessions.
- * Set CODEV_REPL=0 or CLAUDE_CODE_REPL=0 to disable.
+ * Set REPL to false in /config, or CODEV_REPL=0/CLAUDE_CODE_REPL=0,
+ * to disable.
  */
 export function isReplModeEnabled(): boolean {
   if (isEnvDefinedFalsy(process.env.CLAUDE_CODE_REPL)) return false
   if (isEnvDefinedFalsy(process.env.CODEV_REPL)) return false
-  return true
+  if (isEnvTruthy(process.env.CLAUDE_CODE_REPL)) return true
+  if (isEnvTruthy(process.env.CODEV_REPL)) return true
+  if (!isConfigReadingAllowed()) return true
+  return getGlobalConfig().replEnabled ?? true
 }
 
 /**

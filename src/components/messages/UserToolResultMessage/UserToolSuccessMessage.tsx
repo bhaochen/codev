@@ -9,6 +9,7 @@ import type { NormalizedUserMessage, ProgressMessage } from '../../../types/mess
 import { deleteClassifierApproval, getClassifierApproval, getYoloClassifierApproval } from '../../../utils/classifierApprovals.js';
 import type { buildMessageLookups } from '../../../utils/messages.js';
 import { MessageResponse } from '../../MessageResponse.js';
+import { RawToolResultMessage } from '../RawToolResultMessage.js';
 import { HookProgressMessage } from '../HookProgressMessage.js';
 type Props = {
   message: NormalizedUserMessage;
@@ -49,8 +50,11 @@ export function UserToolSuccessMessage({
   React.useEffect(() => {
     deleteClassifierApproval(toolUseID);
   }, [toolUseID]);
-  if (!message.toolUseResult || !tool) {
+  if (message.toolUseResult === undefined || message.toolUseResult === null) {
     return null;
+  }
+  if (!tool) {
+    return <RawToolResultMessage result={message.toolUseResult} />;
   }
 
   // Resumed transcripts deserialize toolUseResult via raw JSON.parse with no
@@ -59,7 +63,7 @@ export function UserToolSuccessMessage({
   // Validate against outputSchema before rendering — mirrors CollapsedReadSearchContent.
   const parsedOutput = tool.outputSchema?.safeParse(message.toolUseResult);
   if (parsedOutput && !parsedOutput.success) {
-    return null;
+    return <RawToolResultMessage result={message.toolUseResult} />;
   }
   const toolResult = parsedOutput?.data ?? message.toolUseResult;
   const renderedMessage = tool.renderToolResultMessage?.(toolResult as never, filterToolProgressMessages(progressMessagesForMessage), {
