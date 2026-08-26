@@ -12,6 +12,7 @@
  * 4. content_block_stop → 清理 tracker
  */
 import { findToolByName, type Tools } from '../../Tool.js'
+import { logForDebugging } from '../../utils/debug.js'
 import { isSpeculatable, specKey, type SpecStore, type BudgetTracker } from './speculation.js'
 
 /**
@@ -186,7 +187,7 @@ export class StreamingSpecDispatcher {
     )
     this.specStore.dispatch(key, specPromise)
 
-    console.error(
+    logForDebugging(
       `[spec-ptc] STREAM-DISPATCH ${toolName}#${key.argsHash.slice(0, 8)}`,
     )
 

@@ -9,6 +9,7 @@ import { findToolByName, type Tools, type ToolUseContext } from '../../Tool.js'
 import { BASH_TOOL_NAME } from '../../tools/BashTool/toolName.js'
 import type { AssistantMessage, Message } from '../../types/message.js'
 import { createChildAbortController } from '../../utils/abortController.js'
+import { logForDebugging } from '../../utils/debug.js'
 import { runToolUse } from './toolExecution.js'
 import {
   SpecStore,
@@ -135,7 +136,7 @@ export class StreamingToolExecutor {
         const hit = this.specStore.claim(key)
         if (hit) {
           speculativeHit = hit
-          console.error(`[spec-ptc] HIT ${block.name}#${key.argsHash.slice(0, 8)}`)
+          logForDebugging(`[spec-ptc] HIT ${block.name}#${key.argsHash.slice(0, 8)}`)
         }
       }
     }
@@ -436,7 +437,7 @@ export class StreamingToolExecutor {
               ? toolResult
               : ''
           this.specStore.dispatch(tool.specKey, Promise.resolve(text))
-          console.error(`[spec-ptc] DISPATCH ${tool.block.name}#${tool.specKey.argsHash.slice(0, 8)} (${this.specStore.inflightCount} inflight)`)
+          logForDebugging(`[spec-ptc] DISPATCH ${tool.block.name}#${tool.specKey.argsHash.slice(0, 8)} (${this.specStore.inflightCount} inflight)`)
         }
       }
 
@@ -483,7 +484,7 @@ export class StreamingToolExecutor {
       // Speculative hit: yield cached result immediately
       if (tool.status === 'completed' && tool.speculativeHit) {
         tool.status = 'yielded'
-        console.error(`[spec-ptc] YIELD ${tool.block.name}#${tool.specKey?.argsHash.slice(0, 8)} (skipped execution)`)
+        logForDebugging(`[spec-ptc] YIELD ${tool.block.name}#${tool.specKey?.argsHash.slice(0, 8)} (skipped execution)`)
         const text = (await tool.speculativeHit.force()) as string
         const msg = createUserMessage({
           content: [{ type: 'tool_result', content: text, tool_use_id: tool.id }],
