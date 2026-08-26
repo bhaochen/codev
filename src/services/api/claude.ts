@@ -255,6 +255,7 @@ import {
   type RetryContext,
   withRetry,
 } from './withRetry.js'
+import { StreamingSpecDispatcher } from '../tools/StreamingSpecDispatcher.js'
 
 // Define a type that represents valid JSON values
 type JsonValue = string | number | boolean | null | JsonObject | JsonArray
@@ -705,6 +706,9 @@ export type Options = {
   // so the model can pace itself. `remaining` is computed by the caller
   // (query.ts decrements across the agentic loop).
   taskBudget?: { total: number; remaining?: number }
+  // spec-ptc: speculative store and budget for streaming pre-dispatch
+  specStore?: import('../tools/speculation.js').SpecStore
+  specBudget?: import('../tools/speculation.js').BudgetTracker
 }
 
 export async function queryModelWithoutStreaming({
@@ -1783,6 +1787,12 @@ async function* queryModel(
   let isFastModeRequest = isFastMode // Keep separate state as it may change if falling back
   let isAdvisorInProgress = false
 
+  // spec-ptc: 流式投机调度器 — 在 streaming loop 中检测 partial JSON 并投机执行
+  const specDispatcher =
+    options.specStore && options.specBudget && tools.length > 0
+      ? new StreamingSpecDispatcher(tools, options.specStore, options.specBudget)
+      : null
+
   try {
     queryCheckpoint('query_client_creation_start')
     const generator = withRetry(
@@ -2009,6 +2019,11 @@ async function* queryModel(
                   ...part.content_block,
                   input: '',
                 }
+                // spec-ptc: 注册流式追踪器
+                specDispatcher?.onBlockStart(
+                  part.index,
+                  part.content_block.name,
+                )
                 break
               case 'server_tool_use':
                 contentBlocks[part.index] = {
@@ -2119,6 +2134,8 @@ async function* queryModel(
                     throw new Error('Content block input is not a string')
                   }
                   contentBlock.input += delta.partial_json
+                  // spec-ptc: 检测 input JSON 是否已完整，如果完整则投机执行
+                  specDispatcher?.onInputDelta(part.index, delta.partial_json)
                   break
                 case 'text_delta':
                   if (contentBlock.type !== 'text') {
@@ -2190,6 +2207,8 @@ async function* queryModel(
               })
               throw new RangeError('Content block not found')
             }
+            // spec-ptc: 清理流式追踪器
+            specDispatcher?.onBlockStop(part.index)
             if (!partialMessage) {
               logEvent('tengu_streaming_error', {
                 error_type:

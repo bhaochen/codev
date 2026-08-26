@@ -704,6 +704,11 @@ async function* queryLoop(
                   }),
                 },
               }),
+              // spec-ptc: 传递 specStore/budget 到 streaming 层
+              ...(streamingToolExecutor && {
+                specStore: streamingToolExecutor.specStore,
+                specBudget: streamingToolExecutor.specBudget,
+              }),
             },
           })) {
             // We won't use the tool_calls from the first attempt

@@ -61,8 +61,8 @@ export class StreamingToolExecutor {
   // Signal to wake up getRemainingResults when progress is available
   private progressAvailableResolve?: () => void
   // Speculative execution (spec-ptc)
-  private specStore = new SpecStore()
-  private budget = new BudgetTracker()
+  readonly specStore = new SpecStore()
+  readonly specBudget = new BudgetTracker()
 
   constructor(
     private readonly toolDefinitions: Tools,
@@ -130,8 +130,8 @@ export class StreamingToolExecutor {
     let speculativeHit: SpecValue | undefined
     if (isSpeculatable(toolDefinition) && parsedInput?.success) {
       const key = specKey(block.name, parsedInput.data)
-      if (this.budget.canDispatch(this.specStore)) {
-        this.budget.recordDispatch()
+      if (this.specBudget.canDispatch(this.specStore)) {
+        this.specBudget.recordDispatch()
         const hit = this.specStore.claim(key)
         if (hit) {
           speculativeHit = hit
