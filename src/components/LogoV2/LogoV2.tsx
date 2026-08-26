@@ -115,6 +115,10 @@ export function LogoV2(): React.ReactNode {
   const { hasReleaseNotes } = checkForReleaseNotesSync(
     config.lastReleaseNotesSeen,
   )
+  const welcomeLogoMode = config.welcomeLogoMode ?? 'auto'
+  const forceFullLogo =
+    welcomeLogoMode !== 'condensed' &&
+    isEnvTruthy(process.env.CLAUDE_CODE_FORCE_FULL_LOGO)
 
   useEffect(() => {
     const currentConfig = getGlobalConfig()
@@ -134,9 +138,9 @@ export function LogoV2(): React.ReactNode {
   // CondensedLogo's own useEffect handles the impression count. Skipping
   // here avoids double-counting since hooks fire before the early return.
   const isCondensedMode =
-    !hasReleaseNotes &&
-    !showOnboarding &&
-    !isEnvTruthy(process.env.CLAUDE_CODE_FORCE_FULL_LOGO)
+    !forceFullLogo &&
+    (welcomeLogoMode === 'condensed' ||
+      (welcomeLogoMode === 'auto' && !hasReleaseNotes && !showOnboarding))
 
   useEffect(() => {
     if (showGuestPassesUpsell && !showOnboarding && !isCondensedMode) {
@@ -178,11 +182,7 @@ export function LogoV2(): React.ReactNode {
   )
 
   // Show condensed logo if no new changelog and not showing onboarding and not forcing full logo
-  if (
-    !hasReleaseNotes &&
-    !showOnboarding &&
-    !isEnvTruthy(process.env.CLAUDE_CODE_FORCE_FULL_LOGO)
-  ) {
+  if (isCondensedMode) {
     return (
       <>
         <CondensedLogo />
@@ -504,4 +504,3 @@ export function LogoV2(): React.ReactNode {
     </>
   )
 }
-

@@ -168,6 +168,13 @@ type SubMenu =
   | 'ChannelDowngrade'
   | 'Language'
   | 'EnableAutoUpdates'
+
+const WELCOME_LOGO_MODE_LABELS: Record<string, string> = {
+  auto: 'Auto',
+  condensed: 'Condensed',
+  full: 'Full',
+}
+
 export function Config({
   onClose,
   context,
@@ -355,6 +362,18 @@ export function Config({
   // TODO: Add MCP servers
   const settingsItems: Setting[] = [
     // Global settings
+    {
+      id: 'welcomeLogoMode',
+      label: 'Welcome screen',
+      value: globalConfig.welcomeLogoMode ?? 'auto',
+      options: ['auto', 'condensed', 'full'],
+      type: 'enum' as const,
+      onChange(welcomeLogoMode: string) {
+        const mode = welcomeLogoMode as 'auto' | 'condensed' | 'full'
+        saveGlobalConfig(current => ({ ...current, welcomeLogoMode: mode }))
+        setGlobalConfig({ ...getGlobalConfig(), welcomeLogoMode: mode })
+      },
+    },
     {
       id: 'autoCompactEnabled',
       label: 'Auto-compact',
@@ -2175,6 +2194,15 @@ export function Config({
                                     </Text>
                                   )}
                               </>
+                            ) : setting.id === 'welcomeLogoMode' ? (
+                              <Text
+                                color={isSelected ? 'suggestion' : undefined}
+                              >
+                                {WELCOME_LOGO_MODE_LABELS[
+                                  setting.value.toString()
+                                ] ??
+                                  setting.value.toString()}
+                              </Text>
                             ) : setting.id === 'theme' ? (
                               <Text
                                 color={isSelected ? 'suggestion' : undefined}

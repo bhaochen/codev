@@ -222,6 +222,8 @@ export type GlobalConfig = {
   lastOnboardingVersion?: string
   // Tracks the last version for which release notes were seen, used for managing release notes
   lastReleaseNotesSeen?: string
+  // Controls the startup welcome logo layout.
+  welcomeLogoMode?: 'auto' | 'condensed' | 'full'
   // Timestamp when changelog was last fetched (content stored in ~/.claude/cache/changelog.md)
   changelogLastFetched?: number
   // @deprecated - Migrated to ~/.claude/cache/changelog.md. Keep for migration support.
@@ -622,6 +624,7 @@ function createDefaultGlobalConfig(): GlobalConfig {
     installMethod: undefined,
     autoUpdates: undefined,
     theme: 'dark',
+    welcomeLogoMode: 'auto',
     preferredNotifChannel: 'auto',
     verbose: false,
     editorMode: 'normal',
@@ -671,6 +674,7 @@ export const GLOBAL_CONFIG_KEYS = [
   'autoUpdates',
   'autoUpdatesProtectedForNative',
   'theme',
+  'welcomeLogoMode',
   'verbose',
   'preferredNotifChannel',
   'shiftEnterKeyBindingInstalled',
