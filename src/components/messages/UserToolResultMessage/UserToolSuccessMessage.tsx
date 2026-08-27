@@ -76,9 +76,10 @@ export function UserToolSuccessMessage({
     input: lookups.toolUseByToolUseID.get(toolUseID)?.input
   }) ?? null;
 
-  // Don't render anything if the tool result message is null
+  // A custom renderer may intentionally omit a result, but the transcript
+  // should still expose the tool's actual output (like Pi's generic fallback).
   if (renderedMessage === null) {
-    return null;
+    return <RawToolResultMessage result={message.toolUseResult} />;
   }
 
   // Tools that return '' from userFacingName opt out of tool chrome and

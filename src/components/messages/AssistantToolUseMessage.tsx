@@ -176,9 +176,9 @@ export function AssistantToolUseMessage(t0) {
     t4 = $[30];
   }
   const renderedToolUseMessage = t4;
-  if (renderedToolUseMessage === null) {
-    return null;
-  }
+  // Keep malformed or newly-added tools inspectable even when their custom
+  // renderer does not know how to summarize the input yet.
+  const toolUseDetails = renderedToolUseMessage ?? formatToolInput(input_0.success ? input_0.data : param.input);
   const t5 = addMargin ? 1 : 0;
   const t6 = stringWidth(userFacingToolName) + (shouldShowDot ? 2 : 0);
   let t7;
@@ -205,14 +205,7 @@ export function AssistantToolUseMessage(t0) {
   } else {
     t9 = $[41];
   }
-  let t10;
-  if ($[42] !== renderedToolUseMessage) {
-    t10 = renderedToolUseMessage !== "" && <Box flexWrap="nowrap"><Text>({renderedToolUseMessage})</Text></Box>;
-    $[42] = renderedToolUseMessage;
-    $[43] = t10;
-  } else {
-    t10 = $[43];
-  }
+  const t10 = toolUseDetails !== "" && <Box flexWrap="nowrap"><Text>({toolUseDetails})</Text></Box>;
   let t11;
   if ($[44] !== input_0.data || $[45] !== input_0.success || $[46] !== tool_0) {
     t11 = input_0.success && tool_0.renderToolUseTag && tool_0.renderToolUseTag(input_0.data);
@@ -315,6 +308,7 @@ function renderToolUseMessage(tool: Tool, input: unknown, {
     if (!parsed.success) {
       return '';
     }
+
     return tool.renderToolUseMessage(parsed.data, {
       theme,
       verbose,
@@ -322,6 +316,22 @@ function renderToolUseMessage(tool: Tool, input: unknown, {
     });
   } catch (error) {
     logError(new Error(`Error rendering tool use message for ${tool.name}: ${error}`));
+    return '';
+  }
+}
+
+function formatToolInput(input: unknown): string {
+  if (input === undefined || input === null) {
+    return '';
+  }
+  try {
+    const serialized = typeof input === 'string' ? input : JSON.stringify(input);
+    if (!serialized) {
+      return '';
+    }
+    return serialized.length > 2000 ? `${serialized.slice(0, 2000)}…` : serialized;
+  } catch (error) {
+    logError(new Error(`Error serializing tool input: ${error}`));
     return '';
   }
 }
