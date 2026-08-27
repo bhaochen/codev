@@ -1,5 +1,8 @@
 import { chmodSync, cpSync, existsSync, mkdirSync } from 'fs'
 import { dirname, join } from 'path'
+import { fileURLToPath } from 'url'
+
+const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 
 const pkg = await Bun.file(new URL('../package.json', import.meta.url)).json() as {
   name: string
@@ -49,7 +52,7 @@ for (let i = 0; i < args.length; i += 1) {
 }
 const features = [...featureSet]
 
-const outfile = join('dist', 'codev')
+const outfile = join(projectRoot, 'dist', 'codev')
 
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -123,7 +126,7 @@ for (const [key, value] of Object.entries(defines)) {
 
 const proc = Bun.spawnSync({
   cmd,
-  cwd: process.cwd(),
+  cwd: projectRoot,
   stdout: 'inherit',
   stderr: 'inherit',
 })
@@ -139,8 +142,9 @@ if (existsSync(outfile)) {
 // Copy vendor/ to dist/vendor/ for runtime audio-capture resolution
 const distDir = dirname(outfile)
 const vendorDir = join(distDir, 'vendor')
-if (!existsSync(vendorDir)) {
-  cpSync('vendor', vendorDir, { recursive: true })
+const sourceVendorDir = join(projectRoot, 'vendor')
+if (!existsSync(vendorDir) && existsSync(sourceVendorDir)) {
+  cpSync(sourceVendorDir, vendorDir, { recursive: true })
   console.log(`Copied vendor/ → ${vendorDir}/`)
 }
 
