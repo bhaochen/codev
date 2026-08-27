@@ -13,7 +13,7 @@ import { useMainLoopModel } from '../../hooks/useMainLoopModel.js';
 import { useVoiceEnabled } from '../../hooks/useVoiceEnabled.js';
 import { Box, Text } from '../../ink.js';
 import { useClaudeAiLimits } from '../../services/claudeAiLimitsHook.js';
-import { calculateTokenWarningState, getAutoCompactThreshold, getEffectiveContextWindowSize } from '../../services/compact/autoCompact.js';
+import { calculateTokenWarningState } from '../../services/compact/autoCompact.js';
 import type { MCPServerConnection } from '../../services/mcp/types.js';
 import type { Message } from '../../types/message.js';
 import { getApiKeyHelperElapsedMs, getConfiguredApiKeyHelper, getSubscriptionType } from '../../utils/auth.js';
@@ -31,7 +31,6 @@ import { IdeStatusIndicator } from '../IdeStatusIndicator.js';
 import { MemoryUsageIndicator } from '../MemoryUsageIndicator.js';
 import { SentryErrorBoundary } from '../SentryErrorBoundary.js';
 import { TokenWarning } from '../TokenWarning.js';
-import { CtxProgressBar } from '../CtxProgressBar.js';
 import { SandboxPromptFooterHint } from './SandboxPromptFooterHint.js';
 
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -319,7 +318,6 @@ function NotificationContent({
             {tokenUsage} tokens
           </Text>
         </Box>}
-      {apiKeyStatus !== 'invalid' && apiKeyStatus !== 'missing' && tokenUsage > 0 && <CtxProgressBar currentTokens={tokenUsage} contextWindowTokens={getEffectiveContextWindowSize(mainLoopModel)} compactionTargetTokens={getAutoCompactThreshold(mainLoopModel)} utilizationPct={Math.round((tokenUsage / Math.max(1, getEffectiveContextWindowSize(mainLoopModel))) * 100)} />}
       {!isBriefOnly && <TokenWarning tokenUsage={tokenUsage} model={mainLoopModel} />}
       {shouldShowAutoUpdater && <AutoUpdaterWrapper verbose={verbose} onAutoUpdaterResult={onAutoUpdaterResult} autoUpdaterResult={autoUpdaterResult} isUpdating={isAutoUpdating} onChangeIsUpdating={onChangeIsUpdating} showSuccessMessage={!isShowingCompactMessage} />}
       {feature('VOICE_MODE') ? voiceEnabled && voiceError && <Box>

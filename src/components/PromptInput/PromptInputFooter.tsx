@@ -6,10 +6,12 @@ import { getBridgeStatus } from '../../bridge/bridgeStatusUtil.js';
 import { useSetPromptOverlay } from '../../context/promptOverlayContext.js';
 import type { VerificationStatus } from '../../hooks/useApiKeyVerification.js';
 import type { IDESelection } from '../../hooks/useIdeSelection.js';
+import { useMainLoopModel } from '../../hooks/useMainLoopModel.js';
 import { useSettings } from '../../hooks/useSettings.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { Box, Text } from '../../ink.js';
 import type { MCPServerConnection } from '../../services/mcp/types.js';
+import { getAutoCompactThreshold, getEffectiveContextWindowSize } from '../../services/compact/autoCompact.js';
 import { telegramService } from '../../services/telegram/TelegramService.js';
 import { feishuService } from '../../services/feishu/FeishuService.js';
 import { useAppState } from '../../state/AppState.js';
@@ -19,7 +21,10 @@ import type { PromptInputMode, VimMode } from '../../types/textInputTypes.js';
 import type { AutoUpdaterResult } from '../../utils/autoUpdater.js';
 import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
 import { isUndercover } from '../../utils/undercover.js';
+import { getMessagesAfterCompactBoundary } from '../../utils/messages.js';
+import { tokenCountFromLastAPIResponse } from '../../utils/tokens.js';
 import { CoordinatorTaskPanel, useCoordinatorTaskCount } from '../CoordinatorAgentStatus.js';
+import { CtxProgressBar } from '../CtxProgressBar.js';
 import { getLastAssistantMessageId, StatusLine, statusLineShouldDisplay } from '../StatusLine.js';
 import { Notifications } from './Notifications.js';
 import { PromptInputFooterLeftSide } from './PromptInputFooterLeftSide.js';
@@ -104,6 +109,11 @@ function PromptInputFooter({
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
   const lastAssistantMessageId = useMemo(() => getLastAssistantMessageId(messages), [messages]);
+  const tokenUsage = useMemo(
+    () => tokenCountFromLastAPIResponse(getMessagesAfterCompactBoundary(messages)),
+    [messages],
+  );
+  const mainLoopModel = useMainLoopModel();
   const isNarrow = columns < 80;
   // In fullscreen the bottom slot is flexShrink:0, so every row here is a row
   // stolen from the ScrollBox. Drop the optional StatusLine first. Non-fullscreen
@@ -142,6 +152,7 @@ function PromptInputFooter({
         <Box flexDirection="column" flexShrink={isNarrow ? 0 : 1}>
           {mode === 'prompt' && !isShort && !exitMessage.show && !isPasting && statusLineShouldDisplay(settings) && <StatusLine messagesRef={messagesRef} lastAssistantMessageId={lastAssistantMessageId} vimMode={vimMode} />}
           <PromptInputFooterLeftSide exitMessage={exitMessage} vimMode={vimMode} mode={mode} toolPermissionContext={toolPermissionContext} suppressHint={suppressHint} isLoading={isLoading} tasksSelected={pillSelected} teamsSelected={teamsSelected} teammateFooterIndex={teammateFooterIndex} tmuxSelected={tmuxSelected} isPasting={isPasting} isSearching={isSearching} historyQuery={historyQuery} setHistoryQuery={setHistoryQuery} historyFailedMatch={historyFailedMatch} onOpenTasksDialog={onOpenTasksDialog} />
+          {apiKeyStatus !== 'invalid' && apiKeyStatus !== 'missing' && tokenUsage > 0 && <CtxProgressBar currentTokens={tokenUsage} contextWindowTokens={getEffectiveContextWindowSize(mainLoopModel)} compactionTargetTokens={getAutoCompactThreshold(mainLoopModel)} utilizationPct={Math.round((tokenUsage / Math.max(1, getEffectiveContextWindowSize(mainLoopModel))) * 100)} />}
         </Box>
         <Box flexShrink={1} gap={1}>
           {isFullscreen ? null : <Notifications apiKeyStatus={apiKeyStatus} autoUpdaterResult={autoUpdaterResult} debug={debug} isAutoUpdating={isAutoUpdating} verbose={verbose} messages={messages} onAutoUpdaterResult={onAutoUpdaterResult} onChangeIsUpdating={onChangeIsUpdating} ideSelection={ideSelection} mcpClients={mcpClients} isInputWrapped={isInputWrapped} isNarrow={isNarrow} />}
