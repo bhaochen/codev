@@ -56,6 +56,9 @@ export function UserToolSuccessMessage({
   if (!tool) {
     return <RawToolResultMessage result={message.toolUseResult} />;
   }
+  if (tool.isTransparentWrapper?.()) {
+    return null;
+  }
 
   // Resumed transcripts deserialize toolUseResult via raw JSON.parse with no
   // validation (parseJSONL). A partial/corrupt/old-format result crashes

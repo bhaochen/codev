@@ -323,6 +323,10 @@ export class ReplEngine {
               content: resultText,
             },
           ],
+          toolUseResult:
+            typeof result === 'object' && result !== null && 'data' in result
+              ? (result as { data: unknown }).data
+              : result,
           isVirtual: true,
         })
 

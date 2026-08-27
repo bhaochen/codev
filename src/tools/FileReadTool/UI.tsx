@@ -3,8 +3,10 @@ import * as React from 'react';
 import { extractTag } from 'src/utils/messages.js';
 import { FallbackToolUseErrorMessage } from '../../components/FallbackToolUseErrorMessage.js';
 import { FilePathLink } from '../../components/FilePathLink.js';
+import { HighlightedCode } from '../../components/HighlightedCode.js';
 import { MessageResponse } from '../../components/MessageResponse.js';
-import { Text } from '../../ink.js';
+import { Box, Text } from '../../ink.js';
+import type { ProgressMessage } from '../../types/message.js';
 import { FILE_NOT_FOUND_CWD_NOTE, getDisplayPath } from '../../utils/file.js';
 import { formatFileSize } from '../../utils/format.js';
 import { getPlansDirectory } from '../../utils/plans.js';
@@ -74,7 +76,14 @@ export function renderToolUseTag({
   }
   return <Text dimColor> {agentTaskId}</Text>;
 }
-export function renderToolResultMessage(output: Output): React.ReactNode {
+const MAX_READ_PREVIEW_LINES = 40;
+const MAX_READ_PREVIEW_CHARS = 6000;
+
+export function renderToolResultMessage(output: Output, _progressMessages: ProgressMessage[] = [], {
+  verbose = false
+}: {
+  verbose?: boolean;
+} = {}): React.ReactNode {
   // TODO: Render recursively
   switch (output.type) {
     case 'image':
@@ -124,8 +133,22 @@ export function renderToolResultMessage(output: Output): React.ReactNode {
     case 'text':
       {
         const {
-          numLines
+          numLines,
+          content
         } = output.file;
+        if (verbose && content) {
+          const lines = content.split('\n');
+          const preview = lines.slice(0, MAX_READ_PREVIEW_LINES).join('\n').slice(0, MAX_READ_PREVIEW_CHARS);
+          const truncated = lines.length > MAX_READ_PREVIEW_LINES || content.length > MAX_READ_PREVIEW_CHARS;
+          return <MessageResponse>
+            <Box flexDirection="column">
+              <Text>Read <Text bold>{numLines}</Text>{' '}{numLines === 1 ? 'line' : 'lines'}</Text>
+              <HighlightedCode code={preview} filePath={output.file.filePath} />
+              {truncated && <Text dimColor>… output truncated (Ctrl+O to view more)</Text>}
+            </Box>
+          </MessageResponse>;
+        }
+
         return <MessageResponse height={1}>
           <Text>
             Read <Text bold>{numLines}</Text>{' '}

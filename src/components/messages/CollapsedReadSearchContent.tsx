@@ -224,8 +224,10 @@ export function CollapsedReadSearchContent({
   }
   const displayedHint = useMinDisplayTime(incomingHint, MIN_HINT_DISPLAY_MS);
 
-  // In verbose mode, render each tool use with its 1-line result summary
-  if (verbose) {
+  // File reads are useful context in the normal transcript, not just a
+  // count. Render them immediately; individual renderers keep previews
+  // bounded and Ctrl+O still exposes the full transcript.
+  if (verbose || readCount > 0) {
     const toolUses: NormalizedAssistantMessage[] = [];
     for (const msg of groupMessages) {
       if (msg.type === 'assistant') {
