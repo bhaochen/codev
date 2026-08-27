@@ -615,7 +615,7 @@ const MessagesImpl = ({
     return () => progress(null);
   }, [progress]);
   const messageKey = useCallback((msg_7: RenderableMessage) => `${msg_7.uuid}-${conversationId}`, [conversationId]);
-  const renderMessageRow = (msg_8: RenderableMessage, index: number) => {
+  const renderMessageRow = (msg_8: RenderableMessage, index: number, inVirtualList = false) => {
     const prevType = index > 0 ? renderableMessages[index - 1]?.type : undefined;
     const isUserContinuation = msg_8.type === 'user' && prevType === 'user';
     // hasContentAfter is only consumed for collapsed_read_search groups;
@@ -632,7 +632,11 @@ const MessagesImpl = ({
     const wrapped = <MessageActionsSelectedContext.Provider key={k_0} value={index === selectedIdx}>
         {row}
       </MessageActionsSelectedContext.Provider>;
-    const interactive = isItemClickable(msg_8)
+    // In the virtualized list VirtualItem owns the click handler, so a click
+    // anywhere on the row (text or blank) toggles expand/collapse. Wrapping in
+    // a nested interactive Box there would double-fire on text clicks (expand
+    // then immediately collapse). Skip it in virtual mode.
+    const interactive = (!inVirtualList && isItemClickable(msg_8))
       ? <Box key={`interactive-${k_0}`} onClick={() => onItemClick(msg_8)}>{wrapped}</Box>
       : wrapped;
     if (unseenDivider && index === dividerBeforeIndex) {
@@ -704,8 +708,8 @@ const MessagesImpl = ({
           passing the array would accumulate every historical version
           (~1-2MB over a 7-turn session). */}
       {virtualScrollRuntimeGate ? <InVirtualListContext.Provider value={true}>
-          <VirtualMessageList messages={renderableMessages} scrollRef={scrollRef} columns={columns} itemKey={messageKey} renderItem={renderMessageRow} onItemClick={onItemClick} isItemClickable={isItemClickable} isItemExpanded={isItemExpanded} trackStickyPrompt={trackStickyPrompt} selectedIndex={selectedIdx >= 0 ? selectedIdx : undefined} cursorNavRef={cursorNavRef} setCursor={setCursor} jumpRef={jumpRef} onSearchMatchesChange={onSearchMatchesChange} scanElement={scanElement} setPositions={setPositions} extractSearchText={extractSearchText} />
-        </InVirtualListContext.Provider> : renderableMessages.flatMap(renderMessageRow)}
+          <VirtualMessageList messages={renderableMessages} scrollRef={scrollRef} columns={columns} itemKey={messageKey} renderItem={(msg, idx) => renderMessageRow(msg, idx, true)} onItemClick={onItemClick} isItemClickable={isItemClickable} isItemExpanded={isItemExpanded} trackStickyPrompt={trackStickyPrompt} selectedIndex={selectedIdx >= 0 ? selectedIdx : undefined} cursorNavRef={cursorNavRef} setCursor={setCursor} jumpRef={jumpRef} onSearchMatchesChange={onSearchMatchesChange} scanElement={scanElement} setPositions={setPositions} extractSearchText={extractSearchText} />
+        </InVirtualListContext.Provider> : renderableMessages.flatMap((m, i) => renderMessageRow(m, i))}
 
       {streamingText && !isBriefOnly && <Box alignItems="flex-start" flexDirection="row" marginTop={1} width="100%">
           <Box flexDirection="row">

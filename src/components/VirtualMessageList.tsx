@@ -175,7 +175,7 @@ type VirtualItemProps = {
   expanded: boolean | undefined;
   hovered: boolean;
   clickable: boolean;
-  onClickK: (msg: RenderableMessage, cellIsBlank: boolean) => void;
+  onClickK: (msg: RenderableMessage) => void;
   onEnterK: (k: string) => void;
   onLeaveK: (k: string) => void;
   renderItem: (msg: RenderableMessage, idx: number) => React.ReactNode;
@@ -221,7 +221,7 @@ function VirtualItem(t0) {
   const t3 = expanded ? 1 : undefined;
   let t4;
   if ($[3] !== clickable || $[4] !== msg || $[5] !== onClickK) {
-    t4 = clickable ? e => onClickK(msg, e.cellIsBlank) : undefined;
+    t4 = clickable ? () => onClickK(msg) : undefined;
     $[3] = clickable;
     $[4] = msg;
     $[5] = onClickK;
@@ -271,7 +271,7 @@ function VirtualItem(t0) {
   }
   let t10;
   if ($[22] !== t1 || $[24] !== t3 || $[25] !== t4 || $[26] !== t5 || $[27] !== t6 || $[28] !== t9) {
-    t10 = <Box ref={t1} flexDirection="column" paddingBottom={t3} onClick={t4} onMouseEnter={t5} onMouseLeave={t6}>{t9}</Box>;
+    t10 = <Box ref={t1} width="100%" flexDirection="column" paddingBottom={t3} onClick={t4} onMouseEnter={t5} onMouseLeave={t6}>{t9}</Box>;
     $[22] = t1;
     $[24] = t3;
     $[25] = t4;
@@ -842,9 +842,9 @@ export function VirtualMessageList({
     onItemClick,
     setHoveredKey
   };
-  const onClickK = useCallback((msg: RenderableMessage, cellIsBlank: boolean) => {
+  const onClickK = useCallback((msg: RenderableMessage) => {
     const h = handlersRef.current;
-    if (!cellIsBlank && h.onItemClick) h.onItemClick(msg);
+    if (h.onItemClick) h.onItemClick(msg);
   }, []);
   const onEnterK = useCallback((k: string) => {
     handlersRef.current.setHoveredKey(k);
