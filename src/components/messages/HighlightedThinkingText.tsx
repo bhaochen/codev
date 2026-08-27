@@ -58,7 +58,7 @@ export function HighlightedThinkingText(t0) {
     } else {
       t5 = $[8];
     }
-    const t6 = isQueued ? "subtle" : "text";
+    const t6 = isQueued ? "subtle" : "userMessageText";
     let t7;
     if ($[9] !== t6 || $[10] !== text) {
       t7 = <Text color={t6}>{text}</Text>;
@@ -96,7 +96,7 @@ export function HighlightedThinkingText(t0) {
         }
         let t3;
         if ($[21] !== text) {
-          t3 = <Text color="text">{text}</Text>;
+          t3 = <Text color="userMessageText">{text}</Text>;
           $[21] = text;
           $[22] = t3;
         } else {
@@ -118,7 +118,7 @@ export function HighlightedThinkingText(t0) {
       let cursor = 0;
       for (const t of triggers) {
         if (t.start > cursor) {
-          parts.push(<Text key={`plain-${cursor}`} color="text">{text.slice(cursor, t.start)}</Text>);
+          parts.push(<Text key={`plain-${cursor}`} color="userMessageText">{text.slice(cursor, t.start)}</Text>);
         }
         for (let i = t.start; i < t.end; i++) {
           parts.push(<Text key={`rb-${i}`} color={getRainbowColor(i - t.start)}>{text[i]}</Text>);
@@ -126,7 +126,7 @@ export function HighlightedThinkingText(t0) {
         cursor = t.end;
       }
       if (cursor < text.length) {
-        parts.push(<Text key={`plain-${cursor}`} color="text">{text.slice(cursor)}</Text>);
+        parts.push(<Text key={`plain-${cursor}`} color="userMessageText">{text.slice(cursor)}</Text>);
       }
     }
     $[15] = pointerColor;
