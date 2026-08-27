@@ -135,7 +135,7 @@ export function renderToolResultMessage(output: Output, _progressMessages: Progr
         } = output.file;
         if (verbose && content) {
           return <MessageResponse>
-            <Box flexDirection="column">
+            <Box flexDirection="column" width="100%">
               <Text>Read <Text bold>{numLines}</Text>{' '}{numLines === 1 ? 'line' : 'lines'}</Text>
               <HighlightedCode code={content} filePath={output.file.filePath} />
             </Box>

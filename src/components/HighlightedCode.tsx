@@ -2,6 +2,7 @@ import { c as _c } from "react/compiler-runtime";
 import * as React from 'react';
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useSettings } from '../hooks/useSettings.js';
+import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import { Ansi, Box, type DOMElement, measureElement, NoSelect, Text, useTheme } from '../ink.js';
 import { isFullscreenEnvEnabled } from '../utils/fullscreen.js';
 import sliceAnsi from '../utils/sliceAnsi.js';
@@ -28,6 +29,7 @@ export const HighlightedCode = memo(function HighlightedCode(t0) {
   const [measuredWidth, setMeasuredWidth] = useState(width || DEFAULT_WIDTH);
   const [theme] = useTheme();
   const settings = useSettings();
+  const { columns } = useTerminalSize();
   const syntaxHighlightingDisabled = settings.syntaxHighlightingDisabled ?? false;
   let t2;
   bb0: {
@@ -61,7 +63,7 @@ export const HighlightedCode = memo(function HighlightedCode(t0) {
   const colorFile = t2;
   let t3;
   let t4;
-  if ($[4] !== width) {
+  if ($[4] !== width || $[21] !== columns) {
     t3 = () => {
       if (!width && ref.current) {
         const {
@@ -72,8 +74,9 @@ export const HighlightedCode = memo(function HighlightedCode(t0) {
         }
       }
     };
-    t4 = [width];
+    t4 = [width, columns];
     $[4] = width;
+    $[21] = columns;
     $[5] = t3;
     $[6] = t4;
   } else {
