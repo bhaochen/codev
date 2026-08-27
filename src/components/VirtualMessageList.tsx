@@ -218,7 +218,6 @@ function VirtualItem(t0) {
   } else {
     t1 = $[2];
   }
-  const t2 = expanded ? "userMessageBackgroundHover" : undefined;
   const t3 = expanded ? 1 : undefined;
   let t4;
   if ($[3] !== clickable || $[4] !== msg || $[5] !== onClickK) {
@@ -271,10 +270,9 @@ function VirtualItem(t0) {
     t9 = $[21];
   }
   let t10;
-  if ($[22] !== t1 || $[23] !== t2 || $[24] !== t3 || $[25] !== t4 || $[26] !== t5 || $[27] !== t6 || $[28] !== t9) {
-    t10 = <Box ref={t1} flexDirection="column" backgroundColor={t2} paddingBottom={t3} onClick={t4} onMouseEnter={t5} onMouseLeave={t6}>{t9}</Box>;
+  if ($[22] !== t1 || $[24] !== t3 || $[25] !== t4 || $[26] !== t5 || $[27] !== t6 || $[28] !== t9) {
+    t10 = <Box ref={t1} flexDirection="column" paddingBottom={t3} onClick={t4} onMouseEnter={t5} onMouseLeave={t6}>{t9}</Box>;
     $[22] = t1;
-    $[23] = t2;
     $[24] = t3;
     $[25] = t4;
     $[26] = t5;

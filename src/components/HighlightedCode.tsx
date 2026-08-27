@@ -89,9 +89,10 @@ export const HighlightedCode = memo(function HighlightedCode(t0) {
     }
     let t6;
     if ($[7] !== colorFile || $[8] !== dim || $[9] !== measuredWidth || $[10] !== theme) {
-      // Read previews use TokyoNight's editor-like palette consistently,
-      // independent of the surrounding terminal UI theme.
-      t6 = colorFile.render('tokyonight', measuredWidth, dim);
+      // Keep Read previews on the same syntax palette as structured diffs.
+      // Copilot CLI follows its active dark/light terminal theme rather than
+      // hard-coding a separate editor palette.
+      t6 = colorFile.render(theme, measuredWidth, dim);
       $[7] = colorFile;
       $[8] = dim;
       $[9] = measuredWidth;
