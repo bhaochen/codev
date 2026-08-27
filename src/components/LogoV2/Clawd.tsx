@@ -5,6 +5,15 @@ import { env } from '../../utils/env.js'
 import { getInitialSettings } from '../../utils/settings/settings.js'
 import { interpolateColor, parseRGB, toRGBColor } from '../Spinner/utils.js'
 
+// Cool Morandi gradient for the Clawd mascot: icy silver → slate → midnight
+// blue. Industrial, cold, restrained high-end feel — independent of theme
+// tokens so the brand mascot reads consistently across light/dark modes.
+export const CLAWD_GRADIENT_STOPS: [string, string, string] = [
+  '#D6DEE8', // cool silver (faint icy tint)
+  '#9DAEBF', // muted slate blue-gray
+  '#3A4860', // midnight blue / graphite
+]
+
 export type ClawdPose =
   | 'default'
   | 'arms-up'

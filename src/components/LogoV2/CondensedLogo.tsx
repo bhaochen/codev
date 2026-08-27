@@ -8,9 +8,6 @@ import { useAppState } from '../../state/AppState.js'
 import { getEffortSuffix } from '../../utils/effort.js'
 import { truncate } from '../../utils/format.js'
 import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js'
-import { getGlobalConfig } from '../../utils/config.js'
-import { resolveThemeSetting } from '../../utils/systemTheme.js'
-import { getTheme } from '../../utils/theme.js'
 import {
   formatModelAndBilling,
   getLogoDisplayData,
@@ -19,7 +16,7 @@ import {
 import { renderModelSetting } from '../../utils/model/model.js'
 import { OffscreenFreeze } from '../OffscreenFreeze.js'
 import { AnimatedClawd } from './AnimatedClawd.js'
-import { Clawd } from './Clawd.js'
+import { Clawd, CLAWD_GRADIENT_STOPS } from './Clawd.js'
 import {
   GuestPassesUpsell,
   incrementGuestPassesSeenCount,
@@ -39,13 +36,7 @@ export function CondensedLogo(): ReactNode {
   const modelDisplayName = renderModelSetting(model)
   const { version, cwd, billingType, agentName: agentNameFromSettings } = getLogoDisplayData()
 
-  const userTheme = resolveThemeSetting(getGlobalConfig().theme)
-  const themeColors = getTheme(userTheme)
-  const gradientStops: [string, string, string] = [
-    themeColors.success,
-    themeColors.clawd_body,
-    themeColors.claude,
-  ]
+  const gradientStops = CLAWD_GRADIENT_STOPS
 
   // Prefer AppState.agent (set from --agent CLI flag) over settings
   const agentName = agent ?? agentNameFromSettings

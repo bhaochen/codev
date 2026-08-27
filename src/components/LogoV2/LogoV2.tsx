@@ -15,7 +15,7 @@ import {
 } from '../../utils/logoV2Utils.js'
 import { truncate } from '../../utils/format.js'
 import { getDisplayPath } from '../../utils/file.js'
-import { Clawd } from './Clawd.js'
+import { Clawd, CLAWD_GRADIENT_STOPS } from './Clawd.js'
 import { FeedColumn } from './FeedColumn.js'
 import {
   createRecentActivityFeed,
@@ -25,7 +25,6 @@ import {
 } from './feedConfigs.js'
 import { getGlobalConfig, saveGlobalConfig } from 'src/utils/config.js'
 import { resolveThemeSetting } from 'src/utils/systemTheme.js'
-import { getTheme } from 'src/utils/theme.js'
 import { getInitialSettings } from 'src/utils/settings/settings.js'
 import {
   isDebugMode,
@@ -251,12 +250,7 @@ export function LogoV2(): React.ReactNode {
   const layoutMode = getLayoutMode(columns)
 
   const userTheme = resolveThemeSetting(getGlobalConfig().theme)
-  const themeColors = getTheme(userTheme)
-  const gradientStops: [string, string, string] = [
-    themeColors.success,
-    themeColors.clawd_body,
-    themeColors.claude,
-  ]
+  const gradientStops = CLAWD_GRADIENT_STOPS
   const borderTitle = ` ${color('clawd_body', userTheme)('Codev')} ${color('inactive', userTheme)(`v${version}`)} `
   const compactBorderTitle = color('clawd_body', userTheme)(' Codev ')
 
