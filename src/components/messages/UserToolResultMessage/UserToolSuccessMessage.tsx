@@ -53,6 +53,10 @@ export function UserToolSuccessMessage({
   if (message.toolUseResult === undefined || message.toolUseResult === null) {
     return null;
   }
+  const toolName = lookups.toolUseByToolUseID.get(toolUseID)?.name;
+  if (!tool && toolName?.toLowerCase() === 'repl') {
+    return null;
+  }
   if (!tool) {
     return <RawToolResultMessage result={message.toolUseResult} />;
   }

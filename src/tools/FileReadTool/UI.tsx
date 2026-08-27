@@ -76,9 +76,6 @@ export function renderToolUseTag({
   }
   return <Text dimColor> {agentTaskId}</Text>;
 }
-const MAX_READ_PREVIEW_LINES = 40;
-const MAX_READ_PREVIEW_CHARS = 6000;
-
 export function renderToolResultMessage(output: Output, _progressMessages: ProgressMessage[] = [], {
   verbose = false
 }: {
@@ -137,14 +134,10 @@ export function renderToolResultMessage(output: Output, _progressMessages: Progr
           content
         } = output.file;
         if (verbose && content) {
-          const lines = content.split('\n');
-          const preview = lines.slice(0, MAX_READ_PREVIEW_LINES).join('\n').slice(0, MAX_READ_PREVIEW_CHARS);
-          const truncated = lines.length > MAX_READ_PREVIEW_LINES || content.length > MAX_READ_PREVIEW_CHARS;
           return <MessageResponse>
             <Box flexDirection="column">
               <Text>Read <Text bold>{numLines}</Text>{' '}{numLines === 1 ? 'line' : 'lines'}</Text>
-              <HighlightedCode code={preview} filePath={output.file.filePath} />
-              {truncated && <Text dimColor>… output truncated (Ctrl+O to view more)</Text>}
+              <HighlightedCode code={content} filePath={output.file.filePath} />
             </Box>
           </MessageResponse>;
         }

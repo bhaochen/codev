@@ -156,7 +156,6 @@ export function CollapsedReadSearchContent({
     searchCount: rawSearchCount,
     readCount: rawReadCount,
     listCount: rawListCount,
-    replCount,
     memorySearchCount,
     memoryReadCount,
     memoryWriteCount,
@@ -194,7 +193,7 @@ export function CollapsedReadSearchContent({
   // needed — it's 0 until results arrive, then only grows).
   const gitOpBashCount = message.gitOpBashCount ?? 0;
   const bashCount = isFullscreenEnvEnabled() ? Math.max(0, maxBashCountRef.current - gitOpBashCount) : 0;
-  const hasNonMemoryOps = searchCount > 0 || readCount > 0 || listCount > 0 || replCount > 0 || mcpCallCount > 0 || bashCount > 0 || gitOpBashCount > 0 || webFetchCount > 0;
+  const hasNonMemoryOps = searchCount > 0 || readCount > 0 || listCount > 0 || mcpCallCount > 0 || bashCount > 0 || gitOpBashCount > 0 || webFetchCount > 0;
   const readPaths = message.readFilePaths;
   const searchArgs = message.searchArgs;
   let incomingHint = message.latestDisplayHint;
@@ -224,10 +223,9 @@ export function CollapsedReadSearchContent({
   }
   const displayedHint = useMinDisplayTime(incomingHint, MIN_HINT_DISPLAY_MS);
 
-  // File reads are useful context in the normal transcript, not just a
-  // count. Render them immediately; individual renderers keep previews
-  // bounded and Ctrl+O still exposes the full transcript.
-  if (verbose || readCount > 0) {
+  // Expanded groups render each tool and its result. In normal mode the
+  // single summary row remains clickable via the message list.
+  if (verbose) {
     const toolUses: NormalizedAssistantMessage[] = [];
     for (const msg of groupMessages) {
       if (msg.type === 'assistant') {
@@ -382,16 +380,6 @@ export function CollapsedReadSearchContent({
     nonMemParts.push(<Text key="list">
         {listVerb} <Text bold>{listCount}</Text>{' '}
         {listCount === 1 ? 'directory' : 'directories'}
-      </Text>);
-  }
-  if (replCount > 0) {
-    const replVerb = isActiveGroup ? "REPL'ing" : "REPL'd";
-    if (nonMemParts.length > 0) {
-      nonMemParts.push(<Text key="comma-repl">, </Text>);
-    }
-    nonMemParts.push(<Text key="repl">
-        {replVerb} <Text bold>{replCount}</Text>{' '}
-        {replCount === 1 ? 'time' : 'times'}
       </Text>);
   }
   if (mcpCallCount > 0) {

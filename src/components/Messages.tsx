@@ -593,6 +593,7 @@ const MessagesImpl = ({
     if (b_0?.type !== 'tool_result' || b_0.is_error || !msg_6.toolUseResult) return false;
     const name = lookupsRef.current.toolUseByToolUseID.get(b_0.tool_use_id)?.name;
     const tool = name ? findToolByName(tools, name) : undefined;
+    if (tool?.name === 'Write' || tool?.name === 'Edit') return true;
     return tool?.isResultTruncated?.(msg_6.toolUseResult as never) ?? false;
   }, [tools]);
   const canAnimate = (!toolJSX || !!toolJSX.shouldContinueAnimation) && !toolUseConfirmQueue.length && !isMessageSelectorVisible;
@@ -631,12 +632,15 @@ const MessagesImpl = ({
     const wrapped = <MessageActionsSelectedContext.Provider key={k_0} value={index === selectedIdx}>
         {row}
       </MessageActionsSelectedContext.Provider>;
+    const interactive = isItemClickable(msg_8)
+      ? <Box key={`interactive-${k_0}`} onClick={() => onItemClick(msg_8)}>{wrapped}</Box>
+      : wrapped;
     if (unseenDivider && index === dividerBeforeIndex) {
       return [<Box key="unseen-divider" marginTop={1}>
           <Divider title={`${unseenDivider.count} new ${plural(unseenDivider.count, 'message')}`} width={columns} color="inactive" />
-        </Box>, wrapped];
+        </Box>, interactive];
     }
-    return wrapped;
+    return interactive;
   };
 
   // Search indexing: for tool_result messages, look up the Tool and use
