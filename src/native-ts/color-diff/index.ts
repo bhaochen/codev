@@ -242,6 +242,33 @@ const GITHUB_SCOPES: Record<string, Color> = {
   subst: rgb(51, 51, 51),
 }
 
+const TOKYONIGHT_SCOPES: Record<string, Color> = {
+  keyword: rgb(187, 154, 247),
+  _storage: rgb(187, 154, 247),
+  built_in: rgb(125, 207, 255),
+  type: rgb(42, 195, 222),
+  literal: rgb(255, 158, 100),
+  number: rgb(255, 158, 100),
+  string: rgb(158, 206, 106),
+  title: rgb(122, 162, 247),
+  'title.function': rgb(122, 162, 247),
+  'title.class': rgb(115, 218, 202),
+  'title.class.inherited': rgb(115, 218, 202),
+  params: rgb(224, 175, 104),
+  comment: rgb(86, 95, 137),
+  meta: rgb(125, 207, 255),
+  attr: rgb(115, 218, 202),
+  attribute: rgb(115, 218, 202),
+  variable: rgb(192, 202, 245),
+  'variable.language': rgb(255, 117, 127),
+  property: rgb(115, 218, 202),
+  operator: rgb(137, 221, 255),
+  punctuation: rgb(169, 177, 214),
+  symbol: rgb(187, 154, 247),
+  regexp: rgb(242, 183, 167),
+  subst: rgb(192, 202, 245),
+}
+
 // Keywords that syntect scopes as storage.type rather than keyword.control.
 // highlight.js lumps these under "keyword"; we re-split so const/function/etc.
 // get the cyan storage color instead of pink.
@@ -281,6 +308,7 @@ const ANSI_SCOPES: Record<string, Color> = {
 
 function buildTheme(themeName: string, mode: ColorMode): Theme {
   const isDark = themeName.includes('dark')
+  const isTokyoNight = themeName.includes('tokyonight')
   const isAnsi = themeName.includes('ansi')
   const isDaltonized = themeName.includes('daltonized')
   const tc = mode === 'truecolor'
@@ -296,6 +324,21 @@ function buildTheme(themeName: string, mode: ColorMode): Theme {
       foreground: ansiIdx(7),
       background: DEFAULT_BG,
       scopes: ANSI_SCOPES,
+    }
+
+  }
+
+  if (isTokyoNight) {
+    return {
+      addLine: tc ? rgb(26, 44, 56) : ansiIdx(23),
+      addWord: tc ? rgb(35, 61, 76) : ansiIdx(24),
+      addDecoration: rgb(115, 218, 202),
+      deleteLine: tc ? rgb(56, 35, 49) : ansiIdx(52),
+      deleteWord: tc ? rgb(78, 43, 62) : ansiIdx(53),
+      deleteDecoration: rgb(255, 117, 127),
+      foreground: rgb(192, 202, 245),
+      background: DEFAULT_BG,
+      scopes: TOKYONIGHT_SCOPES,
     }
   }
 
@@ -521,19 +564,24 @@ function highlightLine(
     // hljs throws on unknown language despite ignoreIllegals
     return [[defaultStyle(theme), code]]
   }
-  if (!hasRootNode(result.emitter)) {
+  // highlight.js exposes the token tree as `_emitter` in current versions.
+  // Older versions used `emitter`; support both so syntax highlighting does
+  // not silently fall back to plain gray text.
+  const emitter = (result as { _emitter?: unknown; emitter?: unknown })._emitter
+    ?? (result as { emitter?: unknown }).emitter
+  if (!hasRootNode(emitter)) {
     if (!loggedEmitterShapeError) {
       loggedEmitterShapeError = true
       logError(
         new Error(
-          `color-diff: hljs emitter shape mismatch (keys: ${Object.keys(result.emitter).join(',')}). Syntax highlighting disabled.`,
+          `color-diff: hljs emitter shape mismatch. Syntax highlighting disabled.`,
         ),
       )
     }
     return [[defaultStyle(theme), code]]
   }
   const blocks: Block[] = []
-  flattenHljs(result.emitter.rootNode, theme, undefined, blocks)
+  flattenHljs(emitter.rootNode, theme, undefined, blocks)
   return blocks
 }
 

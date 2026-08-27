@@ -89,7 +89,9 @@ export const HighlightedCode = memo(function HighlightedCode(t0) {
     }
     let t6;
     if ($[7] !== colorFile || $[8] !== dim || $[9] !== measuredWidth || $[10] !== theme) {
-      t6 = colorFile.render(theme, measuredWidth, dim);
+      // Read previews use TokyoNight's editor-like palette consistently,
+      // independent of the surrounding terminal UI theme.
+      t6 = colorFile.render('tokyonight', measuredWidth, dim);
       $[7] = colorFile;
       $[8] = dim;
       $[9] = measuredWidth;
@@ -103,10 +105,6 @@ export const HighlightedCode = memo(function HighlightedCode(t0) {
   const lines = t5;
   let t6;
   bb2: {
-    if (!isFullscreenEnvEnabled()) {
-      t6 = 0;
-      break bb2;
-    }
     const lineCount = countCharInString(code, "\n") + 1;
     let t7;
     if ($[12] !== lineCount) {
