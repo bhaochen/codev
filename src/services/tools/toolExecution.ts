@@ -102,6 +102,7 @@ import {
   formatError,
   formatZodValidationError,
 } from '../../utils/toolErrors.js'
+import { guardToolInput, MAX_RETRIES } from './toolCallGuard.js'
 import {
   processPreMappedToolResultBlock,
   processToolResultBlock,
@@ -611,10 +612,15 @@ async function checkPermissionsAndCallTool(
     progress: ToolProgress<ToolProgressData> | ProgressMessage<HookProgress>,
   ) => void,
 ): Promise<MessageUpdateLazy[]> {
-  // Validate input types with zod (surprisingly, the model is not great at generating valid input)
-  const parsedInput = tool.inputSchema.safeParse(input)
-  if (!parsedInput.success) {
-    let errorContent = formatZodValidationError(tool.name, parsedInput.error)
+  // Validate + recover tool input with the generic Tool Call Guard.
+  // The model occasionally violates the input contract (missing required
+  // fields, extra keys, wrong types). Instead of failing outright the guard
+  // classifies the issues, applies deterministic safe auto-repairs, and only
+  // surfaces an error (fed back to the model for retry) when a field cannot be
+  // safely repaired or retries are exhausted.
+  const guard = guardToolInput(tool, input, toolUseID)
+  if (guard.status === 'retry' || guard.status === 'fatal') {
+    let errorContent = formatZodValidationError(tool.name, guard.error!)
 
     const schemaHint = buildSchemaNotSentHint(
       tool,
@@ -627,6 +633,11 @@ async function checkPermissionsAndCallTool(
         isMcp: tool.isMcp ?? false,
       })
       errorContent += schemaHint
+    }
+
+    if (guard.status === 'fatal') {
+      errorContent =
+        `Maximum recovery retries (${MAX_RETRIES}) exceeded. ` + errorContent
     }
 
     logForDebugging(
@@ -661,6 +672,19 @@ async function checkPermissionsAndCallTool(
       }),
       ...mcpToolDetailsForAnalytics(tool.name, mcpServerType, mcpServerBaseUrl),
     })
+    logEvent('tengu_tool_call_recovery', {
+      tool: guard.recovery.tool as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      toolUseID: guard.recovery.toolUseID as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      success: guard.recovery.success,
+      disposition: guard.recovery.disposition as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      attempt: guard.recovery.attempt,
+      validation_error: guard.recovery.validation_error as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      repair_type: (guard.recovery.repair?.type ?? null) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      repair_action: (guard.recovery.repair?.action ?? null) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      repair_path: (guard.recovery.repair != null ? JSON.stringify(guard.recovery.repair.path) : null) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      raw_arguments: JSON.stringify(guard.recovery.raw_arguments) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      final_arguments: (guard.recovery.final_arguments != null ? JSON.stringify(guard.recovery.final_arguments) : null) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
     return [
       {
         message: createUserMessage({
@@ -672,12 +696,13 @@ async function checkPermissionsAndCallTool(
               tool_use_id: toolUseID,
             },
           ],
-          toolUseResult: `InputValidationError: ${parsedInput.error.message}`,
+          toolUseResult: `InputValidationError: ${guard.issuesMessage}`,
           sourceToolAssistantUUID: assistantMessage.uuid,
         }),
       },
     ]
   }
+  const parsedInput = guard.parsedInput! as unknown as ReturnType<typeof tool.inputSchema.safeParse>
 
   // Validate input values. Each tool has its own validation logic
   const isValidCall = await tool.validateInput?.(
