@@ -14,6 +14,7 @@ import { lazySchema } from '../../utils/lazySchema.js'
 import type { AssistantMessage, UserMessage } from '../../types/message.js'
 import { REPL_TOOL_NAME } from './constants.js'
 import { getReplPrimitiveTools } from './primitiveTools.js'
+import { getSessionId } from '../../bootstrap/state.js'
 import { ReplEngine } from './engine.js'
 
 const inputSchema = lazySchema(() =>
@@ -33,14 +34,16 @@ type REPLOutput = { result: string; tool_calls: number }
 /** 会话级引擎缓存：同一会话内 VM 上下文持久化，变量绑定跨 turn 保留 */
 const engineCache = new Map<string, ReplEngine>()
 
-function getEngine(
-  sessionId: string,
-  context: ToolUseContext,
-): ReplEngine {
-  let engine = engineCache.get(sessionId)
+function getEngine(context: ToolUseContext): ReplEngine {
+  // Isolate each session's VM state: sub-agents carry a unique agentId, while
+  // the main thread falls back to the session/conversation id. The previous
+  // hardcoded 'default' key let a sub-agent's REPL variables leak into the
+  // parent (and sibling) sessions.
+  const engineKey = context.agentId ?? getSessionId()
+  let engine = engineCache.get(engineKey)
   if (!engine) {
     engine = new ReplEngine(getReplPrimitiveTools(), context)
-    engineCache.set(sessionId, engine)
+    engineCache.set(engineKey, engine)
   }
   // 更新 toolUseContext（每次 turn 可能变化）
   engine.updateContext(context)
@@ -125,10 +128,7 @@ Do NOT use require(), import(), eval(), process, Bun, or globalThis — they are
   },
 
   async call(input: REPLInput, context: ToolUseContext, _canUseTool, _parentMessage, onProgress?) {
-    // 使用 agentId 或 conversation ID 作为会话标识
-    const sessionId = 'default'
-
-    const engine = getEngine(sessionId, context)
+    const engine = getEngine(context)
 
     const result = await engine.execute(
       input.code,

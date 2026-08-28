@@ -16,7 +16,7 @@ import { GoalGetTool } from './tools/GoalGetTool/GoalGetTool.js'
 import { GoalUpdateTool } from './tools/GoalUpdateTool/GoalUpdateTool.js'
 // Dead code elimination: conditional import for ant-only tools
 /* eslint-disable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
-const REPLTool =
+export const REPLTool =
   isReplModeEnabled()
     ? require('./tools/REPLTool/REPLTool.js').REPLTool
     : null
@@ -364,6 +364,7 @@ export const getTools = (permissionContext: ToolPermissionContext): Tools => {
 export function assembleToolPool(
   permissionContext: ToolPermissionContext,
   mcpTools: Tools,
+  options: { forAgent?: boolean } = {},
 ): Tools {
   const builtInTools = getTools(permissionContext)
 
@@ -379,10 +380,23 @@ export function assembleToolPool(
   // Avoid Array.toSorted (Node 20+) — we support Node 18. builtInTools is
   // readonly so copy-then-sort; allowedMcpTools is a fresh .filter() result.
   const byName = (a: Tool, b: Tool) => a.name.localeCompare(b.name)
-  return uniqBy(
+  const pool = uniqBy(
     [...builtInTools].sort(byName).concat(allowedMcpTools.sort(byName)),
     'name',
   )
+
+  // When building the tool pool for a sub-agent, expose the REPL proxy so the
+  // agent gains the same `await callTool('Read'/'Bash'/...)` capability the main
+  // session has behind REPL. In REPL mode getTools() strips REPL_ONLY_TOOLS
+  // (Read/Bash/Grep/Write/Edit) but keeps REPLTool; when REPL is disabled the
+  // primitives are already present, so this is a no-op there. The agent's own
+  // tools/disallowedTools still govern what it may actually invoke (resolved in
+  // resolveAgentTools/filterToolsForAgent).
+  if (options.forAgent && REPLTool && !pool.some(t => toolMatchesName(t, REPL_TOOL_NAME))) {
+    return uniqBy([REPLTool, ...pool], 'name')
+  }
+
+  return pool
 }
 
 /**
