@@ -15,6 +15,6 @@ When called:
 - \`goal_id\` — the exact id from the latest active goal continuation prompt.
 - \`status: 'complete'\` — the objective is fully achieved; auto-continuation stops.
 - \`status: 'blocked'\` — the same blocking condition has repeated for 3+ consecutive goal turns; auto-continuation stops.
-- \`reason\` — one short sentence explaining what was accomplished or what blocked progress. The user reads this.
+- \`reason\` — (required) one short sentence explaining what was accomplished or what blocked progress. The user reads this. Omitting it fails validation.
 
 Only call this when you are confident and the goal_id you have matches the active goal. The tool is a no-op if no matching goal is active.`

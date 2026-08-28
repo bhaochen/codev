@@ -27,7 +27,9 @@ const inputSchema = lazySchema(() =>
       .string()
       .min(1)
       .max(500)
-      .describe('One-sentence explanation visible to the user.'),
+      .describe(
+        'Required. One short sentence explaining what was accomplished or what blocked progress. The user reads this.',
+      ),
   }),
 )
 type InputSchema = ReturnType<typeof inputSchema>
