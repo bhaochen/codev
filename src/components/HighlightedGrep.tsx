@@ -64,7 +64,7 @@ export const HighlightedGrep = memo(function HighlightedGrep({
   const ColorFile = expectColorFile()
 
   const parsed = useMemo(
-    () => (content ? parseGrepContent(content) : null)
+    () => (content ? parseGrepContent(content) : null),
     [content],
   )
 
