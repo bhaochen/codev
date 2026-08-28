@@ -22,7 +22,8 @@ function SearchResultSummary(t0) {
     secondaryCount,
     secondaryLabel,
     content,
-    verbose
+    verbose,
+    highlightCode
   } = t0;
   let t1;
   if ($[0] !== count) {
@@ -175,16 +176,17 @@ export function renderToolResultMessage({
 }: {
   verbose: boolean;
 }): React.ReactNode {
+  const highlightGrep = mode === 'content'
   if (mode === 'content') {
-    return <SearchResultSummary count={numLines ?? 0} countLabel="lines" content={content} verbose={verbose} />;
+    return <SearchResultSummary count={numLines ?? 0} countLabel="lines" content={content} verbose={verbose} highlightCode={highlightGrep} />;
   }
   if (mode === 'count') {
-    return <SearchResultSummary count={numMatches ?? 0} countLabel="matches" secondaryCount={numFiles} secondaryLabel="files" content={content} verbose={verbose} />;
+    return <SearchResultSummary count={numMatches ?? 0} countLabel="matches" secondaryCount={numFiles} secondaryLabel="files" content={content} verbose={verbose} highlightCode={highlightGrep} />;
   }
 
   // files_with_matches mode
   const fileListContent = filenames.map(filename => filename).join('\n');
-  return <SearchResultSummary count={numFiles} countLabel="files" content={fileListContent} verbose={verbose} />;
+  return <SearchResultSummary count={numFiles} countLabel="files" content={fileListContent} verbose={verbose} highlightCode={highlightGrep} />;
 }
 export function getToolUseSummary(input: Partial<{
   pattern: string;
