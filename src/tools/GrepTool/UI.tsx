@@ -9,6 +9,7 @@ import { Box, Text } from '../../ink.js';
 import type { ToolProgressData } from '../../Tool.js';
 import type { ProgressMessage } from '../../types/message.js';
 import { FILE_NOT_FOUND_CWD_NOTE, getDisplayPath } from '../../utils/file.js';
+import { HighlightedGrep } from '../../components/HighlightedGrep.js';
 import { truncate } from '../../utils/format.js';
 import { extractTag } from '../../utils/messages.js';
 
@@ -79,7 +80,7 @@ function SearchResultSummary(t0) {
     }
     let t7;
     if ($[15] !== content) {
-      t7 = <Box marginLeft={5}><Text>{content}</Text></Box>;
+      t7 = <Box marginLeft={5}>{highlightCode && content ? <HighlightedGrep content={content} /> : <Text>{content}</Text>}</Box>;
       $[15] = content;
       $[16] = t7;
     } else {

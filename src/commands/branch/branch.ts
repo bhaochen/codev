@@ -44,9 +44,9 @@ export function deriveFirstPrompt(
     typeof content === 'string'
       ? content
       : content.find(
-          (block): block is { type: 'text'; text: string } =>
-            block.type === 'text',
-        )?.text
+        (block): block is { type: 'text'; text: string } =>
+          block.type === 'text',
+      )?.text
   if (!raw) return 'Branched conversation'
   return (
     raw.replace(/\s+/g, ' ').trim().slice(0, 100) || 'Branched conversation'
@@ -273,7 +273,7 @@ export async function call(
 
     // Resume into the fork
     const titleInfo = title ? ` "${title}"` : ''
-    const resumeHint = `\nTo resume the original: claude -r ${originalSessionId}`
+    const resumeHint = `\nTo resume the original: codev -r ${originalSessionId}`
     const successMessage = `Branched conversation${titleInfo}. You are now in the branch.${resumeHint}`
 
     if (context.resume) {
