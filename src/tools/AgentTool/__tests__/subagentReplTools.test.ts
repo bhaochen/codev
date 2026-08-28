@@ -62,4 +62,42 @@ describe('sub-agent REPL/callTool exposure', () => {
     const pool = assembleToolPool(getEmptyToolPermissionContext(), [])
     expect(Array.isArray(pool)).toBe(true)
   })
+
+  test('async allow-list (Source of Truth) includes REPLTool', async () => {
+    const { ASYNC_AGENT_ALLOWED_TOOLS, IN_PROCESS_TEAMMATE_ALLOWED_TOOLS } =
+      await import('../../../constants/tools.js')
+    const { REPL_TOOL_NAME } = await import(
+      '../../../tools/REPLTool/constants.js'
+    )
+    expect(ASYNC_AGENT_ALLOWED_TOOLS.has(REPL_TOOL_NAME)).toBe(true)
+    expect(IN_PROCESS_TEAMMATE_ALLOWED_TOOLS.has(REPL_TOOL_NAME)).toBe(true)
+  })
+
+  test('async Explore-style agent keeps REPLTool through filterToolsForAgent', async () => {
+    const { assembleToolPool, REPLTool } = await import('../../../tools.js')
+    const { getEmptyToolPermissionContext } = await import('../../../Tool.js')
+    const { resolveAgentTools } = await import('../agentToolUtils.js')
+    const { REPL_TOOL_NAME } = await import(
+      '../../../tools/REPLTool/constants.js'
+    )
+    const pool = assembleToolPool(getEmptyToolPermissionContext(), [], {
+      forAgent: true,
+    })
+    const resolved = resolveAgentTools(
+      {
+        tools: undefined,
+        disallowedTools: [],
+        source: 'built-in',
+        permissionMode: 'acceptEdits',
+      },
+      pool,
+      true,
+    )
+    const names = resolved.resolvedTools.map((t) => t.name)
+    if (REPLTool) {
+      expect(names).toContain(REPL_TOOL_NAME)
+    } else {
+      expect(names.some((n) => /^(Read|Bash|Grep)$/.test(n))).toBe(true)
+    }
+  })
 })

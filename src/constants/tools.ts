@@ -17,6 +17,7 @@ import { SHELL_TOOL_NAMES } from '../utils/shell/shellToolUtils.js'
 import { FILE_EDIT_TOOL_NAME } from '../tools/FileEditTool/constants.js'
 import { FILE_WRITE_TOOL_NAME } from '../tools/FileWriteTool/prompt.js'
 import { NOTEBOOK_EDIT_TOOL_NAME } from '../tools/NotebookEditTool/constants.js'
+import { REPL_TOOL_NAME } from '../tools/REPLTool/constants.js'
 import { SKILL_TOOL_NAME } from '../tools/SkillTool/constants.js'
 import { SEND_MESSAGE_TOOL_NAME } from '../tools/SendMessageTool/constants.js'
 import { TASK_CREATE_TOOL_NAME } from '../tools/TaskCreateTool/constants.js'
@@ -54,6 +55,7 @@ export const CUSTOM_AGENT_DISALLOWED_TOOLS = new Set([
  * Async Agent Tool Availability Status (Source of Truth)
  */
 export const ASYNC_AGENT_ALLOWED_TOOLS = new Set([
+  REPL_TOOL_NAME,
   FILE_READ_TOOL_NAME,
   WEB_SEARCH_TOOL_NAME,
   LOCATION_TOOL_NAME,
@@ -77,6 +79,7 @@ export const ASYNC_AGENT_ALLOWED_TOOLS = new Set([
  * via isInProcessTeammate() check.
  */
 export const IN_PROCESS_TEAMMATE_ALLOWED_TOOLS = new Set([
+  REPL_TOOL_NAME,
   TASK_CREATE_TOOL_NAME,
   TASK_GET_TOOL_NAME,
   TASK_LIST_TOOL_NAME,
