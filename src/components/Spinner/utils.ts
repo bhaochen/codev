@@ -71,14 +71,34 @@ export function parseRGB(colorStr: string): RGBColorType | null {
   const cached = RGB_CACHE.get(colorStr)
   if (cached !== undefined) return cached
 
-  const match = colorStr.match(/rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/)
-  const result = match
-    ? {
-        r: parseInt(match[1]!, 10),
-        g: parseInt(match[2]!, 10),
-        b: parseInt(match[3]!, 10),
-      }
-    : null
+  const normalized = colorStr.trim().replace(/^#/, '')
+  let result: RGBColorType | null = null
+
+  if (/^[0-9a-fA-F]{3}$/.test(normalized)) {
+    // #RGB shorthand
+    result = {
+      r: parseInt(normalized[0]! + normalized[0]!, 16),
+      g: parseInt(normalized[1]! + normalized[1]!, 16),
+      b: parseInt(normalized[2]! + normalized[2]!, 16),
+    }
+  } else if (/^[0-9a-fA-F]{6}$/.test(normalized)) {
+    // #RRGGBB
+    result = {
+      r: parseInt(normalized.slice(0, 2), 16),
+      g: parseInt(normalized.slice(2, 4), 16),
+      b: parseInt(normalized.slice(4, 6), 16),
+    }
+  } else {
+    const match = colorStr.match(/rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/)
+    result = match
+      ? {
+          r: parseInt(match[1]!, 10),
+          g: parseInt(match[2]!, 10),
+          b: parseInt(match[3]!, 10),
+        }
+      : null
+  }
+
   RGB_CACHE.set(colorStr, result)
   return result
 }
