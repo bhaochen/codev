@@ -8,7 +8,7 @@ import type {
   AttributionSnapshotMessage,
   ContextCollapseCommitEntry,
   ContextCollapseSnapshotEntry,
-  GoalEntry,
+  GoalStateEntry,
   LogOption,
   PersistedWorktreeSession,
   SerializedMessage,
@@ -479,7 +479,7 @@ export async function loadConversationForResume(
   prRepository?: string
   // Full path to the session file (for cross-directory resume)
   fullPath?: string
-  goal?: GoalEntry
+  goalStore?: GoalStateEntry
 } | null> {
   try {
     let log: LogOption | null = null
@@ -591,7 +591,7 @@ export async function loadConversationForResume(
       prRepository: log?.prRepository,
       // Include full path for cross-directory resume
       fullPath: log?.fullPath,
-      goal: log?.goal,
+      goalStore: log?.goalStore,
     }
   } catch (error) {
     logError(error as Error)

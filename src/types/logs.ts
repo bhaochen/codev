@@ -50,7 +50,7 @@ export type LogOption = {
   mode?: 'coordinator' | 'normal' // Session mode for coordinator/normal detection
   worktreeSession?: PersistedWorktreeSession | null // Worktree state at session end (null = exited, undefined = never entered)
   contentReplacements?: ContentReplacementRecord[] // Replacement decisions for resume reconstruction
-  goal?: GoalEntry // /goal state for session resume
+  goalStore?: GoalStateEntry // /goal pool + focus for session resume
 }
 
 export type SummaryMessage = {
@@ -104,6 +104,33 @@ export type GoalEntry = {
   continuationCount: number
   lastReason?: string
   lastUpdatedAt: number
+}
+
+/** A single goal as persisted in the multi-goal pool (mirrors AppState Goal). */
+export type PersistedGoal = {
+  id: string
+  objective: string
+  status:
+    | 'pursuing'
+    | 'paused'
+    | 'achieved'
+    | 'blocked'
+    | 'usage-limited'
+    | 'budget-limited'
+  startedAt: number
+  startCostUSD: number
+  startTokensUsed: number
+  continuationCount: number
+  lastReason?: string
+  lastUpdatedAt: number
+}
+
+/** /goal pool + focus, persisted to the transcript for --resume. Last-wins. */
+export type GoalStateEntry = {
+  type: 'goal-state'
+  sessionId: UUID
+  goals: Record<string, PersistedGoal>
+  focusedGoalId: string | undefined
 }
 
 /**
@@ -338,6 +365,7 @@ export type Entry =
   | ContextCollapseCommitEntry
   | ContextCollapseSnapshotEntry
   | GoalEntry
+  | GoalStateEntry
 
 export function sortLogs(logs: LogOption[]): LogOption[] {
   return logs.sort((a, b) => {

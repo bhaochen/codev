@@ -2,6 +2,7 @@ import { useEffect, useRef, useSyncExternalStore } from 'react'
 import { useAppState, useSetAppState } from '../state/AppState.js'
 import {
   buildContinuationPrompt,
+  getFocusedGoal,
   getGoalContinuationGoalId,
   isGoalContinuationPrompt,
 } from '../utils/goal.js'
@@ -25,7 +26,7 @@ export function useGoalAutoContinue(queryGuard: QueryGuard): void {
     queryGuard.subscribe,
     queryGuard.getSnapshot,
   )
-  const goal = useAppState(s => s.goal)
+  const goal = useAppState(getFocusedGoal)
   const mode = useAppState(s => s.toolPermissionContext.mode)
   const setAppState = useSetAppState()
 
@@ -71,13 +72,20 @@ export function useGoalAutoContinue(queryGuard: QueryGuard): void {
 
     setAppState(prev => ({
       ...prev,
-      goal: prev.goal && prev.goal.id === goal.id
-        ? {
-            ...prev.goal,
-            continuationCount: prev.goal.continuationCount + 1,
-            lastUpdatedAt: now,
-          }
-        : prev.goal,
+      goals:
+        prev.goals &&
+        prev.focusedGoalId &&
+        prev.goals[prev.focusedGoalId]?.id === goal.id
+          ? {
+              ...prev.goals,
+              [prev.focusedGoalId]: {
+                ...prev.goals[prev.focusedGoalId],
+                continuationCount:
+                  prev.goals[prev.focusedGoalId].continuationCount + 1,
+                lastUpdatedAt: now,
+              },
+            }
+          : prev.goals,
     }))
   }, [isActive, goal, mode, setAppState])
 }

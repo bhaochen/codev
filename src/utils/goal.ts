@@ -1,4 +1,97 @@
-import type { Goal, GoalStatus } from '../../state/AppStateStore.js'
+import type { AppState } from '../state/AppState.js'
+import type { UUID } from 'crypto'
+import type { SessionId } from '../types/ids.js'
+import type {
+  GoalEntry,
+  GoalStateEntry,
+  PersistedGoal,
+} from '../types/logs.js'
+import type { Goal, GoalStatus } from '../state/AppStateStore.js'
+
+export function goalToPersisted(g: Goal): PersistedGoal {
+  return {
+    id: g.id,
+    objective: g.objective,
+    status: g.status,
+    startedAt: g.startedAt,
+    startCostUSD: g.startCostUSD,
+    startTokensUsed: g.startTokensUsed,
+    continuationCount: g.continuationCount,
+    lastReason: g.lastReason,
+    lastUpdatedAt: g.lastUpdatedAt,
+  }
+}
+
+export function persistedToGoal(p: PersistedGoal): Goal {
+  return {
+    id: p.id,
+    objective: p.objective,
+    status: p.status,
+    startedAt: p.startedAt,
+    startCostUSD: p.startCostUSD,
+    startTokensUsed: p.startTokensUsed,
+    continuationCount: p.continuationCount,
+    lastReason: p.lastReason,
+    lastUpdatedAt: p.lastUpdatedAt,
+  }
+}
+
+/** Build the transcript entry that persists the whole goal pool + focus. */
+export function buildGoalStateEntry(
+  goals: Record<string, Goal>,
+  focusedGoalId: string | undefined,
+  sessionId: SessionId,
+): GoalStateEntry {
+  const persisted: Record<string, PersistedGoal> = {}
+  for (const [id, g] of Object.entries(goals)) {
+    persisted[id] = goalToPersisted(g)
+  }
+  return { type: 'goal-state', sessionId: sessionId as UUID, goals: persisted, focusedGoalId }
+}
+
+/** Migrate a legacy single-goal transcript entry into the pool shape. */
+export function legacyGoalEntryToState(entry: GoalEntry): GoalStateEntry {
+  return {
+    type: 'goal-state',
+    sessionId: entry.sessionId,
+    goals: {
+      [entry.id]: goalToPersisted({
+        id: entry.id,
+        objective: entry.objective,
+        status: entry.status,
+        startedAt: entry.startedAt,
+        startCostUSD: entry.startCostUSD,
+        startTokensUsed: entry.startTokensUsed,
+        continuationCount: entry.continuationCount,
+        lastReason: entry.lastReason,
+        lastUpdatedAt: entry.lastUpdatedAt,
+      }),
+    },
+    focusedGoalId: entry.id,
+  }
+}
+
+/** Convert a persisted goal-state entry back into AppState goal fields. */
+export function goalStateEntryToAppState(store: GoalStateEntry): {
+  goals: Record<string, Goal>
+  focusedGoalId: string | undefined
+} {
+  const goals: Record<string, Goal> = {}
+  for (const [id, p] of Object.entries(store.goals)) {
+    goals[id] = persistedToGoal(p)
+  }
+  return { goals, focusedGoalId: store.focusedGoalId }
+}
+
+/**
+ * The goal that auto-continues and is shown in the footer. Undefined when no
+ * goal pool exists or nothing is focused.
+ */
+export function getFocusedGoal(state: AppState): Goal | undefined {
+  const { goals, focusedGoalId } = state
+  if (!goals || !focusedGoalId) return undefined
+  return goals[focusedGoalId]
+}
 
 export const GOAL_CONTINUATION_PREFIX = '[goal] Continue working toward goal '
 const BLOCKED_AUDIT_TURNS = 3

@@ -27,6 +27,7 @@ import { useAppState, useAppStateStore } from 'src/state/AppState.js';
 import { getIsRemoteMode } from '../../bootstrap/state.js';
 import HistorySearchInput from './HistorySearchInput.js';
 import { goalStatusColor } from './GoalIndicator.js';
+import { getFocusedGoal, isGoalInactive } from '../../utils/goal.js';
 import { usePrStatus } from '../../hooks/usePrStatus.js';
 import { KeyboardShortcutHint } from '../design-system/KeyboardShortcutHint.js';
 import { Byline } from '../design-system/Byline.js';
@@ -261,7 +262,8 @@ function ModeIndicator({
   const expandedView = useAppState(s_3 => s_3.expandedView);
   const showSpinnerTree = expandedView === 'teammates';
   const prStatus = usePrStatus(isLoading, isPrStatusEnabled());
-  const goal = useAppState(s => s.goal);
+  const goal = useAppState(getFocusedGoal);
+  const goals = useAppState(s => s.goals);
   const goalMode = useAppState(s => s.toolPermissionContext.mode);
   const hasTmuxSession = useAppState(s_4 => "external" === 'ant' && s_4.tungstenActiveSession !== undefined);
   const nextTickAt = useSyncExternalStore(proactiveModule?.subscribeToProactiveChanges ?? NO_OP_SUBSCRIBE, proactiveModule?.getNextTickAt ?? NULL, NULL);
@@ -366,8 +368,13 @@ function ModeIndicator({
   const goalPlanSuppressed = goal?.status === 'pursuing' && goalMode === 'plan';
   const goalLabel = goalPlanSuppressed ? 'paused: plan mode' : goal?.status;
   const goalDotColor = goalPlanSuppressed ? 'yellow' : goal ? goalStatusColor(goal.status) : undefined;
+  const goalOtherOpen = goal
+    ? Object.values(goals ?? {}).filter(
+        g => g.id !== goal.id && !isGoalInactive(g.status),
+      ).length
+    : 0
   const goalInline = goal
-    ? <Text><Text color={goalDotColor}>●</Text><Text dimColor> goal: </Text><Text>{goalTruncated}</Text><Text dimColor> [{goalLabel}]</Text></Text>
+    ? <Text><Text color={goalDotColor}>●</Text><Text dimColor> goal: </Text><Text>{goalTruncated}</Text><Text dimColor> [{goalLabel}]</Text>{goalOtherOpen > 0 ? <Text dimColor> (+{goalOtherOpen} open)</Text> : null}</Text>
     : null;
 
   // Build parts array - exclude BackgroundTaskStatus when we have teammate pills

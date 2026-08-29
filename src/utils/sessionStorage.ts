@@ -41,7 +41,8 @@ import {
   asSessionId,
   type SessionId,
 } from '../types/ids.js'
-import type { AttributionSnapshotMessage, GoalEntry } from '../types/logs.js'
+import type { AttributionSnapshotMessage, GoalEntry, GoalStateEntry } from '../types/logs.js'
+import { legacyGoalEntryToState } from './goal.js'
 import {
   type ContentReplacementEntry,
   type ContextCollapseCommitEntry,
@@ -545,10 +546,10 @@ class Project {
   currentSessionPrNumber: number | undefined
   currentSessionPrUrl: string | undefined
   currentSessionPrRepository: string | undefined
-  // /goal state — re-appended on exit so --resume restores it
-  // Tri-state: undefined = never touched, GoalEntry = active goal,
-  // null = cleared (write a tombstone so resume doesn't restore stale goal).
-  currentSessionGoal: GoalEntry | null | undefined
+  // /goal pool + focus — re-appended on exit so --resume restores it.
+  // Tri-state: undefined = never touched, GoalStateEntry = active pool,
+  // null = cleared (write a tombstone so resume doesn't restore stale goals).
+  currentSessionGoalStore: GoalStateEntry | null | undefined
 
   sessionFile: string | null = null
   // Entries buffered while sessionFile is null. Flushed by materializeSessionFile
@@ -840,24 +841,18 @@ class Project {
         timestamp: new Date().toISOString(),
       })
     }
-    if (this.currentSessionGoal) {
+    if (this.currentSessionGoalStore) {
       appendEntryToFile(this.sessionFile, {
-        ...this.currentSessionGoal,
+        ...this.currentSessionGoalStore,
         sessionId,
       })
-    } else if (this.currentSessionGoal === null) {
-      // Goal was explicitly cleared — write a tombstone so resume
-      // doesn't restore a stale goal from an earlier entry.
+    } else if (this.currentSessionGoalStore === null) {
+      // Goal pool was explicitly cleared — write a tombstone so resume
+      // doesn't restore stale goals from an earlier entry.
       appendEntryToFile(this.sessionFile, {
-        type: 'goal',
-        id: '__cleared__',
-        objective: '',
-        status: 'achieved',
-        startedAt: 0,
-        startCostUSD: 0,
-        startTokensUsed: 0,
-        continuationCount: 0,
-        lastUpdatedAt: 0,
+        type: 'goal-state',
+        goals: {},
+        focusedGoalId: undefined,
         sessionId,
       })
     }
@@ -2378,7 +2373,7 @@ export async function loadTranscriptFromFile(
       worktreeSession: worktreeStates.has(sessionId)
         ? worktreeStates.get(sessionId)
         : undefined,
-      goal,
+      goalStore,
     }
   }
 
@@ -2793,7 +2788,7 @@ export function restoreSessionMetadata(meta: {
   prNumber?: number
   prUrl?: string
   prRepository?: string
-  goal?: GoalEntry
+  goalStore?: GoalStateEntry
 }): void {
   const project = getProject()
   // ??= so --name (cacheSessionTitle) wins over the resumed
@@ -2810,7 +2805,7 @@ export function restoreSessionMetadata(meta: {
     project.currentSessionPrNumber = meta.prNumber
   if (meta.prUrl) project.currentSessionPrUrl = meta.prUrl
   if (meta.prRepository) project.currentSessionPrRepository = meta.prRepository
-  if (meta.goal) project.currentSessionGoal = meta.goal
+  if (meta.goalStore) project.currentSessionGoalStore = meta.goalStore
 }
 
 /**
@@ -2953,39 +2948,33 @@ export function saveWorktreeState(
  * Written eagerly on every goal change so the transcript always reflects
  * the latest state. Last-wins on restore — the freshest entry wins.
  */
-export function saveGoal(goal: GoalEntry): void {
+export function saveGoal(goalStore: GoalStateEntry): void {
   const project = getProject()
-  project.currentSessionGoal = goal
+  project.currentSessionGoalStore = goalStore
   // Write immediately so the transcript reflects the latest state at all times.
   // reAppendSessionMetadata also re-appends on exit, but without an immediate
   // write a crash after goal change but before exit would lose the update.
   if (project.sessionFile) {
     appendEntryToFile(project.sessionFile, {
-      ...goal,
+      ...goalStore,
       sessionId: getSessionId(),
     })
   }
 }
 
 /**
- * Clear the goal state and write a tombstone entry to the transcript.
+ * Clear the goal pool and write a tombstone entry to the transcript.
  * Without the tombstone, a stale goal entry from earlier in the session
  * would be restored on --resume (last-wins, but no later entry to win).
  */
 export function clearGoal(): void {
   const project = getProject()
-  project.currentSessionGoal = null
+  project.currentSessionGoalStore = null
   if (project.sessionFile) {
     appendEntryToFile(project.sessionFile, {
-      type: 'goal',
-      id: '__cleared__',
-      objective: '',
-      status: 'achieved',
-      startedAt: 0,
-      startCostUSD: 0,
-      startTokensUsed: 0,
-      continuationCount: 0,
-      lastUpdatedAt: 0,
+      type: 'goal-state',
+      goals: {},
+      focusedGoalId: undefined,
       sessionId: getSessionId(),
     })
   }
@@ -3050,7 +3039,7 @@ export async function loadFullLog(log: LogOption): Promise<LogOption> {
       contextCollapseCommits,
       contextCollapseSnapshot,
       leafUuids,
-      goal,
+      goalStore,
     } = await loadTranscriptFile(sessionFile)
 
     if (messages.size === 0) {
@@ -3121,7 +3110,7 @@ export async function loadFullLog(log: LogOption): Promise<LogOption> {
         sessionId && contextCollapseSnapshot?.sessionId === sessionId
           ? contextCollapseSnapshot
           : undefined,
-      goal,
+      goalStore,
     }
   } catch {
     // If loading fails, return the original log
@@ -3593,8 +3582,8 @@ export async function loadTranscriptFile(
   const contextCollapseCommits: ContextCollapseCommitEntry[] = []
   // Last-wins — later entries supersede.
   let contextCollapseSnapshot: ContextCollapseSnapshotEntry | undefined
-  // Last-wins — later goal entries supersede.
-  let goal: GoalEntry | undefined
+  // Last-wins — later goal-state entries supersede.
+  let goalStore: GoalStateEntry | undefined
 
   try {
     // For large transcripts, avoid materializing megabytes of stale content.
@@ -3756,8 +3745,11 @@ export async function loadTranscriptFile(
         prNumbers.set(entry.sessionId, entry.prNumber)
         prUrls.set(entry.sessionId, entry.prUrl)
         prRepositories.set(entry.sessionId, entry.prRepository)
+      } else if (entry.type === 'goal-state' && entry.sessionId) {
+        goalStore = entry
       } else if (entry.type === 'goal' && entry.sessionId) {
-        goal = entry.id === '__cleared__' ? undefined : entry
+        // Legacy single-goal entry — migrate to the pool shape (last-wins).
+        goalStore = legacyGoalEntryToState(entry)
       } else if (entry.type === 'file-history-snapshot') {
         fileHistorySnapshots.set(entry.messageId, entry)
       } else if (entry.type === 'attribution-snapshot') {
@@ -3892,7 +3884,7 @@ export async function loadTranscriptFile(
     contextCollapseCommits,
     contextCollapseSnapshot,
     leafUuids,
-    goal,
+    goalStore,
   }
 }
 
@@ -3911,7 +3903,7 @@ async function loadSessionFile(sessionId: UUID): Promise<{
   contentReplacements: Map<UUID, ContentReplacementRecord[]>
   contextCollapseCommits: ContextCollapseCommitEntry[]
   contextCollapseSnapshot: ContextCollapseSnapshotEntry | undefined
-  goal?: GoalEntry
+  goal?: GoalStateEntry
 }> {
   const sessionFile = join(
     getSessionProjectDir() ?? getProjectDir(getOriginalCwd()),
@@ -3967,7 +3959,7 @@ export async function getLastSessionLog(
     contentReplacements,
     contextCollapseCommits,
     contextCollapseSnapshot,
-    goal,
+    goalStore,
   } = await loadSessionFile(sessionId)
   if (messages.size === 0) return null
   // Prime getSessionMessages cache so recordTranscript (called after REPL
@@ -4014,7 +4006,7 @@ export async function getLastSessionLog(
       contextCollapseSnapshot?.sessionId === sessionId
         ? contextCollapseSnapshot
         : undefined,
-    goal,
+    goalStore,
   }
 }
 
@@ -4702,7 +4694,7 @@ export async function loadAllLogsFromSessionFile(
     attributionSnapshots,
     contentReplacements,
     leafUuids,
-    goal,
+    goalStore,
   } = await loadTranscriptFile(sessionFile, { keepAllLeaves: true })
 
   if (messages.size === 0) return []
@@ -4775,7 +4767,7 @@ export async function loadAllLogsFromSessionFile(
         chain,
       ),
       contentReplacements: contentReplacements.get(sessionId) ?? [],
-      goal,
+      goalStore,
     })
   }
 

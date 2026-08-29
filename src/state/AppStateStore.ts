@@ -272,8 +272,11 @@ export type AppState = DeepImmutable<{
   bagelUrl?: string
   // WebBrowser tool: sticky panel visibility toggle
   bagelPanelVisible?: boolean
-  // /goal — long-running autonomous objective. Set via `/goal <objective>`.
-  goal: Goal | undefined
+  // /goal — long-running autonomous objectives. `goals` is the pool of open
+  // goals (multi-goal support); `focusedGoalId` selects the goal that
+  // auto-continues and is shown in the footer. Set via `/goal <objective>`.
+  goals: Record<string, Goal> | undefined
+  focusedGoalId: string | undefined
   // chicago MCP session state. Types inlined (not imported from
   // @ant/computer-use-mcp/types) so external typecheck passes without the
   // ant-scoped dep resolved. Shapes match `AppGrant`/`CuGrantFlags`
@@ -588,6 +591,7 @@ export function getDefaultAppState(): AppState {
     effortValue: undefined,
     activeOverlays: new Set<string>(),
     fastMode: false,
-    goal: undefined,
+    goals: undefined,
+    focusedGoalId: undefined,
   }
 }

@@ -26,11 +26,13 @@ import type {
   ContextCollapseCommitEntry,
   ContextCollapseSnapshotEntry,
   GoalEntry,
+  GoalStateEntry,
   PersistedWorktreeSession,
 } from '../types/logs.js'
 import type { Message } from '../types/message.js'
 import { renameRecordingForSession } from './asciicast.js'
 import { clearMemoryFileCaches } from './claudemd.js'
+import { goalStateEntryToAppState } from './goal.js'
 import {
   type AttributionState,
   attributionRestoreStateFromLog,
@@ -313,7 +315,7 @@ type ResumeLoadResult = {
   prNumber?: number
   prUrl?: string
   prRepository?: string
-  goal?: GoalEntry
+  goalStore?: GoalStateEntry
 }
 
 /**
@@ -548,7 +550,7 @@ export async function processResumedConversation(
       ...(restoredAttribution && { attribution: restoredAttribution }),
       ...(standaloneAgentContext && { standaloneAgentContext }),
       agentDefinitions: refreshedAgentDefs,
-      ...(result.goal && { goal: result.goal }),
+      ...(result.goalStore && goalStateEntryToAppState(result.goalStore)),
     },
   }
 }

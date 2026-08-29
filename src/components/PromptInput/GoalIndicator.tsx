@@ -2,6 +2,7 @@ import * as React from 'react'
 import { Text } from '../../ink.js'
 import { useAppState } from '../../state/AppState.js'
 import type { GoalStatus } from '../../state/AppStateStore.js'
+import { getFocusedGoal, isGoalInactive } from '../../utils/goal.js'
 
 const MAX_OBJECTIVE_CHARS = 40
 
@@ -23,7 +24,9 @@ export function goalStatusColor(status: GoalStatus): string {
 }
 
 export function GoalIndicator(): React.ReactNode {
-  const goal = useAppState(s => s.goal)
+  const goals = useAppState(s => s.goals)
+  const focusedGoalId = useAppState(s => s.focusedGoalId)
+  const goal = useAppState(getFocusedGoal)
   const mode = useAppState(s => s.toolPermissionContext.mode)
   if (!goal) return null
 
@@ -36,12 +39,20 @@ export function GoalIndicator(): React.ReactNode {
   const label = planSuppressed ? 'paused: plan mode' : goal.status
   const dotColor = planSuppressed ? 'yellow' : goalStatusColor(goal.status)
 
+  const otherOpen =
+    goals && focusedGoalId
+      ? Object.values(goals).filter(
+          g => g.id !== focusedGoalId && !isGoalInactive(g.status),
+        ).length
+      : 0
+
   return (
     <Text>
       <Text color={dotColor}>●</Text>
       <Text dimColor> goal: </Text>
       <Text>{truncated}</Text>
       <Text dimColor> [{label}]</Text>
+      {otherOpen > 0 ? <Text dimColor> (+{otherOpen} open)</Text> : null}
     </Text>
   )
 }

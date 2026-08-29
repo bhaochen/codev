@@ -1,15 +1,19 @@
 import * as React from 'react'
 import { randomUUID } from 'crypto'
 import { getTotalCost as getTotalCostUSD } from '../../cost-tracker.js'
-import { getTotalTokensUsed } from '../../bootstrap/state.js'
+import { getSessionId, getTotalTokensUsed } from '../../bootstrap/state.js'
 import { Box, Text, useInput } from '../../ink.js'
+import type { AppState } from '../../state/AppState.js'
 import type { Goal, GoalStatus } from '../../state/AppStateStore.js'
 import type { LocalJSXCommandContext, LocalJSXCommandOnDone } from '../../types/command.js'
 import {
+  buildGoalStateEntry,
   buildObjectiveUpdatedPrompt,
   formatElapsed,
   formatGoalStatus,
+  getFocusedGoal,
   isGoalContinuationPrompt,
+  isGoalInactive,
 } from '../../utils/goal.js'
 import { clearGoal, saveGoal } from '../../utils/sessionStorage.js'
 import { enqueue, removeByFilter } from '../../utils/messageQueueManager.js'
@@ -106,7 +110,13 @@ function GoalOverwriteConfirm({
       continuationCount: 0,
       lastUpdatedAt: now,
     }
-    setAppState((prev: AppState) => ({ ...prev, goal: newGoal } satisfies AppState))
+    // Replace only the focused goal; other open goals in the pool are kept.
+    setGoal(setAppState, prev => {
+      const goals = { ...(prev.goals ?? {}) }
+      if (prev.focusedGoalId) delete goals[prev.focusedGoalId]
+      goals[newGoal.id] = newGoal
+      return { goals, focusedGoalId: newGoal.id }
+    })
     clearQueuedGoalContinuations()
 
     const message = inPlanMode
@@ -124,7 +134,7 @@ function GoalOverwriteConfirm({
       <Text bold>Replace existing goal?</Text>
       <Box marginTop={1}>
         <Text dimColor>
-          Current goal ({formatGoalStatus(existing.status)}):
+          Current focused goal ({formatGoalStatus(existing.status)}):
         </Text>
       </Box>
       <Text>{existing.objective}</Text>
@@ -142,25 +152,72 @@ function GoalOverwriteConfirm({
   )
 }
 
-type AppState = ReturnType<typeof context.getAppState>
+type GoalPatch = {
+  goals?: Record<string, Goal>
+  focusedGoalId?: string | undefined
+}
 
 function setGoal(
   setAppState: LocalJSXCommandContext['setAppState'],
-  updater: (prev: Goal | undefined) => Goal | undefined,
+  updater: (prev: { goals?: Record<string, Goal>; focusedGoalId?: string }) => GoalPatch,
 ): void {
   setAppState((prev: AppState) => {
-    const newGoal = updater(prev.goal)
-    if (newGoal) {
-      saveGoal({ type: 'goal', ...newGoal })
+    const next = updater({
+      goals: prev.goals,
+      focusedGoalId: prev.focusedGoalId,
+    })
+    if (next.goals) {
+      saveGoal(buildGoalStateEntry(next.goals, next.focusedGoalId, getSessionId()))
     } else {
       clearGoal()
     }
-    return { ...prev, goal: newGoal } satisfies AppState
+    return {
+      ...prev,
+      goals: next.goals,
+      focusedGoalId: next.focusedGoalId,
+    } satisfies AppState
   })
 }
 
 function clearQueuedGoalContinuations(): void {
   removeByFilter(cmd => isGoalContinuationPrompt(cmd.value))
+}
+
+function createGoal(objective: string): Goal {
+  const now = Date.now()
+  return {
+    id: randomUUID(),
+    objective: objective.trim(),
+    status: 'pursuing' as const,
+    startedAt: now,
+    startCostUSD: getTotalCostUSD(),
+    startTokensUsed: getTotalTokensUsed(),
+    continuationCount: 0,
+    lastUpdatedAt: now,
+  }
+}
+
+function createAndFocus(
+  setAppState: LocalJSXCommandContext['setAppState'],
+  objective: string,
+  inPlanMode: boolean,
+  onDone: LocalJSXCommandOnDone,
+): void {
+  const newGoal = createGoal(objective)
+  setGoal(setAppState, prev => ({
+    goals: { ...(prev.goals ?? {}), [newGoal.id]: newGoal },
+    focusedGoalId: newGoal.id,
+  }))
+  clearQueuedGoalContinuations()
+
+  const message = inPlanMode
+    ? `Goal set: ${objective}\nAuto-continuation is disabled while in Plan mode. Exit plan mode (Shift+Tab) to begin pursuit.`
+    : `Goal set: ${objective}\nThe agent will auto-continue toward this objective until it is achieved, blocked, or paused. Use /goal pause, /goal resume, /goal edit, /goal clear, or /goal list to manage it.`
+  onDone(message, {
+    metaMessages: [
+      `[goal] Active goal id: ${newGoal.id}. If calling update_goal for this goal, include goal_id='${newGoal.id}'.`,
+    ],
+  })
 }
 
 export async function call(
@@ -178,55 +235,102 @@ export async function call(
     : ''
 
   const appState = getAppState()
-  const existing = appState.goal
+  const goals = appState.goals
+  const focusedGoalId = appState.focusedGoalId
+  const focused = getFocusedGoal(appState)
   const inPlanMode = appState.toolPermissionContext.mode === 'plan'
 
+  // /goal list — show every open goal and which is focused.
+  if (sub === 'list') {
+    if (!goals || Object.keys(goals).length === 0) {
+      onDone('No goals. Set one with: /goal <objective>')
+      return null
+    }
+    const lines = Object.values(goals).map(g => {
+      const marker = g.id === focusedGoalId ? '*' : ' '
+      return `${marker} ${g.id.slice(0, 8)}  [${formatGoalStatus(g.status)}]  ${g.objective}`
+    })
+    onDone(`Goals (\* = focused):\n${lines.join('\n')}`)
+    return null
+  }
+
+  // /goal focus <id> — switch the focused goal (drives auto-continue + footer).
+  if (sub === 'focus') {
+    if (!goals || Object.keys(goals).length === 0) {
+      onDone('No goals to focus. Set one with: /goal <objective>')
+      return null
+    }
+    const q = rest.trim().toLowerCase()
+    if (!q) {
+      onDone('Usage: /goal focus <goal-id-prefix>')
+      return null
+    }
+    const match = Object.values(goals).find(
+      g => g.id.toLowerCase() === q || g.id.toLowerCase().startsWith(q),
+    )
+    if (!match) {
+      onDone(`No goal matching "${rest}". Use /goal list to see ids.`)
+      return null
+    }
+    setGoal(setAppState, prev => ({ goals: prev.goals, focusedGoalId: match.id }))
+    clearQueuedGoalContinuations()
+    onDone(`Focused goal ${match.id.slice(0, 8)}: ${match.objective}`)
+    return null
+  }
+
   if (sub === 'pause') {
-    if (!existing) {
+    if (!focused) {
       onDone('No active goal.')
       return null
     }
-    if (existing.status !== 'pursuing') {
-      onDone(`Goal is already ${formatGoalStatus(existing.status)}.`)
+    if (focused.status !== 'pursuing') {
+      onDone(`Goal is already ${formatGoalStatus(focused.status)}.`)
       return null
     }
-    setGoal(setAppState, g =>
-      g ? { ...g, status: 'paused', lastUpdatedAt: Date.now() } : g,
-    )
+    setGoal(setAppState, prev => ({
+      goals: prev.goals
+        ? { ...prev.goals, [prev.focusedGoalId!]: { ...focused, status: 'paused', lastUpdatedAt: Date.now() } }
+        : prev.goals,
+      focusedGoalId: prev.focusedGoalId,
+    }))
     clearQueuedGoalContinuations()
     onDone('Goal paused. Auto-continuation suspended.')
     return null
   }
 
   if (sub === 'resume') {
-    if (!existing) {
+    if (!focused) {
       onDone('No active goal.')
       return null
     }
-    if (existing.status === 'pursuing') {
+    if (focused.status === 'pursuing') {
       onDone('Goal already pursuing.')
       return null
     }
-    if (existing.status === 'achieved') {
+    if (focused.status === 'achieved') {
       onDone(
-        `Goal already ${formatGoalStatus(existing.status)}. Use /goal <objective> to start a new one.`,
+        `Goal already ${formatGoalStatus(focused.status)}. Use /goal <objective> to start a new one.`,
       )
       return null
     }
-    setGoal(setAppState, g =>
-      g
+    setGoal(setAppState, prev => ({
+      goals: prev.goals
         ? {
-            ...g,
-            status: 'pursuing',
-            continuationCount: 0,
-            startedAt: Date.now(),
-            startCostUSD: getTotalCostUSD(),
-            startTokensUsed: getTotalTokensUsed(),
-            lastUpdatedAt: Date.now(),
-            lastReason: undefined,
+            ...prev.goals,
+            [prev.focusedGoalId!]: {
+              ...focused,
+              status: 'pursuing',
+              continuationCount: 0,
+              startedAt: Date.now(),
+              startCostUSD: getTotalCostUSD(),
+              startTokensUsed: getTotalTokensUsed(),
+              lastUpdatedAt: Date.now(),
+              lastReason: undefined,
+            },
           }
-        : g,
-    )
+        : prev.goals,
+      focusedGoalId: prev.focusedGoalId,
+    }))
     clearQueuedGoalContinuations()
     onDone(
       'Goal resumed. Continuation count and budget window reset; auto-continuation will start on the next idle tick.',
@@ -235,18 +339,30 @@ export async function call(
   }
 
   if (sub === 'clear') {
-    if (!existing) {
+    if (!focused) {
       onDone('No active goal.')
       return null
     }
-    setGoal(setAppState, () => undefined)
+    const clearedId = focusedGoalId
+    setGoal(setAppState, prev => {
+      const nextGoals = { ...(prev.goals ?? {}) }
+      if (clearedId) delete nextGoals[clearedId]
+      const remaining = Object.keys(nextGoals)
+      return {
+        goals: remaining.length > 0 ? nextGoals : undefined,
+        focusedGoalId:
+          remaining.length > 0
+            ? remaining[0]
+            : undefined,
+      }
+    })
     clearQueuedGoalContinuations()
     onDone('Goal cleared.')
     return null
   }
 
   if (sub === 'edit') {
-    if (!existing) {
+    if (!focused) {
       onDone('No active goal. Set one with: /goal <objective>')
       return null
     }
@@ -254,26 +370,23 @@ export async function call(
       onDone('Usage: /goal edit <new objective>')
       return null
     }
-    setGoal(setAppState, g =>
-      g
-        ? {
-            ...g,
-            objective: rest,
-            lastUpdatedAt: Date.now(),
-          }
-        : g,
-    )
+    setGoal(setAppState, prev => ({
+      goals: prev.goals
+        ? { ...prev.goals, [prev.focusedGoalId!]: { ...focused, objective: rest, lastUpdatedAt: Date.now() } }
+        : prev.goals,
+      focusedGoalId: prev.focusedGoalId,
+    }))
     clearQueuedGoalContinuations()
     onDone(`Goal objective updated to: ${rest}`, {
       metaMessages: [
-        buildObjectiveUpdatedPrompt({ ...existing, objective: rest }),
+        buildObjectiveUpdatedPrompt({ ...focused, objective: rest }),
       ],
     })
     return null
   }
 
   if (trimmed === '') {
-    if (!existing) {
+    if (!focused) {
       onDone(
         'No active goal. Set one with: /goal <objective>\nThen the agent will auto-continue toward it across turns.',
       )
@@ -281,7 +394,7 @@ export async function call(
     }
     const display = (
       <GoalDisplay
-        goal={existing as Goal}
+        goal={focused as Goal}
         now={Date.now()}
       />
     )
@@ -290,45 +403,26 @@ export async function call(
     return null
   }
 
-  const objective = (sub === 'set' ? rest : trimmed).trim()
+  const objective = (sub === 'set' || sub === 'add') ? rest : trimmed
   if (!objective) {
     onDone('Missing objective.\nUsage: /goal <objective>')
     return null
   }
 
-  if (existing && (existing.status === 'pursuing' || existing.status === 'paused')) {
-    return (
-      <GoalOverwriteConfirm
-        existing={existing}
-        objective={objective}
-        context={context}
-        onDone={onDone}
-        inPlanMode={inPlanMode}
-      />
-    )
+  // /goal add <objective> — always create a new goal without replacing.
+  if (sub === 'add' || !focused || isGoalInactive(focused.status)) {
+    createAndFocus(setAppState, objective, inPlanMode, onDone)
+    return null
   }
 
-  const now = Date.now()
-  const newGoal: Goal = {
-    id: randomUUID(),
-    objective,
-    status: 'pursuing',
-    startedAt: now,
-    startCostUSD: getTotalCostUSD(),
-    startTokensUsed: getTotalTokensUsed(),
-    continuationCount: 0,
-    lastUpdatedAt: now,
-  }
-  setGoal(setAppState, () => newGoal)
-  clearQueuedGoalContinuations()
-
-  const message = inPlanMode
-    ? `Goal set: ${objective}\nAuto-continuation is disabled while in Plan mode. Exit plan mode (Shift+Tab) to begin pursuit.`
-    : `Goal set: ${objective}\nThe agent will auto-continue toward this objective until it is achieved, blocked, or paused. Use /goal pause, /goal resume, /goal edit, or /goal clear to manage it.`
-  onDone(message, {
-    metaMessages: [
-      `[goal] Active goal id: ${newGoal.id}. If calling update_goal for this goal, include goal_id='${newGoal.id}'.`,
-    ],
-  })
-  return null
+  // An active goal is focused — confirm before replacing it.
+  return (
+    <GoalOverwriteConfirm
+      existing={focused}
+      objective={objective}
+      context={context}
+      onDone={onDone}
+      inPlanMode={inPlanMode}
+    />
+  )
 }

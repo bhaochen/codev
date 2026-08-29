@@ -1,8 +1,11 @@
 import { z } from 'zod'
 import { buildTool, type ToolDef } from '../../Tool.js'
+import { getSessionId } from '../../bootstrap/state.js'
 import { lazySchema } from '../../utils/lazySchema.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
+import { buildGoalStateEntry, getFocusedGoal } from '../../utils/goal.js'
 import { saveGoal } from '../../utils/sessionStorage.js'
+import type { Goal } from '../../state/AppStateStore.js'
 import {
   DESCRIPTION,
   UPDATE_GOAL_TOOL_NAME,
@@ -81,7 +84,7 @@ export const GoalUpdateTool = buildTool({
   renderToolUseMessage,
   renderToolResultMessage,
   async call({ goal_id, status, reason }, { getAppState, setAppState }) {
-    const goal = getAppState().goal
+    const goal = getFocusedGoal(getAppState())
     if (
       !goal ||
       (goal.status !== 'pursuing' && goal.status !== 'paused')
@@ -100,7 +103,7 @@ export const GoalUpdateTool = buildTool({
           status: 'stale-goal' as const,
           reason,
           message:
-            'Goal id does not match the active goal — ignoring stale update.',
+            'Goal id does not match the focused goal — ignoring stale update.',
         },
       }
     }
@@ -112,29 +115,35 @@ export const GoalUpdateTool = buildTool({
         ? ('achieved' as const)
         : ('blocked' as const)
 
-    let updatedGoal: typeof goal | null = null
+    let updatedGoal: Goal | null = null
+    let nextGoals: Record<string, Goal> | undefined
+    let nextFocused: string | undefined
     setAppState(prev => {
-      const current = prev.goal
+      const current = prev.goals?.[goal_id]
       if (
         !current ||
-        current.id !== goal_id ||
         (current.status !== 'pursuing' && current.status !== 'paused')
       ) {
         return prev
       }
+      const goals = { ...(prev.goals ?? {}) }
       updatedGoal = {
         ...current,
         status: internalStatus,
         lastReason: reason,
         lastUpdatedAt: now,
       }
+      goals[goal_id] = updatedGoal
+      nextGoals = goals
+      nextFocused = prev.focusedGoalId
       return {
         ...prev,
-        goal: updatedGoal,
+        goals,
+        focusedGoalId: prev.focusedGoalId,
       }
     })
 
-    if (!updatedGoal) {
+    if (!updatedGoal || !nextGoals) {
       return {
         data: {
           status: 'stale-goal' as const,
@@ -145,10 +154,7 @@ export const GoalUpdateTool = buildTool({
       }
     }
 
-    saveGoal({
-      type: 'goal',
-      ...updatedGoal,
-    })
+    saveGoal(buildGoalStateEntry(nextGoals, nextFocused, getSessionId()))
 
     return {
       data: {

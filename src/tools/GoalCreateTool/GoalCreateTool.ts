@@ -1,12 +1,15 @@
 import { randomUUID } from 'crypto'
 import { z } from 'zod'
-import { getTotalTokensUsed } from '../../bootstrap/state.js'
+import type { Goal } from '../../state/AppStateStore.js'
+import { getSessionId, getTotalTokensUsed } from '../../bootstrap/state.js'
 import { getTotalCost } from '../../cost-tracker.js'
 import { buildTool, type ToolDef } from '../../Tool.js'
 import { lazySchema } from '../../utils/lazySchema.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import {
+  buildGoalStateEntry,
   formatGoalStatus,
+  getFocusedGoal,
   isGoalInactive,
 } from '../../utils/goal.js'
 import {
@@ -79,7 +82,7 @@ export const GoalCreateTool = buildTool({
   renderToolResultMessage,
   async call({ objective }, { getAppState, setAppState }) {
     const appState = getAppState()
-    const existing = appState.goal
+    const existing = getFocusedGoal(appState)
 
     if (existing && !isGoalInactive(existing.status)) {
       return {
@@ -92,31 +95,23 @@ export const GoalCreateTool = buildTool({
 
     const now = Date.now()
     const goalId = randomUUID()
-
-    setAppState(prev => ({
-      ...prev,
-      goal: {
-        id: goalId,
-        objective: objective.trim(),
-        status: 'pursuing' as const,
-        startedAt: now,
-        startCostUSD: getTotalCost(),
-        startTokensUsed: getTotalTokensUsed(),
-        continuationCount: 0,
-        lastUpdatedAt: now,
-      },
-    }))
-    saveGoal({
-      type: 'goal',
+    const newGoal: Goal = {
       id: goalId,
       objective: objective.trim(),
-      status: 'pursuing',
+      status: 'pursuing' as const,
       startedAt: now,
       startCostUSD: getTotalCost(),
       startTokensUsed: getTotalTokensUsed(),
       continuationCount: 0,
       lastUpdatedAt: now,
-    })
+    }
+
+    setAppState(prev => ({
+      ...prev,
+      goals: { ...(prev.goals ?? {}), [goalId]: newGoal },
+      focusedGoalId: goalId,
+    }))
+    saveGoal(buildGoalStateEntry({ [goalId]: newGoal }, goalId, getSessionId()))
 
     return {
       data: {

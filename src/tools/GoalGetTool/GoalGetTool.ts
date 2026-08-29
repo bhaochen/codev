@@ -5,6 +5,7 @@ import { jsonStringify } from '../../utils/slowOperations.js'
 import {
   formatElapsed,
   formatGoalStatus,
+  getFocusedGoal,
 } from '../../utils/goal.js'
 import {
   DESCRIPTION,
@@ -71,7 +72,7 @@ export const GoalGetTool = buildTool({
   renderToolUseMessage,
   renderToolResultMessage,
   async call(_input, { getAppState }) {
-    const goal = getAppState().goal
+    const goal = getFocusedGoal(getAppState())
 
     if (!goal) {
       return {
