@@ -180,7 +180,7 @@ export function buildContinuationPrompt(goal: Goal, now: number): string {
     '',
     'Do not rely on intent, partial progress, memory of earlier work, or a plausible final answer as proof of completion. Marking the goal complete is a claim that the full objective has been finished and can withstand requirement-by-requirement scrutiny. Only mark the goal achieved when current evidence proves every requirement has been satisfied and no required work remains. If the evidence is incomplete, weak, indirect, merely consistent with completion, or leaves any requirement missing, incomplete, or unverified, keep working instead of marking the goal complete.',
     '',
-    `If the objective is achieved, call update_goal with goal_id='${goal.id}', status='complete'.`,
+    `If the objective is achieved, call update_goal with goal_id='${goal.id}', status='complete', reason='<one short sentence: what was accomplished>'. The reason field is required; omitting it fails validation.`,
     '',
     'Blocked audit:',
     `- Do not call update_goal with status 'blocked' the first time a blocker appears.`,
@@ -222,7 +222,7 @@ export function buildGoalReminder(goal: Goal): string {
     '<objective>',
     objective,
     '</objective>',
-    `Continue working toward it. Call update_goal with goal_id='${goal.id}', status='complete' when done, or status='blocked' after ${BLOCKED_AUDIT_TURNS} consecutive turns with the same blocking condition.`,
+    `Continue working toward it. When done, call update_goal with goal_id='${goal.id}', status='complete', reason='<one short sentence>'. If the same blocking condition repeats for ${BLOCKED_AUDIT_TURNS} consecutive turns, call it with status='blocked', reason='<one short sentence>'. The reason field is required; omitting it fails validation.`,
   ].join('\n')
 }
 

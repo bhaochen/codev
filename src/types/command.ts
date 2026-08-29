@@ -103,6 +103,7 @@ export type ResumeEntrypoint =
   | 'slash_command_session_id'
   | 'slash_command_title'
   | 'fork'
+  | 'tree'
 
 export type CommandResultDisplay = 'skip' | 'system' | 'user'
 
