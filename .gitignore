@@ -8,15 +8,6 @@ dist/
 Codev
 codev
 
-# Prebuilt native binaries (tracked in claude-code/ reference)
-vendor/
-
-# Friend VRM frontend (Vite + Tauri) build artifacts
-src/components/friend/frontend/node_modules/
-src/components/friend/frontend/dist/
-src/components/friend/frontend/src-tauri/target/
-src/components/friend/frontend/src-tauri/gen/
-
 # Python cache
 __pycache__/
 *.py[cod]
