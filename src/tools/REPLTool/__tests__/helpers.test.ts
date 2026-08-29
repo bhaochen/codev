@@ -1,5 +1,7 @@
 import { describe, test, expect } from 'bun:test'
-import { readFileSync, rmSync } from 'node:fs'
+import { execSync } from 'node:child_process'
+import { join } from 'node:path'
+import { readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { ReplEngine } from '../engine.js'
 import { getReplPrimitiveTools } from '../primitiveTools.js'
 import type { ToolUseContext, Tools } from '../../../Tool.js'
@@ -55,11 +57,21 @@ describe('REPL file-edit helpers', () => {
   })
 
   test('diffFile shows a +/- git diff for a tracked modified file', async () => {
-    const engine = new ReplEngine(getReplPrimitiveTools() as Tools, mockContext())
-    const target = '/home/yuki/Code/Agent/codev/src/tools/REPLTool/engine.ts'
-    const res = await engine.execute("diffFile('" + target + "')", 't')
-    // engine.ts is a tracked, modified file in this repo, so git diff shows our added line
-    expect(res.result).toContain('createReplHelpers')
+    const repoRoot = '/home/yuki/Code/Agent/codev'
+    const tmp = join(repoRoot, 'tmp_diff_test.txt')
+    let res
+    try {
+      writeFileSync(tmp, 'line one\nline two\n')
+      execSync('git -C ' + repoRoot + ' add ' + tmp)
+      writeFileSync(tmp, 'line one\nline two added\n')
+      const engine = new ReplEngine(getReplPrimitiveTools() as Tools, mockContext())
+      res = await engine.execute("diffFile('" + tmp + "')", 't')
+    } finally {
+      execSync('git -C ' + repoRoot + ' rm --cached -f ' + tmp)
+      rmSync(tmp, { force: true })
+    }
+    expect(res.result).toContain('line two added')
+    expect(res.result).toContain('+')
   })
 
   test('raw primitive Write/Edit via callTool persist in REPL (readFileState priming)', async () => {
