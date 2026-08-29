@@ -82,6 +82,14 @@ Available tools (case-insensitive):
 - "Edit" — edit file. Input: { file_path: "path", old_string: "a", new_string: "b" }
 - "Bash" — run shell command. Input: { command: "ls -la" }
 
+Reliable file-edit helpers are also exposed as globals — they write straight to disk, print a +/- diff of the change, and do not require a prior Read:
+- readFile(path) → returns file contents
+- writeFile(path, content) → writes file, prints added/removed diff
+- editFile(path, old, new, {replaceAll?}) → replaces a string, prints diff
+- viewFile(path) → prints the file with line numbers (like Read)
+- diffFile(path, ref?) → prints the git working-tree (or vs ref) diff
+- showDiff(before, after, filePath?) → unified diff of two strings
+
 Example:
 \`\`\`js
 const files = await callTool("Glob", { pattern: "src/**/*.ts" });

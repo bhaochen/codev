@@ -11,6 +11,10 @@ import { createContext, Script } from 'node:vm'
 import { randomUUID } from 'node:crypto'
 import type { Tool, ToolUseContext, Tools } from '../../Tool.js'
 import { findToolByName } from '../../Tool.js'
+import { expandPath } from '../../utils/path.js'
+import { getFileModificationTime } from '../../utils/file.js'
+import { readFileSyncWithMetadata } from '../../utils/fileRead.js'
+import { createReplHelpers } from './helpers.js'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
 import {
   createAssistantMessage,
@@ -249,6 +253,30 @@ export class ReplEngine {
         }
       }
 
+      // Prime readFileState before Edit/Write so the tool's staleness gate
+      // does not reject the call in the REPL (the file need not be Read first
+      // in-session). The reliable helpers do this too; this keeps the raw
+      // primitive Edit/Write tools working directly.
+      const toolNameLower = tool.name.toLowerCase()
+      if (
+        (toolNameLower === 'edit' || toolNameLower === 'write') &&
+        input &&
+        typeof input.file_path === 'string'
+      ) {
+        try {
+          const abs = expandPath(input.file_path)
+          const meta = readFileSyncWithMetadata(abs)
+          self.toolUseContext.readFileState.set(abs, {
+            content: meta.content,
+            timestamp: getFileModificationTime(abs),
+            offset: undefined,
+            limit: undefined,
+          })
+        } catch {
+          // file does not exist yet (new file) or unreadable; the tool handles it
+        }
+      }
+
       // 校验输入
       const parsed = tool.inputSchema.safeParse(input)
       if (!parsed.success) {
@@ -364,9 +392,24 @@ export class ReplEngine {
     }
 
     // 安全沙箱：Proxy 拦截禁止的标识符访问
+    const helpers = createReplHelpers({
+      getContext: () => self.toolUseContext,
+      log: (line: string) => {
+        self.output.push(line)
+      },
+    })
+
     const sandbox: Record<string, unknown> = {
       // 工具调用
       callTool: callToolFn,
+
+      // Reliable file-edit helpers: write directly to disk, print a +/- diff, bypass the readFileState gate
+      readFile: helpers.readFile,
+      writeFile: helpers.writeFile,
+      editFile: helpers.editFile,
+      viewFile: helpers.viewFile,
+      diffFile: helpers.diffFile,
+      showDiff: helpers.showDiff,
 
       // 安全内置
       JSON,
