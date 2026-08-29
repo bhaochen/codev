@@ -152,6 +152,70 @@ function GoalOverwriteConfirm({
   )
 }
 
+function GoalFocusPicker({
+  goals,
+  focusedGoalId,
+  setAppState,
+  onDone,
+}: {
+  goals: Record<string, Goal>
+  focusedGoalId: string | undefined
+  setAppState: LocalJSXCommandContext['setAppState']
+  onDone: LocalJSXCommandOnDone
+}): React.ReactNode {
+  const list = Object.values(goals)
+  const [selected, setSelected] = React.useState(() => {
+    const idx = focusedGoalId ? list.findIndex(g => g.id === focusedGoalId) : -1
+    return idx >= 0 ? idx : 0
+  })
+  const [confirmed, setConfirmed] = React.useState<number | null>(null)
+
+  useInput((input, key) => {
+    if (confirmed !== null) return
+    if (key.upArrow || input === 'k') {
+      setSelected(s => (s > 0 ? s - 1 : list.length - 1))
+    } else if (key.downArrow || input === 'j') {
+      setSelected(s => (s < list.length - 1 ? s + 1 : 0))
+    } else if (key.return || input === ' ') {
+      setConfirmed(selected)
+    } else if (key.escape) {
+      onDone('Goal focus unchanged.')
+    }
+  })
+
+  React.useEffect(() => {
+    if (confirmed === null) return
+    const goal = list[confirmed]
+    setGoal(setAppState, prev => ({ goals: prev.goals, focusedGoalId: goal.id }))
+    clearQueuedGoalContinuations()
+    onDone('Focused goal ' + goal.id.slice(0, 8) + ': ' + goal.objective)
+  }, [confirmed, list, setAppState, onDone])
+
+  return (
+    <Box flexDirection="column">
+      <Text bold>Focus which goal?</Text>
+      <Box marginTop={1} flexDirection="column">
+        {list.map((g, i) => {
+          const cursor = i === selected ? '▶' : ' '
+          const star = g.id === focusedGoalId ? '*' : ' '
+          const color = i === selected ? 'green' : undefined
+          return (
+            <Text key={g.id} color={color}>
+              {cursor} {star} {g.id.slice(0, 8)} [{formatGoalStatus(g.status)}]{' '}
+              {g.objective}
+            </Text>
+          )
+        })}
+      </Box>
+      <Box marginTop={1}>
+        <Text dimColor>
+          ↑/↓ or j/k to move · Enter to focus · Esc to cancel
+        </Text>
+      </Box>
+    </Box>
+  )
+}
+
 type GoalPatch = {
   goals?: Record<string, Goal>
   focusedGoalId?: string | undefined
@@ -262,8 +326,14 @@ export async function call(
     }
     const q = rest.trim().toLowerCase()
     if (!q) {
-      onDone('Usage: /goal focus <goal-id-prefix>')
-      return null
+      return (
+        <GoalFocusPicker
+          goals={goals}
+          focusedGoalId={focusedGoalId}
+          setAppState={setAppState}
+          onDone={onDone}
+        />
+      )
     }
     const match = Object.values(goals).find(
       g => g.id.toLowerCase() === q || g.id.toLowerCase().startsWith(q),
