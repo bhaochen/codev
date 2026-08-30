@@ -23,6 +23,15 @@ export type ModelStrings = Record<ModelKey, string>
 const MODEL_KEYS = Object.keys(ALL_MODEL_CONFIGS) as ModelKey[]
 
 function getBuiltinModelStrings(provider: APIProvider): ModelStrings {
+  // getAPIProvider() can return null on a machine where no auth provider has
+  // been configured yet (e.g. a fresh first run before login). Falling through
+  // to the generic branch below would index ALL_MODEL_CONFIGS[key][null] and
+  // yield undefined model strings, which cascades into an infinite recursion in
+  // parseUserSpecifiedModel (undefined -> getDefaultMainLoopModel -> …). Default
+  // to firstParty builtins in that case.
+  if (!provider) {
+    provider = 'firstParty'
+  }
   if (provider === 'openai') {
     const out = getBuiltinModelStrings('firstParty') as Record<string, string>
     out.haiku45 = process.env.OPENAI_HAIKU_MODEL || 'gpt-5.4-mini'
