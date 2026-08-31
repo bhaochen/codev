@@ -148,7 +148,8 @@ export async function getAnthropicClient({
     await configureApiKeyHeaders(defaultHeaders, getIsNonInteractiveSession())
   }
 
-  // For OpenCode provider, use custom fetch to convert Anthropic format to OpenAI format
+  // For OpenCode provider: 主查询已在 claude.ts 走原生 OpenAI Chat 路径，不再依赖此 shim；
+  // 保留 shim 供 title/sidecar 等直调 getAnthropicClient 的兼容路径。
   const provider = getAPIProvider()
   let opencodeFetchOverride: ClientOptions['fetch'] | undefined
   if (provider === 'opencode') {

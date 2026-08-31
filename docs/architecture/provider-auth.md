@@ -152,27 +152,26 @@ GET /v1/models               GET /v1/models
 POST /v1/count_tokens        (无对应端点，需要 Stub)
 ```
 
-### 3.2 Fetch Override 机制
+### 3.2 Fetch Override vs 原生分流
 
-每个非 Anthropic Provider 实现一个 `createXxxFetchOverride()` 函数，通过 Anthropic SDK 的 `ClientOptions['fetch']` 钩子注入：
+* **Fetch Override 机制** (兼容路径): 非 Anthropic Provider 实现 `createXxxFetchOverride()` 通过 `ClientOptions['fetch']` 钩子注入 `getAnthropicClient()`：
 
 ```typescript
 export function createNvidiaFetchOverride(): 
   (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 ```
 
-该重写在 `getAnthropicClient()` 中按 Provider 选择性注入。`local` (Llama.cpp) 则不使用 Fetch Override，仅设置 `baseURL` 和 dummy API Key：
+* **原生分流** (推荐): `opencode`/`openai` 在 `src/services/api/claude.ts:queryModel` 直接按 `getAPIProvider()` 分流至 `queryModelOpencode`/`queryModelOpenAI`，不经 `Anthropic SDK`，直接 `fetch` 上游 Chat Completions。`opencode` 原生学习自 `opencode/packages/llm/src/route/client.ts:compile()` 的 `LLMRequest→Route(Protocol+Endpoint+Auth)→LLMClient.stream` 抽象，`codev` 侧简化为 `convertAnthropicMessagesToOpenAI → buildOpenAIRequestBody → adaptOpenAIStreamToAnthropic`。
 
 ```typescript
-// src/services/api/client.ts 第 150-163 行
-const provider = getAPIProvider()
-if (provider === 'opencode') {
-  opencodeFetchOverride = createOpenCodeFetchOverride(resolvedModel)
+// src/services/api/client.ts 第 150-163 行 (shim 保留)
+// src/services/api/claude.ts 第 1036-1045 行 (原生分流)
+if (getAPIProvider() === 'opencode') {
+  const { queryModelOpencode } = await import('./opencode/queryModelOpencode.js')
+  yield* queryModelOpencode(messages, systemPrompt, tools, signal, options)
+  return
 }
-if (provider === 'nvidia') {
-  nvidiaFetchOverride = createNvidiaFetchOverride()
-}
-// local provider: 仅设置 baseURL, 无需 Fetch Override
+if (provider === 'nvidia') { nvidiaFetchOverride = createNvidiaFetchOverride() }
 const resolvedFetch = buildFetch(fetchOverride || opencodeFetchOverride || nvidiaFetchOverride, source)
 ```
 
@@ -319,8 +318,15 @@ function shouldUseDeepSeekReasoningCompat(baseUrl: string): boolean {
 
 ### 4.2 OpenCode Zen
 
-**文件**: `src/services/api/opencodeClient.ts`
+**文件**: `src/services/api/opencodeClient.ts` (兼容 shim) / `src/services/api/opencode/queryModelOpencode.ts` (原生)
 
+**原生路径** (推荐, 学习自 `opencode/packages/llm` + `packages/opencode/src/session/llm/native-*`):
+- **分流**: `src/services/api/claude.ts:queryModel` 按 `getAPIProvider()==='opencode'` 直接 `yield* queryModelOpencode`，不经 `Anthropic SDK`，形态同 `queryModelOpenAI` 一等公民
+- **协议**: 直接 `POST https://opencode.ai/zen/v1/chat/completions` (OpenAI Chat Completions)，`LLMRequest{model,system,messages,tools}` 经 `convertAnthropicMessagesToOpenAI/Tools` 显式转换 → `buildOpenAIRequestBody`，流式经 `adaptOpenAIStreamToAnthropic` 回 `Anthropic` 事件
+- **认证**: `getOpenCodeApiKey() → Authorization: Bearer` + `x-opencode-*` 头，无 `billingSled` 暗桩
+- **优势**: 规避 `fetch-override` 的 `x-anthropic-billing-header` 版本漂移与 `effort/beta` 透传导致的 `500`，`muse-spark` 等非 Claude 模型可直接 `tool_choice:auto`
+
+**兼容 shim** (保留供 title/sidecar 直调 `getAnthropicClient`):
 - **认证**: 支持 API Key 和匿名免费使用
 - **免费模式**: 当 `apiKey` 为 `undefined` 或 `'public'` 时，注入 billing 特征码 (`x-anthropic-billing-header: cc_version=2.1.0-dev...`)，标记请求来源用于服务端路由
 - **端点**: `https://opencode.ai/zen/v1/chat/completions`
@@ -331,7 +337,7 @@ function shouldUseDeepSeekReasoningCompat(baseUrl: string): boolean {
   - 支持免费模型列表过滤（life-free models）
 - **动态 UA**: 根据版本和运行时自动构建 `User-Agent`
 - **推理内容**: 支持 `reasoning_content` 到 `thinking` block 的转换
-- **网络架构**: 直连模式（Direct Fetch Override），无需 Sidecar 代理
+- **网络架构**: 原生为直连 `fetch`，shim 为 Fetch Override
 
 ### 4.3 OpenAI / Codex Official
 

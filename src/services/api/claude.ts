@@ -1039,6 +1039,14 @@ async function* queryModel(
     return
   }
 
+  // Opencode 原生路径：不经 Anthropic SDK fetch-override，直接以 OpenAI Chat Completions
+  // 访问 opencode 兼容网关，学习自 opencode/packages/llm 的 LLMRequest/Route 抽象。
+  if (getAPIProvider() === 'opencode') {
+    const { queryModelOpencode } = await import('./opencode/queryModelOpencode.js')
+    yield* queryModelOpencode(messages, systemPrompt, tools, signal, options)
+    return
+  }
+
   // Check cheap conditions first — the off-switch await blocks on GrowthBook
   // init (~10ms). For non-Opus models (haiku, sonnet) this skips the await
   // entirely. Subscribers don't hit this path at all.
