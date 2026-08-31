@@ -215,6 +215,17 @@ type ContextResult = {
 - `execute()` 有工具调用时返回 `JSON.stringify(ContextResult)` 而非 `output||"(no output)"`，`toolCalls==0` 的纯 JS 仍保持原 `output` 行为以兼容 `1+1`/`console.log` 测试；
 - **不变量**：`callTool()成功 → ToolResult必捕获 → ContextAggregator决定暴露`，`console.log` 降为可选的额外 `logs` 字段，不再决定结果可见性。
 
+### 3.6 REPL ≠ SubAgent（批量执行器 vs 另一个 Agent）
+
+一句话：**REPL 不是 subagent，只是主 Agent 调用的批量工具执行器；REPL 自己执行多个工具并在内部聚合后把结果返回给主 Agent，无二次 LLM 调用。**
+
+```text
+主 Agent ──调用 REPL──▶ REPL { Read, Grep, Bash, Edit } ──ContextAggregator──▶ REPL Result(JSON) ──▶ 主 Agent
+  无 SubAgent。isVirtual 的 innerMessages 仅 UI/history，真正进 LLM 的只有 ContextResult。
+```
+
+对比 `AgentTool/task` 的 `主 Agent → SubAgent → (SubAgent 内再调 REPL) → 汇总回主 Agent` 独立会话；普通 `Read/Grep` 批量走 `REPL` 即可。`ContextAggregator` 为纯程序聚合，不消耗额外模型调用。
+
 ---
 
 ## 4. 与投机执行的联动
