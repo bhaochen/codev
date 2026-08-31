@@ -52,13 +52,18 @@ REPL: [一段 JS 代码] → for 循环内 await callTool(...)              1 �
 │   │      ├─ findToolByName (大小写不敏感回退)       │
 │   │      ├─ inputSchema.safeParse               │
 │   │      ├─ tool.call(parsed, ctx, allowAll)    │
-│   │      └─ 结果序列化 → 返回给 VM 代码             │
+│   │      ├─ ToolResult 统一事实模型                 │
+│   │      └─ isVirtual innerMessages → UI/history  │
 │   ├─ console.log/error/warn → output 缓冲        │
-│   └─ return { result, toolCalls, innerMessages } │
+│   ├─ ContextAggregator → ContextResult 聚合       │
+│   └─ return { result: JSON(ContextResult),       │
+│              toolCalls, innerMessages, output }  │
 │                                                 │
 │ isTransparentWrapper=true                       │
 │ → UI 只显示内部 tool 调用，不显示 REPL 本身          │
-│ → innerMessages (isVirtual:true) 注入对话历史      │
+│ → innerMessages (isVirtual:true) 仅 UI/history,  │
+│   不进 LLM API (normalizeMessagesForAPI 过滤)     │
+│ → ContextResult 唯一进 LLM API                  │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -172,6 +177,43 @@ const engineCache = new Map<string, ReplEngine>()
   进度回调把内部每次 callTool 以 `repl_tool_call` 进度消息透出
 - 内部工具的权限全部自动放行（`canUseToolAllowAll`）— primitive 工具本身
   已经过注册期筛选，且 REPL 整体仍受外层权限系统管控
+
+### 3.5 统一事实模型与上下文聚合（REPL Tool Result Contract）
+
+**问题**：`innerMessages (isVirtual:true)` 在 `utils/messages.ts:1999 normalizeMessagesForAPI` 被过滤，不进 LLM API；若模型未 `console.log(r.data)` 则 `engine.ts:131 "(no output)"` 使 `gh auth status` 这类空 `stdout` 成功被误判为不可用，而 `Read` 全量 `console.log` 又致上下文臃肿。
+
+**三层解耦**：
+
+```text
+Tool → ToolResult → ExecutionStore(innerMessages, isVirtual, UI/history)
+                → ContextAggregator → ContextResult → LLM API
+```
+
+```ts
+// src/tools/REPLTool/engine.ts
+type ToolResult = {
+  tool: string; ok: boolean; isError: boolean;
+  exitCode?: number; stdout?: string; stderr?: string;
+  data?: unknown; truncated?: boolean;
+  noOutputExpected?: boolean; outputPath?: string; error?: string;
+}
+type ContextCall = {
+  tool: string; ok: boolean; exitCode?: number;
+  summary?: string; preview?: string;
+  truncated?: boolean; outputPath?: string;
+  noOutputExpected?: boolean; error?: string;
+}
+type ContextResult = {
+  ok: boolean; tool_calls: number;
+  calls: ContextCall[]; logs?: string; error?: string;
+}
+```
+
+- `ToolResult` 统一 `Bash{stdout,stderr,exitCode,noOutputExpected,persistedOutputPath}` 与 `Read/Glob/Grep{data}`；
+- `ExecutionStore` 仍产生 `isVirtual` 的 `assistant(tool_use)+user(tool_result)` 供 `collapse`/`audit`，但不再假设进模型上下文；
+- `ContextAggregator.buildContextResult()` 将每个 `ToolResult` 转 `ContextCall`：`Bash` 合并 `stdout+stderr` 截断 `4000` 字符、`mkdir` 标 `summary="no output expected"`，`Read` 取 `data` 的 `JSON.stringify` 预览 `head 2000+tail 500`、`truncated=true`，超大走 `outputPath` 按需二次 `Read`；
+- `execute()` 有工具调用时返回 `JSON.stringify(ContextResult)` 而非 `output||"(no output)"`，`toolCalls==0` 的纯 JS 仍保持原 `output` 行为以兼容 `1+1`/`console.log` 测试；
+- **不变量**：`callTool()成功 → ToolResult必捕获 → ContextAggregator决定暴露`，`console.log` 降为可选的额外 `logs` 字段，不再决定结果可见性。
 
 ---
 

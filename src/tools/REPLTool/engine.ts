@@ -31,6 +31,45 @@ type CallToolResult = {
   isError: boolean
 }
 
+/** 统一事实模型：所有 primitive tool 的结构化结果 */
+export type ToolResult = {
+  tool: string
+  ok: boolean
+  isError: boolean
+  exitCode?: number
+  stdout?: string
+  stderr?: string
+  data?: unknown
+  truncated?: boolean
+  noOutputExpected?: boolean
+  outputPath?: string
+  error?: string
+}
+
+/** 暴露给模型的聚合视图：区分 status 与 content */
+export type ContextCall = {
+  tool: string
+  ok: boolean
+  exitCode?: number
+  summary?: string
+  preview?: string
+  truncated?: boolean
+  outputPath?: string
+  noOutputExpected?: boolean
+  error?: string
+}
+
+export type ContextResult = {
+  ok: boolean
+  tool_calls: number
+  calls: ContextCall[]
+  logs?: string
+  error?: string
+}
+
+const CONTEXT_PREVIEW_LIMIT = 4000
+const CONTEXT_PREVIEW_HEAD = 2000
+
 /** canUseTool 自动允许 REPL 内的 primitive tool 调用 */
 const canUseToolAllowAll: CanUseToolFn = async () => ({
   behavior: 'allow' as const,
@@ -65,6 +104,8 @@ export class ReplEngine {
   private toolCallCount = 0
   private innerMessages: Message[] = []
   private output: string[] = []
+  private toolResults: ToolResult[] = []
+  private executeError?: string
   private tools: Tools
   private toolUseContext: ToolUseContext
   private onToolProgress?: ToolProgressFn
@@ -95,6 +136,8 @@ export class ReplEngine {
     this.toolCallCount = 0
     this.innerMessages = []
     this.output = []
+    this.toolResults = []
+    this.executeError = undefined
     this.onToolProgress = onToolProgress
 
     if (!this.context) {
@@ -129,18 +172,42 @@ export class ReplEngine {
       }
 
       const toolOutput = this.output.join('\n')
+
+      // 无工具调用：保持原有行为（兼容纯 JS 计算 / console.log）
+      if (this.toolCallCount === 0) {
+        return {
+          result: toolOutput || '(no output)',
+          toolCalls: this.toolCallCount,
+          output: toolOutput,
+          innerMessages: [...this.innerMessages],
+        }
+      }
+
+      // 有工具调用：通过 ContextAggregator 生成结构化结果，不依赖 console.log
+      const contextResult = this.buildContextResult(toolOutput, undefined)
       return {
-        result: toolOutput || '(no output)',
+        result: JSON.stringify(contextResult, null, 2),
         toolCalls: this.toolCallCount,
         output: toolOutput,
         innerMessages: [...this.innerMessages],
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err)
+      this.executeError = errMsg
+      const toolOutput = this.output.join('\n')
+      if (this.toolCallCount === 0) {
+        return {
+          result: `Error: ${errMsg}`,
+          toolCalls: this.toolCallCount,
+          output: toolOutput,
+          innerMessages: [...this.innerMessages],
+        }
+      }
+      const contextResult = this.buildContextResult(toolOutput, errMsg)
       return {
-        result: `Error: ${errMsg}`,
+        result: JSON.stringify(contextResult, null, 2),
         toolCalls: this.toolCallCount,
-        output: this.output.join('\n'),
+        output: toolOutput,
         innerMessages: [...this.innerMessages],
       }
     }
@@ -229,6 +296,78 @@ export class ReplEngine {
     return /\bawait\s/.test(cleaned)
   }
 
+  private buildContextResult(logs: string, error?: string): ContextResult {
+    const calls: ContextCall[] = this.toolResults.map(r => {
+      // 为不同工具生成合适的 preview / summary
+      if (r.tool.toLowerCase() === 'bash') {
+        const combined = [r.stdout ?? '', r.stderr ?? ''].filter(Boolean).join('\n')
+        const preview = this.buildPreview(combined)
+        const summary =
+          r.noOutputExpected && !combined
+            ? 'Command completed successfully (no output expected)'
+            : undefined
+        return {
+          tool: r.tool,
+          ok: r.ok,
+          exitCode: r.exitCode,
+          summary,
+          preview: preview || undefined,
+          truncated: r.truncated || (combined.length > CONTEXT_PREVIEW_LIMIT ? true : undefined),
+          outputPath: r.outputPath,
+          noOutputExpected: r.noOutputExpected || undefined,
+          error: r.error,
+        }
+      }
+      // Read / Glob / Grep / Edit / Write 等
+      let rawPreview: string
+      if (r.data !== undefined) {
+        if (typeof r.data === 'string') rawPreview = r.data
+        else {
+          try {
+            rawPreview = JSON.stringify(r.data, null, 2)
+          } catch {
+            rawPreview = String(r.data)
+          }
+        }
+        // Read 的全量文件内容：只取预览
+        if (rawPreview.length > CONTEXT_PREVIEW_LIMIT) {
+          rawPreview = this.buildPreview(rawPreview)
+        }
+      } else {
+        rawPreview = r.error ?? ''
+      }
+      // 简单 summary：Read/Write 带路径提示
+      const summary =
+        r.ok && rawPreview.length === 0 && r.noOutputExpected
+          ? 'Command completed successfully'
+          : undefined
+      return {
+        tool: r.tool,
+        ok: r.ok,
+        preview: rawPreview || undefined,
+        truncated: r.truncated || (rawPreview.length >= CONTEXT_PREVIEW_LIMIT ? true : undefined),
+        outputPath: r.outputPath,
+        error: r.error,
+      }
+    })
+
+    const ok = !error && calls.every(c => c.ok)
+    return {
+      ok,
+      tool_calls: this.toolCallCount,
+      calls,
+      logs: logs || undefined,
+      error,
+    }
+  }
+
+  private buildPreview(text: string): string {
+    if (text.length <= CONTEXT_PREVIEW_LIMIT) return text
+    const head = text.slice(0, CONTEXT_PREVIEW_HEAD)
+    const tail = text.slice(-500)
+    return `${head}\n... (truncated, total ${text.length} chars, showing head ${CONTEXT_PREVIEW_HEAD} + tail 500)\n${tail}`
+  }
+
   private createContext() {
     const self = this
 
@@ -246,8 +385,17 @@ export class ReplEngine {
         )
       }
       if (!tool) {
+        const errText = `Error: Tool "${toolName}" not found`
+        self.toolResults.push({
+          tool: toolName,
+          ok: false,
+          isError: true,
+          error: errText,
+        })
+        // 仍计数为一次调用，确保 ContextResult 能体现失败
+        self.toolCallCount++
         return {
-          data: `Error: Tool "${toolName}" not found`,
+          data: errText,
           toolName,
           isError: true,
         }
@@ -280,8 +428,16 @@ export class ReplEngine {
       // 校验输入
       const parsed = tool.inputSchema.safeParse(input)
       if (!parsed.success) {
+        const errText = `Error: Invalid input for ${toolName}: ${parsed.error.message}`
+        self.toolResults.push({
+          tool: toolName,
+          ok: false,
+          isError: true,
+          error: errText,
+        })
+        self.toolCallCount++
         return {
-          data: `Error: Invalid input for ${toolName}: ${parsed.error.message}`,
+          data: errText,
           toolName,
           isError: true,
         }
@@ -360,6 +516,49 @@ export class ReplEngine {
 
         self.innerMessages.push(virtualAssistant, virtualUser)
 
+        // 记录结构化事实：供 ContextAggregator 聚合（不依赖 console.log）
+        {
+          const rawData =
+            typeof result === 'object' && result !== null && 'data' in result
+              ? (result as { data: unknown }).data
+              : result
+          // Bash 的 Out 含 stdout/stderr/persistedOutputPath/noOutputExpected
+          const isBash = toolNameLower === 'bash'
+          if (isBash && typeof rawData === 'object' && rawData !== null) {
+            const out = rawData as {
+              stdout?: string
+              stderr?: string
+              interrupted?: boolean
+              persistedOutputPath?: string
+              persistedOutputSize?: number
+              noOutputExpected?: boolean
+            }
+            self.toolResults.push({
+              tool: toolName,
+              ok: true,
+              isError: false,
+              stdout: out.stdout,
+              stderr: out.stderr,
+              exitCode: out.interrupted ? undefined : 0,
+              truncated: !!out.persistedOutputPath,
+              outputPath: out.persistedOutputPath,
+              noOutputExpected: out.noOutputExpected,
+              data: rawData,
+            })
+          } else {
+            // Read/Glob/Grep/Edit/Write 等：保留原始 data，preview 在聚合阶段截断
+            const dataStr = resultText
+            const truncated = dataStr.length > CONTEXT_PREVIEW_LIMIT
+            self.toolResults.push({
+              tool: toolName,
+              ok: true,
+              isError: false,
+              data: rawData,
+              truncated: truncated || undefined,
+            })
+          }
+        }
+
         // 发送完成进度
         self.onToolProgress?.({
           type: 'repl_tool_call',
@@ -375,6 +574,13 @@ export class ReplEngine {
         }
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err)
+
+        self.toolResults.push({
+          tool: toolName,
+          ok: false,
+          isError: true,
+          error: `Error calling ${toolName}: ${errMsg}`,
+        })
 
         self.onToolProgress?.({
           type: 'repl_tool_call',
@@ -472,5 +678,7 @@ export class ReplEngine {
     this.toolCallCount = 0
     this.innerMessages = []
     this.output = []
+    this.toolResults = []
+    this.executeError = undefined
   }
 }

@@ -22,7 +22,7 @@ const inputSchema = lazySchema(() =>
     code: z
       .string()
       .describe(
-        'JavaScript code to execute in the REPL. Can call tools via callTool(name, input). Example: const r = await callTool("read", {file_path: "/tmp/a.txt"}); console.log(r.data)',
+        'JavaScript code to execute in the REPL. Use await callTool(name, input) to call tools. Results are auto-aggregated into structured JSON — console.log is optional. Example: const r = await callTool("read", {file_path: "/tmp/a.txt"});',
       ),
   }),
 )
@@ -72,7 +72,30 @@ When REPL mode is active, primitive tools are only accessible through this tool.
 - Operations that benefit from programmatic control flow
 - Combining search results with edits in a single turn
 
-The REPL runs in a VM context with tool APIs available as functions. Use \`await callTool(name, input)\` to call tools. Results include { data, toolName, isError }.
+The REPL runs in a VM context with tool APIs available as functions. Use \`await callTool(name, input)\` to call tools. Each call returns { data, toolName, isError }.
+
+Execution model (3 layers):
+- ToolResult (unified fact): { tool, ok, isError, stdout/stderr/data, exitCode?, truncated?, outputPath?, noOutputExpected? }
+- ExecutionStore (innerMessages, isVirtual=true): UI/history only, never sent to LLM API
+- ContextAggregator (REPL result): auto-collects every callTool result into structured JSON — you do NOT need console.log to make results visible. console.log is optional extra logging.
+
+Result contract when tool_calls > 0 (structured JSON, always returned):
+\`\`\`json
+{
+  "ok": true,
+  "tool_calls": 2,
+  "calls": [
+    { "tool": "Bash", "ok": true, "exitCode": 0, "preview": "github.com\\n✓ Logged in...", "truncated": false },
+    { "tool": "Read", "ok": true, "preview": "file content head...", "truncated": true, "outputPath": "/tmp/..." }
+  ],
+  "logs": "optional console.log output"
+}
+\`\`\`
+- ok = every call ok && no engine error. Check ok/exitCode/error, never stdout==="" for failure.
+- Bash: stdout/stderr merged into preview, noOutputExpected=true means empty is success (mkdir).
+- Read: preview truncated to ~4KB, truncated=true + outputPath for full content.
+- Grep: preview = matches, truncated if many.
+- Write/Edit: summary/preview = diff summary.
 
 Available tools (case-insensitive):
 - "Glob" — find files by pattern. Input: { pattern: "src/**/*.ts" }
@@ -90,14 +113,12 @@ Reliable file-edit helpers are also exposed as globals — they write straight t
 - diffFile(path, ref?) → prints the git working-tree (or vs ref) diff
 - showDiff(before, after, filePath?) → unified diff of two strings
 
-Example:
+Example (console.log optional):
 \`\`\`js
 const files = await callTool("Glob", { pattern: "src/**/*.ts" });
-console.log("Found files:", files.data);
 const content = await callTool("Read", { file_path: "src/index.ts" });
-console.log(content.data.slice(0, 200));
-const result = await callTool("Bash", { command: "echo hello" });
-console.log(result.data);
+// No need to console.log; result auto-aggregated. Optional:
+// console.log(content.data.slice(0, 200));
 \`\`\`
 
 State persists across calls — variables set in one call are available in the next.

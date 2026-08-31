@@ -278,8 +278,8 @@ WebSearchTool 支持两个搜索后端：
 - **输入参数**: `code` (必填) — JS 代码，通过 `await callTool(name, input)` 调用 primitive tools
 - **行为**: 单次调用内完成多步批量操作；变量跨调用持久化（会话级 engineCache）
 - **primitive 工具集**: Read / Write / Edit / Glob / Grep / Bash（大小写不敏感查找）
-- **透明包装**: `isTransparentWrapper()=true`，UI 只显示内部 tool 调用与进度
-- **注册联动**: REPL 启用时从工具池隐藏 `REPL_ONLY_TOOLS`（即上述 primitive 工具），并在系统提示词中告知模型必须经 REPL 调用
+- **透明包装**: `isTransparentWrapper()=true`，UI 只显示内部 tool 调用与进度；`innerMessages(isVirtual:true)` 仅 UI/history，`normalizeMessagesForAPI` 过滤不进 LLM
+- **结果契约**: `ToolResult{ok,tool,exitCode,stdout/stderr/data,truncated,outputPath,noOutputExpected}` → `ContextAggregator` 聚合为 `ContextResult{ok,tool_calls,calls:[{tool,ok,preview,summary,truncated,outputPath}],logs}` JSON 进 LLM；`console.log` 可选，不再决定可见性。`REPL_ONLY_TOOLS` 在启用时从工具池隐藏
 
 ### BenchmarkTool
 
