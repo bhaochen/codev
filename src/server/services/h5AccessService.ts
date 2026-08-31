@@ -2,7 +2,12 @@ import { createHash, randomBytes } from 'node:crypto'
 import os from 'node:os'
 import { ApiError } from '../middleware/errorHandler.js'
 import { ManagedSettingsService } from './managedSettingsService.js'
-import { ProviderService } from './providerService.js'
+
+function getServerPort(): number {
+  const raw = process.env.SERVER_PORT
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN
+  return Number.isFinite(parsed) ? parsed : 3456
+}
 
 export type H5AccessSettings = {
   enabled: boolean
@@ -149,7 +154,7 @@ function resolveAutoLanPublicBaseUrl(): string | null {
     return null
   }
 
-  return `http://${host}:${ProviderService.getServerPort()}`
+  return `http://${host}:${getServerPort()}`
 }
 
 export function resolveEffectiveH5PublicBaseUrl({

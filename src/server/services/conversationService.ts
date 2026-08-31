@@ -9,11 +9,6 @@
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { ProviderService } from './providerService.js'
-import {
-  OPENAI_CODEX_OAUTH_FILE_ENV_KEY,
-  OPENAI_OAUTH_PROVIDER_ENV_KEY,
-} from './openaiOfficialProvider.js'
 import { sessionService } from './sessionService.js'
 import { diagnosticsService } from './diagnosticsService.js'
 import {
@@ -101,7 +96,6 @@ export class ConversationStartupError extends Error {
 export class ConversationService {
   private sessions = new Map<string, SessionProcess>()
   private deletedSessions = new Set<string>()
-  private providerService = new ProviderService()
 
   private buildSessionCliArgs(
     sessionId: string,
@@ -926,13 +920,9 @@ export class ConversationService {
     sdkUrl?: string,
     options?: SessionStartOptions,
   ): Promise<Record<string, string>> {
-    // Provider isolation: when Desktop has its own provider config/index,
-    // strip inherited provider env vars so the child CLI reads fresh values
-    // from ~/.claude/providers/settings.json instead of stale process.env.
-    //
-    // If the user never configured a Desktop provider and only launched the
-    // app/server with ANTHROPIC_* env vars, keep those env vars so Windows
-    // dev-mode and env-only setups can still authenticate successfully.
+    // Tier1 only: CLI provider isolation — strip inherited ANTHROPIC env when
+    // CLI has a managed provider (opencode/nvidia/openrouter/local) so child
+    // reads fresh values from CLI config.
     const PROVIDER_ENV_KEYS = [
       'ANTHROPIC_API_KEY',
       'ANTHROPIC_BASE_URL',
@@ -947,8 +937,6 @@ export class ConversationService {
       'CLAUDE_CODE_AUTO_COMPACT_WINDOW',
       'CLAUDE_CODE_ATTRIBUTION_HEADER',
       'CLAUDE_CODE_MODEL_CONTEXT_WINDOWS',
-      OPENAI_OAUTH_PROVIDER_ENV_KEY,
-      OPENAI_CODEX_OAUTH_FILE_ENV_KEY,
     ] as const
 
     const cleanEnv = await getProcessEnvWithTerminalShellEnvironment()
@@ -956,36 +944,20 @@ export class ConversationService {
 
     const cliConfig = this.readCliGlobalConfig()
 
-    if (options?.providerId !== undefined || (cliConfig?.authProvider !== undefined && cliConfig.authProvider !== 'anthropic' && cliConfig.authProvider !== 'openai')) {
-      for (const key of PROVIDER_ENV_KEYS) {
-        delete cleanEnv[key]
-      }
-    }
-
-    let desktopServerUrl: string | undefined
-    if (sdkUrl) {
-      try {
-        const parsed = new URL(sdkUrl)
-        desktopServerUrl = `http://${parsed.host}`
-      } catch {
-        desktopServerUrl = undefined
-      }
-    }
-
-    const explicitProviderEnv =
-      typeof options?.providerId === 'string'
-        ? await this.providerService.getProviderRuntimeEnv(options.providerId)
-        : null
-    const networkEnv = buildNetworkEnvironment(await loadNetworkSettings())
-    if (explicitProviderEnv && options?.model?.trim()) {
-      explicitProviderEnv.ANTHROPIC_MODEL = options.model.trim()
-    }
-
     const cliAuthProvider = cliConfig?.authProvider
     const isCliManagedProvider =
       cliAuthProvider !== undefined &&
       cliAuthProvider !== 'anthropic' &&
       cliAuthProvider !== 'openai'
+
+    if (isCliManagedProvider) {
+      for (const key of PROVIDER_ENV_KEYS) {
+        delete cleanEnv[key]
+      }
+    }
+
+    const networkEnv = buildNetworkEnvironment(await loadNetworkSettings())
+
     const cliProviderEnv = isCliManagedProvider
       ? this.buildCliProviderEnv(
           cliAuthProvider as 'opencode' | 'nvidia' | 'openrouter' | 'local',
@@ -996,7 +968,6 @@ export class ConversationService {
     const attributionHeaderEnv = attributionHeaderEnvForModel(
       options?.model?.trim() ||
         cliProviderEnv?.ANTHROPIC_MODEL ||
-        explicitProviderEnv?.ANTHROPIC_MODEL ||
         cleanEnv.ANTHROPIC_MODEL,
     )
 
@@ -1015,10 +986,6 @@ export class ConversationService {
       CLAUDE_COWORK_MEMORY_PATH_OVERRIDE: this.resolveDesktopAutoMemoryPath(workDir),
       CALLER_DIR: workDir,
       PWD: workDir,
-      ...(explicitProviderEnv
-        ? { CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: '1' }
-        : {}),
-      ...(explicitProviderEnv ?? {}),
       ...(cliProviderEnv ?? {}),
       ...networkEnv,
       ...attributionHeaderEnv,

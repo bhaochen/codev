@@ -475,26 +475,15 @@ openaiChatToAnthropic.ts / openaiResponsesToAnthropic.ts (流式)
 Anthropic 格式流式事件回 CLI
 ```
 
-### Provider 配置
+### Provider 配置（仅 Tier1 TUI）
 
-通过 ProviderService (`src/server/services/providerService.ts`) 管理：
+通过 TUI 内置 Provider 系统 (`src/utils/model/providers.ts` + `~/.claude.json`) 管理，Tier2 ProviderService 已移除：
 
 ```typescript
-type ProviderConfig = {
-  id: string;
-  name: string;
-  apiFormat: 'openai' | 'openai-responses' | 'anthropic';
-  baseUrl: string;
-  apiKey: string;
-  models: string[];
-};
+type APIProvider = 'firstParty' | 'openai' | 'opencode' | 'nvidia' | 'local' | 'openrouter' | ...
 ```
 
-支持的内置 Provider（部分）：
-- OpenAI (GPT-4, GPT-4o)
-- Groq (Llama, Mixtral)
-- DeepSeek
-- 自定义 OpenAI 兼容 API
+Provider 通过 `/login` 在终端中配置，桌面端通过 `~/.claude.json` 的 `authProvider` 字段读取。
 
 ---
 
@@ -551,10 +540,7 @@ type ProviderConfig = {
 | `src/friend/server.ts` | Friend HTTP 服务 (Bun.serve) |
 | `src/tools/FriendEmotionTool.ts` | VRM 表情工具 |
 | `src/friend/constants.ts` | 情绪列表常量 |
-| `src/server/proxy/handler.ts` | Provider 代理句柄 |
-| `src/server/proxy/transform/` | 协议转换器 |
-| `src/server/proxy/streaming/` | 流式响应转换 |
-| `src/server/services/providerService.ts` | Provider 配置管理 |
+| `src/utils/model/providers.ts` | Tier1 Provider 管理 |
 | `src/bridge/bridgeMain.ts` | 远程桥接主入口 |
 | `src/bridge/replBridgeTransport.ts` | WebSocket 传输层 |
 | `src/bridge/replBridge.ts` | REPL 桥接逻辑 |

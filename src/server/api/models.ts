@@ -9,16 +9,9 @@
  */
 
 import { SettingsService } from '../services/settingsService.js'
-import { ProviderService } from '../services/providerService.js'
-import { attributionHeaderEnvForModel } from '../services/attributionHeaderPolicy.js'
 import { ApiError, errorResponse } from '../middleware/errorHandler.js'
 import { hasOpenAIAuthLogin } from '../../utils/auth.js'
 import { OPENAI_CODEX_MODEL_CATALOG } from '../../services/openaiAuth/models.js'
-import {
-  OPENAI_OFFICIAL_PROVIDER_ID,
-  OPENAI_OFFICIAL_PROVIDER_NAME,
-  isOpenAIOfficialProviderId,
-} from '../services/openaiOfficialProvider.js'
 
 // ─── Fallback models (used when no provider is configured) ────────────────────
 
@@ -49,7 +42,6 @@ const DEFAULT_MODEL = 'claude-opus-4-7'
 const DEFAULT_EFFORT = 'medium'
 
 const settingsService = new SettingsService()
-const providerService = new ProviderService()
 
 type ApiModelInfo = {
   id: string
@@ -299,7 +291,7 @@ export async function handleModelsApi(
     // ── /api/models/* ─────────────────────────────────────────────────
     switch (sub) {
       case undefined:
-        // GET /api/models — 优先从激活的 Provider 读取模型列表
+        // GET /api/models — Tier1 TUI provider model listing
         if (req.method !== 'GET') throw methodNotAllowed(req.method)
         return await handleModelsList()
 
@@ -343,45 +335,17 @@ async function handleModelsList(): Promise<Response> {
   const cliConfig = await readCliAuthProvider()
   const cliAuthProvider = cliConfig?.authProvider
 
-  const { providers, activeId } = await providerService.listProviders()
-
-  if (activeId) {
-    const activeProvider = providers.find((p) => p.id === activeId)
-    if (activeProvider) {
-      const presetType = activeProvider.presetId?.replace(/^tui-/, '')
-      if (presetType && cliAuthProvider === presetType) {
-        const cliModels = await fetchCliProviderModels()
-        if (cliModels.length > 0) {
-          return Response.json({
-            models: cliModels,
-            provider: { id: activeProvider.id, name: activeProvider.name },
-          })
-        }
-      }
-
-      if (isOpenAIOfficialProviderId(activeId)) {
-        return Response.json({
-          models: buildOpenAIModelList(),
-          provider: { id: OPENAI_OFFICIAL_PROVIDER_ID, name: OPENAI_OFFICIAL_PROVIDER_NAME },
-        })
-      }
-
-      return Response.json({
-        models: buildProviderModelList(activeProvider.models),
-        provider: { id: activeProvider.id, name: activeProvider.name },
-      })
-    }
-  }
-
   if (cliAuthProvider && cliAuthProvider !== 'anthropic' && cliAuthProvider !== 'openai') {
     const cliModels = await fetchCliProviderModels()
-    return Response.json({
-      models: cliModels,
-      provider: {
-        id: `cli-${cliAuthProvider}`,
-        name: CLI_PROVIDER_NAMES[cliAuthProvider] || cliAuthProvider,
-      },
-    })
+    if (cliModels.length > 0) {
+      return Response.json({
+        models: cliModels,
+        provider: {
+          id: `cli-${cliAuthProvider}`,
+          name: CLI_PROVIDER_NAMES[cliAuthProvider] || cliAuthProvider,
+        },
+      })
+    }
   }
 
   return Response.json({ models: getStandaloneModelList(), provider: null })
@@ -389,55 +353,21 @@ async function handleModelsList(): Promise<Response> {
 
 async function handleCurrentModel(req: Request): Promise<Response> {
   if (req.method === 'GET') {
-    // Build the full model list: prefer active provider's models, fall back to defaults
-    const { providers, activeId } = await providerService.listProviders()
-    const isOpenAIProviderActive = isOpenAIOfficialProviderId(activeId)
-    const activeProvider = activeId ? providers.find((p) => p.id === activeId) : null
-    const settings = activeProvider || isOpenAIProviderActive
-      ? await providerService.getManagedSettings()
-      : await settingsService.getUserSettings()
+    const settings = await settingsService.getUserSettings()
     const explicitModel = (settings.model as string) || ''
     const contextTier = (settings.modelContext as string) || undefined
-    const env = (settings.env as Record<string, string>) || {}
     const envModel = process.env.ANTHROPIC_MODEL?.trim() || ''
 
-    let currentModelId: string
-    let currentModelName: string
-
-    if (isOpenAIProviderActive) {
-      currentModelId = explicitModel || env.ANTHROPIC_MODEL || 'gpt-5.3-codex'
-      currentModelName = currentModelId
-    } else if (activeProvider) {
-      // Provider is active — only use the provider-managed settings.
-      // This avoids leaking global ~/.claude/settings.json model choices into
-      // the active provider flow.
-      const providerEnvModel = env.ANTHROPIC_MODEL
-      if (providerEnvModel && !explicitModel) {
-        currentModelId = providerEnvModel
-        currentModelName = providerEnvModel
-      } else {
-        currentModelId = explicitModel || providerEnvModel || activeProvider.models.main
-        currentModelName = currentModelId
-      }
-    } else {
-      // No provider — use settings model with context tier
-      currentModelId = explicitModel || envModel || DEFAULT_MODEL
-      currentModelName = currentModelId
-    }
+    const currentModelId = explicitModel || envModel || DEFAULT_MODEL
+    const currentModelName = currentModelId
 
     const lookupId = contextTier ? `${currentModelId}:${contextTier}` : currentModelId
 
     // Build available models for name lookup
-    const cliModelsFallback = !isOpenAIProviderActive && !activeProvider
-      ? await fetchCliProviderModels()
-      : []
-    const availableModels = isOpenAIProviderActive
-      ? buildOpenAIModelList()
-      : activeProvider
-        ? buildProviderModelList(activeProvider.models)
-        : cliModelsFallback.length > 0
-          ? cliModelsFallback
-          : getStandaloneModelList()
+    const cliModelsFallback = await fetchCliProviderModels()
+    const availableModels = cliModelsFallback.length > 0
+      ? cliModelsFallback
+      : getStandaloneModelList()
 
     const modelEntry = availableModels.find((m) => m.id === lookupId)
       || availableModels.find((m) => m.id === currentModelId)
@@ -471,21 +401,7 @@ async function handleCurrentModel(req: Request): Promise<Response> {
       // Clear context tier when switching to a non-composite model
       updates.modelContext = undefined
     }
-    const { activeId } = await providerService.listProviders()
-    if (activeId) {
-      const currentManagedSettings = await providerService.getManagedSettings()
-      const currentEnv =
-        (currentManagedSettings.env as Record<string, string> | undefined) ?? {}
-      await providerService.updateManagedSettings({
-        ...updates,
-        env: {
-          ...currentEnv,
-          ...attributionHeaderEnvForModel(baseId),
-        },
-      })
-    } else {
-      await settingsService.updateUserSettings(updates)
-    }
+    await settingsService.updateUserSettings(updates)
     return Response.json({ ok: true, model: modelId })
   }
 

@@ -11,8 +11,6 @@ import { resolveCors, type CorsResolution } from './middleware/cors.js'
 import { requireAuth, requireH5Token } from './middleware/auth.js'
 import { teamWatcher } from './services/teamWatcher.js'
 import { cronScheduler } from './services/cronScheduler.js'
-import { handleProxyRequest } from './proxy/handler.js'
-import { ProviderService } from './services/providerService.js'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { OPENAI_CODEX_REDIRECT_PATH } from '../services/openaiAuth/client.js'
@@ -125,7 +123,6 @@ export function startServer(port = PORT, host = HOST) {
   diagnosticsService.installConsoleCapture()
   diagnosticsService.installProcessCapture()
   void refreshModelCapabilities()
-  ProviderService.setServerPort(port)
   const localConnectHost =
     host === '0.0.0.0' || host === '127.0.0.1' || host === 'localhost'
       ? '127.0.0.1'
@@ -307,41 +304,6 @@ export function startServer(port = PORT, host = HOST) {
           }
         }
 
-        // Proxy — protocol-translating reverse proxy for OpenAI-compatible APIs
-        if (url.pathname.startsWith('/proxy/')) {
-          if (cors.rejected) {
-            return corsRejectedResponse(cors)
-          }
-
-          if (authRequired) {
-            const authError = await requireH5Token(req)
-            if (authError) {
-              return withCors(authError, cors)
-            }
-          } else if (forceAuth) {
-            const authError = await requireAuth(req)
-            if (authError) {
-              return withCors(authError, cors)
-            }
-          }
-          try {
-            const response = await handleProxyRequest(req, url)
-            return withCors(response, cors)
-          } catch (error) {
-            void diagnosticsService.recordEvent({
-              type: 'proxy_request_failed',
-              severity: 'error',
-              summary: error instanceof Error ? error.message : String(error),
-              details: { path: url.pathname, method: req.method, error },
-            })
-            console.error('[Server] Proxy error:', error)
-            return withCors(Response.json(
-              { type: 'error', error: { type: 'api_error', message: 'Internal proxy error' } },
-              { status: 500 },
-            ), cors)
-          }
-        }
-
         // Health check
         if (url.pathname === '/health') {
           if (cors.rejected) {
@@ -355,7 +317,7 @@ export function startServer(port = PORT, host = HOST) {
         }
 
         // Static H5 shell/assets are non-secret bootstrap content and must load
-        // before the browser can read the QR token; API/proxy/ws stay protected above.
+        // before the browser can read the QR token; API/ws stay protected above.
         const staticResponse = await handleStaticH5Request(req, url)
         if (staticResponse) {
           return staticResponse

@@ -1,6 +1,6 @@
 # 多 Provider 认证与协议转换架构
 
-> 本文档描述 Codev (cc-haha) 的多 Provider 认证架构、OAuth 2.0 流程、API 协议转换机制以及 Provider 配置管理体系。
+> 本文档描述 Codev 的多 Provider 认证架构、OAuth 2.0 流程、API 协议转换机制以及 Provider 配置管理体系（仅保留 Tier1 TUI）。
 > 代码库：`/home/yuki/Code/Agent/Codev`
 
 ---
@@ -19,32 +19,24 @@ Codev 支持以下 Provider，按认证方式与协议类型分类：
 | **OpenRouter** | API Key | `openai_responses` (Proxy) | `src/utils/model/providers.ts` |
 | **OpenCode Zen** | API Key 或免费 (public) | `openai_chat` (Fetch Override) | `src/services/api/opencodeClient.ts` |
 | **NVIDIA NIM** | API Key (build.nvidia.com) | `openai_chat` (Fetch Override) | `src/services/api/nvidiaClient.ts` |
-| **Local (Ollama/LM Studio/vLLM)** | 无 (Dummy Key) | `anthropic` 或 `openai_chat` | `src/server/config/providerPresets.json` |
+| **Local (Ollama/LM Studio/vLLM)** | 无 (Dummy Key) | `anthropic` 或 `openai_chat` | `src/utils/model/providers.ts`（Tier1） |
 | **Llama.cpp** | 无 | `anthropic` (Fetch Override) | `src/services/api/localClient.ts` |
-| **DeepSeek, Zhipu GLM, Kimi, MiniMax, 接口AI, 胜算云** | API Key (auth_token) | `anthropic` (Native) | `src/server/config/providerPresets.json` |
+| **DeepSeek, Zhipu GLM, Kimi, MiniMax, 接口AI, 胜算云** | API Key (auth_token) | `anthropic` (Native) | `src/utils/model/providers.ts`（Tier1） |
 
 ---
 
 ## 2. 认证架构模式
 
-### 2.1 两级架构总览
+### 2.1 架构总览 — 仅保留 Tier1 TUI
 
-Codev 拥有两套独立的 Provider 系统，设计目标不同：
+Codev 仅保留 Tier1 TUI 内置 Provider（原始 Claude Code），Tier2 预设系统已移除：
 
 ```
 Tier 1: TUI 内置 Provider (原始 Claude Code)
   用途: 终端 /login 快速切换
   存储: ~/.claude.json (单字段 authProvider)
   实现: src/services/api/client.ts + src/utils/model/providers.ts
-
-Tier 2: cc-haha Provider 预设系统 (Codev 扩展)
-  用途: 桌面端多 Provider 管理、预设配置、Proxy 转换
-  存储: ~/.claude/cc-haha/providers.json (结构化索引)
-  实现: src/server/services/providerService.ts
-         src/server/config/providerPresets.ts + .json
 ```
-
-两个层级通过 `ProviderService.autoImportTuiProvider()` 自动同步：当桌面端检测到 TUI 已配置 Provider 但自身尚无活跃 Provider 时，自动导入 TUI 的 Provider 配置。
 
 ### 2.2 API Provider 类型定义
 
@@ -387,82 +379,9 @@ function shouldUseDeepSeekReasoningCompat(baseUrl: string): boolean {
 
 ---
 
-## 5. Provider 预设系统 (cc-haha)
+## 5. Provider 预设系统（已移除 Tier2）
 
-### 5.1 预设配置
-
-Provider 预设定义在 `src/server/config/providerPresets.json`，每个预设包含：
-
-```json
-{
-  "id": "deepseek",
-  "name": "DeepSeek",
-  "baseUrl": "https://api.deepseek.com/anthropic",
-  "apiFormat": "anthropic",
-  "defaultModels": {
-    "main": "deepseek-v4-pro",
-    "haiku": "deepseek-v4-flash",
-    "sonnet": "deepseek-v4-pro",
-    "opus": "deepseek-v4-pro"
-  },
-  "needsApiKey": true,
-  "authStrategy": "auth_token",
-  "defaultEnv": {
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES": "thinking,effort,..."
-  },
-  "modelContextWindows": {
-    "deepseek-v4-pro": 1000000
-  }
-}
-```
-
-**预设支持的 Provider (截至当前):**
-
-| Preset | API Format | Auth Strategy |
-|---|---|---|
-| official | anthropic | — |
-| deepseek | anthropic | auth_token |
-| zhipuglm | anthropic | auth_token |
-| kimi | anthropic | auth_token |
-| minimax | anthropic | auth_token |
-| jiekouai | anthropic | auth_token |
-| shengsuanyun | anthropic | auth_token |
-| lmstudio | anthropic | auth_token_empty_api_key |
-| ollama | anthropic | auth_token_empty_api_key |
-| nvidia | openai_chat | api_key |
-| custom | anthropic | auth_token |
-
-### 5.2 认证策略 (`ProviderAuthStrategy`)
-
-```typescript
-type ProviderAuthStrategy = 
-  | 'api_key'               // x-api-key: <key>     (NVIDIA)
-  | 'auth_token'            // Authorization: Bearer <key>  (DeepSeek, Zhipu, Kimi...)
-  | 'auth_token_empty_api_key' // Bearer + dummy x-api-key  (LM Studio, Ollama)
-  | 'dual_same_token'      // x-api-key + Bearer 同一值
-  | 'dual_dummy'           // x-api-key: dummy + Bearer: dummy  (OpenAI OAuth)
-```
-
-### 5.3 API Format
-
-```typescript
-type ApiFormat = 
-  | 'anthropic'          // 原生 Anthropic Messages API (直连，无需 Proxy)
-  | 'openai_chat'        // OpenAI Chat Completions /v1/chat/completions
-  | 'openai_responses'   // OpenAI Responses API /v1/responses
-```
-
-### 5.4 存储结构
-
-cc-haha 的 Provider 数据存储在：
-
-```
-~/.claude/cc-haha/
-├── providers.json    # Provider 索引 (活跃 ID + Provider 列表)
-└── settings.json     # 同步到 SDK 的环境变量
-```
-
-迁移历史通过 `persistentStorageMigrations.ts` 管理，使用 `CURRENT_PROVIDER_INDEX_SCHEMA_VERSION` 追踪 schema 版本。
+> **Tier2 Provider 预设系统已移除**，仅保留 Tier1 TUI 内置 Provider。相关 Tier2 配置与代理文件已删除。
 
 ---
 
@@ -514,39 +433,13 @@ export function clearModelStrings(): void {
 
 ### 6.3 Model Context Windows
 
-两种方式配置模型上下文窗口：
-
-1. **Preset 预设** (`providerPresets.json` 中的 `modelContextWindows` 字段)
-2. **用户覆盖** (`~/.claude/cc-haha/providers.json` 中的 `modelContextWindows` 字段)
+Tier1 下模型上下文窗口由 `src/utils/model/` 中的 `ALL_MODEL_CONFIGS` 及环境变量决定。
 
 ---
 
-## 7. Provider 运行时环境
+## 7. Provider 运行时环境（仅 Tier1）
 
-### 7.1 运行环境构建
-
-`ProviderService.syncToSettings()` 将活跃 Provider 的配置写入 `~/.claude/cc-haha/settings.json`：
-
-```
-ANTHROPIC_BASE_URL=http://localhost:port/proxy/providers/<id>
-ANTHROPIC_AUTH_TOKEN=dummy            # 用于 Anthropic SDK 认证
-ANTHROPIC_API_KEY=dummy               # 同上
-API_TIMEOUT_MS=300000
-ANTHROPIC_MODEL=<model-id>
-ANTHROPIC_DEFAULT_HAIKU_MODEL=...
-ANTHROPIC_DEFAULT_SONNET_MODEL=...
-ANTHROPIC_DEFAULT_OPUS_MODEL=...
-MODEL_CONTEXT_WINDOWS={"model-id": 1000000}
-```
-
-### 7.2 OpenAI OAuth 运行时
-
-对于 OpenAI Official Provider，特殊的环境变量：
-
-```
-CC_HAHA_OPENAI_OAUTH_PROVIDER=1
-OPENAI_CODEX_OAUTH_FILE=<path-to-oauth-file>
-```
+Tier1 运行时环境通过 `src/utils/model/providers.ts` 及 `getProcessEnvWithTerminalShellEnvironment()` 构建，直接读取 `~/.claude.json` 的 `authProvider` 与环境变量（`ANTHROPIC_*`）。
 
 ---
 
@@ -554,7 +447,7 @@ OPENAI_CODEX_OAUTH_FILE=<path-to-oauth-file>
 
 ```mermaid
 graph TB
-    subgraph "Tier 1: TUI 内置 Provider"
+    subgraph "Tier 1: TUI 内置 Provider（仅保留）"
         A1[~/.claude.json]
         A2[src/utils/model/providers.ts]
         A3[src/services/api/client.ts]
@@ -567,18 +460,6 @@ graph TB
         A3 -->|set baseURL for local| A6
     end
 
-    subgraph "Tier 2: cc-haha Provider 系统"
-        B1[~/.claude/cc-haha/providers.json]
-        B2[~/.claude/cc-haha/settings.json]
-        B3[src/server/services/providerService.ts]
-        B4[src/server/config/providerPresets.json]
-        B5[src/server/proxy/handler.ts]
-        B3 -->|读写| B1
-        B3 -->|syncToSettings| B2
-        B3 -->|activateProvider| B4
-        B3 -->|getProviderForProxy| B5
-    end
-
     subgraph "Anthropic SDK"
         C1[@anthropic-ai/sdk]
         C2[AnthropicBedrock]
@@ -586,13 +467,7 @@ graph TB
         C4[AnthropicFoundry]
     end
 
-    subgraph "协议转换层"
-        D1[anthropicToOpenaiChat]
-        D2[anthropicToOpenaiResponses]
-        D3[openaiChatToAnthropic]
-        D4[openaiResponsesToAnthropic]
-        D5[openaiChatStreamToAnthropic]
-        D6[openaiResponsesStreamToAnthropic]
+    subgraph "协议转换层（Tier1 直连）"
         D7[@ant/model-provider - 通用转换]
         D8[src/services/api/openai - OpenAI 直连]
     end
@@ -610,31 +485,22 @@ graph TB
     A3 -->|Vertex| C3
     A3 -->|Foundry| C4
     A3 -->|Fetch Override| D7
-    
-    B5 --> D1
-    B5 --> D2
-    B5 --> D3
-    B5 --> D4
-    B5 --> D5
-    B5 --> D6
 
     C1 --> E1
 ```
 
 ---
 
-## 9. 添加新 Provider 的标准流程
+## 9. 添加新 Provider 的标准流程（仅 Tier1）
 
-当需要支持一个新的 OpenAI 兼容 Provider 时，按以下步骤操作：
+当需要支持一个新的 OpenAI 兼容 Provider 时，按以下步骤操作（Tier2 预设系统已移除）：
 
 1. **Provider 类型**: 在 `src/utils/model/providers.ts` 的 `APIProvider` 联合类型中添加
 2. **检测函数**: 实现 `isXxxConfigured()` 并在 `getAPIProvider()` 调用链中加入
 3. **Model 字符串**: 在 `src/utils/model/modelStrings.ts` 的 `getBuiltinModelStrings()` 中添加映射
 4. **Fetch Override**: 如果协议需要转换，实现 `createXxxFetchOverride()` (参考 `nvidiaClient.ts`)
 5. **客户端集成**: 在 `src/services/api/client.ts` 的 `getAnthropicClient()` 中注入 Override
-6. **预设配置**: 在 `src/server/config/providerPresets.json` 中添加预设项
-7. **环境变量**: 在 `providerRuntimeEnv.ts` 的 `getManagedEnvKeys()` 中添加变量清理
-8. **认证策略**: 如果使用非标准认证，在 `buildAnthropicAuthHeaders()` 中添加策略
+6. **认证策略**: 如果使用非标准认证，在 `buildAnthropicAuthHeaders()` 中添加策略
 
 ---
 

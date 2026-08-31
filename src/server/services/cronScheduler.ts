@@ -15,8 +15,6 @@ import * as crypto from 'crypto'
 import { CronService, type CronTask } from './cronService.js'
 import { SessionService } from './sessionService.js'
 import { sendTaskNotification } from './notificationService.js'
-import { ProviderService } from './providerService.js'
-import { isProviderManagedEnvVar } from '../../utils/managedEnvConstants.js'
 import {
   buildClaudeCliArgs,
   resolveClaudeCliLauncher,
@@ -335,7 +333,6 @@ export class CronScheduler {
   private lastFiredMinuteKey = new Map<string, string>()
   private cronService: CronService
   private sessionService: SessionService
-  private providerService = new ProviderService()
 
   constructor(cronService?: CronService) {
     this.cronService = cronService || new CronService()
@@ -639,25 +636,8 @@ export class CronScheduler {
     const cleanEnv = await getProcessEnvWithTerminalShellEnvironment()
     delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN
 
-    if (this.shouldStripInheritedProviderEnv(task.providerId)) {
-      for (const key of Object.keys(cleanEnv)) {
-        if (isProviderManagedEnvVar(key)) {
-          delete cleanEnv[key]
-        }
-      }
-    }
-
-    const explicitProviderEnv =
-      typeof task.providerId === 'string'
-        ? await this.providerService.getProviderRuntimeEnv(task.providerId)
-        : null
-    if (explicitProviderEnv && task.model?.trim()) {
-      explicitProviderEnv.ANTHROPIC_MODEL = task.model.trim()
-    }
     const attributionHeaderEnv = attributionHeaderEnvForModel(
-      task.model?.trim() ||
-        explicitProviderEnv?.ANTHROPIC_MODEL ||
-        cleanEnv.ANTHROPIC_MODEL,
+      task.model?.trim() || cleanEnv.ANTHROPIC_MODEL,
     )
 
     return {
@@ -666,43 +646,7 @@ export class CronScheduler {
       CLAUDE_CODE_ENTRYPOINT: 'sdk-cli',
       CALLER_DIR: workDir,
       PWD: workDir,
-      ...(explicitProviderEnv
-        ? {
-            CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: '1',
-            CLAUDE_CODE_ENTRYPOINT: 'sdk-cli',
-          }
-        : {}),
-      ...(explicitProviderEnv ?? {}),
       ...attributionHeaderEnv,
-    }
-  }
-
-  private getConfigDir(): string {
-    return process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude')
-  }
-
-  private shouldStripInheritedProviderEnv(providerId?: string | null): boolean {
-    if (providerId !== undefined) {
-      return true
-    }
-
-    const providersDir = path.join(this.getConfigDir(), 'providers')
-    if (existsSync(path.join(providersDir, 'providers.json'))) {
-      return true
-    }
-
-    try {
-      const raw = readFileSync(path.join(providersDir, 'settings.json'), 'utf-8')
-      const parsed = JSON.parse(raw) as { env?: Record<string, string> }
-      const env = parsed.env ?? {}
-      return Object.entries(env).some(
-        ([key, value]) =>
-          isProviderManagedEnvVar(key) &&
-          typeof value === 'string' &&
-          value.trim().length > 0,
-      )
-    } catch {
-      return false
     }
   }
 

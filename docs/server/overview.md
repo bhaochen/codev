@@ -105,7 +105,6 @@ Codev 桌面服务器是一个同进程 HTTP + WebSocket 服务器，基于 **Bu
 | `/api/agents` / `/api/tasks` | Agent 任务管理 |
 | `/api/status` | 服务器状态查询 |
 | `/api/teams` | 团队配置 |
-| `/api/providers` | Provider 提供商配置 |
 | `/api/adapters` | 适配器管理 |
 | `/api/computer-use` | [Computer Use 功能控制](computer-use.md) — 环境检测、Python venv 安装、桌面控制 |
 | `/api/haha-oauth` | haha 自定义 OAuth 认证 |
@@ -145,9 +144,6 @@ CLI 子进程管理器。每个桌面会话拥有一个 CLI 子进程，子进�
 ### sessionService.ts
 会话 CRUD 操作封装。读写 CLI 持久化在 `~/.claude/projects/{path}/{sessionId}.jsonl` 的会话数据，确保桌面应用与 CLI 数据完全互通。使用 SQLite 间接管理会话索引。
 
-### providerService.ts
-多 Provider 配置管理。基于预设（Preset）系统，支持 OpenCode 兼容配置。存储位置: `~/.claude/cc-haha/providers.json`，活跃 Provider 的环境变量写入 `~/.claude/cc-haha/settings.json`（与原始 Claude Code 的 `~/.claude/settings.json` 隔离）。
-
 ### workspaceService.ts
 Git 工作区管理。支持差异查看、文件历史快照、会话工作区初始化等功能。
 
@@ -182,4 +178,3 @@ Cron 任务调度引擎。定期检查所有定时任务，在匹配 cron 表达
 - `filesystemAccessRoots.ts`: 文件系统访问根目录
 - `recoverableJsonFile.ts`: 可恢复 JSON 文件读写
 - `persistentStorageMigrations.ts`: 持久化存储迁移
-- `providerRuntimeEnv.ts`: Provider 运行时环境

@@ -18,8 +18,6 @@ import {
 import { computerUseApprovalService } from '../services/computerUseApprovalService.js'
 import { sessionService } from '../services/sessionService.js'
 import { SettingsService } from '../services/settingsService.js'
-import { ProviderService } from '../services/providerService.js'
-import { isOpenAIOfficialProviderId } from '../services/openaiOfficialProvider.js'
 import { diagnosticsService } from '../services/diagnosticsService.js'
 import { deriveTitle, generateTitle, saveAiTitle } from '../services/titleService.js'
 import { parseSlashCommand } from '../../utils/slashCommandParsing.js'
@@ -30,7 +28,6 @@ import {
 } from '../../constants/xml.js'
 import { shouldCreateWorktreeForSessionLaunch } from '../services/repositoryLaunchService.js'
 const settingsService = new SettingsService()
-const providerService = new ProviderService()
 
 /**
  * Cache slash commands from CLI init messages, keyed by sessionId.
@@ -67,7 +64,6 @@ const sessionTitleState = new Map<string, {
 }>()
 
 const runtimeOverrides = new Map<string, {
-  providerId: string | null
   modelId: string
 }>()
 
@@ -508,7 +504,6 @@ async function handleSetRuntimeConfig(
   }
 
   const nextOverride = {
-    providerId: message.providerId ?? null,
     modelId,
   }
   const prevOverride = runtimeOverrides.get(sessionId)
@@ -516,7 +511,6 @@ async function handleSetRuntimeConfig(
 
   if (
     prevOverride &&
-    prevOverride.providerId === nextOverride.providerId &&
     prevOverride.modelId === nextOverride.modelId
   ) {
     return
@@ -529,8 +523,7 @@ async function handleSetRuntimeConfig(
         await pendingStartup.catch(() => undefined)
         const currentOverride = runtimeOverrides.get(sessionId)
         if (
-          currentOverride?.providerId !== nextOverride.providerId ||
-          currentOverride.modelId !== nextOverride.modelId ||
+          currentOverride?.modelId !== nextOverride.modelId ||
           !conversationService.hasSession(sessionId)
         ) {
           return
@@ -614,12 +607,12 @@ async function restartSessionWithRuntimeConfig(
       summary: errMsg,
       details: { runtimeOverride: runtimeOverrides.get(sessionId), error: err },
     })
-    console.error(`[WS] Failed to restart CLI for ${sessionId} after runtime override: ${errMsg}`)
+      console.error(`[WS] Failed to restart CLI for ${sessionId} after runtime override: ${errMsg}`)
     sendMessage(ws, {
       type: 'error',
       message: await buildSessionStartupDiagnosticMessage(
         sessionId,
-        `Failed to switch provider/model: ${errMsg}`,
+        `Failed to switch model: ${errMsg}`,
       ),
       code: 'CLI_RESTART_FAILED',
     })
@@ -667,9 +660,8 @@ function triggerTitleGeneration(ws: ServerWebSocket<WebSocketData>, sessionId: s
   const text = count === 1
     ? state.firstUserMessage
     : state.allUserMessages.join('\n')
-  const runtimeProviderId = runtimeOverrides.get(sessionId)?.providerId
 
-  // Fire-and-forget: derive quick title, then upgrade with AI
+  // Fire-and-forget: derive quick title, then upgrade with AI (Tier1: no provider)
   void (async () => {
     try {
       // Stage 1: quick placeholder (only on first message)
@@ -685,8 +677,8 @@ function triggerTitleGeneration(ws: ServerWebSocket<WebSocketData>, sessionId: s
         }
       }
 
-      // Stage 2: AI-generated title
-      const aiTitle = await generateTitle(text, runtimeProviderId)
+      // Stage 2: AI-generated title (Tier1 stubs to null)
+      const aiTitle = await generateTitle(text, null)
       if (aiTitle) {
         const saved = await saveAiTitle(sessionId, aiTitle)
         if (!saved) {
@@ -1691,34 +1683,11 @@ type RuntimeSettings = {
   model?: string
   effort?: string
   thinking?: 'disabled'
-  providerId?: string | null
-}
-
-function isKnownRuntimeProviderId(
-  providerId: string,
-  providers: Array<{ id: string }>,
-): boolean {
-  return (
-    isOpenAIOfficialProviderId(providerId) ||
-    providers.some((provider) => provider.id === providerId)
-  )
 }
 
 async function getRuntimeSettings(sessionId?: string): Promise<RuntimeSettings> {
   const runtimeOverride = sessionId ? runtimeOverrides.get(sessionId) : undefined
   if (runtimeOverride) {
-    if (typeof runtimeOverride.providerId === 'string') {
-      const { providers } = await providerService.listProviders()
-      const providerExists = isKnownRuntimeProviderId(runtimeOverride.providerId, providers)
-      if (!providerExists) {
-        console.warn(
-          `[WS] Ignoring stale runtime provider id for ${sessionId}: ${runtimeOverride.providerId}`,
-        )
-        runtimeOverrides.delete(sessionId!)
-        return getDefaultRuntimeSettings()
-      }
-    }
-
     const userSettings = await settingsService.getUserSettings()
     const effort =
       typeof userSettings.effort === 'string' && userSettings.effort.trim()
@@ -1731,7 +1700,6 @@ async function getRuntimeSettings(sessionId?: string): Promise<RuntimeSettings> 
       model: runtimeOverride.modelId,
       effort,
       thinking,
-      providerId: runtimeOverride.providerId,
     }
   }
 
@@ -1739,52 +1707,14 @@ async function getRuntimeSettings(sessionId?: string): Promise<RuntimeSettings> 
 }
 
 async function getDefaultRuntimeSettings(): Promise<RuntimeSettings> {
-  // First check if CLI has an authProvider configured in ~/.claude.json
-  // (opencode, nvidia, openrouter, local, etc.) - these take precedence
-  // over managed providers since they are configured by the CLI's /login command
-  const cliConfig = await readCliGlobalConfig()
-  if (cliConfig?.authProvider && cliConfig.authProvider !== 'anthropic' && cliConfig.authProvider !== 'openai') {
-    const userSettings = await settingsService.getUserSettings()
-    const baseModel =
-      typeof userSettings.model === 'string' && userSettings.model.trim()
-        ? userSettings.model
-        : undefined
-    const modelContext =
-      typeof userSettings.modelContext === 'string' && userSettings.modelContext.trim()
-        ? userSettings.modelContext
-        : undefined
-    const effort =
-      typeof userSettings.effort === 'string' && userSettings.effort.trim()
-        ? userSettings.effort
-        : undefined
-    const thinking = resolveDesktopThinkingMode(userSettings)
-
-    return {
-      permissionMode: await settingsService.getPermissionMode().catch(() => undefined),
-      model: baseModel ? (modelContext ? `${baseModel}:${modelContext}` : baseModel) : undefined,
-      effort,
-      thinking,
-      providerId: undefined, // CLI manages auth via ~/.claude.json - pass undefined so shouldMarkManagedOAuth checks cli config
-    }
-  }
-
-  // Check if a custom provider is active
-  const { providers, activeId } = await providerService.listProviders()
-  let resolvedActiveId = activeId
-  if (activeId && !isKnownRuntimeProviderId(activeId, providers)) {
-    console.warn(`[WS] Active provider id is stale, falling back to official provider: ${activeId}`)
-    resolvedActiveId = null
-    await providerService.activateOfficial()
-  }
-
   const userSettings = await settingsService.getUserSettings()
-  const providerSettings = resolvedActiveId
-    ? await providerService.getManagedSettings()
-    : undefined
-  const modelSettings = providerSettings ?? userSettings
+  const baseModel =
+    typeof userSettings.model === 'string' && userSettings.model.trim()
+      ? userSettings.model
+      : undefined
   const modelContext =
-    typeof modelSettings.modelContext === 'string' && modelSettings.modelContext.trim()
-      ? modelSettings.modelContext
+    typeof userSettings.modelContext === 'string' && userSettings.modelContext.trim()
+      ? userSettings.modelContext
       : undefined
   const effort =
     typeof userSettings.effort === 'string' && userSettings.effort.trim()
@@ -1792,33 +1722,11 @@ async function getDefaultRuntimeSettings(): Promise<RuntimeSettings> {
       : undefined
   const thinking = resolveDesktopThinkingMode(userSettings)
 
-  let model: string | undefined
-  if (resolvedActiveId) {
-    // Provider is active — only consult provider-managed settings.
-    // Global ~/.claude/settings.json model values must not bleed into provider mode.
-    const baseModel =
-      typeof modelSettings.model === 'string' && modelSettings.model.trim()
-        ? modelSettings.model
-        : ''
-    if (baseModel) {
-      model = baseModel
-      if (modelContext) model += `:${modelContext}`
-    }
-  } else {
-    // No provider — pass model normally
-    const baseModel =
-      typeof userSettings.model === 'string' && userSettings.model.trim()
-        ? userSettings.model
-        : undefined
-    model = baseModel ? (modelContext ? `${baseModel}:${modelContext}` : baseModel) : undefined
-  }
-
   return {
     permissionMode: await settingsService.getPermissionMode().catch(() => undefined),
-    model,
+    model: baseModel ? (modelContext ? `${baseModel}:${modelContext}` : baseModel) : undefined,
     effort,
     thinking,
-    providerId: resolvedActiveId,
   }
 }
 
@@ -1876,25 +1784,9 @@ async function buildSessionStartupDiagnosticMessage(
 
   const runtimeOverride = runtimeOverrides.get(sessionId)
   if (runtimeOverride) {
-    lines.push(`- runtimeOverride.providerId: ${runtimeOverride.providerId ?? '(official)'}`)
     lines.push(`- runtimeOverride.modelId: ${runtimeOverride.modelId}`)
   } else {
     lines.push('- runtimeOverride: (none)')
-  }
-
-  try {
-    const { providers, activeId } = await providerService.listProviders()
-    lines.push(`- activeProviderId: ${activeId ?? '(official)'}`)
-    lines.push(`- configuredProviders: ${providers.length}`)
-    if (providers.length > 0) {
-      lines.push(
-        `- providerIndex: ${providers
-          .map((provider) => `${provider.name} (${provider.id})`)
-          .join(', ')}`,
-      )
-    }
-  } catch (err) {
-    lines.push(`- providers: failed to read (${err instanceof Error ? err.message : String(err)})`)
   }
 
   return lines.join('\n')
@@ -1939,7 +1831,7 @@ async function waitForRuntimeTransitionBeforeUserTurn(
       console.error(`[WS] Runtime transition failed before handling user message for ${sessionId}: ${errMsg}`)
       sendMessage(ws, {
         type: 'error',
-        message: `Failed to switch provider/model: ${errMsg}`,
+        message: `Failed to switch model: ${errMsg}`,
         code: 'CLI_RESTART_FAILED',
       })
       sendMessage(ws, { type: 'status', state: 'idle' })
