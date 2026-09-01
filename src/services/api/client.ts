@@ -11,8 +11,6 @@ import {
   refreshGcpCredentialsIfNeeded,
   getOpenRouterApiKey,
   getLocalBaseUrl,
-  getOpenCodeApiKey,
-  getOpenCodeModelName,
 } from 'src/utils/auth.js'
 import { getUserAgent } from 'src/utils/http.js'
 import { getSmallFastModel } from 'src/utils/model/model.js'
@@ -20,10 +18,9 @@ import {
   getAPIProvider,
   isFirstPartyAnthropicBaseUrl,
   getOpenRouterBaseUrl,
-  getOpencodeBaseUrl,
 } from 'src/utils/model/providers.js'
 import { getProxyFetchOptions } from 'src/utils/proxy.js'
-import { createOpenCodeFetchOverride, fetchOpencodeModels } from './opencodeClient.js'
+import { fetchOpencodeModels } from './opencodeClient.js'
 import { createNvidiaFetchOverride } from './nvidiaClient.js'
 import { createOpenAIFetchOverride } from './openai/openaiClient.js'
 import { resolveOpenAIModel } from '@ant/model-provider'
@@ -148,15 +145,12 @@ export async function getAnthropicClient({
     await configureApiKeyHeaders(defaultHeaders, getIsNonInteractiveSession())
   }
 
-  // For OpenCode provider: 主查询已在 claude.ts 走原生 OpenAI Chat 路径，不再依赖此 shim；
-  // 保留 shim 供 title/sidecar 等直调 getAnthropicClient 的兼容路径。
+  // Opencode 已完全走 src/services/llm 原生直连 (claude.ts → OpenAIChatClient)，
+  // 不再经 Anthropic SDK fetch-override；此处不创建 opencodeFetchOverride，直连即 ok 无回退。
+  // 仍后台预热模型元数据供 context/reasoning 使用
   const provider = getAPIProvider()
-  let opencodeFetchOverride: ClientOptions['fetch'] | undefined
   if (provider === 'opencode') {
-    const resolvedModel = model || getOpenCodeModelName() || 'big-pickle'
-    // Fetch models in background
     void fetchOpencodeModels()
-    opencodeFetchOverride = createOpenCodeFetchOverride(resolvedModel)
   }
 
   // For NVIDIA provider, use custom fetch to convert Anthropic format to OpenAI-compatible format
@@ -175,7 +169,7 @@ export async function getAnthropicClient({
     openaiFetchOverride = createOpenAIFetchOverride(resolvedModel)
   }
 
-  const resolvedFetch = buildFetch(fetchOverride || opencodeFetchOverride || nvidiaFetchOverride || openaiFetchOverride, source)
+  const resolvedFetch = buildFetch(fetchOverride || nvidiaFetchOverride || openaiFetchOverride, source)
 
   const ARGS = {
     defaultHeaders,
