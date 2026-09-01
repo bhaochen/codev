@@ -1030,20 +1030,14 @@ async function* queryModel(
   StreamEvent | AssistantMessage | SystemAPIErrorMessage,
   void
 > {
-  // OpenAI 一等 query 路径：不走 Anthropic SDK（不再需要 fetch-override 桥接），
-  // 直接消费同一份 messages/systemPrompt/tools/options，产出相同事件形状。
-  // 动态 import 避免 claude.ts ↔ openai/index.ts 的循环依赖。
-  if (getAPIProvider() === 'openai') {
-    const { queryModelOpenAI } = await import('./openai/index.js')
-    yield* queryModelOpenAI(messages, systemPrompt, tools, signal, options)
-    return
-  }
-
-  // Opencode 原生路径：不经 Anthropic SDK fetch-override，直接以 OpenAI Chat Completions
-  // 访问 opencode 兼容网关，学习自 opencode/packages/llm 的 LLMRequest/Route 抽象。
-  if (getAPIProvider() === 'opencode') {
-    const { queryModelOpencode } = await import('./opencode/queryModelOpencode.js')
-    yield* queryModelOpencode(messages, systemPrompt, tools, signal, options)
+  // 薄路由：Route 仅组合 Provider+Model+Protocol+endpoint 为可执行请求，
+  // 不承载 Auth/Capability/Transport 生命周期。Client 按 Protocol 共享。
+  const { resolveRoute } = await import('../llm/router/resolveRoute.js')
+  const { getClientForRoute } = await import('../llm/clients/index.js')
+  const route = resolveRoute(options.model)
+  const client = getClientForRoute(route)
+  if (client) {
+    yield* client.query(route, messages, systemPrompt, tools, signal, options)
     return
   }
 
