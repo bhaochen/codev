@@ -13,10 +13,13 @@ export class ModelRuntime {
     const modelMeta = getModelMetadata(route.model)
     const client = getClientForRoute(route)
     if (!client) {
-      // Anthropic 系回退至原生 SDK 路径，由 claude.ts 兼容层处理；此处抛错由上层捕获走旧路径
       throw new Error(`No client for protocol ${route.protocol}`)
     }
-    yield* client.query(route, input.messages, input.systemPrompt, input.tools, input.signal, input.options)
+    // AnthropicMessages 需要 thinkingConfig，经 Options 透传以保持 Client 签名统一（Protocol 客户端不分支 provider）
+    const optionsWithThinking = input.thinkingConfig
+      ? ({ ...input.options, thinkingConfig: input.thinkingConfig } as unknown as typeof input.options)
+      : input.options
+    yield* client.query(route, input.messages, input.systemPrompt, input.tools, input.signal, optionsWithThinking)
     void modelMeta // 预留：capabilities 可用于后续限流/重试决策，不进入 Route
   }
 }
