@@ -3,7 +3,7 @@
  * Auth/Capabilities 不进 Route，Transport 降为 Client 内部实现。
  */
 export type ProviderId =
-  | 'anthropic'
+  | 'firstParty'
   | 'openai'
   | 'opencode'
   | 'nvidia'
@@ -11,6 +11,8 @@ export type ProviderId =
   | 'vertex'
   | 'foundry'
   | 'local'
+  // legacy alias
+  | 'anthropic'
 
 export type ProtocolId =
   | 'anthropic-messages'

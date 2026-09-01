@@ -1,13 +1,53 @@
 /**
  * OpenAI Chat 协议共享客户端 — OpenAI / OpenCode / DeepSeek / Qwen 等凡走 openai-chat 的 Provider 共用。
- * Provider 仅决定 endpoint/model/headers，协议执行在此唯一实现。
+ * Provider 仅提供 endpoint/protocol/model mapping/auth identity 元数据，Client 只懂协议。
  */
 import type { LLMRoute } from '../types.js'
 import type { Message } from '../../../types/message.js'
 import type { Tools } from '../../../Tool.js'
 import type { SystemPrompt } from '../../../utils/systemPromptType.js'
 import type { Options } from '../../api/claude.js'
-import type { StreamEvent, AssistantMessage, SystemAPIErrorMessage } from '../../../types/message.js'
+import type { StreamEvent, AssistantMessage, SystemAPIErrorMessage, UserMessage } from '../../../types/message.js'
+import { APIUserAbortError } from '@anthropic-ai/sdk'
+import { randomUUID } from 'crypto'
+import {
+  adaptOpenAIStreamToAnthropic,
+  convertAnthropicMessagesToOpenAI,
+  convertAnthropicToolsToOpenAI,
+  parseOpenAIStream,
+  type AnthropicMessage,
+  type OpenAIStreamChunk,
+} from '@ant/model-provider'
+import { getSessionId } from '../../../bootstrap/state.js'
+import { getModelMaxOutputTokens } from '../../../utils/context.js'
+import { logForDebugging } from '../../../utils/debug.js'
+import {
+  createAssistantAPIErrorMessage,
+  normalizeContentFromAPI,
+  normalizeMessagesForAPI,
+} from '../../../utils/messages.js'
+import type { AgentId } from '../../../types/ids.js'
+import { toolToAPISchema } from '../../../utils/api.js'
+import { calculateUSDCost } from '../../../utils/modelCost.js'
+import { addToTotalSessionCost } from '../../../cost-tracker.js'
+import { isAbortError } from '../../../utils/errors.js'
+import type { BetaMessage, BetaStopReason, BetaToolUnion, BetaUsage } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
+import { buildOpenAIRequestBody, resolveOpenAIMaxTokens } from '../../api/openai/requestBody.js'
+import { formatOpenAIPromptCacheKey, updateOpenAIUsage } from '../../api/openai/openaiShared.js'
+import { resolveAuth } from '../auth/resolveAuth.js'
+
+function isConvertibleMessage(msg: AssistantMessage | UserMessage): msg is AssistantMessage | UserMessage {
+  return (msg as { type?: string }).type === 'assistant' || (msg as { type?: string }).type === 'user'
+}
+function toAnthropicMessage(msg: AssistantMessage | UserMessage): AnthropicMessage {
+  const inner = (msg as unknown as { message?: { role: 'user' | 'assistant'; content: AnthropicMessage['content'] } }).message
+  return { role: inner?.role ?? 'user', content: inner?.content ?? '' }
+}
+function chatCompletionsUrl(base: string): string {
+  const b = base.replace(/\/$/, '')
+  if (b.endsWith('/v1')) return `${b}/chat/completions`
+  return `${b}/v1/chat/completions`
+}
 
 export async function* queryOpenAIChat(
   route: LLMRoute,
@@ -17,15 +57,163 @@ export async function* queryOpenAIChat(
   signal: AbortSignal,
   options: Options,
 ): AsyncGenerator<StreamEvent | AssistantMessage | SystemAPIErrorMessage, void> {
-  // OpenCode 与 OpenAI 共用同一 Chat Completions 实现，仅 endpoint/model 不同
-  if (route.provider === 'opencode') {
-    const { queryModelOpencode } = await import('../../api/opencode/queryModelOpencode.js')
-    // 复用 opencode 原生路径，但 route 已解析 model/endpoint，覆盖 options
-    const patched = { ...options, model: route.model }
-    yield* queryModelOpencode(messages, systemPrompt, tools, signal, patched)
-    return
+  let partialMessage: BetaMessage | null = null
+  let ttftMs = 0
+  const start = Date.now()
+  let usage = { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
+  let stopReason: string | null = null
+  let maxTokens = 0
+  try {
+    const model = route.model
+    const endpoint = route.endpoint ?? ''
+    if (!endpoint) throw new Error(`openai-chat route missing endpoint for provider ${route.provider}`)
+    const cred = resolveAuth(route.provider)
+    const messagesForAPI = normalizeMessagesForAPI(messages, tools)
+    const toolSchemas = await Promise.all(
+      tools.map(tool =>
+        toolToAPISchema(tool, {
+          getToolPermissionContext: options.getToolPermissionContext,
+          tools,
+          agents: options.agents,
+          allowedAgentTypes: options.allowedAgentTypes,
+          model,
+        }),
+      ),
+    )
+    const standardTools = toolSchemas.filter(
+      (t): t is BetaToolUnion & { type: string } => {
+        const anyT = t as unknown as Record<string, unknown>
+        return anyT.type !== 'advisor_20260301' && anyT.type !== 'computer_20250124'
+      },
+    )
+    const openaiMessages = convertAnthropicMessagesToOpenAI(
+      messagesForAPI.filter(isConvertibleMessage).map(toAnthropicMessage),
+      systemPrompt?.join('\n'),
+      { supportsImages: true },
+    )
+    const openaiTools = convertAnthropicToolsToOpenAI(
+      standardTools.map(t => ({
+        name: (t as { name?: string }).name ?? '',
+        description: (t as { description?: string }).description,
+        input_schema: (t as { input_schema?: Record<string, unknown> }).input_schema,
+      })),
+    )
+    const { upperLimit } = getModelMaxOutputTokens(model)
+    maxTokens = resolveOpenAIMaxTokens(upperLimit, options.maxOutputTokensOverride)
+    const promptCacheKey = formatOpenAIPromptCacheKey(getSessionId())
+    logForDebugging(`[OpenAIChat] provider=${route.provider} model=${model} endpoint=${endpoint} tools=${openaiTools.length}`)
+    const body = buildOpenAIRequestBody({
+      model,
+      messages: openaiMessages,
+      tools: openaiTools,
+      toolChoice: undefined,
+      enableThinking: false,
+      maxTokens,
+      temperatureOverride: options.temperatureOverride,
+      promptCacheKey,
+    })
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'User-Agent': 'codev-llm/1.0',
+      'x-opencode-client': 'cli',
+      'x-opencode-session': `ses_${randomUUID().replace(/-/g, '').slice(0, 22)}`,
+    }
+    if (cred.type === 'bearer') headers.Authorization = `Bearer ${cred.token}`
+    const fetchFn = (options.fetchOverride as unknown as typeof fetch) ?? (globalThis.fetch as typeof fetch)
+    const response = await fetchFn(endpoint.includes('/chat/completions') ? endpoint : chatCompletionsUrl(endpoint), {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal,
+    })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(`Upstream ${route.provider} failed (${response.status})${text ? `: ${text.slice(0, 800)}` : ''}`)
+    }
+    if (!response.body) throw new Error('Upstream response missing body')
+    const adaptedStream = adaptOpenAIStreamToAnthropic(parseOpenAIStream(response.body), model, { includeCacheWriteTokens: false })
+    const newMessages: AssistantMessage[] = []
+    const contentBlocks: Record<number, Record<string, unknown>> = {}
+    for await (const event of adaptedStream) {
+      switch (event.type) {
+        case 'message_start': {
+          partialMessage = event.message as unknown as BetaMessage
+          ttftMs = Date.now() - start
+          if (event.message?.usage) usage = { ...usage, ...(event.message.usage as unknown as typeof usage) }
+          break
+        }
+        case 'content_block_start': {
+          const idx = event.index
+          const cb = event.content_block as any
+          if (cb.type === 'tool_use') contentBlocks[idx] = { ...(cb as any), input: '' }
+          else if (cb.type === 'text') contentBlocks[idx] = { ...(cb as any), text: '' }
+          else if (cb.type === 'thinking') contentBlocks[idx] = { ...(cb as any), thinking: '', signature: '' }
+          else contentBlocks[idx] = { ...(cb as any) }
+          break
+        }
+        case 'content_block_delta': {
+          const idx = event.index
+          const block = contentBlocks[idx] as any
+          if (!block) break
+          const delta = event.delta as any
+          if (delta.type === 'text_delta') block.text = ((block.text as string | undefined) || '') + delta.text
+          else if (delta.type === 'input_json_delta') block.input = ((block.input as string | undefined) || '') + delta.partial_json
+          else if (delta.type === 'thinking_delta') block.thinking = ((block.thinking as string | undefined) || '') + delta.thinking
+          else if (delta.type === 'signature_delta') block.signature = delta.signature
+          break
+        }
+        case 'content_block_stop': {
+          const contentBlock = contentBlocks[event.index]
+          if (!contentBlock || !partialMessage) break
+          const m: AssistantMessage = {
+            message: {
+              ...partialMessage,
+              content: normalizeContentFromAPI([contentBlock] as unknown as BetaMessage['content'], tools, options.agentId as AgentId | undefined),
+            },
+            requestId: undefined,
+            type: 'assistant',
+            uuid: randomUUID(),
+            timestamp: new Date().toISOString(),
+          } as unknown as AssistantMessage
+          newMessages.push(m)
+          yield m
+          break
+        }
+        case 'message_delta': {
+          const deltaUsage = event.usage
+          if (deltaUsage) usage = updateOpenAIUsage(usage, deltaUsage as unknown as Parameters<typeof updateOpenAIUsage>[1])
+          if (event.delta?.stop_reason != null) stopReason = event.delta.stop_reason
+          const lastMsg = newMessages.at(-1) as (AssistantMessage & { message: BetaMessage }) | undefined
+          if (lastMsg) {
+            lastMsg.message.usage = usage as BetaUsage
+            lastMsg.message.stop_reason = stopReason as BetaStopReason | null
+          }
+          if (usage.input_tokens + usage.output_tokens > 0) {
+            const costUSD = calculateUSDCost(model, usage as unknown as Parameters<typeof calculateUSDCost>[1])
+            addToTotalSessionCost(costUSD, usage as unknown as Parameters<typeof addToTotalSessionCost>[1], options.model)
+          }
+          break
+        }
+        case 'message_stop': break
+      }
+      yield { type: 'stream_event', event, ...(event.type === 'message_start' ? { ttftMs } : undefined) } as unknown as StreamEvent
+    }
+    const lastMsg = newMessages.at(-1) as (AssistantMessage & { message: BetaMessage }) | undefined
+    const lastHasToolUse = (lastMsg?.message.content ?? []).some(block => (block as { type?: string }).type === 'tool_use') ?? false
+    if (stopReason === null && !lastHasToolUse) {
+      if (lastMsg) {
+        lastMsg.message.usage = usage as BetaUsage
+        lastMsg.message.stop_reason = 'max_tokens' as BetaStopReason
+      }
+      yield createAssistantAPIErrorMessage({
+        content: `Upstream ${route.provider} response exceeded ${maxTokens} tokens`,
+        apiError: 'max_output_tokens',
+        error: 'max_output_tokens' as any,
+      })
+    }
+  } catch (error) {
+    if (isAbortError(error)) throw error instanceof APIUserAbortError ? error : new APIUserAbortError()
+    const msg = error instanceof Error ? error.message : String(error)
+    yield createAssistantAPIErrorMessage({ content: `API Error: ${msg}`, apiError: 'api_error', error })
   }
-  const { queryModelOpenAI } = await import('../../api/openai/index.js')
-  const patched = { ...options, model: route.model }
-  yield* queryModelOpenAI(messages, systemPrompt, tools, signal, patched)
 }

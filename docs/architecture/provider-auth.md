@@ -530,7 +530,23 @@ Copilot API 对部分模型使用 `max_completion_tokens` 而非 `max_tokens`。
 
 ---
 
-## 11. 参考资料
+## 11. 最终 LLM Runtime 架构 (b4ed8e9 收敛验证)
+
+单轨 `Native LLM Runtime`, `LLMRoute` 最小四字段, `Client=Protocol`:
+
+```text
+Agent → queryModel() → resolveRoute(){provider,protocol,model,endpoint} → ClientRegistry.get(protocol) → Protocol Client → Native Endpoint
+  provider: who, model: which, protocol: how to speak, client: execute, auth:凭什么访问(独立)
+```
+
+* `LLMRoute: src/services/llm/types.ts {provider,protocol,model,endpoint}` 不含 `Auth`/`Capability`/`Transport`
+* `Provider{endpoint,protocol,model mapping,auth identity}→resolveRoute→LLMRoute + resolveAuth→Credential` 分离汇合于 `Client`
+* `Client 按 Protocol` 共享: `OpenAI/OpenCode/DeepSeek→OpenAIChatClient:src/services/llm/clients/openaiChat.ts`, `Anthropic/Bedrock/NVIDIA→AnthropicMessagesClient`, `nvidia` 现 `fetch-override` 标 `legacy→native HTTP`
+* `P0→P5` 收敛: `P0` 清 `Client` 内 `Provider` 分支、`P1` 内联 `resolveProtocol`、`P2` 固定最小 `Route`、`P3` 显式 `auth/`、`P4` `models/registry ModelMetadata`、`P5` `resolveRoute.test.ts` 五路+同 `Client` 锁死。
+
+---
+
+## 12. 参考资料
 
 - **cc-switch** (原始 Proxy 参考实现): https://github.com/farion1231/cc-switch
 - **Anthropic Messages API**: https://docs.anthropic.com/en/api/messages

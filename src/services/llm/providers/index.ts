@@ -9,7 +9,7 @@ import { foundry } from './foundry.js'
 import type { ProviderId } from '../types.js'
 
 export const providers = {
-  anthropic,
+  firstParty: anthropic,
   openai,
   opencode,
   nvidia,
@@ -19,6 +19,12 @@ export const providers = {
   foundry,
 } as const
 
+// firstParty 为 anthropic 的规范 id，anthropic 为兼容别名
+const alias: Partial<Record<ProviderId, ProviderId>> = {
+  anthropic: 'firstParty',
+}
+
 export function getProviderDef(id: ProviderId) {
-  return providers[id]
+  const normalized = (alias[id] ?? id) as keyof typeof providers
+  return (providers as Record<string, unknown>)[normalized] as (typeof providers)[keyof typeof providers] | undefined
 }
