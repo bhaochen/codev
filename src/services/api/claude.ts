@@ -1019,17 +1019,7 @@ export function stripExcessMediaItems(
   }) as (UserMessage | AssistantMessage)[]
 }
 
-export async function* queryModel(
-  messages: Message[],
-  systemPrompt: SystemPrompt,
-  thinkingConfig: ThinkingConfig,
-  tools: Tools,
-  signal: AbortSignal,
-  options: Options,
-): AsyncGenerator<StreamEvent | AssistantMessage | SystemAPIErrorMessage, void> {
-  const { modelRuntime } = await import('../llm/runtime/index.js')
-  yield* modelRuntime.generate({ model: options.model, messages, systemPrompt, tools, signal, options, thinkingConfig })
-}
+export { queryModel } from './queryModel.js'
 
 export function cleanupStream(
   stream: Stream<BetaRawMessageStreamEvent> | undefined,

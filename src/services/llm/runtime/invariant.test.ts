@@ -4,23 +4,18 @@ import { readFileSync } from 'fs'
 describe('P6 invariants', () => {
   test('claude.ts is Facade only depends on ModelRuntime', () => {
     const s = readFileSync('src/services/api/claude.ts', 'utf8')
-    // 必须通过 ModelRuntime 委派
-    expect(s).toContain('modelRuntime.generate')
+    // P6.6 后 claude.ts 仅 re-export queryModel，新入口为 queryModel.ts
+    expect(s).toContain("export { queryModel } from './queryModel.js'")
     // 不应再出现 Provider 分支
     expect(s).not.toMatch(/if\s*\(\s*getAPIProvider\(\)\s*===\s*['"]openai['"]/)
     expect(s).not.toMatch(/if\s*\(\s*getAPIProvider\(\)\s*===\s*['"]opencode['"]/)
     // P6.x: 不应再包含 Anthropic SDK fallback（已收敛至 anthropicMessages 协议客户端）
     expect(s).not.toContain('No client for protocol')
     expect(s).not.toMatch(/anthropic-messages.*fallback/i)
-    // facade 后的 queryModel 不应包含原 fallback 的关键逻辑
     expect(s).not.toContain('tengu_off_switch_query')
-    // 仍保留 helper 导入 getAnthropicClient 供 executeNonStreamingRequest 等，但 queryModel 本体不再直接使用
-    const queryModelIdx = s.indexOf('export async function* queryModel(')
-    // 跳过 queryModelWithStreaming 的干扰，定位真正的 queryModel
-    const realIdx = s.indexOf('export async function* queryModel(\n  messages', queryModelIdx)
-    const afterQueryModel = s.slice(realIdx !== -1 ? realIdx : queryModelIdx, (realIdx !== -1 ? realIdx : queryModelIdx) + 600)
-    expect(afterQueryModel).toContain('modelRuntime.generate')
-    expect(afterQueryModel).not.toContain('getAnthropicClient')
+    const q = readFileSync('src/services/api/queryModel.ts', 'utf8')
+    expect(q).toContain('modelRuntime.generate')
+    expect(q).not.toContain('getAnthropicClient')
   })
   test('ModelRuntime does not branch on provider', () => {
     const s = readFileSync('src/services/llm/runtime/ModelRuntime.ts', 'utf8')
