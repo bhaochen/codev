@@ -1030,15 +1030,14 @@ async function* queryModel(
   StreamEvent | AssistantMessage | SystemAPIErrorMessage,
   void
 > {
-  // 薄路由：Route 仅组合 Provider+Model+Protocol+endpoint 为可执行请求，
-  // 不承载 Auth/Capability/Transport 生命周期。Client 按 Protocol 共享。
-  const { resolveRoute } = await import('../llm/router/resolveRoute.js')
-  const { getClientForRoute } = await import('../llm/clients/index.js')
-  const route = resolveRoute(options.model)
-  const client = getClientForRoute(route)
-  if (client) {
-    yield* client.query(route, messages, systemPrompt, tools, signal, options)
+  // P6 Facade：claude.ts 不再是 LLM 总管，仅兼容旧 import，编排下沉至 ModelRuntime
+  try {
+    const { modelRuntime } = await import('../llm/runtime/index.js')
+    yield* modelRuntime.generate({ model: options.model, messages, systemPrompt, tools, signal, options, thinkingConfig })
     return
+  } catch (e) {
+    if (!String((e as Error).message).includes('No client for protocol')) throw e
+    // 无可用 Protocol Client（如 anthropic-messages）则回退至原生 Anthropic SDK 路径
   }
 
   // Check cheap conditions first — the off-switch await blocks on GrowthBook
