@@ -1,4 +1,4 @@
-import { queryHaiku } from '../../services/api/claude.js'
+import { queryHaiku } from '../../services/llm/query/haiku.js'
 import type { Message } from '../../types/message.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { errorMessage } from '../../utils/errors.js'

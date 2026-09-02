@@ -2,20 +2,23 @@ import { describe, test, expect } from 'bun:test'
 import { readFileSync } from 'fs'
 
 describe('P6 invariants', () => {
-  test('claude.ts is Facade only depends on ModelRuntime', () => {
-    const s = readFileSync('src/services/api/claude.ts', 'utf8')
-    // P6.6 后 claude.ts 仅 re-export queryModel，新入口为 queryModel.ts
-    expect(s).toContain("export { queryModel } from './queryModel.js'")
-    // 不应再出现 Provider 分支
-    expect(s).not.toMatch(/if\s*\(\s*getAPIProvider\(\)\s*===\s*['"]openai['"]/)
-    expect(s).not.toMatch(/if\s*\(\s*getAPIProvider\(\)\s*===\s*['"]opencode['"]/)
-    // P6.x: 不应再包含 Anthropic SDK fallback（已收敛至 anthropicMessages 协议客户端）
-    expect(s).not.toContain('No client for protocol')
-    expect(s).not.toMatch(/anthropic-messages.*fallback/i)
-    expect(s).not.toContain('tengu_off_switch_query')
+  test('claude.ts deleted — queryModel is Facade to ModelRuntime', () => {
+    // claude.ts has been eradicated; all helpers moved to llm/* and queryModel
+    let claudeExists = true
+    try {
+      readFileSync('src/services/api/claude.ts', 'utf8')
+    } catch {
+      claudeExists = false
+    }
+    expect(claudeExists).toBe(false)
     const q = readFileSync('src/services/api/queryModel.ts', 'utf8')
     expect(q).toContain('modelRuntime.generate')
     expect(q).not.toContain('getAnthropicClient')
+    expect(q).not.toMatch(/if\s*\(\s*getAPIProvider\(\)\s*===\s*['"]openai['"]/)
+    expect(q).not.toMatch(/if\s*\(\s*getAPIProvider\(\)\s*===\s*['"]opencode['"]/)
+    expect(q).not.toContain('No client for protocol')
+    expect(q).not.toMatch(/anthropic-messages.*fallback/i)
+    expect(q).not.toContain('tengu_off_switch_query')
   })
   test('ModelRuntime does not branch on provider', () => {
     const s = readFileSync('src/services/llm/runtime/ModelRuntime.ts', 'utf8')

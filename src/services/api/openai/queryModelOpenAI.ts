@@ -61,7 +61,7 @@ import type {
   SystemAPIErrorMessage,
   UserMessage,
 } from '../../../types/message.js'
-import type { Options } from '../claude.js'
+import type { Options } from '../queryModel.js'
 import {
   isOpenAIThinkingEnabled,
   resolveOpenAIMaxTokens,

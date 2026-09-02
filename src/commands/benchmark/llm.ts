@@ -6,10 +6,8 @@
  * 每次调用是「system + 单条 user（完整 transcript）」的非流式文本补全，
  * 与 OpenSeeker/ABSeeker 的文本式 ReAct（<tool_call>/<answer>）一致。
  */
-import {
-  queryWithModel,
-  type Options as QueryModelOptions,
-} from '../../services/api/claude.js'
+import { queryWithModel } from '../../services/llm/query/haiku.js'
+import type { Options as QueryModelOptions } from '../../services/api/queryModel.js'
 import { extractTextContent } from '../../utils/messages.js'
 import { getMainLoopModel } from '../../utils/model/model.js'
 import { asSystemPrompt } from '../../utils/systemPromptType.js'
