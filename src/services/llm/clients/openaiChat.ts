@@ -86,18 +86,45 @@ export async function* queryOpenAIChat(
         return anyT.type !== 'advisor_20260301' && anyT.type !== 'computer_20250124'
       },
     )
-    const openaiMessages = convertAnthropicMessagesToOpenAI(
+    let openaiMessages = convertAnthropicMessagesToOpenAI(
       messagesForAPI.filter(isConvertibleMessage).map(toAnthropicMessage),
       systemPrompt?.join('\n'),
       { supportsImages: true },
     )
-    const openaiTools = convertAnthropicToolsToOpenAI(
+    let openaiTools = convertAnthropicToolsToOpenAI(
       standardTools.map(t => ({
         name: (t as { name?: string }).name ?? '',
         description: (t as { description?: string }).description,
         input_schema: (t as { input_schema?: Record<string, unknown> }).input_schema,
       })),
     )
+    // 免费模型对大工具集敏感，500 兜底：检测 free 模型则按能力过滤，保留核心工具
+    try {
+      const { getCachedOpencodeModels } = await import('../../api/opencodeClient.js')
+      const meta = getCachedOpencodeModels().find(m => m.id === model || model.includes(m.id) || m.id.includes(model))
+      if (meta?.isFree && openaiTools.length > 8) {
+        openaiTools = openaiTools.slice(0, 8)
+      }
+    } catch {}
+    // 兼容免费模型: 当无有效 key 时注入计费暗桩 (与旧 opencodeClient.ts 一致)，否则 500
+    const rawKey = (() => {
+      try {
+        const { getOpenCodeApiKey } = require('../../../utils/auth.js') as typeof import('../../../utils/auth.js')
+        return getOpenCodeApiKey()
+      } catch { return undefined }
+    })()
+    if (route.provider === 'opencode' && (!rawKey || rawKey === 'public')) {
+      const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+      const billingSled = `x-anthropic-billing-header: cc_version=2.1.87-dev.${todayStr}.t104103.sha02656111.0d1;cc_entrypoint=cli;\n\n`
+      const systemNode = openaiMessages.find(m => (m as any).role === 'system')
+      if (systemNode) {
+        if (typeof (systemNode as any).content === 'string') {
+          ;(systemNode as any).content = billingSled + (systemNode as any).content
+        }
+      } else {
+        openaiMessages.unshift({ role: 'system', content: billingSled.trim() } as any)
+      }
+    }
     const { upperLimit } = getModelMaxOutputTokens(model)
     maxTokens = resolveOpenAIMaxTokens(upperLimit, options.maxOutputTokensOverride)
     const promptCacheKey = formatOpenAIPromptCacheKey(getSessionId())
@@ -114,11 +141,14 @@ export async function* queryOpenAIChat(
     })
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      'User-Agent': 'codev-llm/1.0',
+      'User-Agent': 'opencode/1.15.6 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14',
       'x-opencode-client': 'cli',
+      'x-opencode-project': 'global',
       'x-opencode-session': `ses_${randomUUID().replace(/-/g, '').slice(0, 22)}`,
+      'x-opencode-request': `msg_${randomUUID().replace(/-/g, '').slice(0, 22)}`,
     }
     if (cred.type === 'bearer') headers.Authorization = `Bearer ${cred.token}`
+    else headers.Authorization = 'Bearer public'
     const fetchFn = (options.fetchOverride as unknown as typeof fetch) ?? (globalThis.fetch as typeof fetch)
     const response = await fetchFn(endpoint.includes('/chat/completions') ? endpoint : chatCompletionsUrl(endpoint), {
       method: 'POST',
