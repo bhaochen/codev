@@ -98,15 +98,24 @@ export async function* queryOpenAIChat(
         input_schema: (t as { input_schema?: Record<string, unknown> }).input_schema,
       })),
     )
-    // 免费模型对大工具集敏感，500 兜底：检测 free 模型则按能力过滤，保留核心工具
+    // 免费模型对大负载敏感：按 opencode custom 逻辑，free 模型仅保留核心工具且裁剪 system
+    let isFree = model.includes('free') || model.includes('contributor')
     try {
       const { getCachedOpencodeModels } = await import('../../api/opencodeClient.js')
-      const meta = getCachedOpencodeModels().find(m => m.id === model || model.includes(m.id) || m.id.includes(model))
-      if (meta?.isFree && openaiTools.length > 8) {
-        openaiTools = openaiTools.slice(0, 8)
+      const list = getCachedOpencodeModels()
+      if (list.length > 0) {
+        const meta = list.find(m => m.id === model || model.includes(m.id) || m.id.includes(model))
+        if (meta) isFree = !!meta.isFree
+      }
+      if (isFree && openaiTools.length > 8) openaiTools = openaiTools.slice(0, 8)
+      if (isFree) {
+        const sys = openaiMessages.find(m => (m as any).role === 'system') as any
+        if (sys && typeof sys.content === 'string' && sys.content.length > 8000) {
+          sys.content = sys.content.slice(0, 8000) + '\n...[truncated for free model]'
+        }
       }
     } catch {}
-    // 兼容免费模型: 当无有效 key 时注入计费暗桩 (与旧 opencodeClient.ts 一致)，否则 500
+    // 兼容免费模型: 无有效 key 时注入计费暗桩 (与旧 opencodeClient.ts 一致)
     const rawKey = (() => {
       try {
         const { getOpenCodeApiKey } = require('../../../utils/auth.js') as typeof import('../../../utils/auth.js')
@@ -150,12 +159,27 @@ export async function* queryOpenAIChat(
     if (cred.type === 'bearer') headers.Authorization = `Bearer ${cred.token}`
     else headers.Authorization = 'Bearer public'
     const fetchFn = (options.fetchOverride as unknown as typeof fetch) ?? (globalThis.fetch as typeof fetch)
-    const response = await fetchFn(endpoint.includes('/chat/completions') ? endpoint : chatCompletionsUrl(endpoint), {
+    let response = await fetchFn(endpoint.includes('/chat/completions') ? endpoint : chatCompletionsUrl(endpoint), {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
       signal,
     })
+    // 免费模型瞬态 500 按 opencode 策略重试并回退至 big-pickle，确保 hi 可用
+    if (!response.ok && isFree && response.status === 500 && model !== 'big-pickle') {
+      const fallbackBody = { ...body, model: 'big-pickle' }
+      logForDebugging(`[OpenAIChat] free model ${model} 500, fallback to big-pickle`)
+      response = await fetchFn(endpoint.includes('/chat/completions') ? endpoint : chatCompletionsUrl(endpoint), {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(fallbackBody),
+        signal,
+      })
+      if (response.ok) {
+        // 回退成功，更新 model 供后续 usage 统计
+        ;(body as any).model = 'big-pickle'
+      }
+    }
     if (!response.ok) {
       const text = await response.text().catch(() => '')
       throw new Error(`Upstream ${route.provider} failed (${response.status})${text ? `: ${text.slice(0, 800)}` : ''}`)
