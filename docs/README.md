@@ -7,13 +7,13 @@
 ### 架构
 | 文档 | 说明 |
 |------|------|
-| [项目架构概览](architecture/overview.md) | 技术栈、入口流程、模块职责、架构亮点 |
-| [核心数据流](architecture/data-flow.md) | 5 大核心数据流：用户输入、语音捕获、远程桥接、Friend 表情、Provider 代理 |
+| [项目架构概览](architecture/overview.md) | 技术栈、入口流程、模块职责、架构亮点（单轨 Native LLM Runtime + REPL 3 层） |
+| [核心数据流](architecture/data-flow.md) | 6 大核心数据流：用户输入、语音捕获、远程桥接、Friend 表情、Provider 代理（单轨 Native）、REPL 聚合 |
 | [Agent 循环深度解析](architecture/agent-loop.md) | 678 行 | queryLoop 完整流程、StreamingToolExecutor、5 阶段 turn pipeline、恢复机制 |
 | [投机工具执行 spec-ptc](architecture/speculative-execution.md) | SpecStore/BudgetTracker 数据结构、流式 JSON 检测、claim 缓存回放 |
 | [设计哲学与架构原则](architecture/design-philosophy.md) | 329 行 | 5 大价值、13 设计原则、与 Claude Code arXiv paper 的映射 |
 | [安全与权限系统](architecture/safety-and-permissions.md) | 867 行 | 7 种权限模式、Deny-first 规则引擎、Auto-mode ML 分类器、授权流水线 |
-| [Provider 多厂商认证](architecture/provider-auth.md) | 646 行 | OAuth PKCE、Fetch Override、Anthropic↔OpenAI 协议转换、NVIDIA NIM |
+| [Provider 多厂商认证](architecture/provider-auth.md) | 单轨 Native LLM Runtime（Route 最小 4 字段、Client=Protocol、Auth/ModelRegistry 分离、free→big-pickle） |
 | [跨切面关注点](architecture/cross-cutting.md) | 254 行 | 错误处理层次、遥测系统、性能优化策略 |
 
 ### CLI 与工具
@@ -22,9 +22,9 @@
 | [CLI 命令系统](cli/overview.md) | 命令注册、Slash 命令大全 (~75+)、Skill/工作流系统 |
 | [构建系统与功能标记](cli/build-system.md) | 676 行 | Bun 构建管道、48 个 feature flag、死代码消除、命令可用性门控 |
 | [调试系统](cli/debug-system.md) | `/debug` v2.0 DEBUG PROBE 工作流、会话调试日志 |
-| [AI 工具系统](tools/overview.md) | buildTool 框架、执行流程、权限系统、关键工具详解（含 Tavily/SearXNG） |
+| [AI 工具系统](tools/overview.md) | buildTool 框架、执行流程、权限系统、关键工具详解（含 Tavily/SearXNG、REPL 3 层契约） |
 | [工具参考大全](tools/tool-reference.md) | 所有 ~60+ AI 工具的完整参考表 |
-| [REPL Tool 深度解析](tools/repl-tool.md) | Bun node:vm 沙箱、callTool primitive 桥接、sync/async 双路径与变量持久化、Proxy 安全模型 |
+| [REPL Tool 深度解析](tools/repl-tool.md) | Bun node:vm 沙箱、ToolResult/ContextAggregator 3 层契约、isVirtual 不进 LLM、REPL≠SubAgent |
 
 ### Friend VRM 伴侣
 | 文档 | 说明 |
@@ -80,4 +80,4 @@
 ### 面试准备
 | 文档 | 说明 |
 |------|------|
-| [面试准备指南](interview-prep.md) | 782 行 | 高频面试题、源码级解析、架构对比、设计权衡（含投机执行与 REPL 沙箱） |
+| [面试准备指南](interview-prep.md) | 高频面试题、源码级解析、LLM Runtime 单轨 Native（Route/Client/Auth/ModelRegistry）、REPL 批量引擎 3 层契约、投机执行与 Tier2 剔除 |

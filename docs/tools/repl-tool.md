@@ -280,3 +280,15 @@ isolated-vm 或独立进程。
 **Q: 为什么不直接让模型多调几次工具？**
 成本与延迟都是 N 倍；且中间状态污染上下文。REPL 把控制流交给引擎，
 模型只描述"做什么"，符合"代码即最精确的意图表达"的理念。
+
+**Q: 为什么 `innerMessages(isVirtual:true)` 不直接进 LLM，而要 ContextAggregator？**
+`normalizeMessagesForAPI`（`src/utils/messages.ts:1999`）过滤 `isVirtual`，且 `engine.ts:131` 旧 `output||"(no output)"` 会使 `gh auth status` 这类空 `stdout` 成功被误判为失败、`Read` 全量又致上下文臃肿。三层解耦后 `ToolResult` 为统一事实，`isVirtual` 仅 UI/history/audit 可视，真正进 LLM 的只有 `ContextResult` 的 `preview/summary/truncated/outputPath` 聚合，不变量 `callTool成功→ToolResult必捕获→ContextAggregator决定暴露`。
+
+**Q: ToolResult vs ContextCall/ContextResult 的分工？**
+`ToolResult`（`src/tools/REPLTool/engine.ts:35`）保留完整 `stdout/stderr/data/outputPath` 供本地/回放；`ContextCall` 为进 LLM 的精简视图（`preview` 4000 截断、`head2000+tail500`、`summary="no output expected"`、`truncated/outputPath`），`ContextResult` 再聚合 `ok/tool_calls/calls/logs/error`，控制 token 成本与可二次 `Read` 的按需加载。
+
+**Q: REPL 与 SubAgent 的边界？**
+REPL 是主 Agent 的**批量工具执行器**（`主 Agent→REPL{Read,Grep,Bash}→ContextResult→主 Agent`，无二次 LLM）；SubAgent（`AgentTool/task`）是独立会话另起 LLM 调用。普通批量 `Read/Grep/Bash` 走 REPL 即可，需独立推理/探索再用 SubAgent；`ContextAggregator` 为纯程序聚合，不耗额外模型调用。
+
+**Q: P6.6 后 `toolCalls==0` 的纯 JS 如何处理？**
+保持原 `output||"(no output)"` 行为（兼容 `1+1`/`console.log` 测试），仅 `toolCalls>0` 时才产出 `JSON(ContextResult)`，避免无工具调用的计算被 JSON 包裹污染。

@@ -21,7 +21,6 @@ import {
 } from 'src/utils/model/providers.js'
 import { getProxyFetchOptions } from 'src/utils/proxy.js'
 import { fetchOpencodeModels } from './opencodeClient.js'
-import { createNvidiaFetchOverride } from './nvidiaClient.js'
 import { createOpenAIFetchOverride } from './openai/openaiClient.js'
 import { resolveOpenAIModel } from '@ant/model-provider'
 import {
@@ -153,11 +152,7 @@ export async function getAnthropicClient({
     void fetchOpencodeModels()
   }
 
-  // For NVIDIA provider, use custom fetch to convert Anthropic format to OpenAI-compatible format
-  let nvidiaFetchOverride: ClientOptions['fetch'] | undefined
-  if (provider === 'nvidia') {
-    nvidiaFetchOverride = createNvidiaFetchOverride()
-  }
+  // NVIDIA 已迁原生 openai-chat (providers/nvidia.ts) 直连 native-http，无需 fetch-override legacy
 
   // For OpenAI provider, use custom fetch to convert Anthropic format to OpenAI Chat
   // Completions format and talk directly to the OpenAI-compatible endpoint
@@ -169,7 +164,7 @@ export async function getAnthropicClient({
     openaiFetchOverride = createOpenAIFetchOverride(resolvedModel)
   }
 
-  const resolvedFetch = buildFetch(fetchOverride || nvidiaFetchOverride || openaiFetchOverride, source)
+  const resolvedFetch = buildFetch(fetchOverride || openaiFetchOverride, source)
 
   const ARGS = {
     defaultHeaders,

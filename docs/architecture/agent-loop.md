@@ -133,7 +133,7 @@ type State = {
 
 | 事件类型 | 处理位置 | 说明 |
 |---------|---------|------|
-| `text_delta` | 由 claude.ts 封装 | 文本增量 |
+| `text_delta` | 由 `src/services/llm/clients/anthropicMessages.ts:958` 封装 | 文本增量 |
 | `tool_use` | 第 829-845 行 | 提取 tool_use 块，推入 toolUseBlocks |
 | `content_block` | 第 748-787 行 | 处理 content block，backfill tool_use input |
 | `message_stop` | 第 866-892 行 | 处理缓存的微压缩边界消息 |
@@ -236,7 +236,7 @@ StreamingToolExecutor 内建两层投机执行（详见 [speculative-execution.m
   `(toolName, argsHash)` 存入 FIFO store；后续相同调用在 `addTool()`
   时 `claim()` 直接命中，跳过真实执行。仅对 `speculatable && pure`
   的工具生效（当前为 Read/Grep/Glob）。
-- **Layer 2 — StreamingSpecDispatcher**: 挂接 claude.ts streaming loop
+- **Layer 2 — StreamingSpecDispatcher**: 挂接 `src/services/llm/clients/anthropicMessages.ts` streaming loop（经 `src/services/api/queryModel.ts:17` Facade）
   （content_block_start / input_json_delta / content_block_stop 三处 hook），
   用增量 brace-depth 追踪检测 partial JSON 何时完整，完整即异步投机执行。
   预算约束：最多 5 个 inflight、每 turn 20 次 dispatch。

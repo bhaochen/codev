@@ -129,7 +129,7 @@ Anthropic first-party 认证使用标准的 OAuth 2.0 Authorization Code Flow + 
 
 ---
 
-## 3. Protocol Translation (Fetch Override 模式)
+## 3. Protocol Translation — 单轨 Native 直连为主，Fetch Override 仅 Legacy
 
 ### 3.1 核心问题
 
@@ -144,32 +144,25 @@ GET /v1/models               GET /v1/models
 POST /v1/count_tokens        (无对应端点，需要 Stub)
 ```
 
-### 3.2 Fetch Override vs 原生分流
+### 3.2 单轨 Native 直连（P6 最终形态）
 
-* **Fetch Override 机制** (兼容路径): 非 Anthropic Provider 实现 `createXxxFetchOverride()` 通过 `ClientOptions['fetch']` 钩子注入 `getAnthropicClient()`：
-
-```typescript
-export function createNvidiaFetchOverride(): 
-  (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
-```
-
-* **原生分流** (推荐): `opencode`/`openai` 在 `src/services/api/claude.ts:queryModel` 直接按 `getAPIProvider()` 分流至 `queryModelOpencode`/`queryModelOpenAI`，不经 `Anthropic SDK`，直接 `fetch` 上游 Chat Completions。`opencode` 原生学习自 `opencode/packages/llm/src/route/client.ts:compile()` 的 `LLMRequest→Route(Protocol+Endpoint+Auth)→LLMClient.stream` 抽象，`codev` 侧简化为 `convertAnthropicMessagesToOpenAI → buildOpenAIRequestBody → adaptOpenAIStreamToAnthropic`。
+**主路径**：`Agent → src/services/api/queryModel.ts:17 queryModel() → src/services/llm/runtime/ModelRuntime.ts:10 generate() → src/services/llm/router/resolveRoute.ts:11 resolveRoute() → LLMRoute → src/services/llm/clients/index.ts:21 getClientForRoute(protocol) → {openaiChat|anthropicMessages}`，不经 `Anthropic SDK`，直接 `fetch` 上游 Chat Completions。形态学习自 `opencode/packages/llm/src/route/client.ts:compile()` 的 `LLMRequest→Route(Protocol+Endpoint+Auth)→LLMClient.stream`，`codev` 侧简化为 `convertAnthropicMessagesToOpenAI → buildOpenAIRequestBody → adaptOpenAIStreamToAnthropic`。
 
 ```typescript
-// src/services/api/client.ts 第 150-163 行 (shim 保留)
-// src/services/api/claude.ts 第 1036-1045 行 (原生分流)
-if (getAPIProvider() === 'opencode') {
-  const { queryModelOpencode } = await import('./opencode/queryModelOpencode.js')
-  yield* queryModelOpencode(messages, systemPrompt, tools, signal, options)
-  return
+// src/services/api/queryModel.ts:17 — 稳定 Facade，薄封装 ModelRuntime
+export async function* queryModel(messages, systemPrompt, thinkingConfig, tools, signal, options) {
+  const { modelRuntime } = await import('../llm/runtime/index.js')
+  yield* modelRuntime.generate({ model: options.model, messages, systemPrompt, tools, signal, options, thinkingConfig })
 }
-if (provider === 'nvidia') { nvidiaFetchOverride = createNvidiaFetchOverride() }
-const resolvedFetch = buildFetch(fetchOverride || opencodeFetchOverride || nvidiaFetchOverride, source)
+// src/services/llm/runtime/ModelRuntime.ts:10 — resolveRoute(4字段) + getClientForRoute(protocol) + auth分离
+// src/services/llm/clients/openaiChat.ts:52 — openai-chat 共享客户端（无 Provider 分支）
 ```
 
-### 3.3 Fetch Override 通用模式
+* **Fetch Override 仅 legacy**：`nvidia` 仍 `src/services/api/nvidiaClient.ts:createNvidiaFetchOverride()` 注入 `getAnthropicClient()`（`src/services/llm/clients/anthropicMessages.ts:1` 标注 `legacy→native HTTP` 待迁移）；`opencode` 的 `fetch-override fallback` 已在 `5f944f0` 删除，原生直连已验证 ok；`opencodeClient.ts` 仅保留 `getCachedOpencodeModels()` 等元数据查询供 `openaiChat.ts:104` 判定 `isFree`。
 
-所有 Fetch Override 实现共享相同的拦截模式：
+### 3.3 协议转换通用模式（Native 与 Fetch Override 复用同一转换管线）
+
+所有路径共享相同的消息/工具转换（`@ant/model-provider`），差异仅在 Transport（Native `fetch` 直连 vs SDK `fetch` 钩子）：
 
 ```mermaid
 flowchart LR
@@ -299,37 +292,29 @@ function shouldUseDeepSeekReasoningCompat(baseUrl: string): boolean {
 
 ### 4.1 NVIDIA NIM
 
-**文件**: `src/services/api/nvidiaClient.ts`
+**文件**: `src/services/api/nvidiaClient.ts`（legacy fetch-override，待迁 `src/services/llm/clients/anthropicMessages.ts:1 native HTTP`）
 
-- **认证**: `getNvidiaApiKey()` → 写入 `Authorization: Bearer <key>` 请求头
+- **认证**: `getNvidiaApiKey()` → `Authorization: Bearer <key>`（经 `src/services/llm/auth/resolveAuth.ts:18 resolveAuth('nvidia')` 统一）
 - **特殊头**: `HTTP-Referer: https://claude.ai/`, `X-BILLING-INVOKE-ORIGIN: Better-Clawd`
 - **端点**: `{baseUrl}/v1/chat/completions` (默认 `https://integrate.api.nvidia.com/v1`)
 - **Model 列表**: 从 `/v1/models` 动态拉取，缓存于 `cachedNvidiaModels` 模块变量
 - **默认 Model**: `nvidia/llama-3.1-nemotron-70b-instruct` (可通过 `NVIDIA_MODEL` 环境变量覆盖)
-- **网络架构**: 通过 Sidecar 代理转发（`/api/proxy/nvidia`），适用于需要特殊头或 CORS 处理的 Provider。与之对比，OpenCode/OpenRouter 使用直接 Fetch Override 模式。
+- **网络架构**: 当前仍经 Sidecar 代理转发（`/api/proxy/nvidia`），Client=Protocol 收敛后将与 `openai-chat` 一致直连 `fetch`。
 
 ### 4.2 OpenCode Zen
 
-**文件**: `src/services/api/opencodeClient.ts` (兼容 shim) / `src/services/api/opencode/queryModelOpencode.ts` (原生)
+**文件**: `src/services/llm/providers/opencode.ts` + `src/services/llm/clients/openaiChat.ts:52`（单轨 Native；`src/services/api/opencodeClient.ts` 仅保留元数据查询）
 
-**原生路径** (推荐, 学习自 `opencode/packages/llm` + `packages/opencode/src/session/llm/native-*`):
-- **分流**: `src/services/api/claude.ts:queryModel` 按 `getAPIProvider()==='opencode'` 直接 `yield* queryModelOpencode`，不经 `Anthropic SDK`，形态同 `queryModelOpenAI` 一等公民
+**单轨 Native 路径** (`ff00aaf/b4ed8e9/54d775c` 后) — 学习自 `opencode/packages/llm/src/route/client.ts:compile()` 的 `LLMRequest→Route(Protocol+Endpoint+Auth)→LLMClient.stream`：
+- **分流**: `src/services/api/queryModel.ts:17 → src/services/llm/runtime/ModelRuntime.ts:10 → resolveRoute('opencode') → getClientForRoute('openai-chat') → queryOpenAIChat`，不经 `Anthropic SDK`，与 `openai/deepseek` 共用同一 `Client`（Client=Protocol，无 Provider 分支）
 - **协议**: 直接 `POST https://opencode.ai/zen/v1/chat/completions` (OpenAI Chat Completions)，`LLMRequest{model,system,messages,tools}` 经 `convertAnthropicMessagesToOpenAI/Tools` 显式转换 → `buildOpenAIRequestBody`，流式经 `adaptOpenAIStreamToAnthropic` 回 `Anthropic` 事件
-- **认证**: `getOpenCodeApiKey() → Authorization: Bearer` + `x-opencode-*` 头，无 `billingSled` 暗桩
+- **认证**: `src/services/llm/auth/resolveAuth.ts:11 resolveAuth('opencode')` → `Bearer <key>` 或 `Bearer public`，`openaiChat.ts:125` 无有效 key 时注入 `x-anthropic-billing-header` 暗桩（与旧 `opencodeClient` 一致），`x-opencode-*` 头透传
+- **免费模型健壮性** (`src/services/llm/clients/openaiChat.ts:102`): `model.includes('free'/'contributor')` 或 `getCachedOpencodeModels().isFree` 判定 → `tools>8` 截断、`system>8000` 截断；瞬态 `500` 自动 `fallback to big-pickle` 重试（`f141d7c`），确保 `hi` 在无 shim 下可用；`5f944f0` 已移除 `fetch-override fallback`，原生直连验证 ok
 - **优势**: 规避 `fetch-override` 的 `x-anthropic-billing-header` 版本漂移与 `effort/beta` 透传导致的 `500`，`muse-spark` 等非 Claude 模型可直接 `tool_choice:auto`
 
-**兼容 shim** (保留供 title/sidecar 直调 `getAnthropicClient`):
-- **认证**: 支持 API Key 和匿名免费使用
-- **免费模式**: 当 `apiKey` 为 `undefined` 或 `'public'` 时，注入 billing 特征码 (`x-anthropic-billing-header: cc_version=2.1.0-dev...`)，标记请求来源用于服务端路由
-- **端点**: `https://opencode.ai/zen/v1/chat/completions`
-- **Model 发现**: 
-  - 从 `https://models.dev/api.json` 动态获取模型元数据（云端成本策略）
-  - 从 `https://api.github.com/repos/anomalyco/opencode/releases/latest` 获取版本信息
-  - 缓存于 `cachedModels` 模块变量
-  - 支持免费模型列表过滤（life-free models）
-- **动态 UA**: 根据版本和运行时自动构建 `User-Agent`
-- **推理内容**: 支持 `reasoning_content` 到 `thinking` block 的转换
-- **网络架构**: 原生为直连 `fetch`，shim 为 Fetch Override
+**遗留兼容** (`src/services/api/opencodeClient.ts`):
+- 保留 `getCachedOpencodeModels()` / `getOpenCodeApiKey()` 等元数据查询供 `openaiChat.ts` 判定 `isFree`；`createOpenCodeFetchOverride()` 的 `fetch-override` 路径已删除
+- Model 发现仍从 `https://models.dev/api.json` + `https://api.github.com/repos/anomalyco/opencode/releases/latest` 动态拉取，缓存于 `cachedModels`
 
 ### 4.3 OpenAI / Codex Official
 
@@ -443,36 +428,35 @@ Tier1 运行时环境通过 `src/utils/model/providers.ts` 及 `getProcessEnvWit
 
 ---
 
-## 8. 架构图汇总
+## 8. 架构图汇总（P6 最终：单轨 Native + Tier1 仅留）
 
 ```mermaid
 graph TB
-    subgraph "Tier 1: TUI 内置 Provider（仅保留）"
-        A1[~/.claude.json]
-        A2[src/utils/model/providers.ts]
-        A3[src/services/api/client.ts]
-        A4[src/services/api/nvidiaClient.ts]
-        A5[src/services/api/opencodeClient.ts]
-        A6[src/services/api/localClient.ts]
-        A2 -->|getAPIProvider| A3
-        A3 -->|createNvidiaFetchOverride| A4
-        A3 -->|createOpenCodeFetchOverride| A5
-        A3 -->|set baseURL for local| A6
+    subgraph "Tier 1: TUI 内置 Provider（仅保留，Tier2 已删）"
+        A1[~/.claude.json authProvider]
+        A2[src/utils/model/providers.ts getAPIProvider]
+        A3[src/services/llm/router/resolveProvider.ts]
+        A4[src/services/llm/providers/* endpoint+protocol+model]
+        A2 --> A3 --> A4
     end
 
-    subgraph "Anthropic SDK"
-        C1[@anthropic-ai/sdk]
-        C2[AnthropicBedrock]
-        C3[AnthropicVertex]
-        C4[AnthropicFoundry]
+    subgraph "Single-track Native Runtime"
+        B1[src/services/api/queryModel.ts Facade]
+        B2[src/services/llm/runtime/ModelRuntime.ts]
+        B3[src/services/llm/router/resolveRoute.ts 4 fields]
+        B4[src/services/llm/clients/index.ts getClientForRoute protocol]
+        B5[src/services/llm/clients/openaiChat.ts]
+        B6[src/services/llm/clients/anthropicMessages.ts]
+        B7[src/services/llm/auth/resolveAuth.ts Credential]
+        B8[src/services/llm/models/registry.ts ModelMetadata]
+        B1 --> B2 --> B3 --> B4
+        B4 --> B5 & B6
+        B7 -.-> B5 & B6
+        B2 -.-> B8
+        A4 --> B3
     end
 
-    subgraph "协议转换层（Tier1 直连）"
-        D7[@ant/model-provider - 通用转换]
-        D8[src/services/api/openai - OpenAI 直连]
-    end
-
-    subgraph "OAuth 2.0 流程"
+    subgraph "OAuth 2.0 流程（firstParty 专用）"
         E1[src/services/oauth/index.ts]
         E2[src/services/oauth/client.ts]
         E3[src/services/oauth/crypto.ts]
@@ -480,13 +464,7 @@ graph TB
         E5[src/constants/oauth.ts]
     end
 
-    A3 -->|第一方| C1
-    A3 -->|Bedrock| C2
-    A3 -->|Vertex| C3
-    A3 -->|Foundry| C4
-    A3 -->|Fetch Override| D7
-
-    C1 --> E1
+    B6 --> E1
 ```
 
 ---
@@ -530,19 +508,36 @@ Copilot API 对部分模型使用 `max_completion_tokens` 而非 `max_tokens`。
 
 ---
 
-## 11. 最终 LLM Runtime 架构 (b4ed8e9 收敛验证)
+## 11. 最终 LLM Runtime 架构 (P0-P6 收敛，Single-track Native)
 
-单轨 `Native LLM Runtime`, `LLMRoute` 最小四字段, `Client=Protocol`:
+单轨 `Native LLM Runtime`, `LLMRoute` 最小四字段, `Client=Protocol`, `Auth/ModelRegistry` 分离:
 
 ```text
-Agent → queryModel() → resolveRoute(){provider,protocol,model,endpoint} → ClientRegistry.get(protocol) → Protocol Client → Native Endpoint
+Agent → queryModel(src/services/api/queryModel.ts:17 Facade) → ModelRuntime.generate(src/services/llm/runtime/ModelRuntime.ts:10)
+      → resolveRoute(src/services/llm/router/resolveRoute.ts:11){provider,protocol,model,endpoint}
+      → ClientRegistry.get(protocol)(src/services/llm/clients/index.ts:21) → Protocol Client → Native Endpoint
+        ↕                                                              ↕
+   resolveAuth(src/services/llm/auth/resolveAuth.ts:8)→Credential   ModelRegistry(src/services/llm/models/registry.ts:16)→ModelMetadata
   provider: who, model: which, protocol: how to speak, client: execute, auth:凭什么访问(独立)
 ```
 
-* `LLMRoute: src/services/llm/types.ts {provider,protocol,model,endpoint}` 不含 `Auth`/`Capability`/`Transport`
+```mermaid
+flowchart LR
+    A[Agent queryModel Facade] --> B[ModelRuntime.generate]
+    B --> C[resolveRoute 4 fields]
+    B --> D[getModelMetadata capabilities]
+    B --> E[getClientForRoute protocol]
+    E --> F{Protocol Client}
+    F -->|openai-chat| G[OpenAI/OpenCode/DeepSeek\nopenaiChat.ts]
+    F -->|anthropic-messages| H[Anthropic/Bedrock/NVIDIA\nanthropicMessages.ts]
+    C -.->|resolveAuth| I[Credential bearer/none]
+    I --> G & H
+```
+
+* `LLMRoute: src/services/llm/types.ts:22 {provider,protocol,model,endpoint}` 不含 `Auth`/`Capability`/`Transport`
 * `Provider{endpoint,protocol,model mapping,auth identity}→resolveRoute→LLMRoute + resolveAuth→Credential` 分离汇合于 `Client`
-* `Client 按 Protocol` 共享: `OpenAI/OpenCode/DeepSeek→OpenAIChatClient:src/services/llm/clients/openaiChat.ts`, `Anthropic/Bedrock/NVIDIA→AnthropicMessagesClient`, `nvidia` 现 `fetch-override` 标 `legacy→native HTTP`
-* `P0→P5` 收敛: `P0` 清 `Client` 内 `Provider` 分支、`P1` 内联 `resolveProtocol`、`P2` 固定最小 `Route`、`P3` 显式 `auth/`、`P4` `models/registry ModelMetadata`、`P5` `resolveRoute.test.ts` 五路+同 `Client` 锁死。
+* `Client 按 Protocol` 共享: `OpenAI/OpenCode/DeepSeek→OpenAIChatClient:src/services/llm/clients/openaiChat.ts:52`, `Anthropic/Bedrock/NVIDIA→AnthropicMessagesClient:src/services/llm/clients/anthropicMessages.ts:958`, `nvidia` 现 `fetch-override` 标 `legacy→native HTTP`
+* `P0→P6` 收敛: `P0` 清 `Client` 内 `Provider` 分支、`P1` 内联 `resolveProtocol`、`P2` 固定最小 `Route`、`P3` 显式 `auth/`、`P4` `models/registry ModelMetadata`、`P5` `resolveRoute.test.ts` 五路+同 `Client` 锁死、`P6` `54d775c/38df56f/ff00aaf/5f944f0/f141d7c` 叩定 `queryModel.ts` Facade + 剿灭 `claude.ts` + 去 `fetch-override fallback` + `free→big-pickle` 500 兜底 + 默认 `OpenCode` provider(`f1aa3bb`)。
 
 ---
 

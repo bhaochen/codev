@@ -7,7 +7,7 @@
 > - `src/services/tools/speculation.ts` — 核心数据结构
 > - `src/services/tools/StreamingSpecDispatcher.ts` — 流式层投机 dispatch
 > - `src/services/tools/StreamingToolExecutor.ts` — claim 集成点
-> - `src/services/api/claude.ts` — streaming loop hooks
+> - `src/services/llm/clients/anthropicMessages.ts` — streaming loop hooks（经 `src/services/api/queryModel.ts:17` Facade）
 
 ---
 
@@ -163,7 +163,7 @@ feed(delta: string): boolean {
 
 ### StreamingSpecDispatcher — hook 进 streaming loop
 
-`claude.ts` 中三处 hook（约 L2023/L2138/L2211）：
+`src/services/llm/clients/anthropicMessages.ts` 中三处 hook（原 `claude.ts` 约 L2023/L2138/L2211，`ff00aaf` 后职责归位至 `anthropicMessages.ts`，经 `src/services/api/queryModel.ts:17` Facade）：
 
 ```typescript
 // content_block_start → 注册 tracker

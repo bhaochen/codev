@@ -43,11 +43,11 @@ describe('resolveRoute', () => {
     expect(r.protocol).toBe('anthropic-messages')
   })
 
-  test('NVIDIA → nvidia / anthropic-messages', () => {
+  test('NVIDIA → nvidia / openai-chat (migrated native)', () => {
     process.env.CLAUDE_CODE_API_PROVIDER = 'nvidia'
     const r = resolveRoute('test-nvidia')
     expect(r.provider).toBe('nvidia')
-    expect(r.protocol).toBe('anthropic-messages')
+    expect(r.protocol).toBe('openai-chat')
   })
 
   test('Bedrock → bedrock / anthropic-messages', () => {

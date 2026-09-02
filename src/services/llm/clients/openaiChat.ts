@@ -151,10 +151,17 @@ export async function* queryOpenAIChat(
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'User-Agent': 'opencode/1.15.6 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14',
-      'x-opencode-client': 'cli',
-      'x-opencode-project': 'global',
-      'x-opencode-session': `ses_${randomUUID().replace(/-/g, '').slice(0, 22)}`,
-      'x-opencode-request': `msg_${randomUUID().replace(/-/g, '').slice(0, 22)}`,
+    }
+    // Provider-specific headers 按 opencode 侧 custom 定义
+    if (route.provider === 'opencode') {
+      headers['x-opencode-client'] = 'cli'
+      headers['x-opencode-project'] = 'global'
+      headers['x-opencode-session'] = `ses_${randomUUID().replace(/-/g, '').slice(0, 22)}`
+      headers['x-opencode-request'] = `msg_${randomUUID().replace(/-/g, '').slice(0, 22)}`
+    } else if (route.provider === 'nvidia') {
+      headers['HTTP-Referer'] = 'https://opencode.ai/'
+      headers['X-Title'] = 'opencode'
+      headers['X-BILLING-INVOKE-ORIGIN'] = 'OpenCode'
     }
     if (cred.type === 'bearer') headers.Authorization = `Bearer ${cred.token}`
     else headers.Authorization = 'Bearer public'

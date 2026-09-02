@@ -155,45 +155,36 @@ Transparency (丢失细节, LLM 可能遗忘关键上下文)
 
 ---
 
-### Q: 多 Provider 架构如何实现?
+### Q: 单轨 Native LLM Runtime 如何实现？（P0-P6 收敛，Tier2 已删）
 
-Codev 支持多种 LLM Provider, 架构分为两层:
+Codev 已从"双路由+Fetch Override"收敛为单轨 Native 直连（`src/services/llm/`）：
 
-**Tier 1: Anthropic 原生通道**
-
-- 直接使用 Anthropic SDK
-- 支持 Bedrock、Vertex AI、Foundry 三种部署方式
-- 不需要协议转换, 性能最优
-
-**Tier 2: 第三方 Provider 通道**
-
-- 使用 **Fetch Override 模式**: 拦截 `globalThis.fetch` 方法
-- 将 Anthropic Messages API 请求重写到目标 Provider 的 API 格式
-- 协议转换: Anthropic Messages ↔ OpenAI Chat/Responses API
-
-**Fetch Override 的工作原理:**
-
-```
-原始调用: client.messages.create({model, messages, tools})
-    → SDK 内部调用 fetch("https://api.anthropic.com/v1/messages", body)
-    → 被 override 拦截
-    → 转换 body 格式 (Anthropic → OpenAI)
-    → 发送到目标 Provider (如 https://api.openai.com/v1/chat/completions)
-    → 转换 response 格式 (OpenAI → Anthropic)
-    → 返回给 SDK
+```text
+Agent → queryModel Facade(src/services/api/queryModel.ts:17) → ModelRuntime.generate(src/services/llm/runtime/ModelRuntime.ts:10)
+      → resolveRoute(src/services/llm/router/resolveRoute.ts:11) → LLMRoute{provider,protocol,model,endpoint}(src/services/llm/types.ts:22)
+      → getClientForRoute(protocol)(src/services/llm/clients/index.ts:21) → Protocol Client → Native fetch
+        ↕ resolves Auth separately          ↕ ModelRegistry separate
+     resolveAuth(src/services/llm/auth/resolveAuth.ts:8)   getModelMetadata(src/services/llm/models/registry.ts:16)
 ```
 
-**模型列表管理:**
+**核心设计决策：**
 
-- `modelStrings()` 缓存所有可用模型
-- Provider 切换后必须调用 `clearModelStrings()` 清除缓存
-- 模型信息包括: Provider 名、模型 ID、上下文窗口、价格、速率限制
+| 决策 | 说明 | 为什么 |
+|------|------|--------|
+| `LLMRoute` 最小 4 字段 | `{provider,protocol,model,endpoint}` 不含 Auth/Capability/Transport | Auth/Capability 生命周期与路由不同；Route 只表达"一次可执行请求"的最小事实 |
+| `Provider ≠ Protocol` | Provider 仅提供 `{endpoint,protocol,model mapping,auth identity}` 元数据，Protocol 为 Provider 静态属性 | 避免"每个 Provider 一套 Client"膨胀；新增 Provider 只增 `providers/<id>.ts` 元数据，不新增 Client |
+| `Client = Protocol` | `openai-chat→queryOpenAIChat` 承载 OpenAI/OpenCode/DeepSeek，`anthropic-messages→queryAnthropicMessages` 承载 Anthropic/Bedrock/Vertex/Foundry/NVIDIA | 同一协议语义相同，差异仅在 endpoint/header；`Client` 内无 Provider 分支（P0 已清理），满足开闭原则 |
+| `Auth 分离` | `resolveAuth(provider)→Credential{bearer|none}` 独立于 Route，汇合于 Client | 避免 Route 携带敏感 token 扩散；`opencode` 无 key 时 `public` + billing 暗桩，`openai/nvidia` 无 key 时 `none` |
+| `ModelRegistry 分离` | `getModelMetadata(model)→{capabilities: tools/vision/reasoning/streaming}` | Capabilities 用于后续限流/重试决策，不进入 Route，避免 Route 膨胀；P4 从 Route 剥离 |
+| `queryModel.ts` 稳定 Facade | 薄封装 `modelRuntime.generate()`，旧调用方无感 | P6 `claude.ts` 已彻底剿灭（`ff00aaf`），职责归位 `runtime/router/clients/auth/models`，门面稳定降低迁移成本 |
+| `免费模型健壮性` | `model.includes('free'/'contributor')` 或 `models.dev:isFree` 判定 → `tools>8`截断/`system>8000`截断/`500→big-pickle`重试 | `f141d7c` 兜底免费模型瞬态 500，`5f944f0` 已验证原生直连无 `fetch-override fallback` 亦 ok |
+| `Tier2 删除` | `13c204e` 移除 `cc-haha` 预设系统，仅 Tier1 TUI `~/.claude.json:authProvider` | 单一事实源，避免双路由语义冲突；默认 `f1aa3bb` 回落 `opencode` |
 
-**为什么用 Fetch Override 而不是独立 SDK?**
+**追问：为什么删 Transport 抽象？**
+曾试图抽象 `fetch-override/SDK/native HTTP`，但 `Client=Protocol` 已足以复用；多一层间接只增分发开销与心智负担。`openaiChat.ts` 内直接 `fetch(chatCompletionsUrl(endpoint))` + `adaptOpenAIStreamToAnthropic` 即可，`nvidia` 标注 `legacy→native HTTP` 待迁。
 
-1. 保持统一的 Anthropic Messages 接口, 不需要为每个 Provider 写独立适配
-2. Fetch Override 是无侵入的: 所有依赖 Anthropic SDK 的代码无需修改
-3. 对用户透明: 用户配置 Provider 后, 体验完全一致
+**追问：协议转换核心？**
+`@ant/model-provider` 统一管线：`convertAnthropicMessagesToOpenAI/Tools`（system→system message, image→image_url, tool_result→tool, tool_use→tool_calls, thinking→reasoning_content）→ `buildOpenAIRequestBody` → `fetch` → `parseOpenAIStream→adaptOpenAIStreamToAnthropic`（delta.content→text_delta, reasoning_content→thinking_delta, tool_calls→tool_use, finish_reason→stop_reason）。
 
 ---
 
@@ -328,16 +319,16 @@ if (feature("VOICE_MODE")) {
 
 ---
 
-### Q: REPL 沙箱是如何设计的?
+### Q: REPL 沙箱是如何设计的?（P6.6 契约：ToolResult + ContextAggregator + isVirtual）
 
 REPL Tool 让模型在 Bun `node:vm` 沙箱里写 JS，通过 `await callTool("Grep", {...})`
-批量调用 primitive tools（详见 [repl-tool 文档](tools/repl-tool.md)）。
+批量调用 primitive tools（详见 [repl-tool 文档](tools/repl-tool.md)，`src/tools/REPLTool/engine.ts:35`）。
 
 **三层沙箱防御:**
 
 ```
 1. 白名单 context 注入   — 只绑定 JSON/Math/Promise 等 30+ 安全全局，
-                            未列出的（process/require）根本不存在
+                             未列出的（process/require）根本不存在
 2. Proxy get 拦截        — eval/Function/import/globalThis 显式抛 ReferenceError
 3. codeGeneration 关闭    — strings:false 禁 new Function 动态编译, wasm:false
 ```
@@ -349,6 +340,22 @@ async IIFE 包装内的 `var` 声明不会持久化到 vm context（函数作用
 
 - 检测无 top-level await → 同步直接执行，var 自然持久化
 - 有 top-level await → async 包装 + 正则提取 var 名手动注入 context
+
+**3 层契约（a1325f2，面试必答）:**
+
+```
+Tool → ToolResult{tool,ok,isError,exitCode,stdout/stderr,data,truncated,outputPath,noOutputExpected}
+     → ExecutionStore(innerMessages isVirtual:true → UI/history, normalizeMessagesForAPI 过滤不进 LLM)
+     → ContextAggregator.buildContextResult() → ContextResult{ok,tool_calls,calls:[{tool,ok,preview,summary,truncated,outputPath}],logs} JSON → LLM
+```
+
+- `ToolResult` 为统一事实模型（Bash 的 `stdout/stderr/exitCode/persistedOutputPath` 与 Read/Glob 的 `data` 同一结构）
+- `isVirtual` 的 `assistant(tool_use)+user(tool_result)` 仅 UI/history/audit/collapse 可见，真正进 LLM 的只有 `ContextResult`
+- `ContextAggregator`：Bash 合并 `stdout+stderr` 4000 截断（`head2000+tail500`），`mkdir` 标 `summary="no output expected"`；Read 取 `JSON.stringify(data)` `head2000+tail500`、`truncated=true`，超大走 `outputPath` 按需二次 `Read`；`console.log` 降为可选 `logs` 字段
+- 不变量：`callTool成功→ToolResult必捕获→ContextAggregator决定暴露`，与是否 `console.log` 无关；`toolCalls==0` 的纯 JS 仍保持 `output||"(no output)"` 兼容 `1+1`
+
+**REPL ≠ SubAgent:**
+一句话：REPL 是主 Agent 的批量工具执行器（`主 Agent→REPL{Read,Grep,Bash}→ContextResult→主 Agent`，无二次 LLM）；SubAgent（`AgentTool/task`）是独立会话另起 LLM。普通批量走 REPL，需独立推理再走 SubAgent。
 
 **为什么不用 worker/子进程隔离?**
 callTool 需要直接访问 ToolUseContext 与已注册的工具对象；跨进程要序列化
@@ -507,7 +514,7 @@ fork 影子 VM 提前执行。
 
 ---
 
-### 设计多 Provider LLM 代理
+### 设计多 Provider LLM 代理（单轨 Native，P0-P6 后）
 
 **需求分析:**
 
@@ -519,54 +526,50 @@ fork 影子 VM 提前执行。
 **方案对比:**
 
 ```
-方案 A: Fetch Override (Codev 选型)
+方案 A: 单轨 Native Client=Protocol（Codev P6 选型）
   优点:
-    - 无侵入: 不修改 SDK, 不修改 Agent 核心逻辑
-    - 统一接口: 所有代码只认识 Anthropic Messages 格式
-    - 易于扩展: 新增 Provider 只需要写协议转换层
+    - Route 最小 4 字段，Provider 元数据与 Protocol 解耦，新增 Provider 只增 providers/<id>.ts
+    - Client 按协议共享，OpenAI/OpenCode/DeepSeek 同一 Client，无分支，易测试
+    - Auth/ModelRegistry 分离，职责清晰，free 模型 500→big-pickle 可在 Client 层统一兜底
+    - 无 SDK/fetch-override 双路径心智负担，直连可观测
   缺点:
-    - 依赖 fetch API 的完整性
-    - 调试复杂 (请求经过转换层)
-    - 无法利用 SDK 原生功能 (如 streaming 的细节)
+    - 需自维护流式适配（adaptOpenAIStreamToAnthropic）
 
-方案 B: Proxy 模式
-  优点:
-    - 请求在中间层转换, 客户端 SDK 无需修改
-    - 可以添加缓存、限流、日志
-  缺点:
-    - 需要额外部署 Proxy 服务
-    - 增加网络延迟
+方案 B: Fetch Override（已退化为 legacy）
+  优点: 无侵入 SDK
+  缺点: 依赖 fetch 钩子，x-anthropic-billing-header 版本漂移易致 500，调试链长
+
+方案 C: Proxy 模式（服务端 server/proxy/handler.ts 备用）
+  优点: 可加缓存/限流/日志
+  缺点: 额外跳数，延迟+部署成本
 ```
 
-**协议转换 (Anthropic ↔ OpenAI):**
+**协议转换 (Anthropic ↔ OpenAI，@ant/model-provider 统一管线):**
 
 ```
-Anthropic Messages → OpenAI Chat/Responses API
+Anthropic Messages → OpenAI Chat Completions
+  system:          → role:system 消息
+  messages:        → messages（image→image_url, tool_result→tool, tool_use→tool_calls, thinking→reasoning_content）
+  tools:           → {type:'function', function:{name,description,parameters}}
+  max_tokens:      → max_tokens（DeepSeek 需省略，见 provider-auth.md 10.2）
+  stop_sequences:  → stop
 
-关键映射:
-  system:          system_message
-  messages:        messages (角色映射: assistant/assistant, user/user)
-  tools:           tools (function calling 格式)
-  tool_use:        tool_calls
-  tool_result:     tool (function response)
-  max_tokens:      max_tokens
-  stop_sequences:  stop
-
-OpenAI → Anthropic 逆映射同理
+OpenAI → Anthropic 逆映射：adaptOpenAIStreamToAnthropic 处理 SSE 事件对照（含 thinking_delta/tool_use_delta/message_delta）
 ```
 
 **模型列表管理:**
 
-- `modelStrings()` 函数缓存所有可用模型的元数据
-- 缓存包括: Provider、模型 ID、上下文窗口、价格信息
-- Provider 切换时必须调用 `clearModelStrings()` 清除缓存
-- 缓存预热: 启动时异步加载所有 Provider 的模型列表
+- `src/services/llm/models/registry.ts:16 getModelMetadata()` + `src/utils/model/providers.ts:getAPIProvider()` 单一事实源
+- `opencode` 动态 `models.dev/api.json` → `cachedModels` + `isFree` 判定，`openai/nvidia/local` 各自 `/v1/models` 拉取
+- Provider 切换需 `clearModelStrings()`（旧）/ `resolveRoute` 重新解析（新）
 
 **面试追问:**
 
-1. **为什么用 Fetch Override 而不是独立 SDK?** — 对现有代码的侵入最小化。所有依赖 Anthropic SDK 的代码 (包括第三方库) 无需任何修改即可支持新 Provider。
+1. **为什么 Route 仅 4 字段？** — Auth/Capability 生命周期与路由不同，Transport 是 Client 内部实现；Route 只表达"一次可执行请求"的最小完备事实，避免敏感 token 随 Route 扩散。
 
-2. **如何处理 Provider 特有的能力?** — 有些 Provider 不支持 tool use 或 streaming, Fetch Override 层需要做降级处理。
+2. **为什么 Client=Protocol 而非 Client=Provider？** — 同一协议语义相同，差异仅 endpoint/header；按协议收敛符合开闭原则，P0 清理 Client 内 Provider 分支后新增 Provider 零 Client 改动。
+
+3. **免费模型 500 如何兜底？** — `src/services/llm/clients/openaiChat.ts:169` 检测 `isFree && status===500` 自动 `fallback to big-pickle` 重试，另截断 `tools>8`/`system>8000` 降低触发率。
 
 ---
 
@@ -778,5 +781,45 @@ Friend VRM 的场景是 Agent → Avatar 的单向广播, SSE 是最优解。如
 
 ---
 
-> 最后更新: 2026-08-26
-> 基于 Codev main branch (commit 6f33190)
+## 7. LLM Runtime 单轨 Native 深度问答（新增）
+
+### Q: Route 为什么最小 4 字段？
+
+`LLMRoute {provider,protocol,model,endpoint}`（`src/services/llm/types.ts:22`）不含 `Auth/Capability/Transport`。Route 只需表达"一次可执行请求"的最小完备事实：Who/Who's model/How to speak/Where to send；Auth 是"凭什么访问"（`resolveAuth→Credential`），Capability 是"模型能做什么"（`ModelRegistry→ModelMetadata`），Transport 是 Client 内部实现细节。分离避免敏感 token 随 Route 扩散、避免模型能力变更污染路由缓存、降低心智负担。P2 固定最小 Route。
+
+### Q: Provider ≠ Protocol 的含义？
+
+Provider 是"身份+元数据"（`src/services/llm/providers/opencode.ts:14`：`endpoint/protocol/model mapping/auth identity/isFreeModel`），Protocol 是"怎么说话"（`openai-chat` vs `anthropic-messages`）。同一 Protocol 可承载多 Provider（`openai-chat` 承载 OpenAI/OpenCode/DeepSeek），故 `Client=Protocol` 最大化复用；新增 Provider 只需增 `providers/<id>.ts`，不新增 Client。
+
+### Q: openai/opencode 为什么走原生 OpenAI Chat 直连而不用 shim？
+
+`8cad9df` 前曾用 `Anthropic→OpenAI` shim 经 `Anthropic SDK` 的 `fetch-override`，但 `x-anthropic-billing-header` 版本漂移与 `effort/beta` 透传易致免费模型 `500`；`muse-spark` 等非 Claude 模型的 `tool_choice:auto` 亦需直连语义。`P6` 后 `ModelRuntime→openaiChat.ts` 直接 `POST /v1/chat/completions` → `adaptOpenAIStreamToAnthropic`，规避 shim 漂移，`5f944f0` 后原生直连已验证 ok 可删 fallback。
+
+### Q: Tier2 为什么删除？
+
+`cc-haha` Tier2 预设系统引入第二套 Provider 配置与路由，与单轨 `LLMRoute` 语义冲突、增加分发与权限心智负担；`13c204e` 后仅保留 Tier1 TUI（`~/.claude.json:authProvider`，`src/utils/model/providers.ts`），单一事实源，默认 `f1aa3bb` 回落 `opencode`，满足单用户桌面 CLI 场景。
+
+### Q: 免费模型 500 与上下文截断如何处理？
+
+`src/services/llm/clients/openaiChat.ts:102` 按 `model.includes('free'/'contributor')` 或 `getCachedOpencodeModels().isFree` 判定；`tools.length>8` 截至 8、`system>8000` 截断并注 `...[truncated for free model]`；无有效 key 时注入 `x-anthropic-billing-header` 暗桩；瞬态 `500` 时 `f141d7c` 自动 `fallback to big-pickle` 重试，确保 `hi` 可用。
+
+---
+
+## 8. REPL 批量引擎深度问答（新增）
+
+### Q: 3 层契约是什么？为什么 `isVirtual` 不进 LLM？
+
+`Tool→ToolResult(统一事实)→ExecutionStore(innerMessages isVirtual)→ContextAggregator→ContextResult(JSON)→LLM`。`isVirtual` 的 `assistant(tool_use)+user(tool_result)` 在 `src/utils/messages.ts:1999 normalizeMessagesForAPI` 被过滤，仅 UI/history/collapse/audit 可见；若直接把 innerMessages 进 LLM，会与外层 `tool_result` 配对校验冲突且无法控制 token。`ContextResult` 的 `preview/summary/truncated/outputPath` 才是受控的进 LLM 载体。
+
+### Q: 为什么需要 ContextAggregator？
+
+旧 `engine.ts:131 output||"(no output)"` 使 `gh auth status` 空 stdout 成功被判无输出、`Read` 全量又致上下文臃肿。Aggregator 将 `ToolResult` 转 `ContextCall`：Bash 合并 `stdout+stderr` 4000 截断、`noOutputExpected` 标 `summary`；Read 取 `JSON.stringify(data)` `head2000+tail500`、`truncated` 标记；超大走 `outputPath` 按需二次 `Read`。不变量 `callTool成功必捕获→Aggregator决定暴露`，与 `console.log` 无关。
+
+### Q: REPL 与 SubAgent 选型边界？
+
+REPL 是主 Agent 的批量工具执行器，无二次 LLM，适合 `Read/Grep/Glob/Bash/Edit` 批量；SubAgent（`AgentTool/task`）是另起 LLM 会话的独立推理单元，适合探索/并行/需隔离的任务。面试答法：先 REPL 批量、需独立思考再 SubAgent。
+
+---
+
+> 最后更新: 2026-09-02
+> 基于 Codev P6-final `ff00aaf/5f944f0/f141d7c` 单轨 Native LLM Runtime + REPL 3 层契约 + Tier2 已删

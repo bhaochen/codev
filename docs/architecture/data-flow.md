@@ -67,6 +67,32 @@ query() 函数
 | 代理 | `src/server/proxy/handler.ts` | `handleProxyRequest()` |
 | 响应渲染 | `src/screens/REPL.tsx` | 消息列表 + 流式渲染 |
 
+### 单轨 Native LLM Runtime（P6 最终）
+
+```
+Agent query() → queryModel Facade(src/services/api/queryModel.ts:17)
+              → ModelRuntime.generate(src/services/llm/runtime/ModelRuntime.ts:10)
+                ├─ resolveRoute(src/services/llm/router/resolveRoute.ts:11) → LLMRoute{provider,protocol,model,endpoint}
+                ├─ resolveAuth(src/services/llm/auth/resolveAuth.ts:8) → Credential{bearer|none}
+                ├─ getModelMetadata(src/services/llm/models/registry.ts:16) → ModelMetadata{capabilities}
+                └─ getClientForRoute(protocol)(src/services/llm/clients/index.ts:21)
+                   ├─ openai-chat → queryOpenAIChat(src/services/llm/clients/openaiChat.ts:52) 直连 Chat Completions
+                   └─ anthropic-messages → queryAnthropicMessages(src/services/llm/clients/anthropicMessages.ts:958) 直连 Messages
+              → adaptOpenAIStreamToAnthropic / 透传 → query() 流式事件 → Tool Execution → 渲染
+```
+
+免费模型在 `openaiChat.ts:102` 按 `models.dev:isFree` 裁剪 `tools<=8`、`system<=8000`，无 key 注入 `x-anthropic-billing-header` 暗桩，`500` 自动 `fallback to big-pickle`。
+
+### REPL 批量引擎契约（a1325f2）
+
+```
+LLM → REPL tool_use{code} → ReplEngine.execute(src/tools/REPLTool/engine.ts:130)
+        ├─ callTool(name,input) → ToolResult{tool,ok,exitCode,stdout/stderr/data,outputPath,truncated}
+        ├─ ExecutionStore: innerMessages(isVirtual:true) → UI/history（normalizeMessagesForAPI 过滤不进 LLM）
+        └─ ContextAggregator.buildContextResult() → ContextResult{ok,tool_calls,calls:[preview,summary,truncated,outputPath],logs} JSON → LLM API
+   REPL != SubAgent：批量执行器，无二次 LLM 调用；isVirtual 仅可视，ContextResult 唯一进模型。
+```
+
 ### 队列优先级机制
 
 ```
@@ -382,50 +408,28 @@ type VrmBroadcastPayload = {
 
 ---
 
-## 5. Provider 代理流
+## 5. Provider 代理流（单轨 Native，已收敛）
 
-CLI 通过统一接口向不同 LLM Provider 发送请求的完整路径。
+CLI 通过统一接口向不同 LLM Provider 发送请求的完整路径（P6 最终：不再双路由分流，统一 `ModelRuntime`）。
 
-### 双路由架构
+### 单轨路由决策
 
 ```
-CLI (Anthropic Messages API format)
+CLI (Anthropic Messages API format → normalizeMessagesForAPI)
     │
-    │ 选择 Provider
+    │ resolveProviderContext() + resolveModel() + getProviderDef(protocol/endpoint)
     ▼
-┌────────────────────────────────────────┐
-│          Provider 路由决策              │
-│                                        │
-│  isFirstPartyAnthropicBaseUrl()         │
-│  + isClaudeAISubscriber()               │
-│  + !isUsing3PServices()                 │
-│         │                    │          │
-│       是/                    │ 否       │
-│         │                    │          │
-│         ▼                    ▼          │
-│   ┌──────────┐    ┌──────────────────┐ │
-│   │ Anthropic│    │  Proxy Handler   │ │
-│   │ SDK 直连 │    │  (server/proxy/  │ │
-│   │          │    │   handler.ts)    │ │
-│   │POST /v1/ │    │                  │ │
-│   │messages  │    │ apiFormat?       │ │
-│   └──────────┘    │                  │ │
-│                   │ ┌── 'openai' ──▶ │ │
-│                   │ │ Anthropic →    │ │
-│                   │ │ OpenAI Chat    │ │
-│                   │ │ Completions    │ │
-│                   │ │                │ │
-│                   │ │── 'openai-     │ │
-│                   │ │   responses'   │ │
-│                   │ │ Anthropic →    │ │
-│                   │ │ OpenAI         │ │
-│                   │ │ Responses API  │ │
-│                   │ └────────────────│ │
-│                   └──────────────────┘ │
-└────────────────────────────────────────┘
+resolveRoute() → LLMRoute{provider,protocol,model,endpoint} (src/services/llm/types.ts:22)
+    │
+    ├─ resolveAuth(provider) → Credential (src/services/llm/auth/resolveAuth.ts:8)
+    └─ getClientForRoute(protocol) → Protocol Client (src/services/llm/clients/index.ts:21)
+           ├─ openai-chat → queryOpenAIChat (OpenAI/OpenCode/DeepSeek 直连)
+           └─ anthropic-messages → queryAnthropicMessages (Anthropic/Bedrock/Vertex/Foundry/NVIDIA)
+                   │
+                   ▼ Native fetch POST /v1/chat/completions 或 /v1/messages
 ```
 
-### 请求/响应转换流程
+### 请求/响应转换流程（openai-chat 路径）
 
 ```
 Anthropic Messages API 请求
@@ -438,52 +442,44 @@ Anthropic Messages API 请求
 }
     │
     ▼
-anthropicToOpenaiChat.ts / anthropicToOpenaiResponses.ts
+convertAnthropicMessagesToOpenAI(@ant/model-provider) / convertAnthropicToolsToOpenAI
     │
     │ 转换逻辑:
-    │ - system → system message (prefix)
-    │ - messages[] → messages[] (role 映射)
-    │ - max_tokens → max_tokens
-    │ - stream → stream
-    │ - tools → tools (格式适配)
+    │ - system → role:system 消息
+    │ - messages[] → messages[] (role 映射, image→image_url, tool_result→tool, tool_use→tool_calls)
+    │ - thinking → reasoning_content (DeepSeek 兼容)
+    │ - tools: {name, description, input_schema} → {type:function, function:{...}}
     │
     ▼
-OpenAI Chat/Responses API 请求
-{
-  model: "gpt-4",
-  messages: [
-    {role: "system", content: "You are helpful"},
-    {role: "user", content: "Hello"}
-  ],
-  max_tokens: 1024,
-  stream: true
-}
+buildOpenAIRequestBody(...) → {model, messages, tools, max_tokens, temperature, stream:true}
     │
-    │ POST 到上游 Provider URL
+    │ POST 到上游 endpoint（resolveRoute 产出，Provider 仅提供元数据）
     ▼
-OpenAI 流式响应
-    │
-    ▼
-openaiChatToAnthropic.ts / openaiResponsesToAnthropic.ts (流式)
+parseOpenAIStream → adaptOpenAIStreamToAnthropic (流式 SSE 双向转换)
     │
     │ 转换逻辑:
     │ - delta.content → delta.text
+    │ - delta.reasoning_content → thinking_delta
     │ - tool_calls → content_block / tool_use
     │ - finish_reason → stop_reason
     │
     ▼
-Anthropic 格式流式事件回 CLI
+Anthropic 格式流式事件回 query() → 工具调度 → 渲染
 ```
 
-### Provider 配置（仅 Tier1 TUI）
+服务端 `src/server/proxy/handler.ts` 的 `anthropicToOpenaiChat/Responses` 转换仍保留作 H5/远程备用路径；主 CLI 路径已走 `services/llm/clients/*` 直连。
 
-通过 TUI 内置 Provider 系统 (`src/utils/model/providers.ts` + `~/.claude.json`) 管理，Tier2 ProviderService 已移除：
+### Provider 配置（仅 Tier1 TUI，Tier2 已删 `13c204e`）
+
+通过 TUI 内置 Provider 系统 (`src/utils/model/providers.ts` + `~/.claude.json:authProvider`) 单一事实源管理，无 Tier2 预设；默认 `f1aa3bb` 回落 `opencode`：
 
 ```typescript
 type APIProvider = 'firstParty' | 'openai' | 'opencode' | 'nvidia' | 'local' | 'openrouter' | ...
+type LLMRoute = { provider: ProviderId, protocol: ProtocolId, model: string, endpoint?: string }
+type Credential = { type:'bearer', token:string } | { type:'none' }
 ```
 
-Provider 通过 `/login` 在终端中配置，桌面端通过 `~/.claude.json` 的 `authProvider` 字段读取。
+Provider 通过 `/login` 在终端中配置。
 
 ---
 

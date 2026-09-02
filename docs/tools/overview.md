@@ -271,15 +271,21 @@ WebSearchTool 支持两个搜索后端：
 
 ---
 
-### REPLTool
+### REPLTool — VM 沙箱批量执行引擎（P6.6 最终契约）
 
 在 Bun `node:vm` 沙箱中执行 JavaScript 的批量操作引擎（默认启用，`CODEV_REPL=0` 关闭）。详见 [REPL Tool 深度解析](repl-tool.md)。
 
 - **输入参数**: `code` (必填) — JS 代码，通过 `await callTool(name, input)` 调用 primitive tools
-- **行为**: 单次调用内完成多步批量操作；变量跨调用持久化（会话级 engineCache）
-- **primitive 工具集**: Read / Write / Edit / Glob / Grep / Bash（大小写不敏感查找）
-- **透明包装**: `isTransparentWrapper()=true`，UI 只显示内部 tool 调用与进度；`innerMessages(isVirtual:true)` 仅 UI/history，`normalizeMessagesForAPI` 过滤不进 LLM
-- **结果契约**: `ToolResult{ok,tool,exitCode,stdout/stderr/data,truncated,outputPath,noOutputExpected}` → `ContextAggregator` 聚合为 `ContextResult{ok,tool_calls,calls:[{tool,ok,preview,summary,truncated,outputPath}],logs}` JSON 进 LLM；`console.log` 可选，不再决定可见性。`REPL_ONLY_TOOLS` 在启用时从工具池隐藏
+- **行为**: 单次调用内完成多步批量操作；变量跨调用持久化（会话级 `engineCache:Map<sessionId,ReplEngine>`，`src/tools/REPLTool/REPLTool.ts`）
+- **primitive 工具集**: Read / Write / Edit / Glob / Grep / Bash（`src/tools/REPLTool/primitiveTools.ts`，大小写不敏感查找）
+- **透明包装**: `isTransparentWrapper()=true`，UI 只显示内部 tool 调用与 `repl_tool_call` 进度；`innerMessages(isVirtual:true)` 仅 UI/history，`src/utils/messages.ts:1999 normalizeMessagesForAPI` 过滤不进 LLM
+- **3 层契约** (`src/tools/REPLTool/engine.ts:35`):
+  ```
+  Tool → ToolResult{tool,ok,isError,exitCode,stdout/stderr,data,truncated,outputPath,noOutputExpected}
+       → ExecutionStore(innerMessages isVirtual)
+       → ContextAggregator.buildContextResult() → ContextResult{ok,tool_calls,calls:[{tool,ok,preview,summary,truncated,outputPath}],logs} JSON → LLM
+  ```
+  `callTool()成功必捕获 ToolResult → ContextAggregator 决定暴露`，`console.log` 仅补充 `logs` 字段；`Bash` 截断 4000/`head2000+tail500`，超大走 `outputPath` 按需二次 `Read`。`REPL_ONLY_TOOLS` 在启用时从工具池隐藏；`REPL != SubAgent`（无二次 LLM 调用，SubAgent 为 `AgentTool/task` 独立会话）。
 
 ### BenchmarkTool
 
