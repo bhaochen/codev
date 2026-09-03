@@ -18,6 +18,9 @@ export type ProtocolId =
   | 'anthropic-messages'
   | 'openai-chat'
   | 'openai-responses'
+  | 'openai-compatible-chat'
+  | 'gemini'
+  | 'bedrock-converse'
 
 export type LLMRoute = {
   provider: ProviderId
