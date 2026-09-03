@@ -69,3 +69,37 @@ describe('Client=Protocol', () => {
     expect(c1).toBe(c2)
   })
 })
+
+describe('Route override (Phase 4)', () => {
+  test('explicit protocol override → openai-responses', () => {
+    process.env.CLAUDE_CODE_API_PROVIDER = 'openai'
+    const r = resolveRoute({ model: 'gpt-5', protocol: 'openai-responses' })
+    expect(r.provider).toBe('openai')
+    expect(r.protocol).toBe('openai-responses')
+    expect(r.model).toBe('gpt-5')
+  })
+
+  test('explicit endpoint override preserved', () => {
+    const r = resolveRoute({ model: 'test', protocol: 'openai-compatible-chat', endpoint: 'https://example.com/v1' })
+    expect(r.protocol).toBe('openai-compatible-chat')
+    expect(r.endpoint).toBe('https://example.com/v1')
+  })
+
+  test('endpoint override does not affect provider default protocol when not specified', () => {
+    process.env.CLAUDE_CODE_API_PROVIDER = 'openai'
+    const r = resolveRoute({ model: 'gpt-5', endpoint: 'https://example.com/v1' })
+    expect(r.provider).toBe('openai')
+    expect(r.protocol).toBe('openai-chat')
+    expect(r.endpoint).toBe('https://example.com/v1')
+  })
+
+  test('Route → Client respects overridden protocol', () => {
+    const r = resolveRoute({ model: 'gpt-5', protocol: 'openai-compatible-chat', endpoint: 'https://example.com/v1' })
+    const c = getClientForRoute(r)
+    expect(c).not.toBeNull()
+    const compat = getClientForRoute({ provider: 'openai' as const, protocol: 'openai-compatible-chat' as const, model: 'x', endpoint: 'y' })
+    const chat = getClientForRoute({ provider: 'openai' as const, protocol: 'openai-chat' as const, model: 'x', endpoint: 'y' })
+    expect(c).toBe(compat)
+    expect(c).not.toBe(chat)
+  })
+})
