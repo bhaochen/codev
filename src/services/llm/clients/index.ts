@@ -6,6 +6,7 @@ import type { Options } from './anthropicMessages.js'
 import type { StreamEvent, AssistantMessage, SystemAPIErrorMessage } from '../../../types/message.js'
 import { queryOpenAIChat } from './openaiChat.js'
 import { queryOpenAIResponses } from '../protocols/openaiResponses.js'
+import { queryOpenAICompatibleChat } from '../protocols/openaiCompatibleChat.js'
 import { queryAnthropicMessages } from './anthropicMessages.js'
 
 export type LLMClient = {
@@ -22,6 +23,7 @@ export type LLMClient = {
 const clients: Record<string, LLMClient> = {
   'openai-chat': { query: queryOpenAIChat },
   'openai-responses': { query: queryOpenAIResponses },
+  'openai-compatible-chat': { query: queryOpenAICompatibleChat },
   'anthropic-messages': { query: queryAnthropicMessages },
 }
 
