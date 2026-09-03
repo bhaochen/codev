@@ -2,7 +2,9 @@ import type { ProviderId, ProtocolId } from '../types.js'
 
 export const vertex = {
   id: 'vertex' as ProviderId,
-  protocol: 'anthropic-messages' as ProtocolId,
-  endpoint: undefined as string | undefined,
+  defaultProtocol: 'anthropic-messages' as ProtocolId,
+  get defaultEndpoint(): string | undefined { return undefined },
+  get protocol(): ProtocolId { return this.defaultProtocol },
+  get endpoint(): string | undefined { return this.defaultEndpoint },
   resolveModel(fallback: string): string { return fallback },
 } as const

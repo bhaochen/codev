@@ -13,8 +13,10 @@ function isFreeModel(modelId: string): boolean {
 
 export const opencode = {
   id: 'opencode' as ProviderId,
-  protocol: 'openai-chat' as ProtocolId,
-  get endpoint(): string { return getOpencodeBaseUrl() + '/chat/completions' },
+  defaultProtocol: 'openai-chat' as ProtocolId,
+  get defaultEndpoint(): string { return getOpencodeBaseUrl() + '/chat/completions' },
+  get protocol(): ProtocolId { return this.defaultProtocol },
+  get endpoint(): string { return this.defaultEndpoint },
   resolveModel(fallback: string): string {
     try { return getOpenCodeModelName() || fallback || 'big-pickle' } catch { return fallback || 'big-pickle' }
   },

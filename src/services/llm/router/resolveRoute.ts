@@ -15,13 +15,20 @@ export function resolveRoute(input: ResolveRouteInput): LLMRoute {
   const { rawModel, overrideProtocol, overrideEndpoint } = normalizeRouteInput(input)
   const { provider } = resolveProviderContext()
   const model = resolveModel(provider, rawModel)
-  const def = getProviderDef(provider) as { protocol: LLMRoute['protocol']; endpoint?: string }
-  // ProviderDef.protocol 仍为默认 fallback,显式 override 优先
+  const def = getProviderDef(provider) as {
+    defaultProtocol?: LLMRoute['protocol']
+    protocol?: LLMRoute['protocol']
+    defaultEndpoint?: string
+    endpoint?: string
+  }
+  // Phase 9: Provider.defaultProtocol 为默认值,Route 显式覆盖优先
+  const defaultProtocol = def.defaultProtocol ?? def.protocol!
+  const defaultEndpoint = def.defaultEndpoint ?? def.endpoint
   return buildRoute({
     provider,
     model,
-    protocol: def.protocol,
-    endpoint: def.endpoint,
+    protocol: defaultProtocol,
+    endpoint: defaultEndpoint,
     overrideProtocol,
     overrideEndpoint,
   })

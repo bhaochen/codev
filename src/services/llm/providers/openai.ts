@@ -4,7 +4,9 @@ import { resolveOpenAIModel } from '@ant/model-provider'
 
 export const openai = {
   id: 'openai' as ProviderId,
-  protocol: 'openai-chat' as ProtocolId,
-  get endpoint(): string { return getOpenAIBaseUrl() + '/chat/completions' },
+  defaultProtocol: 'openai-chat' as ProtocolId,
+  get defaultEndpoint(): string { return getOpenAIBaseUrl() + '/chat/completions' },
+  get protocol(): ProtocolId { return this.defaultProtocol },
+  get endpoint(): string { return this.defaultEndpoint },
   resolveModel(fallback: string): string { return resolveOpenAIModel(fallback) },
 } as const
