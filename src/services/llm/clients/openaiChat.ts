@@ -98,7 +98,6 @@ export async function* queryOpenAIChat(
         input_schema: (t as { input_schema?: Record<string, unknown> }).input_schema,
       })),
     )
-    // 免费模型对大负载敏感：按 opencode custom 逻辑，free 模型仅保留核心工具且裁剪 system
     let isFree = model.includes('free') || model.includes('contributor')
     try {
       const { getCachedOpencodeModels } = await import('../../api/opencodeClient.js')
@@ -106,13 +105,6 @@ export async function* queryOpenAIChat(
       if (list.length > 0) {
         const meta = list.find(m => m.id === model || model.includes(m.id) || m.id.includes(model))
         if (meta) isFree = !!meta.isFree
-      }
-      if (isFree && openaiTools.length > 8) openaiTools = openaiTools.slice(0, 8)
-      if (isFree) {
-        const sys = openaiMessages.find(m => (m as any).role === 'system') as any
-        if (sys && typeof sys.content === 'string' && sys.content.length > 8000) {
-          sys.content = sys.content.slice(0, 8000) + '\n...[truncated for free model]'
-        }
       }
     } catch {}
     // 兼容免费模型: 无有效 key 时注入计费暗桩 (与旧 opencodeClient.ts 一致)
