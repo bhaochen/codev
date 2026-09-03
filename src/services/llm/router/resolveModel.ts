@@ -1,8 +1,6 @@
-import { getProviderDef } from '../providers/index.js'
-import type { ProviderId } from '../types.js'
-
-export function resolveModel(provider: ProviderId, fallback: string): string {
-  const def = getProviderDef(provider) as { resolveModel?: (m: string) => string }
-  if (def?.resolveModel) return def.resolveModel(fallback)
-  return fallback
-}
+/**
+ * Compatibility re-export — Phase 10: runtime now goes through models/modelResolver.ts.
+ * This file remains for existing imports.
+ */
+export { resolveModel, getModelResolver } from '../models/modelResolver.js'
+export type { ModelResolver } from '../models/modelResolver.js'
