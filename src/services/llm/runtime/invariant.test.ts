@@ -41,10 +41,13 @@ describe('P6 invariants', () => {
     expect(s2).not.toMatch(/if\s*\(\s*route\.provider\s*===\s*['"]/)
     expect(s2).not.toMatch(/if\s*\(\s*route\.provider\s*===\s*['"]openai['"]/)
   })
-  test('anthropic-messages registered via ClientRegistry', () => {
-    const s = readFileSync('src/services/llm/clients/index.ts', 'utf8')
+  test('anthropic-messages registered via ProtocolRegistry', () => {
+    const s = readFileSync('src/services/llm/protocols/index.ts', 'utf8')
     expect(s).toContain('anthropic-messages')
     expect(s).toContain('queryAnthropicMessages')
-    expect(s).not.toMatch(/不经此注册表/)
+    expect(s).toContain('ProtocolRegistry')
+    const c = readFileSync('src/services/llm/clients/index.ts', 'utf8')
+    expect(c).toContain('getProtocolHandler')
+    expect(c).not.toMatch(/不经此注册表/)
   })
 })
