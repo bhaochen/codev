@@ -12,13 +12,12 @@ import type { StreamEvent, AssistantMessage, SystemAPIErrorMessage, UserMessage 
 import { APIUserAbortError } from '@anthropic-ai/sdk'
 import { randomUUID } from 'crypto'
 import {
-  adaptOpenAIStreamToAnthropic,
   convertAnthropicMessagesToOpenAI,
   convertAnthropicToolsToOpenAI,
   type AnthropicMessage,
 } from '@ant/model-provider'
 import { httpRequest } from '../transport/http.js'
-import { parseOpenAIChunksFromSSE } from '../transport/sse.js'
+import { parseSSERaw, type RawSSEEvent } from '../transport/sse.js'
 import { getSessionId } from '../../../bootstrap/state.js'
 import { getModelMaxOutputTokens } from '../../../utils/context.js'
 import { logForDebugging } from '../../../utils/debug.js'
@@ -49,6 +48,143 @@ export function responsesUrl(base: string): string {
   const b = base.replace(/\/$/, '')
   if (b.endsWith('/v1')) return `${b}/responses`
   return `${b}/v1/responses`
+}
+
+/**
+ * Responses SSE to Anthropic stream adapter.
+ * Input RawSSEEvent (event/data), output Anthropic StreamEvent
+ * (message_start / content_block_* / message_delta / message_stop) to reuse downstream.
+ * Only text generation is guaranteed; tool/reasoning events are safely ignored.
+ */
+export async function* adaptOpenAIResponsesSSEToAnthropic(
+  rawStream: AsyncIterable<RawSSEEvent>,
+  model: string,
+): AsyncGenerator<
+  | { type: 'message_start'; message: { id: string; type: 'message'; role: 'assistant'; content: []; model: string; stop_reason: null; stop_sequence: null; usage: { input_tokens: number; output_tokens: number; cache_creation_input_tokens: number; cache_read_input_tokens: number } } }
+  | { type: 'content_block_start'; index: number; content_block: { type: 'text'; text: string } | { type: 'thinking'; thinking: string; signature: string } | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> } }
+  | { type: 'content_block_delta'; index: number; delta: { type: 'text_delta'; text: string } | { type: 'thinking_delta'; thinking: string } | { type: 'input_json_delta'; partial_json: string } | { type: 'signature_delta'; signature: string } }
+  | { type: 'content_block_stop'; index: number }
+  | { type: 'message_delta'; delta: { stop_reason: string; stop_sequence: null }; usage: { input_tokens: number; output_tokens: number; cache_creation_input_tokens: number; cache_read_input_tokens: number } }
+  | { type: 'message_stop' },
+  void
+> {
+  const newMessageId = () => {
+    const bytes = crypto.getRandomValues(new Uint8Array(12))
+    let hex = ''
+    for (const b of bytes) hex += b.toString(16).padStart(2, '0')
+    return `msg_${hex}`
+  }
+  const messageId = newMessageId()
+  let started = false
+  let currentIndex = -1
+  let textBlockOpen = false
+  const openBlocks = new Set<number>()
+  let usage = { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
+
+  const ensureStarted = function* (): Generator<{ type: 'message_start'; message: { id: string; type: 'message'; role: 'assistant'; content: []; model: string; stop_reason: null; stop_sequence: null; usage: typeof usage } }> {
+    if (!started) {
+      started = true
+      yield {
+        type: 'message_start',
+        message: { id: messageId, type: 'message', role: 'assistant', content: [], model, stop_reason: null, stop_sequence: null, usage: { ...usage, output_tokens: 0 } },
+      }
+    }
+  }
+
+  const extractDelta = (parsed: Record<string, unknown>): string | undefined => {
+    if (typeof (parsed as { delta?: unknown }).delta === 'string') return (parsed as { delta: string }).delta
+    if (typeof (parsed as { text?: unknown }).text === 'string') return (parsed as { text: string }).text
+    const d = (parsed as { delta?: unknown }).delta as Record<string, unknown> | undefined
+    if (d && typeof d.text === 'string') return d.text
+    return undefined
+  }
+
+  const extractUsage = (parsed: Record<string, unknown>): typeof usage | undefined => {
+    const root = (parsed as { response?: Record<string, unknown> }).response ?? parsed
+    const u = (root as { usage?: Record<string, unknown> }).usage ?? (parsed as { usage?: Record<string, unknown> }).usage
+    if (!u || typeof u !== 'object') return undefined
+    const uu = u as Record<string, unknown>
+    const input = (uu.input_tokens as number) ?? (uu.prompt_tokens as number) ?? 0
+    const output = (uu.output_tokens as number) ?? (uu.completion_tokens as number) ?? 0
+    return { input_tokens: input, output_tokens: output, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
+  }
+
+  for await (const raw of rawStream) {
+    const evName = raw.event ?? ''
+    const dataStr = raw.data.trim()
+    if (dataStr === '') continue
+    let parsed: Record<string, unknown>
+    try {
+      parsed = JSON.parse(dataStr) as Record<string, unknown>
+    } catch {
+      continue
+    }
+
+    // 忽略 response.created / in_progress 等不需要暴露的事件
+    if (evName === 'response.created' || evName === 'response.in_progress' || evName === 'response.queued') {
+      for (const e of ensureStarted()) yield e as never
+      continue
+    }
+
+    if (evName === 'response.output_text.delta') {
+      const delta = extractDelta(parsed)
+      if (delta == null) continue
+      for (const e of ensureStarted()) yield e as never
+      if (!textBlockOpen) {
+        currentIndex++
+        textBlockOpen = true
+        openBlocks.add(currentIndex)
+        yield { type: 'content_block_start', index: currentIndex, content_block: { type: 'text', text: '' } }
+      }
+      if (delta !== '') {
+        yield { type: 'content_block_delta', index: currentIndex, delta: { type: 'text_delta', text: delta } }
+      }
+      continue
+    }
+
+    if (evName === 'response.output_text.done' || evName === 'response.content_part.done') {
+      if (textBlockOpen) {
+        yield { type: 'content_block_stop', index: currentIndex }
+        openBlocks.delete(currentIndex)
+        textBlockOpen = false
+      }
+      continue
+    }
+
+    if (evName === 'response.completed' || evName === 'response.incomplete' || evName === 'response.failed') {
+      // 确保 message_start 已发(空响应情况)
+      for (const e of ensureStarted()) yield e as never
+      if (textBlockOpen) {
+        yield { type: 'content_block_stop', index: currentIndex }
+        openBlocks.delete(currentIndex)
+        textBlockOpen = false
+      }
+      for (const idx of [...openBlocks]) {
+        yield { type: 'content_block_stop', index: idx }
+        openBlocks.delete(idx)
+      }
+      const u = extractUsage(parsed)
+      if (u) usage = u
+      const status = (parsed as { response?: { status?: string } }).response?.status ?? (parsed as { status?: string }).status
+      const stopReason = status === 'incomplete' ? 'max_tokens' : 'end_turn'
+      yield { type: 'message_delta', delta: { stop_reason: stopReason, stop_sequence: null }, usage: { ...usage } }
+      yield { type: 'message_stop' }
+      return
+    }
+
+    // 未支持的事件(如 function_call, reasoning_summary)安全忽略,不 crash
+  }
+
+  // 流结束未收到 completed 的兜底收尾
+  if (started) {
+    for (const idx of [...openBlocks]) {
+      yield { type: 'content_block_stop', index: idx }
+    }
+    if (started) {
+      yield { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { ...usage } }
+      yield { type: 'message_stop' }
+    }
+  }
 }
 
 /**
@@ -168,9 +304,8 @@ export async function* queryOpenAIResponses(
     }
     if (!response.body) throw new Error('Upstream response missing body')
 
-    // Responses SSE 与 Chat SSE 结构不同,此处先经通用 SSE framing 再按 Chat 适配;
-    // 严格 Responses 规范(response.output_text.delta)需 Responses-specific adapter。
-    const adaptedStream = adaptOpenAIStreamToAnthropic(parseOpenAIChunksFromSSE(response.body) as AsyncIterable<never>, model, { includeCacheWriteTokens: false })
+    const rawStream = parseSSERaw(response.body)
+    const adaptedStream = adaptOpenAIResponsesSSEToAnthropic(rawStream, model)
     const newMessages: AssistantMessage[] = []
     const contentBlocks: Record<number, Record<string, unknown>> = {}
     for await (const event of adaptedStream) {
