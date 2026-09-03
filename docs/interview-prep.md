@@ -155,16 +155,18 @@ Transparency (丢失细节, LLM 可能遗忘关键上下文)
 
 ---
 
-### Q: 单轨 Native LLM Runtime 如何实现？（P0-P6 收敛，Tier2 已删）
+### Q: 单轨 Native LLM Runtime 如何实现？（Phase 1-12 渐进式正交解耦，P0-P6 为旧编号）
 
-Codev 已从"双路由+Fetch Override"收敛为单轨 Native 直连（`src/services/llm/`）：
+> **1-12 ↔ P0-P6 映射**: `P0`清Client分支=`Phase1 Registry声明`/`P1`内联protocol=`Phase2 Responses拆分`/`P2`最小Route=`Phase4 Route抽象`/`P3`显式auth=`Phase7 Auth Strategy`/`P4` registry=`Phase11 ModelRegistry`/`P5`测试锁死=`Phase5 Transport`/`P6` Facade剿灭=`Phase5-6`直连+free兜底。当前以 `Phase 1-12` 为准，`ProtocolRegistry≡ClientRegistry` (`protocols/index.ts` 唯一源)
+
+Codev 已从"双路由+Fetch Override"收敛为单轨 Native 直连（`src/services/llm/`，`89 tests`）：
 
 ```text
-Agent → queryModel Facade(src/services/api/queryModel.ts:17) → ModelRuntime.generate(src/services/llm/runtime/ModelRuntime.ts:10)
-      → resolveRoute(src/services/llm/router/resolveRoute.ts:11) → LLMRoute{provider,protocol,model,endpoint}(src/services/llm/types.ts:22)
-      → getClientForRoute(protocol)(src/services/llm/clients/index.ts:21) → Protocol Client → Native fetch
-        ↕ resolves Auth separately          ↕ ModelRegistry separate
-     resolveAuth(src/services/llm/auth/resolveAuth.ts:8)   getModelMetadata(src/services/llm/models/registry.ts:16)
+Agent → queryModel Facade(src/services/api/queryModel.ts:17) → ModelRuntime.generate(src/services/llm/runtime/ModelRuntime.ts:11)
+      → resolveRoute(src/services/llm/router/resolveRoute.ts:14) → LLMRoute{provider,protocol,model,endpoint}(src/services/llm/types.ts:26 + route/Route.ts:27)
+      → ProtocolRegistry.getHandler(protocol)(src/services/llm/protocols/index.ts:23) → handler.query → Transport.httpRequest + Framing.parseSSERaw → Adapter → Native fetch
+        ↕ ModelResolver canonical               ↕ ModelRegistry has/get
+   AuthStrategy bearer/api-key/none(src/services/llm/auth/strategies.ts:10)  ModelRegistry local>models.dev>default(src/services/llm/models/registry.ts:40)
 ```
 
 **核心设计决策：**
@@ -179,9 +181,14 @@ Agent → queryModel Facade(src/services/api/queryModel.ts:17) → ModelRuntime.
 | `queryModel.ts` 稳定 Facade | 薄封装 `modelRuntime.generate()`，旧调用方无感 | P6 `claude.ts` 已彻底剿灭（`ff00aaf`），职责归位 `runtime/router/clients/auth/models`，门面稳定降低迁移成本 |
 | `免费模型健壮性` | `model.includes('free'/'contributor')` 或 `models.dev:isFree` 判定 → `tools>8`截断/`system>8000`截断/`500→big-pickle`重试 | `f141d7c` 兜底免费模型瞬态 500，`5f944f0` 已验证原生直连无 `fetch-override fallback` 亦 ok |
 | `Tier2 删除` | `13c204e` 移除 `cc-haha` 预设系统，仅 Tier1 TUI `~/.claude.json:authProvider` | 单一事实源，避免双路由语义冲突；默认 `f1aa3bb` 回落 `opencode` |
+| `ProtocolRegistry 唯一源` | `protocols/index.ts:23` `ProtocolRegistry{handler}` 4协议 `openai-chat/responses/compatible/anthropic-messages` + `gemini/bedrock` 无 handler→`unsupported` | `Phase8 91b8fc9` 前 `clients/index` 私有 map 与 `protocols` 分裂，`getClientForRoute→getProtocolHandler` 统一 |
+| `Provider≠Protocol (defaultProtocol)` | `providers/*:5` `defaultProtocol/defaultEndpoint` + `protocol/endpoint` 别名, `resolveRoute({protocol?,endpoint?})` 覆盖 | `Phase9 d752e69` 前 Provider 独占 Protocol, 现同一 Provider 可 `openai→chat/responses/compatible` 三选 |
+| `ModelResolver 独立` | `models/modelResolver.ts:11` `openai→resolveOpenAIModel / opencode→getOpenCodeModelName / others→passthrough` | `Phase10 4225283` 前 `ProviderDef.resolveModel` 独占, 现 `Route` 直调独立 Resolver |
+| `Transport/Framing 最小` | `transport/http.ts:7` `httpRequest` + `transport/sse.ts:24` `parseSSERaw` 跨 chunk + `[DONE]` | `Phase5 a939f5a` 抽离后 3 OpenAI 协议共用, `Phase6` 修复 Responses 误用 Chat parser |
+| `ModelRegistry 合并` | `models/registry.ts:40` `local {big-pickle,default} > models.dev (provider/model) > default`, `registerModelsDev` Via `fromModelsDev` | `Phase11 c5901ae` 仅本地, `12B df13a0f` 纯函数, `12C b9503eb` 合并, `12D e1fa95a` XDG 24h 缓存 + 后台 `sync` |
 
 **追问：为什么删 Transport 抽象？**
-曾试图抽象 `fetch-override/SDK/native HTTP`，但 `Client=Protocol` 已足以复用；多一层间接只增分发开销与心智负担。`openaiChat.ts` 内直接 `fetch(chatCompletionsUrl(endpoint))` + `adaptOpenAIStreamToAnthropic` 即可，`nvidia` 标注 `legacy→native HTTP` 待迁。
+`Phase5` 前曾抽象 `fetch-override/SDK/native HTTP`, 现仅保留最小 `httpRequest + parseSSERaw` (`a939f5a`), `Client=Protocol` 已足以复用；`openaiChat.ts` 不再 `fetch(chatCompletionsUrl)` 直调而经 `Transport`, `nvidia` 已从 `legacy→native` 完成。
 
 **追问：协议转换核心？**
 `@ant/model-provider` 统一管线：`convertAnthropicMessagesToOpenAI/Tools`（system→system message, image→image_url, tool_result→tool, tool_use→tool_calls, thinking→reasoning_content）→ `buildOpenAIRequestBody` → `fetch` → `parseOpenAIStream→adaptOpenAIStreamToAnthropic`（delta.content→text_delta, reasoning_content→thinking_delta, tool_calls→tool_use, finish_reason→stop_reason）。

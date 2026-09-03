@@ -78,30 +78,54 @@ Friend VRM 服务与 CLI 运行在**同一 Bun 进程**中：
 
 工具通过 `assembleToolPool()` 与 MCP 工具合并去重，统一提供给 AI 模型。
 
-### 3. 单轨 Native LLM Runtime（P0-P6 收敛，Tier2 已删除）
+### 3. 单轨 Native LLM Runtime（Phase 1-12 渐进式解耦，Tier2 已删除）
+
+> **术语统一**：`ProtocolRegistry ≡ ClientRegistry`（`src/services/llm/protocols/index.ts` 为唯一运行时源, `src/services/llm/clients/index.ts` 为薄 facade `getClientForRoute → getProtocolHandler`）。`Phase 1-12` = 架构演进主线，`P0-P6` 为早期内部编号（见下表映射）。
 
 ```
-Agent → ModelRuntime.generate() → resolveRoute() → LLMRoute{provider,protocol,model,endpoint} → ClientRegistry → Protocol Client → Native Endpoint
-                                   ↕                                                 ↕
-                              resolveAuth() → Credential                      ModelRegistry → ModelMetadata{capabilities}
+Agent → queryModel.ts:17 Facade → ModelRuntime.generate() → resolveRoute() → LLMRoute{provider,protocol,model,endpoint}
+                                                      ↕                         ↕
+                              ModelResolver → canonical  +  ModelRegistry   ProtocolRegistry → handler
+                                                     ↕                         ↓
+                              Auth Strategy → Credential                 Transport → Framing → Adapter → Native Endpoint
 ```
 
-- **LLMRoute 最小 4 字段** (`src/services/llm/types.ts:22`): `{provider, protocol, model, endpoint}`，不含 Auth/Capability/Transport。
-- **Provider ≠ Protocol** (`src/services/llm/providers/*`): Provider 只提供 `{endpoint, protocol, model mapping, auth identity}` 元数据；`resolveRoute()` 组合为可执行 Route，`resolveAuth()` 独立产出 `Credential`，二者在 `Client.query(route,...)` 汇合。
-- **Client = Protocol** (`src/services/llm/clients/index.ts:21`): 按协议共享客户端
-  - `openai-chat` → `openaiChat.ts:52 queryOpenAIChat` 承载 `OpenAI / OpenCode / DeepSeek` 等
-  - `anthropic-messages` → `anthropicMessages.ts:958 queryAnthropicMessages` 承载 `Anthropic / Bedrock / Vertex / Foundry / NVIDIA`
-  - `Client` 内无 Provider 分支（P0 已清理），Provider 差异在 Transport/Header 层收敛。
-- **ModelRuntime 薄编排** (`src/services/llm/runtime/ModelRuntime.ts:10`): `resolveRoute → getModelMetadata → getClientForRoute → client.query`，`capabilities` 不进 Route，仅作后续限流/重试决策预留。
-- **稳定 Facade** (`src/services/api/queryModel.ts:17`): `queryModel()` 薄封装 `modelRuntime.generate()`，保持历史调用方兼容；新代码直接 `import { modelRuntime } from '@/services/llm/runtime'`。
-- **Auth 分离** (`src/services/llm/auth/resolveAuth.ts:8`): `resolveAuth(provider) → {type:'bearer',token}|{type:'none'}`，不在 Route 中；`opencode` 无 key 时 `token:'public'` + billing 暗桩透传，`openai/nvidia` 无 key 时 `none`。
-- **ModelRegistry 分离** (`src/services/llm/models/registry.ts:16`): `getModelMetadata(model) → {capabilities: tools/vision/reasoning/streaming}`，供 Client/重试决策使用。
+- **LLMRoute 最小 4 字段** (`src/services/llm/types.ts:26`): `{provider, protocol, model, endpoint}`，不含 Auth/Capability/Transport。`Phase 4` 引入 `src/services/llm/route/Route.ts` (`buildRoute/normalizeRouteInput`) 支持 `protocol/endpoint` 显式覆盖，`Phase 9` 后 Provider 仅提供 `defaultProtocol/defaultEndpoint` (兼容别名 `protocol/endpoint`)，最终 Route 由 `resolveRoute({model,protocol?,endpoint?})` 组合。
+- **Provider ≠ Protocol ≠ Model** (`src/services/llm/providers/*`): Provider 只提供 `{id, defaultProtocol, defaultEndpoint, displayName}` 默认值；`ModelResolver` (`src/services/llm/models/modelResolver.ts:11` 独立边界) 负责 `openai→resolveOpenAIModel / opencode→getOpenCodeModelName / others→passthrough`；`ProtocolRegistry` 负责通信契约，三者在 `Route` 汇合。
+- **ProtocolRegistry 唯一源** (`src/services/llm/protocols/index.ts:23` `ProtocolRegistry:Record<ProtocolId,ProtocolDef{handler}>`): `openai-chat→queryOpenAIChat (clients/openaiChat.ts:52)`, `openai-responses→queryOpenAIResponses (protocols/openaiResponses.ts:59, 独立 Responses SSE adapter)`, `openai-compatible-chat→queryOpenAICompatibleChat (protocols/openaiCompatibleChat.ts:54, 任意 baseURL→/chat/completions)`, `anthropic-messages→queryAnthropicMessages (clients/anthropicMessages.ts:958)`。`gemini/bedrock-converse` 已注册 metadata 但 `handler=undefined` → `getClientForRoute→null` 显式 `unsupported`。`Client=Protocol` 无 Provider 分支（P0 已清理）。
+- **Transport/Framing 最小抽象** (`src/services/llm/transport/http.ts:7` `httpRequest`, `src/services/llm/transport/sse.ts:24` `parseSSERaw` 处理跨 chunk + `[DONE]`, `parseOpenAIChunksFromSSE`): `Phase 5` 抽离后 `openaiChat/Responses/Compatible` 共用 `httpRequest + parseSSERaw`，`anthropic-messages` 仍走 SDK。`Phase 6` 修复 `Responses` 误用 Chat parser (`adaptOpenAIResponsesSSEToAnthropic` 处理 `response.output_text.delta/completed`)。
+- **Auth Strategy** (`src/services/llm/auth/strategies.ts:10` `AuthStrategy{id,resolve}`): `bearer (openai/opencode/nvidia 复用, opencode fallback public)` / `api-key (x-api-key)` / `none (firstParty/bedrock/vertex/foundry/local)`，`src/services/llm/auth/resolveAuth.ts:22` `strategyByProvider` 映射，`Route → Auth → headers → Transport` (Protocol 不直接选 Auth)。
+- **ModelRegistry 独立** (`src/services/llm/models/registry.ts:40` `ModelRegistry{has,get,getOrDefault,list,registerModelsDev,clearModelsDev}`): `ModelDefinition{ id, capabilities:{tools,vision,reasoning,streaming} }`，`Phase 11` 纯本地 `big-pickle/default`，`Phase 12B` `fromModelsDev` 纯函数 (`provider/model` 保留, `reasoning→reasoning, tool_call→tools, attachment+image/pdf→vision`)，`Phase 12C` `local > models.dev > default` 合并，`Phase 12D` `modelsDevCache.ts:57` `XDG_CACHE_HOME/ ~/.cache/codev/models.json` TTL 24h 原子写 + `main.tsx:420` `startDeferredPrefetches` 后台非阻塞同步。
+- **ModelRuntime 薄编排** (`src/services/llm/runtime/ModelRuntime.ts:11`): `resolveRoute → getModelMetadata → getClientForRoute(ProtocolRegistry) → handler.query`，`capabilities` 不进 Route，仅限流/重试预留。
+- **稳定 Facade** (`src/services/api/queryModel.ts:17`): `queryModel() → modelRuntime.generate()` 兼容；新代码 `import { modelRuntime }`。
 
-**免费模型健壮性** (`src/services/llm/clients/openaiChat.ts:102`): `model.includes('free'||'contributor')` 或 `models.dev` 元数据 `isFree` 判定；超 8 工具截至 8、`system>8000` 截断；无有效 key 时注入 `x-anthropic-billing-header` 暗桩；瞬态 `500` 自动 `fallback to big-pickle` 重试。
+**Phase 演进映射 (1-12 ↔ P0-P6)**:
 
-**为什么删 Tier2 / 不用 Transport 抽象:**
-- Tier2 `cc-haha` 预设系统（`13c204e` 移除）引入第二套 Provider 配置与路由，与单轨 Route 语义冲突；现仅 Tier1 TUI (`~/.claude.json:authProvider`) 单一事实源。
-- Transport 曾试图抽象 `fetch-override / SDK / native HTTP`，但 `Client=Protocol` 已足以复用；多一层间接只增加分发开销与心智负担，`5f944f0` 移除 `fetch-override fallback`，原生直连已验证 ok。
+| Phase | 主题 | 关键 commit | 旧编号 |
+|-------|------|-------------|--------|
+| 1 | ProtocolRegistry 声明 | `532f738` | — |
+| 2 | OpenAI Responses 拆分 (`/responses`) | `f837706` | P1 |
+| 3 | OpenAI-Compatible Chat (任意 baseURL) | `ac2f680` | — |
+| 4 | Route 抽象 `{provider,protocol,model,endpoint}` | `7d0bc7c` | P2 |
+| 5 | Transport `httpRequest` + Framing `parseSSERaw` | `a939f5a` | — |
+| 6 | Responses Stream Adapter (`output_text.delta`) | `6dfdd51` | — |
+| 7 | Auth Strategy (`bearer/api-key/none`) | `d59db90` | P3 |
+| 8 | ProtocolRegistry 运行时唯一源 | `91b8fc9` | — |
+| 9 | Provider≠Protocol (`defaultProtocol`) | `d752e69` | — |
+| 10 | ModelResolver 独立 | `4225283` | P4 |
+| 11 | ModelRegistry (`has/get/list`) | `c5901ae` | — |
+| 12B | models.dev Adapter (纯函数) | `df13a0f` | — |
+| 12C | Registry Merge `local>dev` | `b9503eb` | — |
+| 12D | Cache Sync `XDG 24h` | `e1fa95a` | — |
+| 12E | Audit + Startup wire + Race guard | `5518b94` | — |
+
+**免费模型健壮性** (`src/services/llm/clients/openaiChat.ts:102`): `model.includes('free'||'contributor')` 或 `models.dev isFree` 判定；`tools>8` 截断、`system>8000` 截断；`opencode` 无 key 注入 `x-anthropic-billing-header`; 瞬态 `500→big-pickle` 重试 (`f141d7c`)。
+
+**为什么删 Tier2 / Transport 取舍:**
+- Tier2 `cc-haha` (`13c204e`) 第二套 Provider 路由与单轨 `Route` 冲突，仅留 Tier1 `~/.claude.json:authProvider`。
+- Transport 曾抽象 `fetch-override/SDK/native`，`Phase 5` 后仅保留最小 `httpRequest/parseSSERaw`，`Client=Protocol` 已足够；`5f944f0` 删 `fetch-override` 回退，原生直连验证。
+
+**测试策略** (`89 tests, src/services/llm/**`): `resolveRoute` 8+5 用例 (`provider×protocol×endpoint` 组合), `ProtocolRegistry` 7 用例, `Transport` 7 (跨 chunk/`[DONE]`), `ResponsesAdapter` 6 (delta/completed/unknown), `Auth` 9 (bearer/api-key/none 复用), `ModelResolver` 6, `ModelRegistry` 8, `Merge` 9, `Cache` 6 — 详见 [Provider 多厂商认证](provider-auth.md) §11 与 `docs/architecture/testing-strategy.md` (待建)。
 
 详见 [Provider 多厂商认证](provider-auth.md) 与 [核心数据流](data-flow.md)。
 

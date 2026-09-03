@@ -7,13 +7,14 @@
 ### 架构
 | 文档 | 说明 |
 |------|------|
-| [项目架构概览](architecture/overview.md) | 技术栈、入口流程、模块职责、架构亮点（单轨 Native LLM Runtime + REPL 3 层） |
+| [项目架构概览](architecture/overview.md) | 技术栈、入口流程、模块职责、架构亮点（Phase 1-12 单轨 Native LLM Runtime + REPL 3 层 + 89 tests） |
 | [核心数据流](architecture/data-flow.md) | 6 大核心数据流：用户输入、语音捕获、远程桥接、Friend 表情、Provider 代理（单轨 Native）、REPL 聚合 |
 | [Agent 循环深度解析](architecture/agent-loop.md) | 678 行 | queryLoop 完整流程、StreamingToolExecutor、5 阶段 turn pipeline、恢复机制 |
 | [投机工具执行 spec-ptc](architecture/speculative-execution.md) | SpecStore/BudgetTracker 数据结构、流式 JSON 检测、claim 缓存回放 |
 | [设计哲学与架构原则](architecture/design-philosophy.md) | 329 行 | 5 大价值、13 设计原则、与 Claude Code arXiv paper 的映射 |
 | [安全与权限系统](architecture/safety-and-permissions.md) | 867 行 | 7 种权限模式、Deny-first 规则引擎、Auto-mode ML 分类器、授权流水线 |
-| [Provider 多厂商认证](architecture/provider-auth.md) | 单轨 Native LLM Runtime（Route 最小 4 字段、Client=Protocol、Auth/ModelRegistry 分离、free→big-pickle） |
+| [Provider 多厂商认证](architecture/provider-auth.md) | **Phase 1-12 正交解耦**：Route 4字段、ProtocolRegistry、Provider≠Protocol、ModelResolver、Auth Strategy、Transport/Framing、ModelRegistry `local>models.dev` + XDG 24h 缓存 (89 tests) |
+| [开发指南](development.md) | 本地开发、测试 (`bun test src/services/llm`), 新增 Provider 6 步, 调试与构建 |
 | [跨切面关注点](architecture/cross-cutting.md) | 254 行 | 错误处理层次、遥测系统、性能优化策略 |
 
 ### CLI 与工具
@@ -80,4 +81,13 @@
 ### 面试准备
 | 文档 | 说明 |
 |------|------|
-| [面试准备指南](interview-prep.md) | 高频面试题、源码级解析、LLM Runtime 单轨 Native（Route/Client/Auth/ModelRegistry）、REPL 批量引擎 3 层契约、投机执行与 Tier2 剔除 |
+| [面试准备指南](interview-prep.md) | 高频面试题、源码级解析、**Phase 1-12 演进表**、LLM Runtime 正交解耦（Route/ProtocolRegistry/Transport/Framing/Auth/ModelRegistry/models.dev）、REPL 3 层契约、投机执行与 Tier2 剔除 |
+
+> **学习路径 (30min)**：`architecture/overview.md` §3 单轨 Runtime → `architecture/provider-auth.md` §3-12 (1-12 完整) → `architecture/data-flow.md` 6 流 → `interview-prep.md` Q《单轨 Runtime》→ `bun test src/services/llm` 89 用例
+
+### 测试
+| 指标 | 现状 |
+|------|------|
+| `src/services/llm` | **89 pass, 0 fail** (resolveRoute 13, ProtocolRegistry 7, Transport 7, ResponsesAdapter 6, Auth 9, ModelResolver 6, ModelRegistry 8, Merge 9, Cache 6) |
+| 覆盖 | Route `provider×protocol×endpoint` 组合、ProtocolRegistry 唯一源、Transport 跨 chunk、`[DONE]`、Responses delta/completed、bearer 复用、canonical `provider/model` |
+| 运行 | `bun test src/services/llm` / `bun x tsc --noEmit` (已知 `QueryEngine.ts` 无关错误除外) |

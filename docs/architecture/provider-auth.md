@@ -469,16 +469,16 @@ graph TB
 
 ---
 
-## 9. 添加新 Provider 的标准流程（仅 Tier1）
+## 9. 添加新 Provider 的标准流程（Phase 12 后的 Tier1）
 
-当需要支持一个新的 OpenAI 兼容 Provider 时，按以下步骤操作（Tier2 预设系统已移除）：
+当需要支持一个新的 OpenAI 兼容 Provider 时（Tier2 已删，仅 1-12 正交架构）：
 
-1. **Provider 类型**: 在 `src/utils/model/providers.ts` 的 `APIProvider` 联合类型中添加
-2. **检测函数**: 实现 `isXxxConfigured()` 并在 `getAPIProvider()` 调用链中加入
-3. **Model 字符串**: 在 `src/utils/model/modelStrings.ts` 的 `getBuiltinModelStrings()` 中添加映射
-4. **Fetch Override**: 如果协议需要转换，实现 `createXxxFetchOverride()` (参考 `nvidiaClient.ts`)
-5. **客户端集成**: 在 `src/services/api/client.ts` 的 `getAnthropicClient()` 中注入 Override
-6. **认证策略**: 如果使用非标准认证，在 `buildAnthropicAuthHeaders()` 中添加策略
+1. **Provider**: `src/services/llm/providers/<id>.ts` 定义 `{id, defaultProtocol, defaultEndpoint, displayName}` (`src/utils/model/providers.ts:6` `APIProvider` 联合类型同步)
+2. **Protocol**: 若复用 `openai-compatible-chat` 无需新建；新 wire format 则 `src/services/llm/protocols/<proto>.ts` + `protocols/index.ts:23` `ProtocolRegistry` 注册 `handler`
+3. **Auth**: `src/services/llm/auth/strategies.ts:10` 复用 `bearer/api-key/none` 或新增策略，`auth/resolveAuth.ts:22` `strategyByProvider` 映射
+4. **Model**: `ModelResolver` (`src/services/llm/models/modelResolver.ts`) 多为 passthrough，无需改；特殊映射 (如 `openai→resolveOpenAIModel`) 在此集中
+5. **验证**: `resolveRoute({model,protocol,endpoint})` 组合测试 (`src/services/llm/router/resolveRoute.test.ts`) + `ModelRegistry`/`ProtocolRegistry` 用例，`bun test src/services/llm` 必须 0 fail
+6. **旧路径已废弃**: 不再 `src/services/api/client.ts:createXxxFetchOverride` / `getAnthropicClient` 注入，改为 `ProtocolRegistry → handler → Transport`
 
 ---
 
@@ -508,38 +508,52 @@ Copilot API 对部分模型使用 `max_completion_tokens` 而非 `max_tokens`。
 
 ---
 
-## 11. 最终 LLM Runtime 架构 (P0-P6 收敛，Single-track Native)
+## 11. 最终 LLM Runtime 架构 (Phase 1-12 正交解耦)
 
-单轨 `Native LLM Runtime`, `LLMRoute` 最小四字段, `Client=Protocol`, `Auth/ModelRegistry` 分离:
+`Provider / Model / Protocol / Route / Auth / Transport/Framing` 正交，`ModelRuntime` 薄编排：
 
 ```text
-Agent → queryModel(src/services/api/queryModel.ts:17 Facade) → ModelRuntime.generate(src/services/llm/runtime/ModelRuntime.ts:10)
-      → resolveRoute(src/services/llm/router/resolveRoute.ts:11){provider,protocol,model,endpoint}
-      → ClientRegistry.get(protocol)(src/services/llm/clients/index.ts:21) → Protocol Client → Native Endpoint
-        ↕                                                              ↕
-   resolveAuth(src/services/llm/auth/resolveAuth.ts:8)→Credential   ModelRegistry(src/services/llm/models/registry.ts:16)→ModelMetadata
-  provider: who, model: which, protocol: how to speak, client: execute, auth:凭什么访问(独立)
+Agent → queryModel.ts:17 Facade → ModelRuntime.generate():11
+      → resolveRoute():14 {provider, model→ModelResolver, protocol→defaultProtocol/override, endpoint→defaultEndpoint/override} → LLMRoute
+      → ModelRegistry.getOrDefault(model) → capabilities (tools/vision/reasoning/streaming)
+      → ProtocolRegistry.getHandler(protocol) → handler.query(route,messages,tools,signal,options)
+           ↓                                    ↕
+      Auth Strategy → Credential → headers → Transport.httpRequest → Framing.parseSSERaw → Adapter(Responses/Chat) → StreamEvent
 ```
 
 ```mermaid
 flowchart LR
-    A[Agent queryModel Facade] --> B[ModelRuntime.generate]
+    A[Agent queryModel] --> B[ModelRuntime.generate]
     B --> C[resolveRoute 4 fields]
-    B --> D[getModelMetadata capabilities]
-    B --> E[getClientForRoute protocol]
-    E --> F{Protocol Client}
-    F -->|openai-chat| G[OpenAI/OpenCode/DeepSeek\nopenaiChat.ts]
-    F -->|anthropic-messages| H[Anthropic/Bedrock/NVIDIA\nanthropicMessages.ts]
-    C -.->|resolveAuth| I[Credential bearer/none]
-    I --> G & H
+    B --> D[ModelResolver canonical]
+    B --> E[ModelRegistry has/get]
+    B --> F[getProtocolHandler]
+    F --> G{Protocol}
+    G -->|openai-chat| H[queryOpenAIChat]
+    G -->|openai-responses| I[queryOpenAIResponses + ResponsesAdapter]
+    G -->|openai-compatible| J[queryOpenAICompatibleChat]
+    G -->|anthropic-messages| K[queryAnthropicMessages]
+    C -.-> L[AuthStrategy bearer/api-key/none]
+    L --> G
+    G & I & J & K --> M[Transport httpRequest]
+    M --> N[Framing parseSSERaw]
+    N --> G & I & J
 ```
 
-* `LLMRoute: src/services/llm/types.ts:22 {provider,protocol,model,endpoint}` 不含 `Auth`/`Capability`/`Transport`
-* `Provider{endpoint,protocol,model mapping,auth identity}→resolveRoute→LLMRoute + resolveAuth→Credential` 分离汇合于 `Client`
-* `Client 按 Protocol` 共享: `OpenAI/OpenCode/DeepSeek→OpenAIChatClient:src/services/llm/clients/openaiChat.ts:52`, `Anthropic/Bedrock/NVIDIA→AnthropicMessagesClient:src/services/llm/clients/anthropicMessages.ts:958`, `nvidia` 现 `fetch-override` 标 `legacy→native HTTP`
-* `P0→P6` 收敛: `P0` 清 `Client` 内 `Provider` 分支、`P1` 内联 `resolveProtocol`、`P2` 固定最小 `Route`、`P3` 显式 `auth/`、`P4` `models/registry ModelMetadata`、`P5` `resolveRoute.test.ts` 五路+同 `Client` 锁死、`P6` `54d775c/38df56f/ff00aaf/5f944f0/f141d7c` 叩定 `queryModel.ts` Facade + 剿灭 `claude.ts` + 去 `fetch-override fallback` + `free→big-pickle` 500 兜底 + 默认 `OpenCode` provider(`f1aa3bb`)。
+* `LLMRoute: src/services/llm/types.ts:26 {provider,protocol,model,endpoint}` + `route/Route.ts:27 buildRoute(override ?? default)`
+* `Provider{defaultProtocol,defaultEndpoint} + ModelResolver{openai/opencode/passthrough} + ProtocolRegistry{handler} → Route` 三源汇合，`Client=Protocol` (`clients/index.ts:26` 薄 facade `getProtocolHandler`)
+* `Auth` (`auth/strategies.ts:10` `bearer/api-key/none` 复用, `opencode fallback public`) 与 `ModelRegistry` (`models/registry.ts:40` `local > models.dev > default`, `has/get/list`) 独立，不进 Route
+* `Transport/Framing` (`transport/http.ts:7` `httpRequest`, `transport/sse.ts:24` `parseSSERaw` 跨 chunk + `[DONE]`) 仅 3 OpenAI 协议共用，`anthropic-messages` 仍 SDK
+* 演进: `P0` 清 Client 分支 → `Phase1` ProtocolRegistry → `2` Responses 拆分 `/responses` → `3` Compatible 任意 baseURL → `4` Route 4字段 (`7d0bc7c`) → `5` Transport/Framing (`a939f5a`) → `6` Responses adapter (`6dfdd51`) → `7` Auth Strategy (`d59db90`) → `8` Registry 唯一源 (`91b8fc9`) → `9` Provider≠Protocol (`d752e69`) → `10` ModelResolver 独立 (`4225283`) → `11` ModelRegistry (`c5901ae`) → `12B` Adapter 纯函数 (`df13a0f`) → `12C` Merge local>dev (`b9503eb`) → `12D` Cache XDG 24h + `main.tsx:420` 后台 `syncModelsDevCache({background:true})` (`e1fa95a`) → `12E` Audit + Race guard (`5518b94`)
 
----
+## 12. Phase 12 models.dev 集成 (12A-12E)
+
+* **12A 调研**: `https://models.dev/api.json` 212 prov 7495 models / `models.json` 365 provider-agnostic, `provider/model` id, `reasoning/tool_call/attachment/modalities → capabilities`, 仅 enrichment 非硬依赖
+* **12B Adapter** (`models/modelsDevAdapter.ts:25` `fromModelsDev(raw):ModelDefinition`): `id` 保留 `provider/model`, `vision=attachment&&image/pdf`, 缺失 `→false`, `streaming=true`, 抛错 `missing id`
+* **12C Merge** (`models/registry.ts:49` `registerModelsDev` + `clearModelsDev`): `LOCAL {big-pickle,default} > MODELS_DEV > default`, 同 id 去重 (local 赢), `has/get/getOrDefault/list` 合并视图, `unknown→default` passthrough, `Route` 非门控
+* **12D Cache** (`models/modelsDevCache.ts:57`): `GET https://models.dev/models.json → XDG_CACHE_HOME/ ~/.cache/codev/models.json` TTL 24h 原子写, `CODEV_MODELS_CACHE_PATH` 覆盖, 腐坏/空/离线 → 回退本地, `catalog.json` 兼容
+* **12E Audit**: `startDeferredPrefetches` 后台非阻塞 + `syncInProgress` 防重入, `ModelDefinition {id, capabilities:{tools,vision,reasoning,streaming}}` 未污染, 89 tests 覆盖 `cache hit/miss/expired/corrupt/offline` 等
+
 
 ## 12. 参考资料
 
