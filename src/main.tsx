@@ -417,6 +417,8 @@ export function startDeferredPrefetches(): void {
   void initializeAnalyticsGates();
   void prefetchOfficialMcpUrls();
   void refreshModelCapabilities();
+  // models.dev cache warm — non-blocking, failure isolated (Phase 12D)
+  void import('./services/llm/models/modelsDevCache.js').then(m => m.syncModelsDevCache({ background: true })).catch(() => {})
 
   // File change detectors deferred from init() to unblock first render
   void settingsChangeDetector.initialize();

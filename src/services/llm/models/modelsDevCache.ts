@@ -96,6 +96,8 @@ export async function fetchAndCacheModelsDev(opts?: {
   return { fetched: rawList.length, added }
 }
 
+let syncInProgress = false
+
 /** Startup sync: try cache first, then background fetch (non-blocking if requested). */
 export async function syncModelsDevCache(opts?: {
   fetchFn?: typeof fetch
@@ -103,22 +105,32 @@ export async function syncModelsDevCache(opts?: {
   ttlMs?: number
   background?: boolean
 }): Promise<{ cacheHit: boolean; cacheAdded: number; fetched?: number; added?: number }> {
-  const cacheRes = await loadModelsDevCache({ ttlMs: opts?.ttlMs, cachePath: opts?.cachePath })
-  if (opts?.background) {
-    // fire-and-forget fetch
-    fetchAndCacheModelsDev({ fetchFn: opts?.fetchFn, cachePath: opts?.cachePath }).catch(() => {})
-    return { cacheHit: cacheRes.hit, cacheAdded: cacheRes.added }
-  }
-  // If cache missed or stale, fetch synchronously (failure is non-fatal)
-  if (!cacheRes.hit) {
-    try {
-      const fetched = await fetchAndCacheModelsDev({ fetchFn: opts?.fetchFn, cachePath: opts?.cachePath })
-      return { cacheHit: false, cacheAdded: cacheRes.added, fetched: fetched.fetched, added: fetched.added }
-    } catch {
-      return { cacheHit: false, cacheAdded: cacheRes.added }
+  if (syncInProgress) return { cacheHit: false, cacheAdded: 0 }
+  syncInProgress = true
+  try {
+    const cacheRes = await loadModelsDevCache({ ttlMs: opts?.ttlMs, cachePath: opts?.cachePath })
+    if (opts?.background) {
+      // fire-and-forget fetch — does not block caller, failure isolated
+      fetchAndCacheModelsDev({ fetchFn: opts?.fetchFn, cachePath: opts?.cachePath })
+        .catch(() => {})
+        .finally(() => {
+          syncInProgress = false
+        })
+      return { cacheHit: cacheRes.hit, cacheAdded: cacheRes.added }
     }
+    // If cache missed or stale, fetch synchronously (failure is non-fatal)
+    if (!cacheRes.hit) {
+      try {
+        const fetched = await fetchAndCacheModelsDev({ fetchFn: opts?.fetchFn, cachePath: opts?.cachePath })
+        return { cacheHit: false, cacheAdded: cacheRes.added, fetched: fetched.fetched, added: fetched.added }
+      } catch {
+        return { cacheHit: false, cacheAdded: cacheRes.added }
+      }
+    }
+    return { cacheHit: cacheRes.hit, cacheAdded: cacheRes.added }
+  } finally {
+    if (!opts?.background) syncInProgress = false
   }
-  return { cacheHit: cacheRes.hit, cacheAdded: cacheRes.added }
 }
 
 export const __test__ = { getCachePath, isFresh }
