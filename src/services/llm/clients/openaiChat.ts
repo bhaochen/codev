@@ -14,10 +14,10 @@ import {
   adaptOpenAIStreamToAnthropic,
   convertAnthropicMessagesToOpenAI,
   convertAnthropicToolsToOpenAI,
-  parseOpenAIStream,
   type AnthropicMessage,
-  type OpenAIStreamChunk,
 } from '@ant/model-provider'
+import { httpRequest } from '../transport/http.js'
+import { parseOpenAIChunksFromSSE } from '../transport/sse.js'
 import { getSessionId } from '../../../bootstrap/state.js'
 import { getModelMaxOutputTokens } from '../../../utils/context.js'
 import { logForDebugging } from '../../../utils/debug.js'
@@ -157,23 +157,20 @@ export async function* queryOpenAIChat(
     }
     if (cred.type === 'bearer') headers.Authorization = `Bearer ${cred.token}`
     else headers.Authorization = 'Bearer public'
-    const fetchFn = (options.fetchOverride as unknown as typeof fetch) ?? (globalThis.fetch as typeof fetch)
-    let response = await fetchFn(endpoint.includes('/chat/completions') ? endpoint : chatCompletionsUrl(endpoint), {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-      signal,
-    })
+    const fetchOverride = options.fetchOverride as unknown as typeof fetch | undefined
+    const url = endpoint.includes('/chat/completions') ? endpoint : chatCompletionsUrl(endpoint)
+    let response = await httpRequest(
+      { url, method: 'POST', headers, body: JSON.stringify(body), signal },
+      fetchOverride,
+    )
     // 免费模型瞬态 500 按 opencode 策略重试并回退至 big-pickle，确保 hi 可用
     if (!response.ok && isFree && response.status === 500 && model !== 'big-pickle') {
       const fallbackBody = { ...body, model: 'big-pickle' }
       logForDebugging(`[OpenAIChat] free model ${model} 500, fallback to big-pickle`)
-      response = await fetchFn(endpoint.includes('/chat/completions') ? endpoint : chatCompletionsUrl(endpoint), {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(fallbackBody),
-        signal,
-      })
+      response = await httpRequest(
+        { url, method: 'POST', headers, body: JSON.stringify(fallbackBody), signal },
+        fetchOverride,
+      )
       if (response.ok) {
         // 回退成功，更新 model 供后续 usage 统计
         ;(body as any).model = 'big-pickle'
@@ -184,7 +181,7 @@ export async function* queryOpenAIChat(
       throw new Error(`Upstream ${route.provider} failed (${response.status})${text ? `: ${text.slice(0, 800)}` : ''}`)
     }
     if (!response.body) throw new Error('Upstream response missing body')
-    const adaptedStream = adaptOpenAIStreamToAnthropic(parseOpenAIStream(response.body), model, { includeCacheWriteTokens: false })
+    const adaptedStream = adaptOpenAIStreamToAnthropic(parseOpenAIChunksFromSSE(response.body) as AsyncIterable<never>, model, { includeCacheWriteTokens: false })
     const newMessages: AssistantMessage[] = []
     const contentBlocks: Record<number, Record<string, unknown>> = {}
     for await (const event of adaptedStream) {

@@ -16,9 +16,10 @@ import {
   adaptOpenAIStreamToAnthropic,
   convertAnthropicMessagesToOpenAI,
   convertAnthropicToolsToOpenAI,
-  parseOpenAIStream,
   type AnthropicMessage,
 } from '@ant/model-provider'
+import { httpRequest } from '../transport/http.js'
+import { parseOpenAIChunksFromSSE } from '../transport/sse.js'
 import { getSessionId } from '../../../bootstrap/state.js'
 import { getModelMaxOutputTokens } from '../../../utils/context.js'
 import { logForDebugging } from '../../../utils/debug.js'
@@ -122,20 +123,18 @@ export async function* queryOpenAICompatibleChat(
     if (cred.type === 'bearer') headers.Authorization = `Bearer ${cred.token}`
     else headers.Authorization = 'Bearer public'
 
-    const fetchFn = (options.fetchOverride as unknown as typeof fetch) ?? (globalThis.fetch as typeof fetch)
+    const fetchOverride = options.fetchOverride as unknown as typeof fetch | undefined
     const url = endpoint.includes('/chat/completions') ? endpoint : compatibleChatCompletionsUrl(endpoint)
-    const response = await fetchFn(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-      signal,
-    })
+    const response = await httpRequest(
+      { url, method: 'POST', headers, body: JSON.stringify(body), signal },
+      fetchOverride,
+    )
     if (!response.ok) {
       const text = await response.text().catch(() => '')
       throw new Error(`Upstream ${route.provider} failed (${response.status})${text ? `: ${text.slice(0, 800)}` : ''}`)
     }
     if (!response.body) throw new Error('Upstream response missing body')
-    const adaptedStream = adaptOpenAIStreamToAnthropic(parseOpenAIStream(response.body), model, { includeCacheWriteTokens: false })
+    const adaptedStream = adaptOpenAIStreamToAnthropic(parseOpenAIChunksFromSSE(response.body) as AsyncIterable<never>, model, { includeCacheWriteTokens: false })
     const newMessages: AssistantMessage[] = []
     const contentBlocks: Record<number, Record<string, unknown>> = {}
     for await (const event of adaptedStream) {

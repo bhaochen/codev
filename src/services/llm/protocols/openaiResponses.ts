@@ -15,9 +15,10 @@ import {
   adaptOpenAIStreamToAnthropic,
   convertAnthropicMessagesToOpenAI,
   convertAnthropicToolsToOpenAI,
-  parseOpenAIStream,
   type AnthropicMessage,
 } from '@ant/model-provider'
+import { httpRequest } from '../transport/http.js'
+import { parseOpenAIChunksFromSSE } from '../transport/sse.js'
 import { getSessionId } from '../../../bootstrap/state.js'
 import { getModelMaxOutputTokens } from '../../../utils/context.js'
 import { logForDebugging } from '../../../utils/debug.js'
@@ -155,25 +156,21 @@ export async function* queryOpenAIResponses(
     if (cred.type === 'bearer') headers.Authorization = `Bearer ${cred.token}`
     else headers.Authorization = 'Bearer public'
 
-    const fetchFn = (options.fetchOverride as unknown as typeof fetch) ?? (globalThis.fetch as typeof fetch)
+    const fetchOverride = options.fetchOverride as unknown as typeof fetch | undefined
     const url = endpoint.includes('/responses') ? endpoint : responsesUrl(endpoint)
-    const response = await fetchFn(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-      signal,
-    })
+    const response = await httpRequest(
+      { url, method: 'POST', headers, body: JSON.stringify(body), signal },
+      fetchOverride,
+    )
     if (!response.ok) {
       const text = await response.text().catch(() => '')
       throw new Error(`Upstream ${route.provider} failed (${response.status})${text ? `: ${text.slice(0, 800)}` : ''}`)
     }
     if (!response.body) throw new Error('Upstream response missing body')
 
-    // Responses SSE 与 Chat SSE 结构不同,此处先尝试按 OpenAI Chat 流解析;
-    // 若上游严格按 Responses 规范返回 response.output_text.delta 等事件,
-    // 则需要 Responses-specific adapter。当前先复用 chat 适配器保证契约兼容,
-    // 后续可替换为 adaptResponsesStreamToAnthropic。
-    const adaptedStream = adaptOpenAIStreamToAnthropic(parseOpenAIStream(response.body), model, { includeCacheWriteTokens: false })
+    // Responses SSE 与 Chat SSE 结构不同,此处先经通用 SSE framing 再按 Chat 适配;
+    // 严格 Responses 规范(response.output_text.delta)需 Responses-specific adapter。
+    const adaptedStream = adaptOpenAIStreamToAnthropic(parseOpenAIChunksFromSSE(response.body) as AsyncIterable<never>, model, { includeCacheWriteTokens: false })
     const newMessages: AssistantMessage[] = []
     const contentBlocks: Record<number, Record<string, unknown>> = {}
     for await (const event of adaptedStream) {
