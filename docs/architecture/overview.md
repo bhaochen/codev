@@ -119,7 +119,7 @@ Agent → queryModel.ts:17 Facade → ModelRuntime.generate() → resolveRoute()
 | 12D | Cache Sync `XDG 24h` | `e1fa95a` | — |
 | 12E | Audit + Startup wire + Race guard | `5518b94` | — |
 
-**免费模型健壮性** (`src/services/llm/clients/openaiChat.ts:102`): `model.includes('free'||'contributor')` 或 `models.dev isFree` 判定；`tools>8` 截断、`system>8000` 截断；`opencode` 无 key 注入 `x-anthropic-billing-header`; 瞬态 `500→big-pickle` 重试 (`f141d7c`)。
+**免费模型健壮性** (`src/services/llm/clients/openaiChat.ts:101`): `model.includes('free'||'contributor')` 或 `models.dev isFree` 判定（请求体不裁剪，全量发送）；`opencode` 无 key 注入 `x-anthropic-billing-header`; 瞬态 `500→big-pickle` 重试 (`f141d7c`)。
 
 **为什么删 Tier2 / Transport 取舍:**
 - Tier2 `cc-haha` (`13c204e`) 第二套 Provider 路由与单轨 `Route` 冲突，仅留 Tier1 `~/.claude.json:authProvider`。

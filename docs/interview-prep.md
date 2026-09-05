@@ -179,7 +179,7 @@ Agent → queryModel Facade(src/services/api/queryModel.ts:17) → ModelRuntime.
 | `Auth 分离` | `resolveAuth(provider)→Credential{bearer|none}` 独立于 Route，汇合于 Client | 避免 Route 携带敏感 token 扩散；`opencode` 无 key 时 `public` + billing 暗桩，`openai/nvidia` 无 key 时 `none` |
 | `ModelRegistry 分离` | `getModelMetadata(model)→{capabilities: tools/vision/reasoning/streaming}` | Capabilities 用于后续限流/重试决策，不进入 Route，避免 Route 膨胀；P4 从 Route 剥离 |
 | `queryModel.ts` 稳定 Facade | 薄封装 `modelRuntime.generate()`，旧调用方无感 | P6 `claude.ts` 已彻底剿灭（`ff00aaf`），职责归位 `runtime/router/clients/auth/models`，门面稳定降低迁移成本 |
-| `免费模型健壮性` | `model.includes('free'/'contributor')` 或 `models.dev:isFree` 判定 → `tools>8`截断/`system>8000`截断/`500→big-pickle`重试 | `f141d7c` 兜底免费模型瞬态 500，`5f944f0` 已验证原生直连无 `fetch-override fallback` 亦 ok |
+| `免费模型健壮性` | `model.includes('free'/'contributor')` 或 `models.dev:isFree` 判定（请求体不裁剪，全量发送）→ `500→big-pickle`重试 | `f141d7c` 兜底免费模型瞬态 500，`5f944f0` 已验证原生直连无 `fetch-override fallback` 亦 ok |
 | `Tier2 删除` | `13c204e` 移除 `cc-haha` 预设系统，仅 Tier1 TUI `~/.claude.json:authProvider` | 单一事实源，避免双路由语义冲突；默认 `f1aa3bb` 回落 `opencode` |
 | `ProtocolRegistry 唯一源` | `protocols/index.ts:23` `ProtocolRegistry{handler}` 4协议 `openai-chat/responses/compatible/anthropic-messages` + `gemini/bedrock` 无 handler→`unsupported` | `Phase8 91b8fc9` 前 `clients/index` 私有 map 与 `protocols` 分裂，`getClientForRoute→getProtocolHandler` 统一 |
 | `Provider≠Protocol (defaultProtocol)` | `providers/*:5` `defaultProtocol/defaultEndpoint` + `protocol/endpoint` 别名, `resolveRoute({protocol?,endpoint?})` 覆盖 | `Phase9 d752e69` 前 Provider 独占 Protocol, 现同一 Provider 可 `openai→chat/responses/compatible` 三选 |
@@ -576,7 +576,7 @@ OpenAI → Anthropic 逆映射：adaptOpenAIStreamToAnthropic 处理 SSE 事件�
 
 2. **为什么 Client=Protocol 而非 Client=Provider？** — 同一协议语义相同，差异仅 endpoint/header；按协议收敛符合开闭原则，P0 清理 Client 内 Provider 分支后新增 Provider 零 Client 改动。
 
-3. **免费模型 500 如何兜底？** — `src/services/llm/clients/openaiChat.ts:169` 检测 `isFree && status===500` 自动 `fallback to big-pickle` 重试，另截断 `tools>8`/`system>8000` 降低触发率。
+3. **免费模型 500 如何兜底？** — `src/services/llm/clients/openaiChat.ts:167` 检测 `isFree && status===500` 自动 `fallback to big-pickle` 重试（请求体不裁剪，全量发送）。
 
 ---
 
@@ -806,9 +806,9 @@ Provider 是"身份+元数据"（`src/services/llm/providers/opencode.ts:14`：`
 
 `cc-haha` Tier2 预设系统引入第二套 Provider 配置与路由，与单轨 `LLMRoute` 语义冲突、增加分发与权限心智负担；`13c204e` 后仅保留 Tier1 TUI（`~/.claude.json:authProvider`，`src/utils/model/providers.ts`），单一事实源，默认 `f1aa3bb` 回落 `opencode`，满足单用户桌面 CLI 场景。
 
-### Q: 免费模型 500 与上下文截断如何处理？
+### Q: 免费模型 500 如何处理？
 
-`src/services/llm/clients/openaiChat.ts:102` 按 `model.includes('free'/'contributor')` 或 `getCachedOpencodeModels().isFree` 判定；`tools.length>8` 截至 8、`system>8000` 截断并注 `...[truncated for free model]`；无有效 key 时注入 `x-anthropic-billing-header` 暗桩；瞬态 `500` 时 `f141d7c` 自动 `fallback to big-pickle` 重试，确保 `hi` 可用。
+`src/services/llm/clients/openaiChat.ts:101` 按 `model.includes('free'/'contributor')` 或 `getCachedOpencodeModels().isFree` 判定（请求体不裁剪，全量发送）；无有效 key 时注入 `x-anthropic-billing-header` 暗桩；瞬态 `500` 时 `f141d7c` 自动 `fallback to big-pickle` 重试，确保 `hi` 可用。
 
 ---
 

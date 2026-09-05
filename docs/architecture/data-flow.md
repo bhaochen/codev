@@ -81,7 +81,7 @@ Agent query() → queryModel Facade(src/services/api/queryModel.ts:17)
               → adaptOpenAIStreamToAnthropic / 透传 → query() 流式事件 → Tool Execution → 渲染
 ```
 
-免费模型在 `openaiChat.ts:102` 按 `models.dev:isFree` 裁剪 `tools<=8`、`system<=8000`，无 key 注入 `x-anthropic-billing-header` 暗桩，`500` 自动 `fallback to big-pickle`。
+免费模型在 `openaiChat.ts:101` 按 `model.includes('free'/'contributor')` 或 `models.dev:isFree` 判定（请求体不裁剪，全量发送），无 key 注入 `x-anthropic-billing-header` 暗桩，`500` 自动 `fallback to big-pickle`。
 
 ### REPL 批量引擎契约（a1325f2）
 

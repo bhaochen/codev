@@ -309,7 +309,7 @@ function shouldUseDeepSeekReasoningCompat(baseUrl: string): boolean {
 - **分流**: `src/services/api/queryModel.ts:17 → src/services/llm/runtime/ModelRuntime.ts:10 → resolveRoute('opencode') → getClientForRoute('openai-chat') → queryOpenAIChat`，不经 `Anthropic SDK`，与 `openai/deepseek` 共用同一 `Client`（Client=Protocol，无 Provider 分支）
 - **协议**: 直接 `POST https://opencode.ai/zen/v1/chat/completions` (OpenAI Chat Completions)，`LLMRequest{model,system,messages,tools}` 经 `convertAnthropicMessagesToOpenAI/Tools` 显式转换 → `buildOpenAIRequestBody`，流式经 `adaptOpenAIStreamToAnthropic` 回 `Anthropic` 事件
 - **认证**: `src/services/llm/auth/resolveAuth.ts:11 resolveAuth('opencode')` → `Bearer <key>` 或 `Bearer public`，`openaiChat.ts:125` 无有效 key 时注入 `x-anthropic-billing-header` 暗桩（与旧 `opencodeClient` 一致），`x-opencode-*` 头透传
-- **免费模型健壮性** (`src/services/llm/clients/openaiChat.ts:102`): `model.includes('free'/'contributor')` 或 `getCachedOpencodeModels().isFree` 判定 → `tools>8` 截断、`system>8000` 截断；瞬态 `500` 自动 `fallback to big-pickle` 重试（`f141d7c`），确保 `hi` 在无 shim 下可用；`5f944f0` 已移除 `fetch-override fallback`，原生直连验证 ok
+- **免费模型健壮性** (`src/services/llm/clients/openaiChat.ts:101`): `model.includes('free'/'contributor')` 或 `getCachedOpencodeModels().isFree` 判定（请求体不裁剪，全量发送）；瞬态 `500` 自动 `fallback to big-pickle` 重试（`f141d7c`），确保 `hi` 在无 shim 下可用；`5f944f0` 已移除 `fetch-override fallback`，原生直连验证 ok
 - **优势**: 规避 `fetch-override` 的 `x-anthropic-billing-header` 版本漂移与 `effort/beta` 透传导致的 `500`，`muse-spark` 等非 Claude 模型可直接 `tool_choice:auto`
 
 **遗留兼容** (`src/services/api/opencodeClient.ts`):
