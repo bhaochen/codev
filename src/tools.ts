@@ -16,10 +16,6 @@ import { GoalGetTool } from './tools/GoalGetTool/GoalGetTool.js'
 import { GoalUpdateTool } from './tools/GoalUpdateTool/GoalUpdateTool.js'
 // Dead code elimination: conditional import for ant-only tools
 /* eslint-disable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
-export const REPLTool =
-  isReplModeEnabled()
-    ? require('./tools/REPLTool/REPLTool.js').REPLTool
-    : null
 const SuggestBackgroundPRTool =
   process.env.USER_TYPE === 'ant'
     ? require('./tools/SuggestBackgroundPRTool/SuggestBackgroundPRTool.js')
@@ -155,6 +151,23 @@ import {
 } from './tools/REPLTool/constants.js'
 export { REPL_ONLY_TOOLS }
 /* eslint-disable @typescript-eslint/no-require-imports */
+/**
+ * Runtime REPLTool resolver (REPL Toggle Correctness Fix).
+ *
+ * MUST NOT be evaluated at module import time: isReplModeEnabled() reads
+ * global config, which is unavailable before enableConfigs() (returns
+ * default-true while isConfigReadingAllowed() === false). A module-level
+ * `export const REPLTool = isReplModeEnabled() ? require(...) : null`
+ * freezes that pre-config default and leaks REPL into the pool even when
+ * replEnabled=false. Resolve lazily here so getAllBaseTools()/getTools()
+ * always observe the current toggle, regardless of import order.
+ */
+export function getReplTool(): Tool | null {
+  if (!isReplModeEnabled()) return null
+  return (
+    require('./tools/REPLTool/REPLTool.js') as typeof import('./tools/REPLTool/REPLTool.js')
+  ).REPLTool
+}
 const getPowerShellTool = () => {
   if (!isPowerShellToolEnabled()) return null
   return (
@@ -199,6 +212,8 @@ export function getToolsForDefaultPreset(): string[] {
  * NOTE: This MUST stay in sync with https://console.statsig.com/4aF3Ewatb6xPVpCwxb5nA3/dynamic_configs/claude_code_global_system_caching, in order to cache the system prompt across users.
  */
 export function getAllBaseTools(): Tools {
+  // Runtime resolution: never freeze REPL registration at import time.
+  const replTool = getReplTool()
   return [
     AgentTool,
     TaskOutputTool,
@@ -237,7 +252,7 @@ export function getAllBaseTools(): Tools {
       ? [getTeamCreateTool(), getTeamDeleteTool()]
       : []),
     ...(VerifyPlanExecutionTool ? [VerifyPlanExecutionTool] : []),
-    ...(REPLTool ? [REPLTool] : []),
+    ...(replTool ? [replTool] : []),
     ...(WorkflowTool ? [WorkflowTool] : []),
     ...(SleepTool ? [SleepTool] : []),
     ...cronTools,
@@ -293,8 +308,9 @@ export const getTools = (permissionContext: ToolPermissionContext): Tools => {
     // --bare + REPL mode: REPL wraps Bash/Read/Edit/etc inside the VM, so
     // return REPL instead of the raw primitives. Matches the non-bare path
     // below which also hides REPL_ONLY_TOOLS when REPL is enabled.
-    if (isReplModeEnabled() && REPLTool) {
-      const replSimple: Tool[] = [REPLTool]
+    const replToolForSimple = getReplTool()
+    if (isReplModeEnabled() && replToolForSimple) {
+      const replSimple: Tool[] = [replToolForSimple]
       if (
         feature('COORDINATOR_MODE') &&
         coordinatorModeModule?.isCoordinatorMode()
@@ -328,9 +344,17 @@ export const getTools = (permissionContext: ToolPermissionContext): Tools => {
   // Filter out tools that are denied by the deny rules
   let allowedTools = filterToolsByDenyRules(tools, permissionContext)
 
-  // When REPL mode is enabled, hide primitive tools from direct use.
-  // They're still accessible inside REPL via the VM context.
-  if (isReplModeEnabled()) {
+  // Defense-in-depth invariant (must hold regardless of how the base pool
+  // was assembled or when this module was imported):
+  //   REPL disabled → REPLTool absent, primitives directly available.
+  //   REPL enabled  → REPLTool present (if not deny-listed), primitives
+  //                   hidden from direct use (still callable inside the VM).
+  const replOn = isReplModeEnabled()
+  if (!replOn) {
+    allowedTools = allowedTools.filter(
+      tool => !toolMatchesName(tool, REPL_TOOL_NAME),
+    )
+  } else {
     const replEnabled = allowedTools.some(tool =>
       toolMatchesName(tool, REPL_TOOL_NAME),
     )
@@ -391,9 +415,17 @@ export function assembleToolPool(
   // (Read/Bash/Grep/Write/Edit) but keeps REPLTool; when REPL is disabled the
   // primitives are already present, so this is a no-op there. The agent's own
   // tools/disallowedTools still govern what it may actually invoke (resolved in
-  // resolveAgentTools/filterToolsForAgent).
-  if (options.forAgent && REPLTool && !pool.some(t => toolMatchesName(t, REPL_TOOL_NAME))) {
-    return uniqBy([REPLTool, ...pool], 'name')
+  // resolveAgentTools/filterToolsForAgent). Resolved at runtime (not from a
+  // frozen module-level const) so mid-session /config toggles take effect on
+  // the next assembly.
+  if (options.forAgent && isReplModeEnabled()) {
+    const replToolForAgent = getReplTool()
+    if (
+      replToolForAgent &&
+      !pool.some(t => toolMatchesName(t, REPL_TOOL_NAME))
+    ) {
+      return uniqBy([replToolForAgent, ...pool], 'name')
+    }
   }
 
   return pool

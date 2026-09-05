@@ -11,7 +11,7 @@ import { describe, test, expect } from 'bun:test'
 // yield an incomplete permission context).
 describe('sub-agent REPL/callTool exposure', () => {
   test('assembleToolPool({ forAgent: true }) surfaces REPLTool', async () => {
-    const { assembleToolPool, REPLTool } = await import('../../../tools.js')
+    const { assembleToolPool, getReplTool } = await import('../../../tools.js')
     const { getEmptyToolPermissionContext } = await import('../../../Tool.js')
     const { REPL_TOOL_NAME } = await import('../../../tools/REPLTool/constants.js')
 
@@ -20,7 +20,7 @@ describe('sub-agent REPL/callTool exposure', () => {
     })
     const names = pool.map((t: { name: string }) => t.name)
 
-    if (REPLTool) {
+    if (getReplTool()) {
       expect(names).toContain(REPL_TOOL_NAME)
     } else {
       // REPL disabled in this build: primitives must be directly present.
@@ -74,7 +74,7 @@ describe('sub-agent REPL/callTool exposure', () => {
   })
 
   test('async Explore-style agent keeps REPLTool through filterToolsForAgent', async () => {
-    const { assembleToolPool, REPLTool } = await import('../../../tools.js')
+    const { assembleToolPool, getReplTool } = await import('../../../tools.js')
     const { getEmptyToolPermissionContext } = await import('../../../Tool.js')
     const { resolveAgentTools } = await import('../agentToolUtils.js')
     const { REPL_TOOL_NAME } = await import(
@@ -94,7 +94,7 @@ describe('sub-agent REPL/callTool exposure', () => {
       true,
     )
     const names = resolved.resolvedTools.map((t) => t.name)
-    if (REPLTool) {
+    if (getReplTool()) {
       expect(names).toContain(REPL_TOOL_NAME)
     } else {
       expect(names.some((n) => /^(Read|Bash|Grep)$/.test(n))).toBe(true)
