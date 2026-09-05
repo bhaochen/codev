@@ -8,8 +8,11 @@
 > - `src/tools/REPLTool/engine.ts` — VM 执行引擎
 > - `src/tools/REPLTool/REPLTool.ts` — 工具定义
 > - `src/tools/REPLTool/primitiveTools.ts` — primitive 工具集
-> - `src/tools/REPLTool/constants.ts` — 启用开关（默认开，`CODEV_REPL=0` 关）
-> - `src/tools/REPLTool/__tests__/engine.test.ts` — 测试
+> - `src/tools/REPLTool/constants.ts` — 启用开关（默认开；`/config` 的 `replEnabled` 字段；环境变量 `CODEV_REPL` / `CLAUDE_CODE_REPL` 优先级最高，`=0` 关、`=1` 开）
+> - `src/tools/REPLTool/__tests__/engine.test.ts` — VM 引擎测试
+> - `src/tools/REPLTool/__tests__/replToggle.test.ts` — 开关回归测试（6 用例）
+>
+> 注册方式：`REPLTool` 不在模块 import 阶段静态注册，而由 `src/tools.ts:getReplTool()` 在每次工具装配时按当前 `isReplModeEnabled()` 运行时解析（lazy require），结果与 import 顺序无关；`getTools()` 另有 defense-in-depth 不变量兜底（见 §3.7）。
 
 ---
 
@@ -226,6 +229,14 @@ type ContextResult = {
 
 对比 `AgentTool/task` 的 `主 Agent → SubAgent → (SubAgent 内再调 REPL) → 汇总回主 Agent` 独立会话；普通 `Read/Grep` 批量走 `REPL` 即可。`ContextAggregator` 为纯程序聚合，不消耗额外模型调用。
 
+### 3.7 开关与工具注册（toggle correctness）
+
+`isReplModeEnabled()`（`constants.ts`）在 `enableConfigs()` 之前不可读配置（此时恒返 `true`），因此 `REPLTool` 绝不能在模块顶层按开关静态初始化——否则 `replEnabled=false` 也会被冻结进工具池。当前实现：
+
+- `getAllBaseTools()` / `getTools()` / `assembleToolPool({ forAgent })` 每次都经 `getReplTool()` 运行时决议是否注册 `REPL`；
+- `getTools()` 出口强制不变量：关闭 → `REPL` 必不存在、原语（`REPL_ONLY_TOOLS`）可直接调用；开启 → `REPL` 存在（若未被 deny-rule 剔除）、原语从直接调用隐藏（仍可在 VM 内 `callTool`）；
+- `/config` 切换下次工具装配（下一轮对话）生效；提示词分支（`prompts.ts:getUsingYourToolsSection`）同步切换。
+
 ---
 
 ## 4. 与投机执行的联动
@@ -241,7 +252,7 @@ REPL 是 spec-ptc Layer 3（Shadow Execution）的目标宿主：
 
 ## 5. 测试覆盖
 
-`src/tools/REPLTool/__tests__/engine.test.ts`（10 个测试全通过）：
+`src/tools/REPLTool/__tests__/engine.test.ts`（VM 引擎行为）：
 
 - 基本算术/表达式执行（含返回值捕获）
 - console.log/error/warn 输出捕获
@@ -251,6 +262,13 @@ REPL 是 spec-ptc Layer 3（Shadow Execution）的目标宿主：
 - eval/import/process 等沙箱禁止项
 - 大小写不敏感工具查找
 - tool_calls 计数
+
+`src/tools/REPLTool/__tests__/replToggle.test.ts`（开关正确性，6 用例）：
+
+- `replEnabled=false` → 无 `REPL`，原语可直接调用；`true` → 有 `REPL`，原语隐藏
+- `CODEV_REPL=0/1` 覆盖配置文件开关
+- `assembleToolPool({ forAgent: true })` 跟随开关
+- 该文件静态 import `tools.ts`（static-first 顺序），冻结回归会直接失败
 
 ---
 

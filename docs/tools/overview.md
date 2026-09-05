@@ -68,10 +68,10 @@ getTools(permissionContext) → Tool[]
 
 执行流程：
 
-1. **`CLAUDE_CODE_SIMPLE` 模式**：仅返回 BashTool、FileReadTool、FileEditTool（极简模式）
-2. **`getAllBaseTools()`**：收集所有内置工具，按 feature flag 和条件编译
+1. **`CLAUDE_CODE_SIMPLE` 模式**：仅返回 BashTool、FileReadTool、FileEditTool（极简模式；REPL 开启时改返 REPL）
+2. **`getAllBaseTools()`**：收集所有内置工具，按 feature flag 和条件编译；`REPL` 由 `getReplTool()` 按当前 `isReplModeEnabled()` 运行时决议注册（不在 import 阶段冻结）
 3. **`filterToolsByDenyRules()`**：检查 deny rules，过滤被禁止的工具
-4. **`REPL 模式过滤`**：当 REPL 启用时，隐藏原始工具（`REPL_ONLY_TOOLS`）
+4. **`REPL 模式过滤`**（不变量）：关闭时 `REPL` 必不存在、原始工具（`REPL_ONLY_TOOLS`）可直接调用；启用时保留 `REPL` 并隐藏原始工具（仍可在 VM 内 `callTool`）
 5. **`isEnabled()` 过滤**：逐个检查工具是否启用
 
 ### assembleToolPool()
@@ -273,7 +273,7 @@ WebSearchTool 支持两个搜索后端：
 
 ### REPLTool — VM 沙箱批量执行引擎（P6.6 最终契约）
 
-在 Bun `node:vm` 沙箱中执行 JavaScript 的批量操作引擎（默认启用，`CODEV_REPL=0` 关闭）。详见 [REPL Tool 深度解析](repl-tool.md)。
+在 Bun `node:vm` 沙箱中执行 JavaScript 的批量操作引擎（默认启用；`/config` 的 `replEnabled` 字段控制，环境变量 `CODEV_REPL` / `CLAUDE_CODE_REPL` 优先级最高）。详见 [REPL Tool 深度解析](repl-tool.md)。
 
 - **输入参数**: `code` (必填) — JS 代码，通过 `await callTool(name, input)` 调用 primitive tools
 - **行为**: 单次调用内完成多步批量操作；变量跨调用持久化（会话级 `engineCache:Map<sessionId,ReplEngine>`，`src/tools/REPLTool/REPLTool.ts`）
