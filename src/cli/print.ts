@@ -87,6 +87,54 @@ function isAsyncIterable(value: unknown): value is AsyncIterable<string> {
 }
 
 /**
+ * 非 SDK headless 退出前收尾：先把 transcript 落盘（QueryEngine 在 yield result
+ * 前已 flush 缓冲写入，这里只兜底 fire-and-forget 的尾巴），再排空 stdio，
+ * 最后显式退出。
+ *
+ * 显式退出的原因：-p 是单轮脚本模式，但启动链（fetch 连接池、文件监听、
+ * 各类后台单例）会留下事件循环句柄，进程答完也不退出。desktop 侧本来就是
+ * 收到 result 就杀 CLI（见 QueryEngine 落盘注释），-p 自己退出语义一致。
+ * SDK WebSocket 模式不走这里（等对端挂断）。
+ */
+async function settleAndExitHeadless(): Promise<never> {
+  try {
+    const { flushSessionStorage } = await import('../utils/sessionStorage.js')
+    await Promise.race([
+      flushSessionStorage().catch(() => {}),
+      new Promise(resolve => setTimeout(resolve, 3000).unref()),
+    ])
+  } catch {
+    // 落盘失败不阻塞退出
+  }
+  await Promise.all([drainStream(process.stdout), drainStream(process.stderr)])
+  // eslint-disable-next-line custom-rules/no-process-exit
+  process.exit(process.exitCode ?? 0)
+}
+
+function drainStream(stream: NodeJS.WriteStream, timeoutMs = 2000): Promise<void> {
+  return new Promise(resolve => {
+    let done = false
+    const finish = () => {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      resolve()
+    }
+    const timer = setTimeout(finish, timeoutMs).unref()
+    try {
+      if ((stream as { destroyed?: boolean }).destroyed) {
+        finish()
+        return
+      }
+      // 空写回调在之前排队的数据刷出后触发；EPIPE 等异常直接放行
+      stream.write('', finish)
+    } catch {
+      finish()
+    }
+  })
+}
+
+/**
  * The headless store may carry no file cache yet (fresh process). cloneFileStateCache
  * requires a real cache (it reads `cache.max`), so fall back to an empty one.
  */
@@ -202,10 +250,7 @@ async function runNonSDKHeadless(params: {
         mcpClients,
         readFileCache,
       })
-      return
-    }
-
-    if (isAsyncIterable(inputPrompt)) {
+    } else if (isAsyncIterable(inputPrompt)) {
       // --input-format=stream-json: the stdin stream yields chunks; each line
       // is one user message/turn.
       const lines: string[] = []
@@ -238,6 +283,8 @@ async function runNonSDKHeadless(params: {
     )
     process.exitCode = 1
   }
+  // 非 SDK headless 跑完即退出（落盘+排空后显式 exit，见 settleAndExitHeadless）
+  await settleAndExitHeadless()
 }
 
 async function runHeadlessTurns(
