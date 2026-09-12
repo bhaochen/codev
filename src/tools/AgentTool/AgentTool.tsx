@@ -628,13 +628,14 @@ export const AgentTool = buildTool({
       } : undefined,
       // Normal path: workerTools already includes REPLTool (via assembleToolPool's
       // forAgent flag). Fork path inherits the parent's exact tool array for
-      // prompt-cache stability, so append the runtime-resolved REPLTool there
-      // too if missing (never from a frozen module-level const).
+      // prompt-cache stability, so append the runtime-resolved (always-on)
+      // REPLTool there too if missing.
       availableTools: isForkPath
         ? (() => {
             const replToolForFork = getReplTool()
-            return replToolForFork &&
-              !toolUseContext.options.tools.some(t => t.name === 'REPL')
+            return !toolUseContext.options.tools.some(
+              t => t.name === 'REPL',
+            )
               ? [...toolUseContext.options.tools, replToolForFork]
               : toolUseContext.options.tools
           })()

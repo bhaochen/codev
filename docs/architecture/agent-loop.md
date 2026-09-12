@@ -168,6 +168,37 @@ type State = {
 
 ## 3. 工具调度与流式执行
 
+```text
+                    ┌──────────────┐
+                    │     LLM      │
+                    └──────┬───────┘
+                           │
+                        Tool Use
+                           │
+                           ▼
+                    ┌──────────────┐
+                    │ runToolUse() │
+                    └──────┬───────┘
+                           │
+                Structured Tool Call
+                           │
+                           ▼
+                    ┌──────────────┐
+                    │ tool.call()  │
+                    └──────┬───────┘
+                           │
+                      Tool Result
+                           │
+                           ▼
+                    ┌──────────────┐
+                    │     LLM      │
+                    └──────────────┘
+```
+
+> 流程概览：LLM 发出 tool use block → `runToolUse()`（`src/services/tools/toolExecution.ts`，
+> 内部完成 findToolByName、inputSchema 校验、权限检查）→ `tool.call()` 执行核心逻辑 →
+> ToolResult 经由 hooks/结果处理回传 LLM。详细组件见下文各小节。
+
 ### 3.1 StreamingToolExecutor 架构
 
 **文件**: `src/services/tools/StreamingToolExecutor.ts`

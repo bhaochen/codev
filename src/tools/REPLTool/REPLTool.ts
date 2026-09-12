@@ -1,9 +1,11 @@
 /**
- * REPL Tool — 在 VM 沙箱中执行 JavaScript 代码。
+ * REPL Tool — 可编程执行环境（VM 沙箱中运行 JavaScript）。
  *
- * 可调用 primitive tools（Read, Write, Edit, Glob, Grep, Bash），
- * 状态跨 turn 持久化。isTransparentWrapper=true 使 REPL 本身不可见，
- * 只显示内部工具调用的进度和结果。
+ * 提供 for/while/if/函数/regex/数据结构等完整编程能力，状态跨 turn
+ * 持久化；同时可调用 primitive tools（Read, Write, Edit, Glob, Grep, Bash）。
+ * 是叠加在普通工具池之上的编程环境，不取代任何直接工具。
+ * isTransparentWrapper=true 使 REPL 本身不可见，只显示内部工具调用的
+ * 进度和结果。
  */
 import { z } from 'zod/v4'
 import { buildTool, type ToolUseContext } from '../../Tool.js'
@@ -22,7 +24,7 @@ const inputSchema = lazySchema(() =>
     code: z
       .string()
       .describe(
-        'JavaScript code to execute in the REPL. Use await callTool(name, input) to call tools. Results are auto-aggregated into structured JSON — console.log is optional. Example: const r = await callTool("read", {file_path: "/tmp/a.txt"});',
+        'JavaScript to run in the REPL programming environment. Write arbitrary logic (loops, conditionals, functions, regex, data processing) and use await callTool(name, input) for file/search/shell access. Variables persist across calls. Result is the expression value / console output, or auto-aggregated JSON of tool calls.',
       ),
   }),
 )
@@ -61,18 +63,17 @@ export const REPLTool = buildTool({
   },
 
   async description() {
-    return 'Execute JavaScript in the REPL with access to primitive tools (Read, Write, Edit, Glob, Grep, Bash)'
+    return 'Sandboxed JavaScript programming environment with persistent state; optionally call primitive tools (Read, Write, Edit, Glob, Grep, Bash) from code'
   },
   async prompt() {
-    return `Execute JavaScript in the REPL — a sandboxed environment with direct access to primitive tools (Read, Write, Edit, Glob, Grep, Bash).
+    return `Execute JavaScript in the REPL — a sandboxed **programming environment**, not just a tool caller. Write real programs: loops, conditions, helper functions, regex, data structures, arithmetic. Anything you would otherwise "reason about" in tokens can be computed exactly here, and variables persist across calls.
 
-When REPL mode is active, primitive tools are only accessible through this tool. Use REPL for:
-- Batch operations across many files
-- Complex multi-step file transformations
-- Operations that benefit from programmatic control flow
-- Combining search results with edits in a single turn
+REPL is **additive**: the normal tools (Read, Write, Edit, Glob, Grep, Bash) remain directly callable. Use a direct tool for a single operation. Reach for REPL when a task benefits from programming:
+- Batch operations across many files (loop + condition + transform in ONE call instead of N round-trips)
+- Multi-step pipelines whose intermediates should stay in VM variables, not bloat your context
+- Work that mixes computation with file, search, or shell access
 
-The REPL runs in a VM context with tool APIs available as functions. Use \`await callTool(name, input)\` to call tools. Each call returns { data, toolName, isError }.
+Inside the environment, tools are plain functions via \`await callTool(name, input)\` — each returns { data, toolName, isError }. Results of tool calls are auto-aggregated into structured JSON; console.log is optional extra logging. Pure computation with no tool calls returns the expression value / console output directly.
 
 Execution model (3 layers):
 - ToolResult (unified fact): { tool, ok, isError, stdout/stderr/data, exitCode?, truncated?, outputPath?, noOutputExpected? }
@@ -97,7 +98,7 @@ Result contract when tool_calls > 0 (structured JSON, always returned):
 - Grep: preview = matches, truncated if many.
 - Write/Edit: summary/preview = diff summary.
 
-Available tools (case-insensitive):
+Available tools (case-insensitive), callable via callTool:
 - "Glob" — find files by pattern. Input: { pattern: "src/**/*.ts" }
 - "Grep" — search file contents. Input: { pattern: "regex", path: "src/" }
 - "Read" — read file contents. Input: { file_path: "path/to/file" }
@@ -113,12 +114,18 @@ Reliable file-edit helpers are also exposed as globals — they write straight t
 - diffFile(path, ref?) → prints the git working-tree (or vs ref) diff
 - showDiff(before, after, filePath?) → unified diff of two strings
 
-Example (console.log optional):
+Example — program across files (console.log optional):
 \`\`\`js
 const files = await callTool("Glob", { pattern: "src/**/*.ts" });
-const content = await callTool("Read", { file_path: "src/index.ts" });
-// No need to console.log; result auto-aggregated. Optional:
-// console.log(content.data.slice(0, 200));
+const names = files.data ?? [];
+const todo = names.filter(n => n.includes("legacy"));
+for (const f of todo) {
+  const c = await callTool("Read", { file_path: f });
+  if (c.data.includes("TODO")) {
+    await callTool("Edit", { file_path: f, old_string: "TODO", new_string: "DONE" });
+  }
+}
+const stats = todo.length; // pure computation, returned exactly
 \`\`\`
 
 State persists across calls — variables set in one call are available in the next.

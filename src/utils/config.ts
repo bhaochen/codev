@@ -226,8 +226,6 @@ export type GlobalConfig = {
   welcomeLogoMode?: 'auto' | 'condensed' | 'full'
   // Controls whether the terminal uses the alternate screen.
   fullscreenMode?: 'auto' | 'fullscreen' | 'window'
-  // Controls whether the REPL tool is available.
-  replEnabled?: boolean
   // Timestamp when changelog was last fetched (content stored in ~/.claude/cache/changelog.md)
   changelogLastFetched?: number
   // @deprecated - Migrated to ~/.claude/cache/changelog.md. Keep for migration support.
@@ -630,7 +628,6 @@ function createDefaultGlobalConfig(): GlobalConfig {
     theme: 'dark',
     welcomeLogoMode: 'auto',
     fullscreenMode: 'auto',
-    replEnabled: true,
     preferredNotifChannel: 'auto',
     verbose: false,
     editorMode: 'normal',
@@ -682,7 +679,6 @@ export const GLOBAL_CONFIG_KEYS = [
   'theme',
   'welcomeLogoMode',
   'fullscreenMode',
-  'replEnabled',
   'verbose',
   'preferredNotifChannel',
   'shiftEnterKeyBindingInstalled',

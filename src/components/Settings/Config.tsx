@@ -392,16 +392,6 @@ export function Config({
       },
     },
     {
-      id: 'replEnabled',
-      label: 'REPL',
-      value: globalConfig.replEnabled ?? true,
-      type: 'boolean' as const,
-      onChange(replEnabled: boolean) {
-        saveGlobalConfig(current => ({ ...current, replEnabled }))
-        setGlobalConfig({ ...getGlobalConfig(), replEnabled })
-      },
-    },
-    {
       id: 'autoCompactEnabled',
       label: 'Auto-compact',
       value: globalConfig.autoCompactEnabled,

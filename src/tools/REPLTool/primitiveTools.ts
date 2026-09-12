@@ -9,8 +9,9 @@ import { GrepTool } from '../GrepTool/GrepTool.js'
 let _primitiveTools: readonly Tool[] | undefined
 
 /**
- * Primitive tools accessible inside the REPL VM context.
- * These are hidden from direct model use when REPL mode is on.
+ * Primitive tools accessible inside the REPL VM context via callTool().
+ * These remain directly callable as normal tools too — REPL is additive,
+ * it does not replace them.
  */
 export function getReplPrimitiveTools(): readonly Tool[] {
   return (_primitiveTools ??= [

@@ -1,23 +1,37 @@
-# REPL Tool — VM 沙箱批量执行引擎
+# REPL Tool — VM 沙箱可编程执行环境
 
-> 让模型从"每步一次工具调用"升级为"一段代码批量完成多步操作"。
+> 让模型从"调用 20 个预设工具"升级为"拥有一个可以编程的环境"：
 > REPL 是一个运行在 Bun `node:vm` 沙箱中的 JavaScript 执行环境，
-> 通过 `callTool()` 直接调用 primitive tools（Read/Write/Edit/Glob/Grep/Bash）。
+> 可以写循环/条件/函数/regex/数据结构等任意逻辑，并通过 `callTool()`
+> 调用 primitive tools（Read/Write/Edit/Glob/Grep/Bash）。
+> 它**叠加**在普通工具池之上——不隐藏、不取代任何直接工具，只是多给模型
+> 一个"编程"的选项。
 >
 > 相关源码：
 > - `src/tools/REPLTool/engine.ts` — VM 执行引擎
 > - `src/tools/REPLTool/REPLTool.ts` — 工具定义
 > - `src/tools/REPLTool/primitiveTools.ts` — primitive 工具集
-> - `src/tools/REPLTool/constants.ts` — 启用开关（默认开；`/config` 的 `replEnabled` 字段；环境变量 `CODEV_REPL` / `CLAUDE_CODE_REPL` 优先级最高，`=0` 关、`=1` 开）
+> - `src/tools/REPLTool/constants.ts` — `REPL_TOOL_NAME` 常量（无启用开关）
 > - `src/tools/REPLTool/__tests__/engine.test.ts` — VM 引擎测试
-> - `src/tools/REPLTool/__tests__/replToggle.test.ts` — 开关回归测试（6 用例）
+> - `src/tools/REPLTool/__tests__/replToggle.test.ts` — 恒在不变量回归测试
 >
-> 注册方式：`REPLTool` 不在模块 import 阶段静态注册，而由 `src/tools.ts:getReplTool()` 在每次工具装配时按当前 `isReplModeEnabled()` 运行时解析（lazy require），结果与 import 顺序无关；`getTools()` 另有 defense-in-depth 不变量兜底（见 §3.7）。
+> 注册方式：`REPLTool` 由 `src/tools.ts:getReplTool()` 运行时解析（lazy require，为规避模块循环依赖，与 config/import 顺序无关）。REPL 是恒在基础工具，无开关（见 §3.7）。
 
 ---
 
 ## 1. 为什么需要 REPL？
 
+核心定位：**REPL 是一个可编程环境，而不是工具网关**。传统 Agent 给模型的
+是 N 个预设好的工具 API（`search(query)`、`read_file(path)`）；
+REPL 给模型的是一个可以"编程"的环境——`for`/`while`/`if`/函数/列表/字典/
+regex/数据处理，自己组合逻辑。模型获得的不是"这里有 20 个工具"，
+而是"这里有一个可以编程的环境"。
+
+因此 REPL 是**恒在且叠加**的能力：模型既保留全部直接工具，又多了一把
+"把多步逻辑写成一端代码"的钥匙。没有开关——REPL 是每个 agent 都不可少的
+基础工具。单次操作用直接工具，多步/批量/需要中间状态的操作才写程序。
+
+批量收益（之前的动机，仍然成立）：
 传统模式下模型做批量操作（如重命名 20 个文件）需要 20 次独立工具调用，
 每次都有完整的 round-trip：模型生成 → API 传输 → 权限检查 → 执行 → 结果回传。
 
@@ -218,9 +232,9 @@ type ContextResult = {
 - `execute()` 有工具调用时返回 `JSON.stringify(ContextResult)` 而非 `output||"(no output)"`，`toolCalls==0` 的纯 JS 仍保持原 `output` 行为以兼容 `1+1`/`console.log` 测试；
 - **不变量**：`callTool()成功 → ToolResult必捕获 → ContextAggregator决定暴露`，`console.log` 降为可选的额外 `logs` 字段，不再决定结果可见性。
 
-### 3.6 REPL ≠ SubAgent（批量执行器 vs 另一个 Agent）
+### 3.6 REPL ≠ SubAgent（可编程环境 vs 另一个 Agent）
 
-一句话：**REPL 不是 subagent，只是主 Agent 调用的批量工具执行器；REPL 自己执行多个工具并在内部聚合后把结果返回给主 Agent，无二次 LLM 调用。**
+一句话：**REPL 不是 subagent，只是主 Agent 调用的可编程执行环境；REPL 自己执行代码/多个工具并在内部聚合后把结果返回给主 Agent，无二次 LLM 调用。**
 
 ```text
 主 Agent ──调用 REPL──▶ REPL { Read, Grep, Bash, Edit } ──ContextAggregator──▶ REPL Result(JSON) ──▶ 主 Agent
@@ -229,13 +243,19 @@ type ContextResult = {
 
 对比 `AgentTool/task` 的 `主 Agent → SubAgent → (SubAgent 内再调 REPL) → 汇总回主 Agent` 独立会话；普通 `Read/Grep` 批量走 `REPL` 即可。`ContextAggregator` 为纯程序聚合，不消耗额外模型调用。
 
-### 3.7 开关与工具注册（toggle correctness）
+### 3.7 恒在注册与叠加语义（always-on）
 
-`isReplModeEnabled()`（`constants.ts`）在 `enableConfigs()` 之前不可读配置（此时恒返 `true`），因此 `REPLTool` 绝不能在模块顶层按开关静态初始化——否则 `replEnabled=false` 也会被冻结进工具池。当前实现：
+REPL 是恒在基础工具：**没有开关**——`/config` 无 `replEnabled` 字段，
+无 `CODEV_REPL` / `CLAUDE_CODE_REPL` 环境变量，任何配置/环境都无法把 REPL
+从工具池剔除。历史上 REPL 曾有开关（`isReplModeEnabled()` 读 config + env，
+存在 import 顺序冻结问题），现已被移除：
 
-- `getAllBaseTools()` / `getTools()` / `assembleToolPool({ forAgent })` 每次都经 `getReplTool()` 运行时决议是否注册 `REPL`；
-- `getTools()` 出口强制不变量：关闭 → `REPL` 必不存在、原语（`REPL_ONLY_TOOLS`）可直接调用；开启 → `REPL` 存在（若未被 deny-rule 剔除）、原语从直接调用隐藏（仍可在 VM 内 `callTool`）；
-- `/config` 切换下次工具装配（下一轮对话）生效；提示词分支（`prompts.ts:getUsingYourToolsSection`）同步切换。
+- `getAllBaseTools()` 直接包含 `getReplTool()`；`getTools()` 不再做任何 REPL 存在性过滤；
+- `CLAUDE_CODE_SIMPLE`（--bare）模式恒叠加 `REPL`（Bash/Read/Edit + REPL）；
+- `assembleToolPool({ forAgent })` 恒确保子 agent 池中有 REPL；
+- `getReplTool()` 保留 lazy require，仅为规避 tools.ts ↔ REPLTool 的模块循环依赖，与 config/import 顺序无关；
+- 提示词（`prompts.ts:getUsingYourToolsSection`）恒追加一条 REPL 叠加说明，
+  常规逐工具指导不变；所有原语始终可直接调用（叠加语义，REPL 不隐藏任何工具）。
 
 ---
 
@@ -263,12 +283,13 @@ REPL 是 spec-ptc Layer 3（Shadow Execution）的目标宿主：
 - 大小写不敏感工具查找
 - tool_calls 计数
 
-`src/tools/REPLTool/__tests__/replToggle.test.ts`（开关正确性，6 用例）：
+`src/tools/REPLTool/__tests__/replToggle.test.ts`（恒在不变量，5 用例）：
 
-- `replEnabled=false` → 无 `REPL`，原语可直接调用；`true` → 有 `REPL`，原语隐藏
-- `CODEV_REPL=0/1` 覆盖配置文件开关
-- `assembleToolPool({ forAgent: true })` 跟随开关
-- 该文件静态 import `tools.ts`（static-first 顺序），冻结回归会直接失败
+- `getTools()` 恒含 `REPL`，原语（Read/Write/Edit/Glob/Grep/Bash）恒可直接调用（叠加，非网关）
+- `getReplTool()` 恒解析出 Tool（非空）
+- `getAllBaseTools()` 恒含 `REPL`
+- `assembleToolPool({ forAgent: true })` 恒为子 agent 暴露 `REPL` + 原语
+- 该文件静态 import `tools.ts`（static-first 顺序），防止条件化注册回归（若有人再次读 config/env 选择性跳过 REPL 会直接失败）
 
 ---
 
@@ -306,7 +327,7 @@ isolated-vm 或独立进程。
 `ToolResult`（`src/tools/REPLTool/engine.ts:35`）保留完整 `stdout/stderr/data/outputPath` 供本地/回放；`ContextCall` 为进 LLM 的精简视图（`preview` 4000 截断、`head2000+tail500`、`summary="no output expected"`、`truncated/outputPath`），`ContextResult` 再聚合 `ok/tool_calls/calls/logs/error`，控制 token 成本与可二次 `Read` 的按需加载。
 
 **Q: REPL 与 SubAgent 的边界？**
-REPL 是主 Agent 的**批量工具执行器**（`主 Agent→REPL{Read,Grep,Bash}→ContextResult→主 Agent`，无二次 LLM）；SubAgent（`AgentTool/task`）是独立会话另起 LLM 调用。普通批量 `Read/Grep/Bash` 走 REPL 即可，需独立推理/探索再用 SubAgent；`ContextAggregator` 为纯程序聚合，不耗额外模型调用。
+REPL 是主 Agent 的**可编程执行环境**（`主 Agent→REPL{循环+Read/Grep/Bash 逻辑}→ContextResult→主 Agent`，无二次 LLM）；SubAgent（`AgentTool/task`）是独立会话另起 LLM 调用。批量/多步/需要编程逻辑的 `Read/Grep/Bash` 走 REPL 即可，需独立推理/探索再用 SubAgent；`ContextAggregator` 为纯程序聚合，不耗额外模型调用。
 
 **Q: P6.6 后 `toolCalls==0` 的纯 JS 如何处理？**
 保持原 `output||"(no output)"` 行为（兼容 `1+1`/`console.log` 测试），仅 `toolCalls>0` 时才产出 `JSON(ContextResult)`，避免无工具调用的计算被 JSON 包裹污染。

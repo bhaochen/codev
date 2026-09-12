@@ -44,7 +44,7 @@ import {
   getScratchpadDir,
 } from '../utils/permissions/filesystem.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
-import { isReplModeEnabled } from '../tools/REPLTool/constants.js'
+import { REPL_TOOL_NAME } from '../tools/REPLTool/constants.js'
 import { feature } from 'bun:bundle'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { shouldUseGlobalCacheScope } from '../utils/betas.js'
@@ -271,20 +271,12 @@ function getUsingYourToolsSection(enabledTools: Set<string>): string {
     enabledTools.has(n),
   )
 
-  // In REPL mode, Read/Write/Edit/Glob/Grep/Bash/Agent are hidden from direct
-  // use (REPL_ONLY_TOOLS). The "prefer dedicated tools over Bash" guidance is
-  // irrelevant — REPL's own prompt covers how to call them from scripts.
-  if (isReplModeEnabled()) {
-    const items = [
-      `The Read, Write, Edit, Glob, Grep, and Bash tools are NOT available as direct tool calls. You MUST use the REPL tool to access them via \`await callTool("ToolName", input)\`. For example: \`await callTool("Glob", { pattern: "**/*.ts" })\``,
-      `Do NOT attempt to call Read, Write, Edit, Glob, Grep, or Bash directly — they will fail. Always go through the REPL tool.`,
-      taskToolName
-        ? `Break down and manage your work with the ${taskToolName} tool. These tools are helpful for planning your work and helping the user track your progress. Mark each task as completed as soon as you are done with the task. Do not batch up multiple tasks before marking them as completed.`
-        : null,
-    ].filter(item => item !== null)
-    if (items.length === 0) return ''
-    return [`# Using your tools`, ...prependBullets(items)].join(`\n`)
-  }
+  // REPL (when enabled) is an additive programming environment on top of the
+  // normal tools — it never replaces them. So there is no special section
+  // here; the per-tool guidance below applies unchanged, and a single bullet
+  // points at REPL for tasks that benefit from real programming logic. REPL's
+  // own prompt covers how to call tools from scripts.
+  const replPresent = enabledTools.has(REPL_TOOL_NAME)
 
   // Ant-native builds alias find/grep to embedded bfs/ugrep and remove the
   // dedicated Glob/Grep tools, so skip guidance pointing at them.
@@ -308,6 +300,9 @@ function getUsingYourToolsSection(enabledTools: Set<string>): string {
     providedToolSubitems,
     taskToolName
       ? `Break down and manage your work with the ${taskToolName} tool. These tools are helpful for planning your work and helping the user track your progress. Mark each task as completed as soon as you are done with the task. Do not batch up multiple tasks before marking them as completed.`
+      : null,
+    replPresent
+      ? `When a task needs real programming logic across many operations — loops, conditions, multi-step transforms, batch edits — use the ${REPL_TOOL_NAME} tool, a sandboxed JavaScript environment, instead of a long chain of individual tool calls. It runs in addition to the normal tools: use a direct tool for a single operation, and turn to REPL when programming helps.`
       : null,
     `You can call multiple tools in a single response. If you intend to call multiple tools and there are no dependencies between them, make all independent tool calls in parallel. Maximize use of parallel tool calls where possible to increase efficiency. However, if some tool calls depend on previous calls to inform dependent values, do NOT call these tools in parallel and instead call them sequentially. For instance, if one operation must complete before another starts, run these operations sequentially instead.`,
   ].filter(item => item !== null)

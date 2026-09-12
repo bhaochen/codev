@@ -480,10 +480,10 @@ export function filterToolsByDenyRules<T extends { name: string; mcpInfo?: ... }
 
 `getTools()` 函数（`src/tools.ts`）的组装流程：
 
-1. **Simple 模式**（`CLAUDE_CODE_SIMPLE=1`）：仅返回 `BashTool`、`FileReadTool`、`FileEditTool`（或 REPL 模式下的 `REPLTool`），加上协调者模式所需的 `AgentTool` + `TaskStopTool`。
+1. **Simple 模式**（`CLAUDE_CODE_SIMPLE=1`）：返回 `BashTool`、`FileReadTool`、`FileEditTool`（恒叠加 `REPLTool`），加上协调者模式所需的 `AgentTool` + `TaskStopTool`。
 2. **完整模式**：通过 `getAllBaseTools()` 获取所有工具，移除特殊工具（`ListMcpResourcesTool`、`ReadMcpResourceTool`、`SYNTHETIC_OUTPUT_TOOL_NAME`）。
 3. **应用拒绝规则**：`filterToolsByDenyRules()`。
-4. **REPL 模式屏蔽**：当 REPL 启用时，隐藏 `REPL_ONLY_TOOLS` 集合中的原始工具。
+4. **REPL 恒在**（不变量）：`REPL` 必在池中，无开关；所有原语始终可直接调用 —— REPL 是叠加的编程环境，不隐藏任何工具。
 5. **应用 `isEnabled()`**：每个工具自身的 `isEnabled()` 检查。
 
 ### 4.3 条件工具（`feature()` 门控导入）

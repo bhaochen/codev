@@ -68,10 +68,10 @@ getTools(permissionContext) → Tool[]
 
 执行流程：
 
-1. **`CLAUDE_CODE_SIMPLE` 模式**：仅返回 BashTool、FileReadTool、FileEditTool（极简模式；REPL 开启时改返 REPL）
-2. **`getAllBaseTools()`**：收集所有内置工具，按 feature flag 和条件编译；`REPL` 由 `getReplTool()` 按当前 `isReplModeEnabled()` 运行时决议注册（不在 import 阶段冻结）
+1. **`CLAUDE_CODE_SIMPLE` 模式**：返回 BashTool、FileReadTool、FileEditTool（极简模式；恒叠加 REPL，不替换原语）
+2. **`getAllBaseTools()`**：收集所有内置工具，按 feature flag 和条件编译；`REPL` 是恒在基础工具，由 `getReplTool()` 运行时解析（lazy require 仅为规避模块循环依赖）
 3. **`filterToolsByDenyRules()`**：检查 deny rules，过滤被禁止的工具
-4. **`REPL 模式过滤`**（不变量）：关闭时 `REPL` 必不存在、原始工具（`REPL_ONLY_TOOLS`）可直接调用；启用时保留 `REPL` 并隐藏原始工具（仍可在 VM 内 `callTool`）
+4. **REPL 恒在**（不变量）：`REPL` 必在工具池中，无开关、无任何配置/环境剔除路径；所有原语始终可直接调用 —— REPL 是叠加的编程环境，不隐藏任何工具
 5. **`isEnabled()` 过滤**：逐个检查工具是否启用
 
 ### assembleToolPool()
@@ -271,12 +271,12 @@ WebSearchTool 支持两个搜索后端：
 
 ---
 
-### REPLTool — VM 沙箱批量执行引擎（P6.6 最终契约）
+### REPLTool — VM 沙箱可编程执行环境（P6.6 最终契约）
 
-在 Bun `node:vm` 沙箱中执行 JavaScript 的批量操作引擎（默认启用；`/config` 的 `replEnabled` 字段控制，环境变量 `CODEV_REPL` / `CLAUDE_CODE_REPL` 优先级最高）。详见 [REPL Tool 深度解析](repl-tool.md)。
+在 Bun `node:vm` 沙箱中执行 JavaScript 的可编程环境（**恒在基础工具**，无开关，不可关闭）。**叠加**在普通工具池之上，不取代任何直接工具。详见 [REPL Tool 深度解析](repl-tool.md)。
 
-- **输入参数**: `code` (必填) — JS 代码，通过 `await callTool(name, input)` 调用 primitive tools
-- **行为**: 单次调用内完成多步批量操作；变量跨调用持久化（会话级 `engineCache:Map<sessionId,ReplEngine>`，`src/tools/REPLTool/REPLTool.ts`）
+- **输入参数**: `code` (必填) — JS 代码；可写任意逻辑（循环/条件/函数/regex/数据结构），并通过 `await callTool(name, input)` 调用 primitive tools
+- **行为**: 单次调用内完成多步批量操作或纯计算；变量跨调用持久化（会话级 `engineCache:Map<sessionId,ReplEngine>`，`src/tools/REPLTool/REPLTool.ts`）
 - **primitive 工具集**: Read / Write / Edit / Glob / Grep / Bash（`src/tools/REPLTool/primitiveTools.ts`，大小写不敏感查找）
 - **透明包装**: `isTransparentWrapper()=true`，UI 只显示内部 tool 调用与 `repl_tool_call` 进度；`innerMessages(isVirtual:true)` 仅 UI/history，`src/utils/messages.ts:1999 normalizeMessagesForAPI` 过滤不进 LLM
 - **3 层契约** (`src/tools/REPLTool/engine.ts:35`):
@@ -285,7 +285,7 @@ WebSearchTool 支持两个搜索后端：
        → ExecutionStore(innerMessages isVirtual)
        → ContextAggregator.buildContextResult() → ContextResult{ok,tool_calls,calls:[{tool,ok,preview,summary,truncated,outputPath}],logs} JSON → LLM
   ```
-  `callTool()成功必捕获 ToolResult → ContextAggregator 决定暴露`，`console.log` 仅补充 `logs` 字段；`Bash` 截断 4000/`head2000+tail500`，超大走 `outputPath` 按需二次 `Read`。`REPL_ONLY_TOOLS` 在启用时从工具池隐藏；`REPL != SubAgent`（无二次 LLM 调用，SubAgent 为 `AgentTool/task` 独立会话）。
+  `callTool()成功必捕获 ToolResult → ContextAggregator 决定暴露`，`console.log` 仅补充 `logs` 字段；`Bash` 截断 4000/`head2000+tail500`，超大走 `outputPath` 按需二次 `Read`。REPL 叠加在工具池之上，原语工具始终可直接调用（无隐藏、无开关）；`REPL != SubAgent`（无二次 LLM 调用，SubAgent 为 `AgentTool/task` 独立会话）。
 
 ### BenchmarkTool
 
