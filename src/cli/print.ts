@@ -98,6 +98,42 @@ function getReadFileCache(state: any): FileStateCache {
 }
 
 /**
+ * text 模式下从一条 result 消息提取 stdout 文本。
+ * 成功结果取 `result`；无文本（如末块非 text）返回 null，调用方保持静默以免污染管道。
+ */
+export function getHeadlessResultText(sdkMsg: {
+  type?: string
+  result?: string
+}): string | null {
+  if (sdkMsg?.type !== 'result') return null
+  const text = sdkMsg.result ?? ''
+  return text.length > 0 ? text : null
+}
+
+/**
+ * text 模式下为“零输出的 error 结果”生成 stderr 摘要。
+ * error_during_execution 等结果没有 `result` 字段（只有 errors[]），旧逻辑直接
+ * 静默，-p 用户看到的就是“没反应”。这里返回可打印的摘要，调用方写 stderr，
+ * stdout 依然保持纯净（管道友好），进程退出码仍为 1。
+ * 非 error 结果返回 null。
+ */
+export function getHeadlessErrorSummary(sdkMsg: {
+  type?: string
+  subtype?: string
+  is_error?: boolean
+  errors?: string[]
+  stop_reason?: string | null
+}): string | null {
+  if (sdkMsg?.type !== 'result') return null
+  const isError = sdkMsg.is_error === true || (sdkMsg.subtype !== undefined && sdkMsg.subtype !== 'success')
+  if (!isError) return null
+  if (getHeadlessResultText(sdkMsg as { type?: string; result?: string }) !== null) return null
+  const errors = Array.isArray(sdkMsg.errors) ? sdkMsg.errors : []
+  const detail = errors.length > 0 ? errors.join('\n') : `subtype=${sdkMsg.subtype ?? 'unknown'} stop_reason=${sdkMsg.stop_reason ?? 'null'}`
+  return `request failed (${sdkMsg.subtype ?? 'error'}):\n${detail}`
+}
+
+/**
  * Plain headless query: consume inputPrompt (string = single turn;
  * AsyncIterable from --input-format=stream-json = one turn per line/chunk)
  * through QueryEngine, and emit output per --output-format:
@@ -302,9 +338,25 @@ async function runHeadlessTurns(
           writeToStdout(`${ndjsonSafeStringify(sdkMsg)}\n`)
         } else {
           // text: emit the final assistant text (one line per result).
-          const text = (sdkMsg as { result?: string }).result ?? ''
-          if (text.length > 0) {
+          const text = getHeadlessResultText(sdkMsg as { type?: string; result?: string })
+          if (text !== null) {
             writeToStdout(`${text}\n`)
+          } else {
+            // Zero-output error results (e.g. error_during_execution has
+            // errors[] but no result) must not fail silently in -p: surface
+            // a summary on stderr, stdout stays clean for pipes.
+            const summary = getHeadlessErrorSummary(
+              sdkMsg as {
+                type?: string
+                subtype?: string
+                is_error?: boolean
+                errors?: string[]
+                stop_reason?: string | null
+              },
+            )
+            if (summary !== null) {
+              process.stderr.write(`[codev -p] ${summary}\n`)
+            }
           }
         }
       } else if (isStreamJson) {

@@ -460,15 +460,16 @@ export function getPublicModelDisplayName(model: ModelName): string | null {
     }
   }
 
-  // Check OpenCode Zen models first (before getModelStrings() which maps them to aliases)
-  if (model === 'big-pickle') return 'Big Pickle'
-  if (model === 'gpt-5-nano') return 'GPT 5 Nano'
-  if (model === 'minimax-m2.5-free') return 'MiniMax M2.5 Free'
-  if (model === 'minimax-m2.5') return 'MiniMax M2.5'
-  if (model === 'hy3-preview-free') return 'HY3 Preview Free'
-  if (model === 'ling-2.6-flash-free') return 'Ling 2.6 Flash Free'
-  if (model === 'trinity-large-preview-free') return 'Trinity Large Preview Free'
-  if (model === 'nemotron-3-super-free') return 'Nemotron 3 Super Free'
+  // OpenCode Zen 模型显示名取自目录缓存，无硬编码 ID 分支；
+  // 未命中（非 Zen 模型或缓存为空）则继续走下面的 Claude 映射
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getOpencodeModelDisplayName } = require('../../services/api/opencodeClient.js') as typeof import('../../services/api/opencodeClient.js')
+    const zenName = getOpencodeModelDisplayName(model)
+    if (zenName) return zenName
+  } catch {
+    // Ignore errors, fall through
+  }
 
   switch (model) {
     case getModelStrings().opus46:

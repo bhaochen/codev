@@ -1,6 +1,10 @@
 /**
  * OpenAI Chat Completions 非流式响应 → Anthropic Messages API 响应。
+ *
+ * thinking 来源与流式侧一致：reasoning_content / reasoning / reasoning_text
+ * 按优先级提取（见 extractOpenAIReasoningText），reasoning_details 仅兜底。
  */
+import { extractOpenAIReasoningText } from './openaiReasoning.js'
 
 export type OpenAIResponseShape = {
   id?: string
@@ -8,6 +12,9 @@ export type OpenAIResponseShape = {
     message?: {
       content?: string | null
       reasoning_content?: string | null
+      reasoning?: string | null
+      reasoning_text?: string | null
+      reasoning_details?: Array<{ text?: string }> | null
       tool_calls?: Array<{
         id: string
         function: { name: string; arguments: string }
@@ -37,10 +44,11 @@ export function convertOpenAIResponseToAnthropic(
     input?: unknown
   }> = []
 
-  if (choice?.message?.reasoning_content) {
+  const reasoningText = extractOpenAIReasoningText(choice?.message)
+  if (reasoningText) {
     anthropicContent.push({
       type: 'thinking',
-      thinking: choice.message.reasoning_content,
+      thinking: reasoningText,
     })
   }
 

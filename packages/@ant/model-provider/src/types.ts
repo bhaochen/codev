@@ -41,6 +41,16 @@ export type OpenAIStreamChunk = {
     delta?: {
       content?: string | null
       reasoning_content?: string | null
+      /**
+       * Zen / OpenAI 兼容网关的另两种 thinking 线序（实测）：
+       * - `reasoning`：nemotron-3-ultra / nemotron-3.5-lightning / mimo-v2.5 等
+       * - `reasoning_text`：部分 OpenAI 兼容后端
+       * 与 reasoning_content 同等映射为 thinking。优先级见 extractOpenAIReasoningText。
+       */
+      reasoning?: string | null
+      reasoning_text?: string | null
+      /** 与 `reasoning` 并存的结构化 thinking 明细；`reasoning` 缺失时可拼接兜底。 */
+      reasoning_details?: Array<{ text?: string; type?: string; index?: number }> | null
       tool_calls?: Array<{
         index: number
         id?: string

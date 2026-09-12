@@ -43,6 +43,20 @@ export type ModelOption = {
   descriptionForModel?: string
 }
 
+/**
+ * OpenCode Zen 模型显示名：查目录缓存，无硬编码 ID 分支；
+ * 缓存未命中时回退原始 ID。
+ */
+function resolveOpencodeDisplayName(modelId: string): string {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getOpencodeModelDisplayName } = require('../../services/api/opencodeClient.js') as typeof import('../../services/api/opencodeClient.js')
+    return getOpencodeModelDisplayName(modelId) ?? modelId
+  } catch {
+    return modelId
+  }
+}
+
 export function getDefaultOptionForUser(fastMode = false): ModelOption {
   if (process.env.USER_TYPE === 'ant') {
     const currentModel = renderDefaultModelSetting(
@@ -97,7 +111,7 @@ export function getDefaultOptionForUser(fastMode = false): ModelOption {
   // Check if we should use OpenCode Zen model
   if (isOpenCode) {
     const currentModel = getOpenCodeModelName() || 'big-pickle'
-    const displayName = currentModel === 'big-pickle' ? 'Big Pickle' : currentModel
+    const displayName = resolveOpencodeDisplayName(currentModel)
     return {
       value: null,
       label: 'Default (recommended)',
@@ -119,7 +133,7 @@ export function getDefaultOptionForUser(fastMode = false): ModelOption {
       }
       if (fileConfig.authProvider === 'opencode') {
         const currentModel = fileConfig.openCodeModelName || 'big-pickle'
-        const displayName = currentModel === 'big-pickle' ? 'Big Pickle' : currentModel
+        const displayName = resolveOpencodeDisplayName(currentModel)
         return {
           value: null,
           label: 'Default (recommended)',
@@ -536,30 +550,12 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
         if (filtered.length > 0) {
           return [
             defaultOpt,
-            ...filtered.map(m => {
-              let label = m.name || m.id
-              let description = hasApiKey ? 'OpenCode Zen Model' : '限时免费模型'
-              
-              if (m.id === 'big-pickle') {
-                label = 'Big Pickle'
-                description = '旗舰模型，限时免费，适合复杂任务'
-              } else if (m.id === 'gpt-5-nano') {
-                label = 'GPT 5 Nano'
-                description = '永久免费，轻量快速，隐私安全'
-              } else if (m.id === 'minimax-m2.5-free') {
-                label = 'MiniMax M2.5 Free'
-              } else if (m.id === 'hy3-preview-free') {
-                label = 'HY3 Preview Free'
-              } else if (m.id === 'ling-2.6-flash-free') {
-                label = 'Ling 2.6 Flash Free'
-              } else if (m.id === 'trinity-large-preview-free') {
-                label = 'Trinity Large Preview Free'
-              } else if (m.id === 'nemotron-3-super-free') {
-                label = 'Nemotron 3 Super Free'
-              }
-              
-              return { value: m.id, label, description }
-            }),
+            // 显示名/描述全部来自目录，无硬编码 ID 分支
+            ...filtered.map(m => ({
+              value: m.id,
+              label: m.name || m.id,
+              description: hasApiKey ? 'OpenCode Zen Model' : '限时免费模型',
+            })),
           ]
         }
       }

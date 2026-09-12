@@ -127,7 +127,20 @@ export async function* queryOpenAIChat(
       }
     }
     const { upperLimit } = getModelMaxOutputTokens(model)
-    maxTokens = resolveOpenAIMaxTokens(upperLimit, options.maxOutputTokensOverride)
+    // opencode 模型按目录 limit.output 裁剪 max_tokens：未知模型默认 64000 会超过
+    // mimo-v2.5-free(32000)/ling-3.0-flash-fin-free(32768)/big-pickle(32000) 的上限，
+    // Zen 当前容忍超发，但严格校验即 400。用目录值 clamp，缺失时回退默认。
+    let effectiveUpperLimit = upperLimit
+    if (route.provider === 'opencode') {
+      try {
+        const { getOpencodeModelMaxTokens } = await import('../../api/opencodeClient.js')
+        const catalogCap = getOpencodeModelMaxTokens(model)
+        if (typeof catalogCap === 'number' && catalogCap >= 4_096) {
+          effectiveUpperLimit = Math.min(upperLimit, catalogCap)
+        }
+      } catch {}
+    }
+    maxTokens = resolveOpenAIMaxTokens(effectiveUpperLimit, options.maxOutputTokensOverride)
     const promptCacheKey = formatOpenAIPromptCacheKey(getSessionId())
     logForDebugging(`[OpenAIChat] provider=${route.provider} model=${model} endpoint=${endpoint} tools=${openaiTools.length}`)
     const body = buildOpenAIRequestBody({

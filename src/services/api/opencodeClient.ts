@@ -12,8 +12,11 @@ import {
 } from '@ant/model-provider'
 
 const OPENCODE_BASE_URL = 'https://opencode.ai/zen/v1'
-// 核心进化：引入云端元数据和 GitHub 动态版本追溯终点
-const MODELS_META_URL = 'https://models.dev/api.json'
+// 模型目录源与官方 opencode 对齐：优先自建镜像，失败回退上游 models.dev
+// （对标 opencode packages/core/src/models-dev.ts: `Flag.OPENCODE_MODELS_URL || "https://models.opencode.ai"`）
+const MODELS_META_PRIMARY_URL =
+  process.env.OPENCODE_MODELS_URL || 'https://models.opencode.ai/api.json'
+const MODELS_META_FALLBACK_URL = 'https://models.dev/api.json'
 const GITHUB_RELEASE_URL = 'https://api.github.com/repos/anomalyco/opencode/releases/latest'
 
 // 安全兜底的初始 User-Agent
@@ -56,17 +59,23 @@ export async function fetchOpencodeModels(): Promise<void> {
       }
 
       // -----------------------------------------------------------------
-      // ✨ 步骤 2：请求大杂烩元数据，为精准剔除下架模型、识别免费模型做铺垫
+      // ✨ 步骤 2：请求模型目录元数据，为精准剔除下架模型、识别免费模型做铺垫
+      // 主源 models.opencode.ai（官方行为），失败回退 models.dev
       // -----------------------------------------------------------------
-      const res = await fetch(MODELS_META_URL, {
-        headers: {
-          'User-Agent': `opencode/${cliVersion} ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14`,
-          'Accept-Encoding': 'gzip, deflate, br'
-        }
-      })
-      
-      if (!res.ok) {
-        console.error(`[opencodeClient] Failed to fetch models meta: ${res.status} ${res.statusText}`)
+      const metaHeaders = {
+        'User-Agent': `opencode/${cliVersion} ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14`,
+        'Accept-Encoding': 'gzip, deflate, br',
+      }
+      let res = await fetch(MODELS_META_PRIMARY_URL, { headers: metaHeaders }).catch(() => null)
+      if (!res?.ok) {
+        console.error(
+          `[opencodeClient] Primary models source failed (${res ? `${res.status} ${res.statusText}` : 'network error'}), falling back to ${MODELS_META_FALLBACK_URL}`,
+        )
+        res = await fetch(MODELS_META_FALLBACK_URL, { headers: metaHeaders }).catch(() => null)
+      }
+
+      if (!res?.ok) {
+        console.error(`[opencodeClient] Failed to fetch models meta: ${res ? `${res.status} ${res.statusText}` : 'network error'}`)
         return
       }
 
@@ -129,6 +138,15 @@ export async function fetchOpencodeModels(): Promise<void> {
 
 export function getCachedOpencodeModels(): CachedOpencodeModel[] {
   return cachedModels || []
+}
+
+/**
+ * 目录驱动的显示名：有缓存命中即返回目录 name，无硬编码 ID 分支；
+ * 未命中返回 undefined，调用方自行回退原始 ID。
+ */
+export function getOpencodeModelDisplayName(modelId: string): string | undefined {
+  if (!cachedModels) return undefined
+  return cachedModels.find(m => m.id === modelId)?.name
 }
 
 export function getOpencodeModelContextWindow(modelId: string): number | undefined {

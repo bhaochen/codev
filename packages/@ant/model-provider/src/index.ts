@@ -44,6 +44,9 @@ export {
   type OpenAIResponseShape,
 } from './shared/openaiConvertResponse.js'
 
+// reasoning 字段提取（reasoning_content / reasoning / reasoning_text / reasoning_details）
+export { extractOpenAIReasoningText } from './shared/openaiReasoning.js'
+
 // 流式适配 + SSE 传输
 export {
   adaptOpenAIStreamToAnthropic,

@@ -9,7 +9,9 @@
  *   finish_reason            → message_delta(stop_reason) + message_stop
  *
  * Thinking 支持：
- *   DeepSeek 等端点通过 delta.reasoning_content 输出思维链，映射为 Anthropic
+ *   DeepSeek 等端点通过 delta.reasoning_content 输出思维链，Zen 网关对
+ *   nemotron/mimo 系模型则用 delta.reasoning（+ reasoning_details），另有后端用
+ *   delta.reasoning_text。三者经 extractOpenAIReasoningText 统一映射为 Anthropic
  *   thinking 块。空字符串同样是有效信号（DeepSeek v4 直接作答时返回
  *   reasoning_content: ""，空 thinking 块必须在后续请求中往返，否则 400）。
  *
@@ -24,6 +26,7 @@
  */
 import type { OpenAIStreamChunk } from '../types.js'
 import { normalizeOpenAIUsage } from './openaiUsage.js'
+import { extractOpenAIReasoningText } from './openaiReasoning.js'
 
 export type AnthropicStreamEvent =
   | {
@@ -166,8 +169,8 @@ export async function* adaptOpenAIStreamToAnthropic(
     // 只带 usage 的空 chunk 跳过
     if (!delta) continue
 
-    // reasoning_content → thinking 块。空字符串是有效信号，也必须是块（见头注释）。
-    const reasoningContent = delta.reasoning_content
+    // reasoning 系字段 → thinking 块。空字符串是有效信号，也必须是块（见头注释）。
+    const reasoningContent = extractOpenAIReasoningText(delta)
     if (reasoningContent != null) {
       if (!thinkingBlockOpen) {
         currentContentIndex++
