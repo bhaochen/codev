@@ -55,7 +55,6 @@ import {
 } from '../../utils/permissions/yoloClassifier.js'
 import { emitTaskProgress as emitTaskProgressEvent } from '../../utils/task/sdkProgress.js'
 import { isInProcessTeammate } from '../../utils/teammateContext.js'
-import { getTokenCountFromUsage } from '../../utils/tokens.js'
 import { EXIT_PLAN_MODE_V2_TOOL_NAME } from '../ExitPlanModeTool/constants.js'
 import { AGENT_TOOL_NAME, LEGACY_AGENT_TOOL_NAME } from './constants.js'
 import type { AgentDefinition } from './loadAgentsDir.js'
@@ -273,6 +272,28 @@ export function countToolUses(messages: MessageType[]): number {
   return count
 }
 
+/**
+ * API input usage is cumulative within an agent run, while output usage is
+ * per response. The final response can legitimately report zero output (for
+ * example, after a tool-only turn), so reading only the last assistant
+ * message undercounts the run and can produce a misleading 0.
+ */
+function getTokenCountFromAgentMessages(messages: MessageType[]): number {
+  let latestInputTokens = 0
+  let cumulativeOutputTokens = 0
+
+  for (const message of messages) {
+    if (message.type !== 'assistant') continue
+    latestInputTokens =
+      message.message.usage.input_tokens +
+      (message.message.usage.cache_creation_input_tokens ?? 0) +
+      (message.message.usage.cache_read_input_tokens ?? 0)
+    cumulativeOutputTokens += message.message.usage.output_tokens
+  }
+
+  return latestInputTokens + cumulativeOutputTokens
+}
+
 export function finalizeAgentTool(
   agentMessages: MessageType[],
   agentId: string,
@@ -316,7 +337,7 @@ export function finalizeAgentTool(
     }
   }
 
-  const totalTokens = getTokenCountFromUsage(lastAssistantMessage.message.usage)
+  const totalTokens = getTokenCountFromAgentMessages(agentMessages)
   const totalToolUseCount = countToolUses(agentMessages)
 
   logEvent('tengu_agent_tool_completed', {

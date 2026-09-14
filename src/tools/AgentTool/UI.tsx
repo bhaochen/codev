@@ -79,6 +79,30 @@ function getSearchOrReadInfo(progressMessage: ProgressMessage<Progress>, tools: 
   }
   return null;
 }
+
+/**
+ * Progress messages do not necessarily contain the final assistant response.
+ * In particular, the sync agent path forwards only messages containing a
+ * tool_use/tool_result, while providers commonly report the final usage on
+ * the plain-text response. Keep the same accounting rules as
+ * ProgressTracker: input is the latest cumulative value, output is summed.
+ */
+function getTokenCountFromProgressMessages(messages: ProgressMessage<Progress>[]): number | null {
+  let latestInputTokens: number | null = null;
+  let cumulativeOutputTokens = 0;
+
+  for (const progressMessage of messages) {
+    if (!hasProgressMessage(progressMessage.data) || progressMessage.data.message.type !== 'assistant') {
+      continue;
+    }
+
+    const usage = progressMessage.data.message.message.usage;
+    latestInputTokens = usage.input_tokens + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0);
+    cumulativeOutputTokens += usage.output_tokens;
+  }
+
+  return latestInputTokens === null ? null : latestInputTokens + cumulativeOutputTokens;
+}
 type SummaryMessage = {
   type: 'summary';
   searchCount: number;
@@ -476,12 +500,7 @@ export function renderToolUseProgressMessage(progressMessages: ProgressMessage<P
       const message = msg.data.message;
       return message.message.content.some(content => content.type === 'tool_use');
     });
-    const latestAssistant = progressMessages.findLast((msg): msg is ProgressMessage<AgentToolProgress> => hasProgressMessage(msg.data) && msg.data.message.type === 'assistant');
-    let tokens = null;
-    if (latestAssistant?.data.message.type === 'assistant') {
-      const usage = latestAssistant.data.message.message.usage;
-      tokens = (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0) + usage.input_tokens + usage.output_tokens;
-    }
+    const tokens = getTokenCountFromProgressMessages(progressMessages);
     return {
       toolUseCount,
       tokens
@@ -635,12 +654,7 @@ function calculateAgentStats(progressMessages: ProgressMessage<Progress>[]): {
     const message = msg.data.message;
     return message.type === 'user' && message.message.content.some(content => content.type === 'tool_result');
   });
-  const latestAssistant = progressMessages.findLast((msg): msg is ProgressMessage<AgentToolProgress> => hasProgressMessage(msg.data) && msg.data.message.type === 'assistant');
-  let tokens = null;
-  if (latestAssistant?.data.message.type === 'assistant') {
-    const usage = latestAssistant.data.message.message.usage;
-    tokens = (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0) + usage.input_tokens + usage.output_tokens;
-  }
+  const tokens = getTokenCountFromProgressMessages(progressMessages);
   return {
     toolUseCount,
     tokens
@@ -674,6 +688,10 @@ export function renderGroupedAgentToolUse(toolUses: Array<{
     result
   }) => {
     const stats = calculateAgentStats(progressMessages);
+    // Once the tool has resolved, prefer the result's total. The final
+    // assistant response is intentionally absent from progressMessages for
+    // some agents, so progress-only stats can otherwise show 0 or be stale.
+    const completedTokens = result?.output?.status === 'completed' && typeof result.output.totalTokens === 'number' ? result.output.totalTokens : undefined;
     const lastToolInfo = extractLastToolInfo(progressMessages, tools);
     const parsedInput = inputSchema().safeParse(param.input);
 
@@ -714,7 +732,7 @@ export function renderGroupedAgentToolUse(toolUses: Array<{
       agentType,
       description,
       toolUseCount: stats.toolUseCount,
-      tokens: stats.tokens,
+      tokens: completedTokens ?? stats.tokens,
       isResolved,
       isError,
       isAsync,
