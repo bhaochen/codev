@@ -160,6 +160,17 @@ export function getReplTool(): Tool {
     require('./tools/REPLTool/REPLTool.js') as typeof import('./tools/REPLTool/REPLTool.js')
   ).REPLTool
 }
+/**
+ * Runtime RLMTool resolver.
+ *
+ * RLM is gated on /rlm mode being enabled; resolved lazily here to keep the
+ * module graph cycle-free (RLMTool pulls in the RLM engine and Python sandbox).
+ */
+export function getRlmTool(): Tool {
+  return (
+    require('./tools/RLMTool/RLMTool.js') as typeof import('./tools/RLMTool/RLMTool.js')
+  ).RLMTool
+}
 const getPowerShellTool = () => {
   if (!isPowerShellToolEnabled()) return null
   return (
@@ -245,6 +256,7 @@ export function getAllBaseTools(): Tools {
       : []),
     ...(VerifyPlanExecutionTool ? [VerifyPlanExecutionTool] : []),
     getReplTool(),
+    getRlmTool(),
     ...(WorkflowTool ? [WorkflowTool] : []),
     ...(SleepTool ? [SleepTool] : []),
     ...cronTools,

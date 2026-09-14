@@ -570,6 +570,20 @@ ${CYBER_RISK_INSTRUCTION}`,
     ...(shouldUseGlobalCacheScope() ? [SYSTEM_PROMPT_DYNAMIC_BOUNDARY] : []),
     // --- Dynamic content (registry-managed) ---
     ...resolvedDynamicSections,
+    // RLM mode guidance (active when /rlm is on)
+    DANGEROUS_uncachedSystemPromptSection(
+      'rlm_mode',
+      async () => {
+        try {
+          const { rlmController, rlmSystemPromptAddendum } = await import('../tools/RLMTool/controller.js')
+          if (!rlmController.isEnabled()) return null
+          return rlmSystemPromptAddendum()
+        } catch {
+          return null
+        }
+      },
+      'RLM mode can toggle mid-session',
+    ),
   ].filter(s => s !== null)
 }
 

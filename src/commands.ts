@@ -47,6 +47,7 @@ import tasks from './commands/tasks/index.js'
 import feishu from './commands/feishu/index.js'
 import goals from './commands/goal/index.js'
 import telegram from './commands/telegram/index.js'
+import rlm from './commands/rlm/index.js'
 import teleport from './commands/teleport/index.js'
 /* eslint-disable @typescript-eslint/no-require-imports */
 const agentsPlatform =
@@ -327,6 +328,7 @@ const COMMANDS = memoize((): Command[] => [
   vim,
   benchmark,
   benchmarkNonInteractive,
+  rlm,
   ...(webCmd ? [webCmd] : []),
   ...(forkCmd ? [forkCmd] : []),
   ...(buddy ? [buddy] : []),
