@@ -14,7 +14,6 @@ import {
   type FetchedContent,
   getURLMarkdownContent,
 } from './utils.js' // 抓网页, 处理 markdown
-import { fetchImagesAsInline } from '../../utils/inlineImageUtils.js'
 
 const inputSchema = lazySchema(() =>
   z.strictObject({ // 严格对象 不允许多字段
@@ -41,9 +40,7 @@ const outputSchema = lazySchema(() =>
 )
 type OutputSchema = ReturnType<typeof outputSchema>
 
-export type Output = z.infer<OutputSchema> & {
-  images?: Array<{ url: string; base64: string; mediaType: string }>
-}
+export type Output = z.infer<OutputSchema>
 
 // Tool 定义开始
 export const WebFetchTool = buildTool({
@@ -183,13 +180,6 @@ To complete your request, I need to fetch content from the redirected URL. Pleas
         result += `\n\n[Binary content also saved to ${persistedPath}]`
       }
 
-      const imageUrls = result
-        ? result.match(/!\[.*?\]\((https?:\/\/[^)\s]+)\)/g)?.map((m) => m.match(/!\[[^\]]*\]\(([^)]+)\)/)?.[1] ?? []) ?? []
-        : []
-
-      const images =
-        imageUrls.length > 0 ? await fetchImagesAsInline(imageUrls.slice(0, 4), 4) : undefined
-
       const output: Output = {
         bytes,
         code,
@@ -197,7 +187,6 @@ To complete your request, I need to fetch content from the redirected URL. Pleas
         result,
         durationMs: Date.now() - start,
         url,
-        images,
       }
 
       return {
@@ -227,14 +216,6 @@ To complete your request, I need to fetch content from the redirected URL. Pleas
       type: 'tool_result',
       content: [
         { type: 'text', text: output.result },
-        ...(output.images?.map((img) => ({
-          type: 'image' as const,
-          source: {
-            type: 'base64' as const,
-            data: img.base64,
-            media_type: img.mediaType as 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp',
-          },
-        })) ?? []),
       ],
     }
   },

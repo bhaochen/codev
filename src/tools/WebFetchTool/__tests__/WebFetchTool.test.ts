@@ -218,6 +218,26 @@ describe('WebFetchTool', () => {
       expect(blockParam.type).toBe('tool_result')
       expect(blockParam.content).toBeDefined()
     })
+
+    test('should keep fetched images out of the model tool result', () => {
+      const blockParam = WebFetchTool.mapToolResultToToolResultBlockParam(
+        {
+          result: '![diagram](https://example.com/diagram.png)',
+          images: [
+            {
+              url: 'https://example.com/diagram.png',
+              base64: 'encoded-image',
+              mediaType: 'image/png',
+            },
+          ],
+        } as any,
+        'text-only-model-tool-use',
+      )
+
+      expect(blockParam.content).toEqual([
+        { type: 'text', text: '![diagram](https://example.com/diagram.png)' },
+      ])
+    })
   })
 
   describe('Local Fetch Integration', () => {
