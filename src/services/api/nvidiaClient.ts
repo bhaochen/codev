@@ -140,7 +140,7 @@ export function createNvidiaFetchOverride(): (input: RequestInfo | URL, init?: R
 
     if (openaiTools && openaiTools.length > 0) {
       requestBody.tools = openaiTools
-      requestBody.tool_choice = 'auto'
+      requestBody.tool_choice = anthropicBody.tool_choice ?? 'auto'
     }
 
     const headers: Record<string, string> = {

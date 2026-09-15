@@ -301,7 +301,8 @@ export function createOpenCodeFetchOverride(
 
     if (openaiTools && openaiTools.length > 0) {
       requestBody.tools = openaiTools
-      requestBody.tool_choice = 'auto'
+      requestBody.tool_choice =
+        (anthropicBody as { tool_choice?: unknown }).tool_choice ?? 'auto'
     }
 
     // =================================================================
@@ -376,4 +377,3 @@ export function createOpenCodeFetchOverride(
     })
   }
 }
-

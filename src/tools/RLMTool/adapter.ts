@@ -83,11 +83,18 @@ function extractTextFromRaw(raw: unknown): string {
     .join('')
 }
 
-/** Read usage from the raw response (SDK shape: `message.usage.input_tokens/output_tokens`). */
+/**
+ * Read usage from the raw response. Cache read/write tokens are included in
+ * `input` because the RLM trace reports total model token traffic, not only
+ * the uncached `input_tokens` field.
+ */
 function usageFromRaw(raw: unknown): Usage {
   const msg = (raw as { message?: unknown })?.message ?? raw
   const u = (msg as { usage?: Record<string, number> })?.usage
-  const input = u?.input_tokens ?? 0
+  const input =
+    (u?.input_tokens ?? 0) +
+    (u?.cache_creation_input_tokens ?? 0) +
+    (u?.cache_read_input_tokens ?? 0)
   const output = u?.output_tokens ?? 0
   return { input, output, totalTokens: input + output }
 }

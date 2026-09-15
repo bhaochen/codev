@@ -12,6 +12,7 @@ import type { StreamEvent, AssistantMessage, SystemAPIErrorMessage, UserMessage 
 import { APIUserAbortError } from '@anthropic-ai/sdk'
 import { randomUUID } from 'crypto'
 import {
+  anthropicToolChoiceToOpenAI,
   convertAnthropicMessagesToOpenAI,
   convertAnthropicToolsToOpenAI,
   type AnthropicMessage,
@@ -267,7 +268,7 @@ export async function* queryOpenAIResponses(
       model,
       messages: openaiMessages,
       tools: openaiTools,
-      toolChoice: undefined,
+      toolChoice: anthropicToolChoiceToOpenAI(options.toolChoice),
       enableThinking: false,
       maxTokens,
       temperatureOverride: options.temperatureOverride,
@@ -278,6 +279,9 @@ export async function* queryOpenAIResponses(
       ...(instructions ? { instructions } : {}),
       input,
       ...(openaiTools.length > 0 ? { tools: openaiTools } : {}),
+      ...((chatBody as Record<string, unknown>).tool_choice !== undefined
+        ? { tool_choice: (chatBody as Record<string, unknown>).tool_choice }
+        : {}),
       stream: true,
       stream_options: (chatBody as Record<string, unknown>).stream_options,
       ...(promptCacheKey ? { prompt_cache_key: promptCacheKey } : {}),

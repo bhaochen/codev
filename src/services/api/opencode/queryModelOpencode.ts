@@ -21,6 +21,7 @@ import type {
 import { APIUserAbortError } from '@anthropic-ai/sdk'
 import { randomUUID } from 'crypto'
 import {
+  anthropicToolChoiceToOpenAI,
   adaptOpenAIStreamToAnthropic,
   convertAnthropicMessagesToOpenAI,
   convertAnthropicToolsToOpenAI,
@@ -157,8 +158,7 @@ export async function* queryModelOpencode(
         input_schema: (t as { input_schema?: Record<string, unknown> }).input_schema,
       })),
     )
-    // Opencode 多为 OpenAI-compatible，tool_choice 固定 auto 即可
-    const openaiToolChoice = undefined
+    const openaiToolChoice = anthropicToolChoiceToOpenAI(options.toolChoice)
 
     const { upperLimit } = getModelMaxOutputTokens(opencodeModel)
     maxTokens = resolveOpenAIMaxTokens(upperLimit, options.maxOutputTokensOverride)

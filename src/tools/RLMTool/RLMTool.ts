@@ -19,7 +19,7 @@ import { rlmController } from './controller.js'
 import type { AdapterDeps } from './adapter.js'
 import { createEngine, type RlmProgress } from './engine.js'
 import { packCwd } from './pack-cwd.js'
-import { renderToolUseProgressMessage } from './UI.js'
+import { renderRlmResultMessage, renderToolUseProgressMessage } from './UI.js'
 
 const inputSchema = lazySchema(() =>
   z.strictObject({
@@ -170,4 +170,6 @@ Pass a focused, self-contained prompt. The engine runs multiple turns internally
   },
 
   renderToolUseProgressMessage,
+
+  renderToolResultMessage: renderRlmResultMessage,
 })

@@ -34,16 +34,13 @@ export function latestAnswerContentOf(results: readonly ReplResult[]): string | 
   return null
 }
 
-/** Cap for the recovered-stdout fallback — it rides `RlmResult`, not history. */
-const LAST_STDOUT_CAP = 4_000
-
-/** Last non-empty stdout across a turn's blocks, capped. A run that ends without an
+/** Last non-empty stdout across a turn's blocks. A run that ends without an
  *  `answer[...]` frame still printed its winning value, and re-running the whole task to get it
- *  is a waste (and non-deterministic). */
+ *  is a waste (and non-deterministic). Keep it intact so generated reports do not lose edges. */
 export function latestStdoutOf(results: readonly ReplResult[]): string {
   for (let i = results.length - 1; i >= 0; i--) {
     const out = results[i]?.stdout.trim()
-    if (out) return out.length > LAST_STDOUT_CAP ? out.slice(-LAST_STDOUT_CAP) : out
+    if (out) return out
   }
   return ''
 }
@@ -53,12 +50,6 @@ export function turnHadError(results: readonly ReplResult[]): boolean {
   return results.some((r) => r.raised)
 }
 
-/** Max stdout kept verbatim in history. Larger outputs collapse to a small preview + elision note —
- *  the full content persists in REPL variables, never in the root model's history. */
-const SMALL_STDOUT_LIMIT = 800
-const STDOUT_PREVIEW_LIMIT = 200
-const STDOUT_TAIL_LIMIT = 200
-
 /** The REPL output fed back to the model as the next user message. Prefixed `REPL stdout:`. */
 export function formatReplOutputs(results: readonly ReplResult[], skippedBlocks = 0): string {
   if (results.length === 0) {
@@ -66,12 +57,10 @@ export function formatReplOutputs(results: readonly ReplResult[], skippedBlocks 
   }
   const multi = results.length > 1
   const parts = new Array<string>(results.length)
-  let hadElision = false
   for (let i = 0; i < results.length; i++) {
     const r = results[i]
     const head = multi ? `[block ${i + 1}]\n` : ''
-    const { text, elided } = formatStdout(r)
-    hadElision ||= elided
+    const text = formatStdout(r)
     parts[i] = `${head}${text}${formatReplStderr(r.stderr)}`
   }
   const body = parts.join('\n\n')
@@ -79,31 +68,11 @@ export function formatReplOutputs(results: readonly ReplResult[], skippedBlocks 
     skippedBlocks > 0
       ? `\n\n[${skippedBlocks} later \`\`\`repl\`\`\` block(s) skipped because an earlier block raised — fix and re-run them]`
       : ''
-  // Orientation hint only when the model lost output to elision — otherwise it sees everything.
-  if (!hadElision) return `REPL stdout:\n${body}${skipNote}`
-  // The REPL namespace is persistent across blocks in a turn, so the last block's varNames reflect
-  // every variable created in any earlier block too.
-  const varNames = results.at(-1)?.varNames ?? []
-  const hint =
-    varNames.length > 0
-      ? `REPL vars: ${varNames.join(', ')}`
-      : `No REPL vars yet — assign results to variables before printing large outputs.`
-  return `REPL stdout:\n${body}${skipNote}\n\n${hint}`
+  return `REPL stdout:\n${body}${skipNote}`
 }
 
-/** Stdout ≤ SMALL_STDOUT_LIMIT flows through verbatim; larger output keeps a short head + a note
- *  telling the model how to inspect it in slices. Returns whether elision occurred. */
-function formatStdout(r: ReplResult): { text: string; elided: boolean } {
+/** Preserve stdout verbatim. Import/export reports and generated graphs depend on middle lines. */
+function formatStdout(r: ReplResult): string {
   const out = r.stdout.trim()
-  if (!out) return { text: '(no stdout)', elided: false }
-  if (out.length <= SMALL_STDOUT_LIMIT) return { text: out, elided: false }
-  const cut = out.length - STDOUT_PREVIEW_LIMIT - STDOUT_TAIL_LIMIT
-  return {
-    text: [
-      out.slice(0, STDOUT_PREVIEW_LIMIT),
-      `[… ${cut} chars elided — full output stays in REPL vars; inspect slices: print(result[:500])]`,
-      out.slice(-STDOUT_TAIL_LIMIT),
-    ].join('\n'),
-    elided: true,
-  }
+  return out || '(no stdout)'
 }

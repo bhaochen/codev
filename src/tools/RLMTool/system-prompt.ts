@@ -287,8 +287,8 @@ export function buildRlmSystemPrompt(meta: PromptMeta, opts: SystemPromptOptions
     '',
     replGlossary(kind, recursion, opts.child ?? false, opts.delegation ?? false),
     '',
-    'REPL stdout over ~800 characters is truncated to a short excerpt — large results stay in your',
-    'REPL variables as buffers. Re-print only the slice you need (e.g. `print(result[:500])`).',
+    'REPL stdout is returned verbatim, including the middle of large outputs. Use variables and',
+    'slicing when you intentionally want a smaller display, but do not assume omitted lines exist.',
     '',
     'Start by probing `context` (print a few lines, count items). Then build up an answer to the query.',
   )

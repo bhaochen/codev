@@ -55,6 +55,14 @@ export interface RlmProgress {
   readonly prompt?: string
   readonly response?: string
   readonly usage?: Usage
+  /** Cumulative usage for the complete RLM tree (root + recursive/sub-LLM calls). */
+  readonly totalInputTokens?: number
+  readonly totalOutputTokens?: number
+}
+
+interface UsageTotals {
+  input: number
+  output: number
 }
 
 const TRACE_TEXT_LIMIT = 1_600
@@ -76,6 +84,25 @@ function defaultComplete(adapter: AdapterDeps): CompleteFn {
 export function createEngine(deps: EngineDeps): RunRlm {
   const { config, signal, onEvent, onUsage, cwd = process.cwd() } = deps
   const complete = deps.complete ?? defaultComplete(deps.adapter)
+  const usageTotals: UsageTotals = { input: 0, output: 0 }
+  let rootStartedAt = 0
+
+  const completeTracked = async (
+    history: readonly ChatMsg[],
+    sampling: Parameters<CompleteFn>[1],
+    role: 'root' | 'sub' = 'root',
+  ): Promise<CompleteResult> => {
+    const result = await complete(history, sampling)
+    usageTotals.input += result.usage.input
+    usageTotals.output += result.usage.output
+    onUsage?.(result.usage, role)
+    return result
+  }
+
+  const traceUsage = (): Pick<RlmProgress, 'totalInputTokens' | 'totalOutputTokens'> => ({
+    totalInputTokens: usageTotals.input,
+    totalOutputTokens: usageTotals.output,
+  })
 
   /** Build subcall handlers bound to a run's live context and engine re-entry.
    *  `trackDetached` keeps the parent watchdog alive while a sub-call is being serviced.
@@ -96,11 +123,10 @@ export function createEngine(deps: EngineDeps): RunRlm {
         detail: `sub-LLM request (depth ${depth})`,
         prompt: traceText(prompt),
       })
-      const { text, usage } = await complete([{ role: 'user', content: prompt }], {
+      const { text, usage } = await completeTracked([{ role: 'user', content: prompt }], {
         maxTokens: 1024,
         temperature: 0,
-      })
-      onUsage?.(usage, 'sub')
+      }, 'sub')
       onEvent?.({
         type: 'rlm_progress',
         phase: 'subcall',
@@ -109,6 +135,7 @@ export function createEngine(deps: EngineDeps): RunRlm {
         prompt: traceText(prompt),
         response: traceText(text),
         usage,
+        ...traceUsage(),
       })
       return text
     }
@@ -138,6 +165,11 @@ export function createEngine(deps: EngineDeps): RunRlm {
   }
 
   const run: RunRlm = async (input: RlmInput): Promise<RlmResult> => {
+    const runStartedAt = input.depth === 0 ? (rootStartedAt = Date.now()) : Date.now()
+    if (input.depth === 0) {
+      usageTotals.input = 0
+      usageTotals.output = 0
+    }
     onEvent?.({ type: 'rlm_progress', phase: 'start', depth: input.depth, detail: (input.rootPrompt ?? '').slice(0, 60) })
     onEvent?.({ type: 'rlm_progress', phase: 'turn', depth: input.depth, turn: 0, maxTurns: config.maxIterations })
 
@@ -247,7 +279,7 @@ export function createEngine(deps: EngineDeps): RunRlm {
         if (config.compaction) {
           history = elideOldToolPayloads(history)
           if (shouldCompact(history)) {
-            history = await compactHistory(history, complete)
+            history = await compactHistory(history, completeTracked)
           }
         }
 
@@ -275,7 +307,7 @@ export function createEngine(deps: EngineDeps): RunRlm {
           turn: i + 1,
           detail: `model turn ${i + 1}`,
         })
-        const turn = await runTurn(history, sandbox, complete, {
+        const turn = await runTurn(history, sandbox, completeTracked, {
           sampling: rootSampling,
           signal,
         })
@@ -288,6 +320,7 @@ export function createEngine(deps: EngineDeps): RunRlm {
           detail: traceText(turn.response),
           response: traceText(turn.response),
           usage: turn.usage,
+          ...traceUsage(),
         })
         for (let blockIndex = 0; blockIndex < turn.results.length; blockIndex++) {
           const repl = turn.results[blockIndex]!
@@ -302,11 +335,10 @@ export function createEngine(deps: EngineDeps): RunRlm {
             stderr: traceText(repl.stderr),
             executionTimeMs: repl.executionTimeMs,
             varNames: repl.varNames,
+            ...traceUsage(),
           })
         }
         if (turn.blocks.some((b) => /\b(?:search|grep_context)\s*\(/.test(b))) sawRetrieval = true
-
-        onUsage?.(turn.usage, 'root')
 
         const answerContent = latestAnswerContentOf(turn.results)
         if (answerContent) best = answerContent
@@ -327,8 +359,8 @@ export function createEngine(deps: EngineDeps): RunRlm {
             verificationNudged = true
             verificationNudgePending = true
           } else {
-            const done = buildResult(final, i + 1, lastStdout)
-            onEvent?.({ type: 'rlm_progress', phase: 'answer', depth: input.depth, detail: final.slice(0, 60) })
+            const done = buildResult(final, i + 1, lastStdout, usageTotals, Date.now() - runStartedAt)
+            onEvent?.({ type: 'rlm_progress', phase: 'answer', depth: input.depth, detail: final.slice(0, 60), ...traceUsage() })
             return done
           }
         }
@@ -340,15 +372,17 @@ export function createEngine(deps: EngineDeps): RunRlm {
       // --- out of turns → finalize --------------------------------------
       if (pendingReplOutputs) appendUserMessage(history, pendingReplOutputs)
       const finalized = buildResult(
-        await finalize(history, complete, sandbox),
+        await finalize(history, completeTracked, sandbox),
         completedTurns,
         lastStdout,
+        usageTotals,
+        Date.now() - runStartedAt,
       )
-      onEvent?.({ type: 'rlm_progress', phase: 'answer', depth: input.depth, detail: finalized.answer.slice(0, 60) })
+      onEvent?.({ type: 'rlm_progress', phase: 'answer', depth: input.depth, detail: finalized.answer.slice(0, 60), ...traceUsage() })
       return finalized
     } catch (err) {
       if (signal?.aborted) {
-        return buildResult(best.trim() || '(aborted)', completedTurns, lastStdout)
+        return buildResult(best.trim() || '(aborted)', completedTurns, lastStdout, usageTotals, Date.now() - runStartedAt)
       }
       nodeStatus = 'error'
       throw err
@@ -358,6 +392,7 @@ export function createEngine(deps: EngineDeps): RunRlm {
         phase: nodeStatus === 'error' ? 'error' : 'done',
         depth: input.depth,
         detail: nodeStatus === 'error' ? 'run failed' : 'run complete',
+        ...traceUsage(),
       })
       clearInterval(watchdogHeartbeat)
       await settleDetached()
@@ -367,14 +402,20 @@ export function createEngine(deps: EngineDeps): RunRlm {
   return run
 }
 
-function buildResult(answer: string, iterations: number, lastStdout: string): RlmResult {
+function buildResult(
+  answer: string,
+  iterations: number,
+  lastStdout: string,
+  usage: UsageTotals,
+  durationMs: number,
+): RlmResult {
   const final = answer.trim().length > 0 ? answer.trim() : '(no final answer)'
   return {
     answer: final,
     iterations,
-    inputTokens: 0,
-    outputTokens: 0,
-    durationMs: 0,
+    inputTokens: usage.input,
+    outputTokens: usage.output,
+    durationMs,
     lastStdout,
   }
 }
