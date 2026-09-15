@@ -30,6 +30,7 @@ import { getAPIProvider } from './providers.js'
 import { LIGHTNING_BOLT } from '../../constants/figures.js'
 import { isModelAllowed } from './modelAllowlist.js'
 import { type ModelAlias, isModelAlias } from './aliases.js'
+import { ALL_MODEL_CONFIGS, type ModelKey } from './configs.js'
 import { capitalize } from '../stringUtils.js'
 
 export type ModelShortName = string
@@ -448,7 +449,49 @@ export function renderModelSetting(setting: ModelName | ModelAlias): string {
   return renderModelName(setting)
 }
 
-// @[MODEL LAUNCH]: Add display name cases for the new model (base + [1m] variant if applicable).
+// 显示名从 ALL_MODEL_CONFIGS 的 key 推导（如 sonnet46 → 'Sonnet 4.6'，
+// opus40 → 'Opus 4'），新模型加到 configs.ts 后无需再改这里。
+const MODEL_KEY_DISPLAY_NAMES: ReadonlyMap<ModelKey, string> = (() => {
+  const FAMILY_NAMES: Record<string, string> = {
+    haiku: 'Haiku',
+    sonnet: 'Sonnet',
+    opus: 'Opus',
+  }
+  const map = new Map<ModelKey, string>()
+  for (const key of Object.keys(ALL_MODEL_CONFIGS) as ModelKey[]) {
+    const match = /^([a-z]+)(\d+)$/.exec(key)
+    if (!match) continue
+    const family = FAMILY_NAMES[match[1]]
+    if (!family) continue
+    const digits = match[2]
+    // 40 → 4（末位为 0 时省略）；46 → 4.6（major.minor）
+    const major = digits.slice(0, -1)
+    const minor = digits.slice(-1)
+    const version = minor === '0' ? major : `${major}.${minor}`
+    map.set(key, `${family} ${version}`)
+  }
+  return map
+})()
+
+/**
+ * 通过当前 provider 的 model string 反查 ModelKey，返回对应显示名
+ * （统一处理 [1m] 后缀）。未命中返回 null，调用方回退原始 model ID。
+ */
+function getKnownModelDisplayName(model: ModelName): string | null {
+  const has1m = /\[1m]$/i.test(model)
+  const base = has1m ? model.slice(0, -4) : model
+  const strings = getModelStrings()
+  for (const [key, value] of Object.entries(strings) as [ModelKey, string][]) {
+    if (value === base) {
+      const name = MODEL_KEY_DISPLAY_NAMES.get(key)
+      if (!name) return null
+      return has1m ? `${name} (1M context)` : name
+    }
+  }
+  return null
+}
+
+// @[MODEL LAUNCH]: 新模型的显示名由 MODEL_KEY_DISPLAY_NAMES 从 configs.ts 自动推导，无需在此添加 case。
 export function getPublicModelDisplayName(model: ModelName): string | null {
   // OpenAI provider maps the Claude model strings (haiku45/sonnet46/opus46) to GPT
   // IDs (e.g. gpt-5.4-mini). Those IDs would otherwise match the Claude switch arms
@@ -460,51 +503,20 @@ export function getPublicModelDisplayName(model: ModelName): string | null {
     }
   }
 
-  // OpenCode Zen 模型显示名取自目录缓存，无硬编码 ID 分支；
-  // 未命中（非 Zen 模型或缓存为空）则继续走下面的 Claude 映射
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { getOpencodeModelDisplayName } = require('../../services/api/opencodeClient.js') as typeof import('../../services/api/opencodeClient.js')
-    const zenName = getOpencodeModelDisplayName(model)
-    if (zenName) return zenName
-  } catch {
-    // Ignore errors, fall through
+  // OpenCode Zen 模型显示名完全由目录驱动；
+  // 目录命中即返回，未命中（缓存为空 / fetch 未完成）直接返回原始 ID，
+  // 不再穿透到下面的 Claude 硬编码 switch —— 避免 big-pickle 撞 opus46 显示名
+  if (getAPIProvider() === 'opencode') {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getOpencodeModelDisplayName } = require('../../services/api/opencodeClient.js') as typeof import('../../services/api/opencodeClient.js')
+      return getOpencodeModelDisplayName(model) ?? model
+    } catch {
+      return model
+    }
   }
 
-  switch (model) {
-    case getModelStrings().opus46:
-      return 'Opus 4.6'
-    case getModelStrings().opus46 + '[1m]':
-      return 'Opus 4.6 (1M context)'
-    case getModelStrings().opus45:
-      return 'Opus 4.5'
-    case getModelStrings().opus41:
-      return 'Opus 4.1'
-    case getModelStrings().opus40:
-      return 'Opus 4'
-    case getModelStrings().sonnet46 + '[1m]':
-      return 'Sonnet 4.6 (1M context)'
-    case getModelStrings().sonnet46:
-      return 'Sonnet 4.6'
-    case getModelStrings().sonnet45 + '[1m]':
-      return 'Sonnet 4.5 (1M context)'
-    case getModelStrings().sonnet45:
-      return 'Sonnet 4.5'
-    case getModelStrings().sonnet40:
-      return 'Sonnet 4'
-    case getModelStrings().sonnet40 + '[1m]':
-      return 'Sonnet 4 (1M context)'
-    case getModelStrings().sonnet37:
-      return 'Sonnet 3.7'
-    case getModelStrings().sonnet35:
-      return 'Sonnet 3.5'
-    case getModelStrings().haiku45:
-      return 'Haiku 4.5'
-    case getModelStrings().haiku35:
-      return 'Haiku 3.5'
-    default:
-      return null
-  }
+  return getKnownModelDisplayName(model)
 }
 
 function maskModelCodename(baseName: string): string {

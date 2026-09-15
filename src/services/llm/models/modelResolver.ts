@@ -24,8 +24,11 @@ const openAIResolver: ModelResolver = {
 const openCodeResolver: ModelResolver = {
   id: 'opencode',
   resolve(_provider, model) {
+    // model = 用户通过 /model 显式选择的模型（如 big-pickle）
+    // getOpenCodeModelName() = 登录时保存的默认值
+    // 用户显式选择优先；只有 model 为空/null 时才用 config 默认值
     try {
-      return getOpenCodeModelName() || model || 'big-pickle'
+      return model || getOpenCodeModelName() || 'big-pickle'
     } catch {
       return model || 'big-pickle'
     }
