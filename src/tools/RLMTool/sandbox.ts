@@ -12,6 +12,7 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { dirname, join } from 'node:path'
+import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import {
   isInterrupt,
@@ -59,7 +60,29 @@ export interface SandboxOptions {
   readonly initTimeoutMs?: number
 }
 
-const WORKER_PATH = join(dirname(fileURLToPath(import.meta.url)), 'py', 'worker.py')
+/**
+ * Resolve the worker in both source-tree and compiled-binary environments.
+ *
+ * Bun's compiled modules report a virtual `/$bunfs/root/...` import.meta.url.
+ * Python cannot open that path, so the build places the worker beside the
+ * executable and we use process.execPath as the runtime fallback.
+ */
+export function resolveWorkerPath(
+  moduleUrl: string = import.meta.url,
+  executablePath: string = process.execPath,
+): string {
+  const sourcePath = join(dirname(fileURLToPath(moduleUrl)), 'py', 'worker.py')
+  if (existsSync(sourcePath)) return sourcePath
+
+  const bundledPath = join(dirname(executablePath), 'py', 'worker.py')
+  if (existsSync(bundledPath)) return bundledPath
+
+  // Keep the eventual Python error useful when a distribution is incomplete.
+  // The source path is the most actionable path for development diagnostics.
+  return sourcePath
+}
+
+const WORKER_PATH = resolveWorkerPath()
 const STDERR_TAIL_CHARS = 8_192
 /** How often to refresh the parent request watchdog (and ping the worker) during silent host work. */
 export const SANDBOX_WATCHDOG_HEARTBEAT_MS = 30_000

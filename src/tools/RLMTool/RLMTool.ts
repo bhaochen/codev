@@ -19,6 +19,7 @@ import { rlmController } from './controller.js'
 import type { AdapterDeps } from './adapter.js'
 import { createEngine, type RlmProgress } from './engine.js'
 import { packCwd } from './pack-cwd.js'
+import { renderToolUseProgressMessage } from './UI.js'
 
 const inputSchema = lazySchema(() =>
   z.strictObject({
@@ -107,6 +108,7 @@ Pass a focused, self-contained prompt. The engine runs multiple turns internally
     const adapter: AdapterDeps = {
       model,
       signal,
+      requestTimeoutMs: rlmController.getConfig().requestTimeoutMs,
       getToolPermissionContext: async () => ({
         allowedTools: [],
         deniedTools: [],
@@ -117,15 +119,19 @@ Pass a focused, self-contained prompt. The engine runs multiple turns internally
     }
 
     try {
-      const packProgress: RlmProgress = { phase: 'start', detail: 'packing cwd' }
+      const packProgress: RlmProgress = { type: 'rlm_progress', phase: 'start', detail: 'packing cwd' }
       onProgress?.({
         toolUseID: context.toolUseId ?? '',
         data: packProgress as any,
       })
 
       const contextPayload = await packCwd(process.cwd())
+      onProgress?.({
+        toolUseID: context.toolUseId ?? '',
+        data: { type: 'rlm_progress', phase: 'start', detail: `packed ${contextPayload.length} files` },
+      })
 
-const config = rlmController.getConfig()
+      const config = rlmController.getConfig()
       const cwd = process.cwd()
       const engine = createEngine({
         config,
@@ -162,4 +168,6 @@ const config = rlmController.getConfig()
       rlmController.end()
     }
   },
+
+  renderToolUseProgressMessage,
 })

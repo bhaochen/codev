@@ -23,6 +23,9 @@ export function buildTurnPrompt(
 export const FINALIZE_PROMPT =
   'You are out of turns. Finalize NOW: set `answer["content"]` and `answer["ready"] = True` ' +
   '(fenced ```repl```) with your best final answer from everything you have gathered. ' +
+  'For file inventories, use the exact paths and counts from `context` or printed REPL output; ' +
+  'never invent filenames, omit discovered files, or mix source files with cache artifacts unless ' +
+  'the requested scope explicitly includes them. ' +
   'Only if the REPL is unavailable, answer as plain text.'
 
 /** One-shot retrieval-discipline nudge. */

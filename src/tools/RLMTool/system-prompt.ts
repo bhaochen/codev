@@ -236,6 +236,8 @@ function replGlossary(kind: ContextKind, recursion: boolean, child: boolean, del
     '- `list_tasks()`: every Task this REPL created — [{kind, label, done, var}].',
     '- `answer`: a dict initialized to {"content": "", "ready": False}. To submit your final answer,',
     '  set `answer["content"]` and `answer["ready"] = True`.',
+    '  For factual file lists and counts, derive the answer from an exact Python enumeration of `context`',
+    '  and preserve the paths verbatim. Do not invent plausible filenames or report an approximate count.',
     '  **You MUST flip `answer["ready"] = True` — runs that never finalize are discarded.**',
   )
   return lines.join('\n')

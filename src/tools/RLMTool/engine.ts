@@ -41,10 +41,27 @@ export interface EngineDeps {
 }
 
 export interface RlmProgress {
-  readonly phase: 'start' | 'turn' | 'subcall' | 'answer' | 'done' | 'error'
+  readonly type: 'rlm_progress'
+  readonly phase: 'start' | 'turn' | 'model' | 'python' | 'subcall' | 'answer' | 'done' | 'error'
+  readonly depth?: number
   readonly turn?: number
   readonly maxTurns?: number
   readonly detail?: string
+  readonly code?: string
+  readonly stdout?: string
+  readonly stderr?: string
+  readonly executionTimeMs?: number
+  readonly varNames?: readonly string[]
+  readonly prompt?: string
+  readonly response?: string
+  readonly usage?: Usage
+}
+
+const TRACE_TEXT_LIMIT = 1_600
+
+function traceText(value: string): string {
+  const text = value.trim()
+  return text.length > TRACE_TEXT_LIMIT ? `${text.slice(0, TRACE_TEXT_LIMIT)}…` : text
 }
 
 /** Build the default complete function from the adapter deps. */
@@ -67,17 +84,35 @@ export function createEngine(deps: EngineDeps): RunRlm {
     runChild: RunRlm,
     getContext: () => unknown,
     trackDetached: <T>(task: () => Promise<T>) => Promise<T>,
+    depth: number,
   ): Pick<SubcallHandlers, 'llmQuery' | 'llmBatch' | 'rlmQuery' | 'rlmBatch'> {
 
     /** Sub-LLM single-shot query — blocking handler for a sandbox interrupt. */
     async function subLlmQuery(prompt: string): Promise<string> {
+      onEvent?.({
+        type: 'rlm_progress',
+        phase: 'subcall',
+        depth,
+        detail: `sub-LLM request (depth ${depth})`,
+        prompt: traceText(prompt),
+      })
       const { text, usage } = await complete([{ role: 'user', content: prompt }], {
         maxTokens: 1024,
         temperature: 0,
       })
       onUsage?.(usage, 'sub')
+      onEvent?.({
+        type: 'rlm_progress',
+        phase: 'subcall',
+        depth,
+        detail: `sub-LLM response · ${usage.output} tokens`,
+        prompt: traceText(prompt),
+        response: traceText(text),
+        usage,
+      })
       return text
     }
+
 
     /** Sub-LLM batch — parallel single-shot queries. */
     async function subLlmBatch(prompts: readonly string[]): Promise<readonly string[]> {
@@ -103,11 +138,8 @@ export function createEngine(deps: EngineDeps): RunRlm {
   }
 
   const run: RunRlm = async (input: RlmInput): Promise<RlmResult> => {
-    const isRoot = input.depth === 0
-    if (isRoot) {
-      onEvent?.({ phase: 'start', detail: (input.rootPrompt ?? '').slice(0, 60) })
-      onEvent?.({ phase: 'turn', turn: 0, maxTurns: config.maxIterations })
-    }
+    onEvent?.({ type: 'rlm_progress', phase: 'start', depth: input.depth, detail: (input.rootPrompt ?? '').slice(0, 60) })
+    onEvent?.({ type: 'rlm_progress', phase: 'turn', depth: input.depth, turn: 0, maxTurns: config.maxIterations })
 
     let liveContext: unknown = input.context ?? []
 
@@ -177,7 +209,7 @@ export function createEngine(deps: EngineDeps): RunRlm {
       let pendingReplOutputs: string | undefined
 
       const subcalls = {
-        ...buildSubcallHandlers(run, () => liveContext, trackDetached),
+        ...buildSubcallHandlers(run, () => liveContext, trackDetached, input.depth),
         // add_context: pack a source on the host, append it into the live context (children
         // inherit the grown world), and let the worker read the temp file.
         ...buildAddContextHandler(
@@ -210,7 +242,7 @@ export function createEngine(deps: EngineDeps): RunRlm {
 
       // --- main loop -----------------------------------------------------
       for (let i = 0; i < config.maxIterations; i++) {
-        if (isRoot) onEvent?.({ phase: 'turn', turn: i + 1, maxTurns: config.maxIterations })
+        onEvent?.({ type: 'rlm_progress', phase: 'turn', depth: input.depth, turn: i + 1, maxTurns: config.maxIterations })
 
         if (config.compaction) {
           history = elideOldToolPayloads(history)
@@ -236,11 +268,42 @@ export function createEngine(deps: EngineDeps): RunRlm {
 
         appendUserMessage(history, buildTurnPrompt(i, config.maxIterations, notes))
 
-        onEvent?.({ phase: 'subcall', detail: `model turn ${i + 1}` })
+        onEvent?.({
+          type: 'rlm_progress',
+          phase: 'model',
+          depth: input.depth,
+          turn: i + 1,
+          detail: `model turn ${i + 1}`,
+        })
         const turn = await runTurn(history, sandbox, complete, {
           sampling: rootSampling,
           signal,
         })
+
+        onEvent?.({
+          type: 'rlm_progress',
+          phase: 'model',
+          depth: input.depth,
+          turn: i + 1,
+          detail: traceText(turn.response),
+          response: traceText(turn.response),
+          usage: turn.usage,
+        })
+        for (let blockIndex = 0; blockIndex < turn.results.length; blockIndex++) {
+          const repl = turn.results[blockIndex]!
+          onEvent?.({
+            type: 'rlm_progress',
+            phase: 'python',
+            depth: input.depth,
+            turn: i + 1,
+            detail: `Python Sandbox · block ${blockIndex + 1}/${turn.results.length}`,
+            code: traceText(turn.blocks[blockIndex] ?? ''),
+            stdout: traceText(repl.stdout),
+            stderr: traceText(repl.stderr),
+            executionTimeMs: repl.executionTimeMs,
+            varNames: repl.varNames,
+          })
+        }
         if (turn.blocks.some((b) => /\b(?:search|grep_context)\s*\(/.test(b))) sawRetrieval = true
 
         onUsage?.(turn.usage, 'root')
@@ -265,7 +328,7 @@ export function createEngine(deps: EngineDeps): RunRlm {
             verificationNudgePending = true
           } else {
             const done = buildResult(final, i + 1, lastStdout)
-            onEvent?.({ phase: 'answer', detail: final.slice(0, 60) })
+            onEvent?.({ type: 'rlm_progress', phase: 'answer', depth: input.depth, detail: final.slice(0, 60) })
             return done
           }
         }
@@ -281,7 +344,7 @@ export function createEngine(deps: EngineDeps): RunRlm {
         completedTurns,
         lastStdout,
       )
-      onEvent?.({ phase: 'answer', detail: finalized.answer.slice(0, 60) })
+      onEvent?.({ type: 'rlm_progress', phase: 'answer', depth: input.depth, detail: finalized.answer.slice(0, 60) })
       return finalized
     } catch (err) {
       if (signal?.aborted) {
@@ -290,7 +353,12 @@ export function createEngine(deps: EngineDeps): RunRlm {
       nodeStatus = 'error'
       throw err
     } finally {
-      onEvent?.({ phase: nodeStatus === 'error' ? 'error' : 'done' })
+      onEvent?.({
+        type: 'rlm_progress',
+        phase: nodeStatus === 'error' ? 'error' : 'done',
+        depth: input.depth,
+        detail: nodeStatus === 'error' ? 'run failed' : 'run complete',
+      })
       clearInterval(watchdogHeartbeat)
       await settleDetached()
       await sandbox?.dispose()

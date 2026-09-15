@@ -56,6 +56,8 @@ export interface AdapterDeps {
   /** Minimal Options fields required by queryModelWithoutStreaming. */
   readonly getToolPermissionContext: Options['getToolPermissionContext']
   readonly querySource: Options['querySource']
+  /** Hard upper bound for one provider request, including root and sub-LLM calls. */
+  readonly requestTimeoutMs?: number
 }
 
 /** Map engine reasoning level → codev ThinkingConfig. */
@@ -126,12 +128,16 @@ export async function adapterComplete(
 
   const thinkingConfig = toThinkingConfig(sampling?.reasoning)
 
+  const requestTimeoutMs = deps.requestTimeoutMs ?? 2 * 60_000
+  const timeout = AbortSignal.timeout(requestTimeoutMs)
+  const signal = deps.signal ? AbortSignal.any([deps.signal, timeout]) : timeout
+
   const response = await queryModelWithoutStreaming({
     messages: apiMessages,
     systemPrompt,
     thinkingConfig,
     tools: [],
-    signal: deps.signal ?? new AbortController().signal,
+    signal,
     options: {
       getToolPermissionContext: deps.getToolPermissionContext,
       model: deps.model,

@@ -12,7 +12,9 @@ const DEFAULT_CONFIG: RlmConfig = {
   maxDepth: 3,
   maxIterations: 12,
   execTimeoutS: 600,
-  requestTimeoutMs: 20 * 60_000,
+  // A hung provider request must not leave the interactive tool spinning for 20 minutes.
+  // The parent signal still allows callers to abort sooner.
+  requestTimeoutMs: 2 * 60_000,
   maxPromptChars: 400_000,
   python: 'python3',
   sandboxInitTimeoutMs: 30_000,

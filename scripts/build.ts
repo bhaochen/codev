@@ -139,8 +139,18 @@ if (existsSync(outfile)) {
   chmodSync(outfile, 0o755)
 }
 
-// Copy vendor/ to dist/vendor/ for runtime audio-capture resolution
+// Copy the RLM Python worker beside the compiled executable. Bun's compiled
+// modules use virtual /$bunfs/root/... URLs, which Python cannot open.
 const distDir = dirname(outfile)
+const rlmPyDir = join(distDir, 'py')
+const sourceRlmPyDir = join(projectRoot, 'src', 'tools', 'RLMTool', 'py')
+mkdirSync(rlmPyDir, { recursive: true })
+for (const file of ['guards.py', 'hostio.py', 'retrieval.py', 'scaffold.py', 'tasks.py', 'worker.py']) {
+  cpSync(join(sourceRlmPyDir, file), join(rlmPyDir, file))
+}
+console.log(`Copied RLM Python worker → ${rlmPyDir}/`)
+
+// Copy vendor/ to dist/vendor/ for runtime audio-capture resolution
 const vendorDir = join(distDir, 'vendor')
 const sourceVendorDir = join(projectRoot, 'vendor')
 if (!existsSync(vendorDir) && existsSync(sourceVendorDir)) {
