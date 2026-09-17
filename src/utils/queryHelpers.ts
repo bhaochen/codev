@@ -1,4 +1,4 @@
-import type { ToolUseBlock } from '@anthropic-ai/sdk/resources/index.mjs'
+import type { AgentToolUseBlock } from '../types/agentMessage.js'
 import last from 'lodash-es/last.js'
 import {
   getSessionId,
@@ -236,11 +236,11 @@ export async function* handleOrphanedPermission(
   }
 
   const content = assistantMessage.message.content
-  let toolUseBlock: ToolUseBlock | undefined
+  let toolUseBlock: AgentToolUseBlock | undefined
   if (Array.isArray(content)) {
     for (const block of content) {
       if (block.type === 'tool_use' && block.id === toolUseID) {
-        toolUseBlock = block as ToolUseBlock
+        toolUseBlock = block as AgentToolUseBlock
         break
       }
     }
@@ -258,7 +258,7 @@ export async function* handleOrphanedPermission(
     return
   }
 
-  // Create ToolUseBlock with the updated input if permission was allowed
+  // Create AgentToolUseBlock with the updated input if permission was allowed
   let finalInput = toolInput
   if (permissionResult.behavior === 'allow') {
     if (permissionResult.updatedInput !== undefined) {
@@ -270,7 +270,7 @@ export async function* handleOrphanedPermission(
       )
     }
   }
-  const finalToolUseBlock: ToolUseBlock = {
+  const finalToolUseBlock: AgentToolUseBlock = {
     ...toolUseBlock,
     input: finalInput,
   }

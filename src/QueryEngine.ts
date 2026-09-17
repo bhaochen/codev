@@ -1,5 +1,5 @@
 import { feature } from 'bun:bundle'
-import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs'
+import type { AgentContentBlock } from './types/agentMessage.js'
 import { randomUUID } from 'crypto'
 import last from 'lodash-es/last.js'
 import {
@@ -207,7 +207,7 @@ export class QueryEngine {
   }
 
   async *submitMessage(
-    prompt: string | ContentBlockParam[],
+    prompt: string | AgentContentBlock[],
     options?: { uuid?: string; isMeta?: boolean },
   ): AsyncGenerator<SDKMessage, void, unknown> {
     const {
@@ -1216,7 +1216,7 @@ export async function* ask({
   orphanedPermission,
 }: {
   commands: Command[]
-  prompt: string | Array<ContentBlockParam>
+  prompt: string | Array<AgentContentBlock>
   promptUuid?: string
   isMeta?: boolean
   cwd: string

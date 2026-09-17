@@ -1,4 +1,4 @@
-import type { ContentBlockParam } from '@anthropic-ai/sdk/resources'
+import type { AgentContentBlock } from '../../types/agentMessage.js'
 import { randomUUID } from 'crypto'
 import { setPromptId } from 'src/bootstrap/state.js'
 import type {
@@ -17,8 +17,8 @@ import {
 } from '../userPromptKeywords.js'
 
 export function processTextPrompt(
-  input: string | Array<ContentBlockParam>,
-  imageContentBlocks: ContentBlockParam[],
+  input: string | Array<AgentContentBlock>,
+  imageContentBlocks: AgentContentBlock[],
   imagePasteIds: number[],
   attachmentMessages: AttachmentMessage[],
   uuid?: string,

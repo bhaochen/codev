@@ -1,4 +1,4 @@
-import type { BetaContentBlock } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
+import type { AgentContentBlock } from '../../types/agentMessage.js'
 import { randomUUID, type UUID } from 'crypto'
 import { getSessionId } from 'src/bootstrap/state.js'
 import {
@@ -265,7 +265,7 @@ function normalizeAssistantMessageForSDK(
     return message.message
   }
 
-  const normalizedContent = content.map((block): BetaContentBlock => {
+  const normalizedContent = content.map((block): AgentContentBlock => {
     if (block.type !== 'tool_use') {
       return block
     }

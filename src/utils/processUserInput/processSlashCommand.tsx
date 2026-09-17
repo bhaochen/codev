@@ -1,8 +1,5 @@
 import { feature } from 'bun:bundle'
-import type {
-  ContentBlockParam,
-  TextBlockParam,
-} from '@anthropic-ai/sdk/resources'
+import type { AgentContentBlock, AgentTextBlock } from '../../types/agentMessage.js'
 import { randomUUID } from 'crypto'
 import { setPromptId } from 'src/bootstrap/state.js'
 import {
@@ -113,7 +110,7 @@ async function executeForkedSlashCommand(
   command: CommandBase & PromptCommand,
   args: string,
   context: ProcessUserInputContext,
-  precedingInputBlocks: ContentBlockParam[],
+  precedingInputBlocks: AgentContentBlock[],
   setToolJSX: SetToolJSXFn,
   canUseTool: CanUseToolFn,
 ): Promise<SlashCommandResult> {
@@ -388,8 +385,8 @@ export function looksLikeCommand(commandName: string): boolean {
 
 export async function processSlashCommand(
   inputString: string,
-  precedingInputBlocks: ContentBlockParam[],
-  imageContentBlocks: ContentBlockParam[],
+  precedingInputBlocks: AgentContentBlock[],
+  imageContentBlocks: AgentContentBlock[],
   attachmentMessages: AttachmentMessage[],
   context: ProcessUserInputContext,
   setToolJSX: SetToolJSXFn,
@@ -694,8 +691,8 @@ async function getMessagesForSlashCommand(
   args: string,
   setToolJSX: SetToolJSXFn,
   context: ProcessUserInputContext,
-  precedingInputBlocks: ContentBlockParam[],
-  imageContentBlocks: ContentBlockParam[],
+  precedingInputBlocks: AgentContentBlock[],
+  imageContentBlocks: AgentContentBlock[],
   _isAlreadyProcessing?: boolean,
   canUseTool?: CanUseToolFn,
   uuid?: string,
@@ -1091,7 +1088,7 @@ export async function processPromptSlashCommand(
   args: string,
   commands: Command[],
   context: ToolUseContext,
-  imageContentBlocks: ContentBlockParam[] = [],
+  imageContentBlocks: AgentContentBlock[] = [],
 ): Promise<SlashCommandResult> {
   const command = findCommand(commandName, commands)
   if (!command) {
@@ -1115,8 +1112,8 @@ async function getMessagesForPromptSlashCommand(
   command: CommandBase & PromptCommand,
   args: string,
   context: ToolUseContext,
-  precedingInputBlocks: ContentBlockParam[] = [],
-  imageContentBlocks: ContentBlockParam[] = [],
+  precedingInputBlocks: AgentContentBlock[] = [],
+  imageContentBlocks: AgentContentBlock[] = [],
   uuid?: string,
 ): Promise<SlashCommandResult> {
   // In coordinator mode (main thread only), skip loading the full skill content
@@ -1152,7 +1149,7 @@ async function getMessagesForPromptSlashCommand(
     parts.push(
       `\nInstruct a worker to use this skill by including "Use the /${command.name} skill" in your Agent prompt. The worker has access to the Skill tool and will receive the skill's content and permissions when it invokes it.`,
     )
-    const summaryContent: ContentBlockParam[] = [
+    const summaryContent: AgentContentBlock[] = [
       { type: 'text', text: parts.join('\n') },
     ]
     return {
@@ -1192,7 +1189,7 @@ async function getMessagesForPromptSlashCommand(
     ? `${command.source}:${command.name}`
     : command.name
   const skillContent = result
-    .filter((b): b is TextBlockParam => b.type === 'text')
+    .filter((b): b is AgentTextBlock => b.type === 'text')
     .map(b => b.text)
     .join('\n\n')
   addInvokedSkill(
@@ -1209,7 +1206,7 @@ async function getMessagesForPromptSlashCommand(
   )
 
   // Create content for the main message, including any pasted images
-  const mainMessageContent: ContentBlockParam[] =
+  const mainMessageContent: AgentContentBlock[] =
     imageContentBlocks.length > 0 || precedingInputBlocks.length > 0
       ? [...imageContentBlocks, ...precedingInputBlocks, ...result]
       : result
@@ -1222,7 +1219,7 @@ async function getMessagesForPromptSlashCommand(
   const attachmentMessages = await toArray(
     getAttachmentMessages(
       result
-        .filter((block): block is TextBlockParam => block.type === 'text')
+        .filter((block): block is AgentTextBlock => block.type === 'text')
         .map(block => block.text)
         .join(' '),
       context,

@@ -1,4 +1,4 @@
-import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
+import type { AgentContentBlock } from './agentMessage.js'
 import type { UUID } from 'crypto'
 import type { CanUseToolFn } from '../hooks/useCanUseTool.js'
 import type { CompactionResult } from '../services/compact/compact.js'
@@ -53,7 +53,7 @@ export type PromptCommand = {
   getPromptForCommand(
     args: string,
     context: ToolUseContext,
-  ): Promise<ContentBlockParam[]>
+  ): Promise<AgentContentBlock[]>
 }
 
 /**

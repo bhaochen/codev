@@ -1,34 +1,55 @@
-import type { UUID } from 'crypto'
+/**
+ * Codev store/UI message types.
+ *
+ * Agent Core keeps messages in two layers:
+ *
+ * 1. CANONICAL semantic messages come from ./agentMessage.ts — provider-agnostic
+ *    `AgentMessage` / `AgentUserMessage` / `AgentAssistantMessage` carrying
+ *    `AgentContentBlock[]` content. These are the ONLY message abstractions
+ *    Agent Core reasons about (role, content, uuid, timestamp).
+ *
+ * 2. Codev-specific runtime metadata layers on top in this module:
+ *    - `origin` attribution (human / channel / coordinator / task-notification)
+ *    - the store's discriminator wrapper (`NormalizedMessage` = `{ type,
+ *      message, uuid, timestamp, ... }`) unifying user/assistant/system/
+ *      progress/attachment entries for rendering and the transcript
+ *    - system/progress/grouped/attachment UI message shapes
+ *
+ * `Message` / `UserMessage` / `AssistantMessage` are thin derivations of the
+ * canonical Agent types — NOT independent definitions. The canonical semantic
+ * types live in exactly one place (./agentMessage.ts).
+ *
+ * Provider wire formats (Anthropic/OpenAI/...) never appear here.
+ */
+
 import type {
-  ContentBlockParam,
-  MessageParam,
-} from '@anthropic-ai/sdk/resources/messages.mjs'
+  AgentAssistantMessage,
+  AgentMessage,
+  AgentStreamEvent,
+  AgentUserMessage,
+} from './agentMessage.js'
 
-export type MessageOrigin = 'user' | 'assistant' | 'system'
+/**
+ * Provenance of a message/command, stamped onto the store entry so the
+ * transcript records structurally where the content came from.
+ * `undefined` = human (keyboard).
+ */
+export type MessageOrigin =
+  | { kind: 'human' }
+  | { kind: 'channel'; server: string }
+  | { kind: 'coordinator' }
+  | { kind: 'task-notification' }
 
-export type Message = {
-  role: 'user' | 'assistant' | 'system'
-  content: ContentBlockParam[]
-  uuid: string
-  timestamp: number
+/**
+ * Any-role canonical semantic message with codev `origin` attribution.
+ * See ./agentMessage.ts for the canonical definition.
+ */
+export type Message = AgentMessage & { origin?: MessageOrigin }
+
+export type UserMessage = AgentUserMessage & { origin?: MessageOrigin }
+
+export type AssistantMessage = AgentAssistantMessage & {
   origin?: MessageOrigin
-}
-
-export type UserMessage = {
-  role: 'user'
-  content: ContentBlockParam[]
-  uuid: string
-  timestamp: number
-  origin?: MessageOrigin
-}
-
-export type AssistantMessage = {
-  role: 'assistant'
-  content: ContentBlockParam[]
-  uuid: string
-  timestamp: number
-  origin?: MessageOrigin
-  model?: string
 }
 
 export type NormalizedMessage =
@@ -237,10 +258,12 @@ export type RequestStartEvent = {
   timestamp: number
 }
 
-export type StreamEvent =
-  | { type: 'message_start'; message: MessageParam }
-  | { type: 'content_block_start'; content_block: ContentBlockParam }
-  | { type: 'content_block_delta'; delta: unknown }
-  | { type: 'content_block_stop' }
-  | { type: 'message_delta'; usage: unknown }
-  | { type: 'message_stop' }
+/**
+ * Streaming event emitted by protocol clients (Anthropic, OpenAI Chat,
+ * OpenAI Responses, OpenAI-compatible) and consumed by Agent Core.
+ *
+ * Provider-agnostic: an alias of `AgentStreamEvent`. The Provider adapter
+ * (e.g. Anthropic block/param conversion) translates between this canonical
+ * shape and each provider's native stream events at the client boundary.
+ */
+export type StreamEvent = AgentStreamEvent

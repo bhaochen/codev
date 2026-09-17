@@ -1,5 +1,4 @@
 import { feature } from 'bun:bundle'
-import type { BetaToolUseBlock } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
 import { randomUUID } from 'crypto'
 import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
 import {
@@ -11,6 +10,7 @@ import type {
   AssistantMessage,
   Message as MessageType,
 } from '../../types/message.js'
+import type { AgentToolUseBlock } from '../../types/agentMessage.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { createUserMessage } from '../../utils/messages.js'
 import type { BuiltInAgentDefinition } from './loadAgentsDir.js'
@@ -121,7 +121,7 @@ export function buildForkedMessages(
 
   // Collect all tool_use blocks from the assistant message
   const toolUseBlocks = assistantMessage.message.content.filter(
-    (block): block is BetaToolUseBlock => block.type === 'tool_use',
+    (block): block is AgentToolUseBlock => block.type === 'tool_use',
   )
 
   if (toolUseBlocks.length === 0) {

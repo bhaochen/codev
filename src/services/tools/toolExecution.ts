@@ -1,9 +1,9 @@
 import { feature } from 'bun:bundle'
 import type {
-  ContentBlockParam,
-  ToolResultBlockParam,
-  ToolUseBlock,
-} from '@anthropic-ai/sdk/resources/index.mjs'
+  AgentContentBlock,
+  AgentToolResultBlock,
+  AgentToolUseBlock,
+} from '../../types/agentMessage.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -336,7 +336,7 @@ function getMcpServerBaseUrlFromToolName(
 }
 
 export async function* runToolUse(
-  toolUse: ToolUseBlock,
+  toolUse: AgentToolUseBlock,
   assistantMessage: AssistantMessage,
   canUseTool: CanUseToolFn,
   toolUseContext: ToolUseContext,
@@ -1052,7 +1052,7 @@ async function checkPermissionsAndCallTool(
     }
 
     // Build top-level content: tool_result (text-only for is_error compatibility) + images alongside
-    const messageContent: ContentBlockParam[] = [
+    const messageContent: AgentContentBlock[] = [
       {
         type: 'tool_result',
         content: errorMessage,
@@ -1075,7 +1075,7 @@ async function checkPermissionsAndCallTool(
     if (rejectContentBlocks?.length) {
       const imageCount = count(
         rejectContentBlocks,
-        (b: ContentBlockParam) => b.type === 'image',
+        (b: AgentContentBlock) => b.type === 'image',
       )
       if (imageCount > 0) {
         const startId = getNextImagePasteId(toolUseContext.messages)
@@ -1427,7 +1427,7 @@ async function checkPermissionsAndCallTool(
 
     async function addToolResult(
       toolUseResult: unknown,
-      preMappedBlock?: ToolResultBlockParam,
+      preMappedBlock?: AgentToolResultBlock,
     ) {
       // Use the pre-mapped block when available (non-MCP tools where hooks
       // don't modify the output), otherwise map from scratch.
@@ -1440,7 +1440,7 @@ async function checkPermissionsAndCallTool(
         : await processToolResultBlock(tool, toolUseResult, toolUseID)
 
       // Build content blocks - tool result first, then optional feedback
-      const contentBlocks: ContentBlockParam[] = [toolResultBlock]
+      const contentBlocks: AgentContentBlock[] = [toolResultBlock]
       // Add accept feedback if user provided feedback when approving
       // (acceptFeedback only exists on PermissionAllowDecision, which is guaranteed here)
       if (
@@ -1467,7 +1467,7 @@ async function checkPermissionsAndCallTool(
       if (allowContentBlocks?.length) {
         const imageCount = count(
           allowContentBlocks,
-          (b: ContentBlockParam) => b.type === 'image',
+          (b: AgentContentBlock) => b.type === 'image',
         )
         if (imageCount > 0) {
           const startId = getNextImagePasteId(toolUseContext.messages)

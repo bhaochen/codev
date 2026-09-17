@@ -25,6 +25,7 @@ import {
   TOOL_SEARCH_TOOL_NAME,
 } from '../tools/ToolSearchTool/prompt.js'
 import type { Message } from '../types/message.js'
+import type { AgentToolResultBlock } from '../types/agentMessage.js'
 import {
   countToolDefinitionTokens,
   TOOL_TOKEN_COUNT_OVERHEAD,
@@ -474,9 +475,11 @@ function isToolReferenceWithName(
 /**
  * Type representing a tool_result block with array content.
  * Used for extracting tool_reference blocks from ToolSearchTool results.
+ * Narrow view of the canonical AgentToolResultBlock — content blocks in
+ * history are canonical Agent blocks, so reference the canonical `type` tag
+ * rather than re-declaring it.
  */
-type ToolResultBlock = {
-  type: 'tool_result'
+type ToolResultBlock = Pick<AgentToolResultBlock, 'type'> & {
   content: unknown[]
 }
 

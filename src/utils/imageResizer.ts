@@ -1,7 +1,4 @@
-import type {
-  Base64ImageSource,
-  ImageBlockParam,
-} from '@anthropic-ai/sdk/resources/messages.mjs'
+import type { AgentImageBlock } from '../types/agentMessage.js'
 import {
   API_IMAGE_MAX_BASE64_SIZE,
   IMAGE_MAX_HEIGHT,
@@ -158,7 +155,7 @@ interface ImageCompressionContext {
 
 interface CompressedImageResult {
   base64: string
-  mediaType: Base64ImageSource['media_type']
+  mediaType: string
   originalSize: number
 }
 
@@ -433,17 +430,17 @@ export async function maybeResizeAndDownsampleImageBuffer(
 }
 
 export interface ImageBlockWithDimensions {
-  block: ImageBlockParam
+  block: AgentImageBlock
   dimensions?: ImageDimensions
 }
 
 /**
  * Resizes an image content block if needed
- * Takes an image ImageBlockParam and returns a resized version if necessary
+ * Takes an image AgentImageBlock and returns a resized version if necessary
  * Also returns dimension information for coordinate mapping
  */
 export async function maybeResizeAndDownsampleImageBlock(
-  imageBlock: ImageBlockParam,
+  imageBlock: AgentImageBlock,
 ): Promise<ImageBlockWithDimensions> {
   // Only process base64 images
   if (imageBlock.source.type !== 'base64') {
@@ -472,7 +469,7 @@ export async function maybeResizeAndDownsampleImageBlock(
       source: {
         type: 'base64',
         media_type:
-          `image/${resized.mediaType}` as Base64ImageSource['media_type'],
+          `image/${resized.mediaType}` as string,
         data: resized.buffer.toString('base64'),
       },
     },
@@ -595,12 +592,12 @@ export async function compressImageBufferWithTokenLimit(
 
 /**
  * Compresses an image block to fit within a maximum byte size.
- * Wrapper around compressImageBuffer for ImageBlockParam.
+ * Wrapper around compressImageBuffer for AgentImageBlock.
  */
 export async function compressImageBlock(
-  imageBlock: ImageBlockParam,
+  imageBlock: AgentImageBlock,
   maxBytes: number = IMAGE_TARGET_RAW_SIZE,
-): Promise<ImageBlockParam> {
+): Promise<AgentImageBlock> {
   // Only process base64 images
   if (imageBlock.source.type !== 'base64') {
     return imageBlock
@@ -638,7 +635,7 @@ function createCompressedImageResult(
   return {
     base64: buffer.toString('base64'),
     mediaType:
-      `image/${normalizedMediaType}` as Base64ImageSource['media_type'],
+      `image/${normalizedMediaType}` as string,
     originalSize,
   }
 }

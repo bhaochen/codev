@@ -127,7 +127,7 @@ Agent → queryModel.ts:17 Facade → ModelRuntime.generate() → resolveRoute()
 
 **测试策略** (`89 tests, src/services/llm/**`): `resolveRoute` 8+5 用例 (`provider×protocol×endpoint` 组合), `ProtocolRegistry` 7 用例, `Transport` 7 (跨 chunk/`[DONE]`), `ResponsesAdapter` 6 (delta/completed/unknown), `Auth` 9 (bearer/api-key/none 复用), `ModelResolver` 6, `ModelRegistry` 8, `Merge` 9, `Cache` 6 — 详见 [Provider 多厂商认证](provider-auth.md) §11 与 `docs/architecture/testing-strategy.md` (待建)。
 
-详见 [Provider 多厂商认证](provider-auth.md) 与 [核心数据流](data-flow.md)。
+详见 [Provider 多厂商认证](provider-auth.md)、[核心数据流](data-flow.md) 与 [System Prompt 组装逻辑](system-prompt-assembly.md)。架构演进方向见 [ADR: Agent Message Abstraction](adr-agent-message-abstraction.md)。
 
 ### 4. REPL 3 层批量执行（P6.6 契约）
 

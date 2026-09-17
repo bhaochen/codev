@@ -1,17 +1,5 @@
 import { feature } from 'bun:bundle'
 import type { BetaUsage as Usage } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
-import type {
-  ContentBlock,
-  ContentBlockParam,
-  RedactedThinkingBlock,
-  RedactedThinkingBlockParam,
-  TextBlockParam,
-  ThinkingBlock,
-  ThinkingBlockParam,
-  ToolResultBlockParam,
-  ToolUseBlock,
-  ToolUseBlockParam,
-} from '@anthropic-ai/sdk/resources/index.mjs'
 import { randomUUID, type UUID } from 'crypto'
 import isObject from 'lodash-es/isObject.js'
 import last from 'lodash-es/last.js'
@@ -92,13 +80,15 @@ type HookAttachmentWithName = Exclude<
 >
 
 import type { APIError } from '@anthropic-ai/sdk'
+import { anthropicBlockToAgent } from '../types/anthropicAdapter.js'
 import type {
-  BetaContentBlock,
-  BetaMessage,
-  BetaRedactedThinkingBlock,
-  BetaThinkingBlock,
-  BetaToolUseBlock,
-} from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
+  AgentContentBlock,
+  AgentRedactedThinkingBlock,
+  AgentTextBlock,
+  AgentThinkingBlock,
+  AgentToolResultBlock,
+  AgentToolUseBlock,
+} from '../types/agentMessage.js'
 import type {
   HookEvent,
   SDKAssistantMessageError,
@@ -375,7 +365,7 @@ function baseCreateAssistantMessage({
     speed: null,
   },
 }: {
-  content: BetaContentBlock[]
+  content: AgentContentBlock[]
   isApiErrorMessage?: boolean
   apiError?: AssistantMessage['apiError']
   error?: SDKAssistantMessageError
@@ -413,7 +403,7 @@ export function createAssistantMessage({
   usage,
   isVirtual,
 }: {
-  content: string | BetaContentBlock[]
+  content: string | AgentContentBlock[]
   usage?: Usage
   isVirtual?: true
 }): AssistantMessage {
@@ -424,7 +414,7 @@ export function createAssistantMessage({
             {
               type: 'text' as const,
               text: content === '' ? NO_CONTENT_MESSAGE : content,
-            } as BetaContentBlock, // NOTE: citations field is not supported in Bedrock API
+            } as AgentContentBlock, // NOTE: citations field is not supported in Bedrock API
           ]
         : content,
     usage,
@@ -448,7 +438,7 @@ export function createAssistantAPIErrorMessage({
       {
         type: 'text' as const,
         text: content === '' ? NO_CONTENT_MESSAGE : content,
-      } as BetaContentBlock, // NOTE: citations field is not supported in Bedrock API
+      } as AgentContentBlock, // NOTE: citations field is not supported in Bedrock API
     ],
     isApiErrorMessage: true,
     apiError,
@@ -473,7 +463,7 @@ export function createUserMessage({
   permissionMode,
   origin,
 }: {
-  content: string | ContentBlockParam[]
+  content: string | AgentContentBlock[]
   isMeta?: true
   isVisibleInTranscriptOnly?: true
   isVirtual?: true
@@ -527,8 +517,8 @@ export function prepareUserContent({
   precedingInputBlocks,
 }: {
   inputString: string
-  precedingInputBlocks: ContentBlockParam[]
-}): string | ContentBlockParam[] {
+  precedingInputBlocks: AgentContentBlock[]
+}): string | AgentContentBlock[] {
   if (precedingInputBlocks.length === 0) {
     return inputString
   }
@@ -621,7 +611,7 @@ export function createProgressMessage<P extends Progress>({
 
 export function createToolResultStopMessage(
   toolUseID: string,
-): ToolResultBlockParam {
+): AgentToolResultBlock {
   return {
     type: 'tool_result',
     content: CANCEL_MESSAGE,
@@ -823,7 +813,7 @@ export function normalizeMessages(messages: Message[]): NormalizedMessage[] {
 }
 
 type ToolUseRequestMessage = NormalizedAssistantMessage & {
-  message: { content: [ToolUseBlock] }
+  message: { content: [AgentToolUseBlock] }
 }
 
 export function isToolUseRequestMessage(
@@ -837,7 +827,7 @@ export function isToolUseRequestMessage(
 }
 
 type ToolUseResultMessage = NormalizedUserMessage & {
-  message: { content: [ToolResultBlockParam] }
+  message: { content: [AgentToolResultBlock] }
 }
 
 export function isToolUseResultMessage(
@@ -1150,8 +1140,8 @@ export type MessageLookups = {
   resolvedHookCounts: Map<string, Map<HookEvent, number>>
   /** Maps tool_use_id to the user message containing its tool_result */
   toolResultByToolUseID: Map<string, NormalizedMessage>
-  /** Maps tool_use_id to the ToolUseBlockParam */
-  toolUseByToolUseID: Map<string, ToolUseBlockParam>
+  /** Maps tool_use_id to the AgentToolUseBlock */
+  toolUseByToolUseID: Map<string, AgentToolUseBlock>
   /** Total count of normalized messages (for truncation indicator text) */
   normalizedMessageCount: number
   /** Set of tool use IDs that have a corresponding tool_result */
@@ -1174,7 +1164,7 @@ export function buildMessageLookups(
   // First pass: group assistant messages by ID and collect all tool use IDs per message
   const toolUseIDsByMessageID = new Map<string, Set<string>>()
   const toolUseIDToMessageID = new Map<string, string>()
-  const toolUseByToolUseID = new Map<string, ToolUseBlockParam>()
+  const toolUseByToolUseID = new Map<string, AgentToolUseBlock>()
   for (const msg of messages) {
     if (msg.type === 'assistant') {
       const id = msg.message.id
@@ -1373,7 +1363,7 @@ export const EMPTY_STRING_SET: ReadonlySet<string> = Object.freeze(
 export function buildSubagentLookups(
   messages: { message: AssistantMessage | NormalizedUserMessage }[],
 ): { lookups: MessageLookups; inProgressToolUseIDs: Set<string> } {
-  const toolUseByToolUseID = new Map<string, ToolUseBlockParam>()
+  const toolUseByToolUseID = new Map<string, AgentToolUseBlock>()
   const resolvedToolUseIDs = new Set<string>()
   const toolResultByToolUseID = new Map<
     string,
@@ -1384,7 +1374,7 @@ export function buildSubagentLookups(
     if (msg.type === 'assistant') {
       for (const content of msg.message.content) {
         if (content.type === 'tool_use') {
-          toolUseByToolUseID.set(content.id, content as ToolUseBlockParam)
+          toolUseByToolUseID.set(content.id, content as AgentToolUseBlock)
         }
       }
     } else if (msg.type === 'user') {
@@ -1464,7 +1454,7 @@ export function getToolUseIDs(
   return new Set(
     normalizedMessages
       .filter(
-        (_): _ is NormalizedAssistantMessage<BetaToolUseBlock> =>
+        (_): _ is NormalizedAssistantMessage<AgentToolUseBlock> =>
           _.type === 'assistant' &&
           Array.isArray(_.message.content) &&
           _.message.content[0]?.type === 'tool_use',
@@ -1654,7 +1644,7 @@ function appendMessageTagToUserMessage(message: UserMessage): UserMessage {
   }
 
   const newContent = [...content]
-  const textBlock = newContent[lastTextIdx] as TextBlockParam
+  const textBlock = newContent[lastTextIdx] as AgentTextBlock
   newContent[lastTextIdx] = {
     ...textBlock,
     text: textBlock.text + tag,
@@ -1776,7 +1766,7 @@ export function stripCallerFieldFromAssistantMessage(
  * contains tool_reference (ToolSearch loaded tools)?
  */
 function contentHasToolReference(
-  content: ReadonlyArray<ContentBlockParam>,
+  content: ReadonlyArray<AgentContentBlock>,
 ): boolean {
   return content.some(
     block =>
@@ -1843,8 +1833,8 @@ function smooshSystemReminderSiblings(
     const hasToolResult = content.some(b => b.type === 'tool_result')
     if (!hasToolResult) return msg
 
-    const srText: TextBlockParam[] = []
-    const kept: ContentBlockParam[] = []
+    const srText: AgentTextBlock[] = []
+    const kept: AgentContentBlock[] = []
     for (const b of content) {
       if (b.type === 'text' && b.text.startsWith('<system-reminder>')) {
         srText.push(b)
@@ -1856,7 +1846,7 @@ function smooshSystemReminderSiblings(
 
     // Smoosh into the LAST tool_result (positionally adjacent in rendered prompt)
     const lastTrIdx = kept.findLastIndex(b => b.type === 'tool_result')
-    const lastTr = kept[lastTrIdx] as ToolResultBlockParam
+    const lastTr = kept[lastTrIdx] as AgentToolResultBlock
     const smooshed = smooshIntoToolResult(lastTr, srText)
     if (smooshed === null) return msg // tool_ref constraint — leave alone
 
@@ -1897,7 +1887,7 @@ function sanitizeErrorToolResultContent(
       if (trContent.every(c => c.type === 'text')) return b
       changed = true
       const texts = trContent.filter(c => c.type === 'text').map(c => c.text)
-      const textOnly: TextBlockParam[] =
+      const textOnly: AgentTextBlock[] =
         texts.length > 0 ? [{ type: 'text', text: texts.join('\n\n') }] : []
       return { ...b, content: textOnly }
     })
@@ -1976,7 +1966,7 @@ function relocateToolReferenceSiblings(
       message: {
         ...target.message,
         content: [
-          ...(target.message.content as ContentBlockParam[]),
+          ...(target.message.content as AgentContentBlock[]),
           ...textSiblings,
         ],
       },
@@ -2467,9 +2457,9 @@ function mergeAdjacentUserMessages(
  * In thecontent[] list on a UserMessage, tool_result blocks much come first
  * to avoid "tool result must follow tool use" API errors.
  */
-function hoistToolResults(content: ContentBlockParam[]): ContentBlockParam[] {
-  const toolResults: ContentBlockParam[] = []
-  const otherBlocks: ContentBlockParam[] = []
+function hoistToolResults(content: AgentContentBlock[]): AgentContentBlock[] {
+  const toolResults: AgentContentBlock[] = []
+  const otherBlocks: AgentContentBlock[] = []
 
   for (const block of content) {
     if (block.type === 'tool_result') {
@@ -2483,8 +2473,8 @@ function hoistToolResults(content: ContentBlockParam[]): ContentBlockParam[] {
 }
 
 function normalizeUserTextContent(
-  a: string | ContentBlockParam[],
-): ContentBlockParam[] {
+  a: string | AgentContentBlock[],
+): AgentContentBlock[] {
   if (typeof a === 'string') {
     return [{ type: 'text', text: a }]
   }
@@ -2503,9 +2493,9 @@ function normalizeUserTextContent(
  * when b is an SR-wrapped attachment.
  */
 function joinTextAtSeam(
-  a: ContentBlockParam[],
-  b: ContentBlockParam[],
-): ContentBlockParam[] {
+  a: AgentContentBlock[],
+  b: AgentContentBlock[],
+): AgentContentBlock[] {
   const lastA = a.at(-1)
   const firstB = b[0]
   if (lastA?.type === 'text' && firstB?.type === 'text') {
@@ -2515,7 +2505,7 @@ function joinTextAtSeam(
 }
 
 type ToolResultContentItem = Extract<
-  ToolResultBlockParam['content'],
+  AgentToolResultBlock['content'],
   readonly unknown[]
 >[number]
 
@@ -2532,9 +2522,9 @@ type ToolResultContentItem = Extract<
  * - otherwise → array, with adjacent text merged (notebook.ts idiom)
  */
 function smooshIntoToolResult(
-  tr: ToolResultBlockParam,
-  blocks: ContentBlockParam[],
-): ToolResultBlockParam | null {
+  tr: AgentToolResultBlock,
+  blocks: AgentContentBlock[],
+): AgentToolResultBlock | null {
   if (blocks.length === 0) return tr
 
   const existing = tr.content
@@ -2560,7 +2550,7 @@ function smooshIntoToolResult(
   if (allText && (existing === undefined || typeof existing === 'string')) {
     const joined = [
       (existing ?? '').trim(),
-      ...blocks.map(b => (b as TextBlockParam).text.trim()),
+      ...blocks.map(b => (b as AgentTextBlock).text.trim()),
     ]
       .filter(Boolean)
       .join('\n\n')
@@ -2598,9 +2588,9 @@ function smooshIntoToolResult(
 }
 
 export function mergeUserContentBlocks(
-  a: ContentBlockParam[],
-  b: ContentBlockParam[],
-): ContentBlockParam[] {
+  a: AgentContentBlock[],
+  b: AgentContentBlock[],
+): AgentContentBlock[] {
   // See https://anthropic.slack.com/archives/C06FE2FP0Q2/p1747586370117479 and
   // https://anthropic.slack.com/archives/C0AHK9P0129/p1773159663856279:
   // any sibling after tool_result renders as </function_results>\n\nHuman:<...>
@@ -2649,14 +2639,20 @@ export function mergeUserContentBlocks(
 // Sometimes the API returns empty messages (eg. "\n\n"). We need to filter these out,
 // otherwise they will give an API error when we send them to the API next time we call query().
 export function normalizeContentFromAPI(
-  contentBlocks: BetaMessage['content'],
+  contentBlocks: AgentContentBlock[],
   tools: Tools,
   agentId?: AgentId,
-): BetaMessage['content'] {
+): AgentContentBlock[] {
   if (!contentBlocks) {
     return []
   }
-  return contentBlocks.map(contentBlock => {
+  // API responses arrive as provider (Anthropic-shaped) content blocks. The
+  // store is canonical Agent content, so normalize tool inputs first (the raw
+  // shapes the switch below reads match between providers — OpenAI/other
+  // clients pass their own chunks through the same Anthropic-compatible shape)
+  // and then convert each block through the adapter into an AgentContentBlock.
+  return contentBlocks
+    .map(contentBlock => {
     switch (contentBlock.type) {
       case 'tool_use': {
         if (
@@ -2747,7 +2743,8 @@ export function normalizeContentFromAPI(
       default:
         return contentBlock
     }
-  })
+    })
+    .map(block => anthropicBlockToAgent(block))
 }
 
 export function isEmptyMessageText(text: string): boolean {
@@ -2887,7 +2884,7 @@ export function textForResubmit(
 
 /**
  * Extract text from an array of content blocks, joining text blocks with the
- * given separator. Works with ContentBlock, ContentBlockParam, BetaContentBlock,
+ * given separator. Works with AgentContentBlock, AgentContentBlock, AgentContentBlock,
  * and their readonly/DeepImmutable variants via structural typing.
  */
 export function extractTextContent(
@@ -2901,7 +2898,7 @@ export function extractTextContent(
 }
 
 export function getContentText(
-  content: string | DeepImmutable<Array<ContentBlockParam>>,
+  content: string | DeepImmutable<Array<AgentContentBlock>>,
 ): string | null {
   if (typeof content === 'string') {
     return content
@@ -2914,7 +2911,7 @@ export function getContentText(
 
 export type StreamingToolUse = {
   index: number
-  contentBlock: BetaToolUseBlock
+  contentBlock: AgentToolUseBlock
   unparsedToolInput: string
 }
 
@@ -3758,7 +3755,7 @@ Read the team config to discover your teammates' names. Check the task list peri
       if (Array.isArray(attachment.prompt)) {
         // Handle content blocks (may include images)
         const textContent = attachment.prompt
-          .filter((block): block is TextBlockParam => block.type === 'text')
+          .filter((block): block is AgentTextBlock => block.type === 'text')
           .map(block => block.text)
           .join('\n')
 
@@ -3766,7 +3763,7 @@ Read the team config to discover your teammates' names. Check the task list peri
           block => block.type === 'image',
         )
 
-        const content: ContentBlockParam[] = [
+        const content: AgentContentBlock[] = [
           {
             type: 'text',
             text: wrapCommandText(textContent, origin),
@@ -3887,7 +3884,7 @@ You have exited auto mode. The user may now want to interact more directly. You 
       }
 
       // Transform each content item using the MCP transform function
-      const transformedBlocks: ContentBlockParam[] = []
+      const transformedBlocks: AgentContentBlock[] = []
 
       // Handle the resource contents - only process text content
       for (const item of content.contents) {
@@ -4298,7 +4295,7 @@ function createToolResultMessage<Output>(
       result.content.some(block => block.type === 'image')
     ) {
       return createUserMessage({
-        content: result.content as ContentBlockParam[],
+        content: result.content as AgentContentBlock[],
         isMeta: true,
       })
     }
@@ -4698,7 +4695,7 @@ export function countToolCalls(
     if (!msg) continue
     if (msg.type === 'assistant' && Array.isArray(msg.message.content)) {
       const hasToolUse = msg.message.content.some(
-        (block): block is ToolUseBlock =>
+        (block): block is AgentToolUseBlock =>
           block.type === 'tool_use' && block.name === toolName,
       )
       if (hasToolUse) {
@@ -4727,7 +4724,7 @@ export function hasSuccessfulToolCall(
     if (!msg) continue
     if (msg.type === 'assistant' && Array.isArray(msg.message.content)) {
       const toolUse = msg.message.content.find(
-        (block): block is ToolUseBlock =>
+        (block): block is AgentToolUseBlock =>
           block.type === 'tool_use' && block.name === toolName,
       )
       if (toolUse) {
@@ -4745,7 +4742,7 @@ export function hasSuccessfulToolCall(
     if (!msg) continue
     if (msg.type === 'user' && Array.isArray(msg.message.content)) {
       const toolResult = msg.message.content.find(
-        (block): block is ToolResultBlockParam =>
+        (block): block is AgentToolResultBlock =>
           block.type === 'tool_result' &&
           block.tool_use_id === mostRecentToolUseId,
       )
@@ -4760,17 +4757,9 @@ export function hasSuccessfulToolCall(
   return false
 }
 
-type ThinkingBlockType =
-  | ThinkingBlock
-  | RedactedThinkingBlock
-  | ThinkingBlockParam
-  | RedactedThinkingBlockParam
-  | BetaThinkingBlock
-  | BetaRedactedThinkingBlock
+type ThinkingBlockType = AgentThinkingBlock | AgentRedactedThinkingBlock
 
-function isThinkingBlock(
-  block: ContentBlockParam | ContentBlock | BetaContentBlock,
-): block is ThinkingBlockType {
+function isThinkingBlock(block: AgentContentBlock): block is ThinkingBlockType {
   return block.type === 'thinking' || block.type === 'redacted_thinking'
 }
 
@@ -5288,7 +5277,7 @@ export function ensureToolResultPairing(
             'type' in block &&
             block.type === 'tool_result'
           ) {
-            const trId = (block as ToolResultBlockParam).tool_use_id
+            const trId = (block as AgentToolResultBlock).tool_use_id
             if (existingToolResultIds.has(trId)) {
               hasDuplicateToolResults = true
             }
@@ -5318,7 +5307,7 @@ export function ensureToolResultPairing(
     repaired = true
 
     // Build synthetic error tool_result blocks for missing IDs
-    const syntheticBlocks: ToolResultBlockParam[] = missingIds.map(id => ({
+    const syntheticBlocks: AgentToolResultBlock[] = missingIds.map(id => ({
       type: 'tool_result' as const,
       tool_use_id: id,
       content: SYNTHETIC_TOOL_RESULT_PLACEHOLDER,
@@ -5327,7 +5316,7 @@ export function ensureToolResultPairing(
 
     if (nextMsg?.type === 'user') {
       // Next message is already a user message - patch it
-      let content: (ContentBlockParam | ContentBlock)[] = Array.isArray(
+      let content: (AgentContentBlock | AgentContentBlock)[] = Array.isArray(
         nextMsg.message.content,
       )
         ? nextMsg.message.content
@@ -5343,7 +5332,7 @@ export function ensureToolResultPairing(
             'type' in block &&
             block.type === 'tool_result'
           ) {
-            const trId = (block as ToolResultBlockParam).tool_use_id
+            const trId = (block as AgentToolResultBlock).tool_use_id
             if (orphanedSet.has(trId)) return false
             if (seenTrIds.has(trId)) return false
             seenTrIds.add(trId)
@@ -5405,7 +5394,7 @@ export function ensureToolResultPairing(
       if (m.type === 'assistant') {
         const toolUses = m.message.content
           .filter(b => b.type === 'tool_use')
-          .map(b => (b as ToolUseBlock | ToolUseBlockParam).id)
+          .map(b => (b as AgentToolUseBlock).id)
         const serverToolUses = m.message.content
           .filter(
             b => b.type === 'server_tool_use' || b.type === 'mcp_tool_use',
@@ -5426,7 +5415,7 @@ export function ensureToolResultPairing(
             b =>
               typeof b === 'object' && 'type' in b && b.type === 'tool_result',
           )
-          .map(b => (b as ToolResultBlockParam).tool_use_id)
+          .map(b => (b as AgentToolResultBlock).tool_use_id)
         if (toolResults.length > 0) {
           return `[${idx}] user(tool_results=[${toolResults.join(',')}])`
         }

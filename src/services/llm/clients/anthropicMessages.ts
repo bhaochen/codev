@@ -26,6 +26,7 @@ import type {
 import type { TextBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
 import type { Stream } from '@anthropic-ai/sdk/streaming.mjs'
 import { randomUUID } from 'crypto'
+import { agentBlockToAnthropic } from '../../../types/anthropicAdapter.js'
 import {
   getAPIProvider,
   isFirstPartyAnthropicBaseUrl,
@@ -616,11 +617,17 @@ export function userMessageToMessageParam(
         ],
       }
     } else {
+      // Stored content is canonical Agent content (providerOptions escape
+      // hatch) — convert to the Anthropic wire format before adding the
+      // request-time cache_control marker.
+      const content = message.message.content.map(block =>
+        agentBlockToAnthropic(block),
+      )
       return {
         role: 'user',
-        content: message.message.content.map((_, i) => ({
+        content: content.map((_, i) => ({
           ..._,
-          ...(i === message.message.content.length - 1
+          ...(i === content.length - 1
             ? enablePromptCaching
               ? { cache_control: getCacheControl({ querySource }) }
               : {}
@@ -632,10 +639,11 @@ export function userMessageToMessageParam(
   // Clone array content to prevent in-place mutations (e.g., insertCacheEditsBlock's
   // splice) from contaminating the original message. Without cloning, multiple calls
   // to addCacheBreakpoints share the same array and each splices in duplicate cache_edits.
+  // Stored content is canonical Agent content — convert to the Anthropic wire format.
   return {
     role: 'user',
     content: Array.isArray(message.message.content)
-      ? [...message.message.content]
+      ? message.message.content.map(block => agentBlockToAnthropic(block))
       : message.message.content,
   }
 }
@@ -661,11 +669,16 @@ export function assistantMessageToMessageParam(
         ],
       }
     } else {
+      // Stored content is canonical Agent content — convert to the Anthropic
+      // wire format first so the last-block cache marker lands on the wire.
+      const content = message.message.content.map(block =>
+        agentBlockToAnthropic(block),
+      )
       return {
         role: 'assistant',
-        content: message.message.content.map((_, i) => ({
+        content: content.map((_, i) => ({
           ..._,
-          ...(i === message.message.content.length - 1 &&
+          ...(i === content.length - 1 &&
           _.type !== 'thinking' &&
           _.type !== 'redacted_thinking' &&
           (feature('CONNECTOR_TEXT') ? !isConnectorTextBlock(_) : true)
@@ -679,7 +692,9 @@ export function assistantMessageToMessageParam(
   }
   return {
     role: 'assistant',
-    content: message.message.content,
+    content: Array.isArray(message.message.content)
+      ? message.message.content.map(block => agentBlockToAnthropic(block))
+      : message.message.content,
   }
 }
 

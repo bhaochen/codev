@@ -10,7 +10,7 @@
  */
 
 import { feature } from 'bun:bundle'
-import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs'
+import type { AgentContentBlock } from '../../types/agentMessage.js'
 import { getSystemPrompt } from '../../constants/prompts.js'
 import { TEAMMATE_MESSAGE_TAG } from '../../constants/xml.js'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
@@ -251,7 +251,7 @@ function createInProcessCanUseTool(
               updatedInput: Record<string, unknown>,
               permissionUpdates: PermissionUpdate[],
               feedback?: string,
-              contentBlocks?: ContentBlockParam[],
+              contentBlocks?: AgentContentBlock[],
             ) {
               if (decisionMade) return
               decisionMade = true
@@ -289,7 +289,7 @@ function createInProcessCanUseTool(
                   contentBlocks.length > 0 && { contentBlocks }),
               })
             },
-            onReject(feedback?: string, contentBlocks?: ContentBlockParam[]) {
+            onReject(feedback?: string, contentBlocks?: AgentContentBlock[]) {
               if (decisionMade) return
               decisionMade = true
               abortController.signal.removeEventListener(
@@ -355,7 +355,7 @@ function createInProcessCanUseTool(
           updatedInput: Record<string, unknown> | undefined,
           permissionUpdates: PermissionUpdate[],
           _feedback?: string,
-          contentBlocks?: ContentBlockParam[],
+          contentBlocks?: AgentContentBlock[],
         ) {
           cleanup()
           persistPermissionUpdates(permissionUpdates)
@@ -370,7 +370,7 @@ function createInProcessCanUseTool(
             ...(contentBlocks && contentBlocks.length > 0 && { contentBlocks }),
           })
         },
-        onReject(feedback?: string, contentBlocks?: ContentBlockParam[]) {
+        onReject(feedback?: string, contentBlocks?: AgentContentBlock[]) {
           cleanup()
           const message = feedback
             ? `${SUBAGENT_REJECT_MESSAGE_WITH_REASON_PREFIX}${feedback}`

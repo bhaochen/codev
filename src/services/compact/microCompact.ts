@@ -1,5 +1,5 @@
 import { feature } from 'bun:bundle'
-import type { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
+import type { AgentToolResultBlock } from '../../types/agentMessage.js'
 import type { QuerySource } from '../../constants/querySource.js'
 import type { ToolUseContext } from '../../Tool.js'
 import { FILE_EDIT_TOOL_NAME } from '../../tools/FileEditTool/constants.js'
@@ -135,7 +135,7 @@ export function resetMicrocompactState(): void {
 }
 
 // Helper to calculate tool result tokens
-function calculateToolResultTokens(block: ToolResultBlockParam): number {
+function calculateToolResultTokens(block: AgentToolResultBlock): number {
   if (!block.content) {
     return 0
   }

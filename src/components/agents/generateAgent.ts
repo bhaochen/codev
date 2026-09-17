@@ -1,4 +1,3 @@
-import type { ContentBlock } from '@anthropic-ai/sdk/resources/index.mjs'
 import { getUserContext } from 'src/context.js'
 import { queryModelWithoutStreaming } from 'src/services/api/queryModel.js'
 import { getEmptyToolPermissionContext } from 'src/Tool.js'
@@ -9,6 +8,7 @@ import {
   normalizeMessagesForAPI,
 } from 'src/utils/messages.js'
 import type { ModelName } from 'src/utils/model/model.js'
+import type { AgentTextBlock } from '../../types/agentMessage.js'
 import { isAutoMemoryEnabled } from '../../memdir/paths.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -165,7 +165,7 @@ export async function generateAgent(
   })
 
   const textBlocks = response.message.content.filter(
-    (block): block is ContentBlock & { type: 'text' } => block.type === 'text',
+    (block): block is AgentTextBlock => block.type === 'text',
   )
   const responseText = textBlocks.map(block => block.text).join('\n')
 

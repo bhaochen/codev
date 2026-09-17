@@ -1,5 +1,5 @@
 import { feature } from 'bun:bundle'
-import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs'
+import type { AgentContentBlock } from '../types/agentMessage.js'
 import type { Permutations } from 'src/types/utils.js'
 import { getSessionId } from '../bootstrap/state.js'
 import type { AppState } from '../state/AppState.js'
@@ -377,18 +377,18 @@ export function isQueuedCommandVisible(cmd: QueuedCommand): boolean {
 /**
  * Extract text from a queued command value.
  * For strings, returns the string.
- * For ContentBlockParam[], extracts text from text blocks.
+ * For AgentContentBlock[], extracts text from text blocks.
  */
-function extractTextFromValue(value: string | ContentBlockParam[]): string {
+function extractTextFromValue(value: string | AgentContentBlock[]): string {
   return typeof value === 'string' ? value : extractTextContent(value, '\n')
 }
 
 /**
- * Extract images from ContentBlockParam[] and convert to PastedContent format.
+ * Extract images from AgentContentBlock[] and convert to PastedContent format.
  * Returns empty array for string values or if no images found.
  */
 function extractImagesFromValue(
-  value: string | ContentBlockParam[],
+  value: string | AgentContentBlock[],
   startId: number,
 ): PastedContent[] {
   if (typeof value === 'string') {
@@ -442,7 +442,7 @@ export function popAllEditable(
     return undefined
   }
 
-  // Extract text from queued commands (handles both strings and ContentBlockParam[])
+  // Extract text from queued commands (handles both strings and AgentContentBlock[])
   const queuedTexts = editable.map(cmd => extractTextFromValue(cmd.value))
   const newInput = [...queuedTexts, currentInput].filter(Boolean).join('\n')
 
@@ -462,7 +462,7 @@ export function popAllEditable(
         }
       }
     }
-    // Bridge/remote commands may embed images directly in ContentBlockParam[].
+    // Bridge/remote commands may embed images directly in AgentContentBlock[].
     const cmdImages = extractImagesFromValue(cmd.value, nextImageId)
     images.push(...cmdImages)
     nextImageId += cmdImages.length

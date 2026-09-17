@@ -66,10 +66,10 @@ import { randomUUID, type UUID } from 'crypto'
 import { getSettings_DEPRECATED } from './settings/settings.js'
 import { getSnippetForTwoFileDiff } from 'src/tools/FileEditTool/utils.js'
 import type {
-  ContentBlockParam,
-  ImageBlockParam,
-  Base64ImageSource,
-} from '@anthropic-ai/sdk/resources/messages.mjs'
+  AgentContentBlock,
+  AgentImageBlock,
+  AgentToolResultBlock,
+} from '../types/agentMessage.js'
 import { maybeResizeAndDownsampleImageBlock } from './imageResizer.js'
 import type { PastedContent } from './config.js'
 import { getGlobalConfig } from './config.js'
@@ -542,7 +542,7 @@ export type Attachment =
     }
   | {
       type: 'queued_command'
-      prompt: string | Array<ContentBlockParam>
+      prompt: string | Array<AgentContentBlock>
       source_uuid?: UUID
       imagePasteIds?: number[]
       /** Original queue mode — 'prompt' for user messages, 'task-notification' for system events */
@@ -1060,7 +1060,7 @@ export async function getQueuedCommandAttachments(
   return Promise.all(
     filtered.map(async _ => {
       const imageBlocks = await buildImageContentBlocks(_.pastedContents)
-      let prompt: string | Array<ContentBlockParam> = _.value
+      let prompt: string | Array<AgentContentBlock> = _.value
       if (imageBlocks.length > 0) {
         // Build content block array with text + images so the model sees them
         const textValue =
@@ -1102,7 +1102,7 @@ export function getAgentPendingMessageAttachments(
 
 async function buildImageContentBlocks(
   pastedContents: Record<number, PastedContent> | undefined,
-): Promise<ImageBlockParam[]> {
+): Promise<AgentImageBlock[]> {
   if (!pastedContents) {
     return []
   }
@@ -1112,12 +1112,12 @@ async function buildImageContentBlocks(
   }
   const results = await Promise.all(
     imageContents.map(async img => {
-      const imageBlock: ImageBlockParam = {
+      const imageBlock: AgentImageBlock = {
         type: 'image',
         source: {
           type: 'base64',
           media_type: (img.mediaType ||
-            'image/png') as Base64ImageSource['media_type'],
+            'image/png') as string,
           data: img.content,
         },
       }
@@ -2423,11 +2423,10 @@ export function startRelevantMemoryPrefetch(
   return handle
 }
 
-type ToolResultBlock = {
-  type: 'tool_result'
-  tool_use_id: string
-  is_error?: boolean
-}
+type ToolResultBlock = Pick<
+  AgentToolResultBlock,
+  'type' | 'tool_use_id' | 'is_error'
+>
 
 function isToolResultBlock(b: unknown): b is ToolResultBlock {
   return (

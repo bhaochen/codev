@@ -1,4 +1,4 @@
-import type { ContentBlockParam } from '@anthropic-ai/sdk/resources';
+import type { AgentContentBlock } from '../../types/agentMessage.js';
 import { randomUUID } from 'crypto';
 import * as React from 'react';
 import { BashModeProgress } from 'src/components/BashModeProgress.js';
@@ -14,7 +14,7 @@ import { isPowerShellToolEnabled } from '../shell/shellToolUtils.js';
 import { processToolResultBlock } from '../toolResultStorage.js';
 import { escapeXml } from '../xml.js';
 import type { ProcessUserInputContext } from './processUserInput.js';
-export async function processBashCommand(inputString: string, precedingInputBlocks: ContentBlockParam[], attachmentMessages: AttachmentMessage[], context: ProcessUserInputContext, setToolJSX: SetToolJSXFn): Promise<{
+export async function processBashCommand(inputString: string, precedingInputBlocks: AgentContentBlock[], attachmentMessages: AttachmentMessage[], context: ProcessUserInputContext, setToolJSX: SetToolJSXFn): Promise<{
   messages: (UserMessage | AttachmentMessage | SystemMessage)[];
   shouldQuery: boolean;
 }> {
