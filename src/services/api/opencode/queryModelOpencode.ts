@@ -63,6 +63,7 @@ import {
   updateOpenAIUsage,
 } from '../openai/openaiShared.js'
 import { chatCompletionsUrl as openaiChatCompletionsUrl } from '../openai/openaiClient.js'
+import { createOpencodeId, getOpencodeProjectId, getOpencodeUserAgent } from '../opencodeUserAgent.js'
 
 function isOpencodeConvertibleMessage(
   msg: AssistantMessage | UserMessage,
@@ -362,11 +363,11 @@ async function fetchOpencodeStream(params: {
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'User-Agent': 'codev-opencode-native/1.0',
+    'User-Agent': getOpencodeUserAgent(),
     'x-opencode-client': 'cli',
-    'x-opencode-project': 'global',
-    'x-opencode-session': `ses_${randomUUID().replace(/-/g, '').slice(0, 22)}`,
-    'x-opencode-request': `msg_${randomUUID().replace(/-/g, '').slice(0, 22)}`,
+    'x-opencode-project': await getOpencodeProjectId(),
+    'x-opencode-session': createOpencodeId('ses'),
+    'x-opencode-request': createOpencodeId('msg'),
   }
   if (apiKey) {
     headers.Authorization = `Bearer ${apiKey}`

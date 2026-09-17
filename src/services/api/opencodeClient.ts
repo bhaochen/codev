@@ -1,4 +1,3 @@
-import { randomUUID } from 'crypto'
 import { getOpenCodeApiKey, getOpenCodeModelName } from '../../utils/auth.js'
 import {
   convertAnthropicMessagesToOpenAI,
@@ -10,7 +9,7 @@ import {
   resolveOpenAIModelSupportsImages,
   type AnthropicMessage,
 } from '@ant/model-provider'
-import { getOpencodeUserAgent, setOpencodeVersion } from './opencodeUserAgent.js'
+import { createOpencodeId, getOpencodeProjectId, getOpencodeUserAgent } from './opencodeUserAgent.js'
 
 const OPENCODE_BASE_URL = 'https://opencode.ai/zen/v1'
 // 模型目录源与官方 opencode 对齐：优先自建镜像，失败回退上游 models.dev
@@ -18,7 +17,6 @@ const OPENCODE_BASE_URL = 'https://opencode.ai/zen/v1'
 const MODELS_META_PRIMARY_URL =
   process.env.OPENCODE_MODELS_URL || 'https://models.opencode.ai/api.json'
 const MODELS_META_FALLBACK_URL = 'https://models.dev/api.json'
-const GITHUB_RELEASE_URL = 'https://api.github.com/repos/anomalyco/opencode/releases/latest'
 
 type CachedOpencodeModel = {
   id: string
@@ -38,26 +36,8 @@ export async function fetchOpencodeModels(): Promise<void> {
   fetchPromise = (async () => {
     try {
       // -----------------------------------------------------------------
-      // ✨ 步骤 1：复刻 TUI，先去 GitHub 动态探针摸出最新的 CLI 版本号
-      // -----------------------------------------------------------------
-      let cliVersion = '1.18.31' // 默认兜底版本
-      try {
-        const ghRes = await fetch(GITHUB_RELEASE_URL, {
-          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AgentFramework/1.0)' }
-        })
-        if (ghRes.ok) {
-          const ghData = await ghRes.json() as { tag_name?: string }
-          if (ghData.tag_name) {
-            // 精准剥离 'v' 前缀 (例如 v1.15.10 -> 1.15.10)
-            cliVersion = ghData.tag_name.replace(/^v/, '')
-          }
-        }
-      } catch (ghError) {
-        console.error('[opencodeClient] 动态获取 GitHub 版本失败，采用安全兜底:', ghError)
-      }
-
-      // -----------------------------------------------------------------
-      // ✨ 步骤 2：请求模型目录元数据，为精准剔除下架模型、识别免费模型做铺垫
+      // 请求模型目录元数据，为精准剔除下架模型、识别免费模型做铺垫。
+      // UA 必须对应本机安装的 OpenCode 版本，不能拿 GitHub 最新版本冒充。
       // 主源 models.opencode.ai（官方行为），失败回退 models.dev
       // -----------------------------------------------------------------
       const metaHeaders = {
@@ -78,15 +58,8 @@ export async function fetchOpencodeModels(): Promise<void> {
       }
 
       const data = await res.json() as any
-      const npmProvider = data?.opencode?.npm || '@ai-sdk/openai-compatible'
-
       // -----------------------------------------------------------------
-      // ✨ 步骤 3：合体！将获取到的依赖名与最新版本号注入全局动态 UA 中
-      // -----------------------------------------------------------------
-      setOpencodeVersion(cliVersion, npmProvider)
-
-      // -----------------------------------------------------------------
-      // ✨ 步骤 4：摒弃死板的硬编码 Set，改用云端 cost 策略实时判定免费模型
+      // 摒弃死板的硬编码 Set，改用云端 cost 策略实时判定免费模型
       // -----------------------------------------------------------------
       const opencodeModels = data?.opencode?.models || {}
       const modelList: CachedOpencodeModel[] = []
@@ -286,9 +259,9 @@ export function createOpenCodeFetchOverride(
       'Content-Type': 'application/json',
       'User-Agent': getOpencodeUserAgent(),
       'x-opencode-client': 'cli',
-      'x-opencode-project': 'global',
-      'x-opencode-session': `ses_${randomUUID().replace(/-/g, '').slice(0, 22)}`,
-      'x-opencode-request': `msg_${randomUUID().replace(/-/g, '').slice(0, 22)}`,
+      'x-opencode-project': await getOpencodeProjectId(),
+      'x-opencode-session': createOpencodeId('ses'),
+      'x-opencode-request': createOpencodeId('msg'),
       Authorization: `Bearer ${apiKey || 'public'}`,
     }
 

@@ -36,7 +36,7 @@ import type { BetaMessage, BetaStopReason, BetaToolUnion, BetaUsage } from '@ant
 import { buildOpenAIRequestBody, resolveOpenAIMaxTokens } from '../../api/openai/requestBody.js'
 import { formatOpenAIPromptCacheKey, updateOpenAIUsage } from '../../api/openai/openaiShared.js'
 import { resolveAuth } from '../auth/resolveAuth.js'
-import { getOpencodeUserAgent } from '../../api/opencodeUserAgent.js'
+import { createOpencodeId, getOpencodeProjectId, getOpencodeUserAgent } from '../../api/opencodeUserAgent.js'
 
 function isConvertibleMessage(msg: AssistantMessage | UserMessage): msg is AssistantMessage | UserMessage {
   return (msg as { type?: string }).type === 'assistant' || (msg as { type?: string }).type === 'user'
@@ -143,9 +143,9 @@ export async function* queryOpenAIChat(
     // Provider-specific headers 按 opencode 侧 custom 定义
     if (route.provider === 'opencode') {
       headers['x-opencode-client'] = 'cli'
-      headers['x-opencode-project'] = 'global'
-      headers['x-opencode-session'] = `ses_${randomUUID().replace(/-/g, '').slice(0, 22)}`
-      headers['x-opencode-request'] = `msg_${randomUUID().replace(/-/g, '').slice(0, 22)}`
+      headers['x-opencode-project'] = await getOpencodeProjectId()
+      headers['x-opencode-session'] = createOpencodeId('ses')
+      headers['x-opencode-request'] = createOpencodeId('msg')
     } else if (route.provider === 'nvidia') {
       headers['HTTP-Referer'] = 'https://opencode.ai/'
       headers['X-Title'] = 'opencode'
