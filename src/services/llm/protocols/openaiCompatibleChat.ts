@@ -38,6 +38,7 @@ import type { BetaMessage, BetaStopReason, BetaToolUnion, BetaUsage } from '@ant
 import { buildOpenAIRequestBody, resolveOpenAIMaxTokens } from '../../api/openai/requestBody.js'
 import { formatOpenAIPromptCacheKey, updateOpenAIUsage } from '../../api/openai/openaiShared.js'
 import { resolveAuth } from '../auth/resolveAuth.js'
+import { getOpencodeUserAgent } from '../../api/opencodeUserAgent.js'
 
 function isConvertibleMessage(msg: AssistantMessage | UserMessage): msg is AssistantMessage | UserMessage {
   return (msg as { type?: string }).type === 'assistant' || (msg as { type?: string }).type === 'user'
@@ -120,7 +121,7 @@ export async function* queryOpenAICompatibleChat(
     })
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      'User-Agent': 'opencode/1.15.6 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14',
+      'User-Agent': route.provider === 'opencode' ? getOpencodeUserAgent() : 'codev',
     }
     if (cred.type === 'bearer') headers.Authorization = `Bearer ${cred.token}`
     else headers.Authorization = 'Bearer public'

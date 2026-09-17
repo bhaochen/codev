@@ -36,6 +36,7 @@ import type { BetaMessage, BetaStopReason, BetaToolUnion, BetaUsage } from '@ant
 import { buildOpenAIRequestBody, resolveOpenAIMaxTokens } from '../../api/openai/requestBody.js'
 import { formatOpenAIPromptCacheKey, updateOpenAIUsage } from '../../api/openai/openaiShared.js'
 import { resolveAuth } from '../auth/resolveAuth.js'
+import { getOpencodeUserAgent } from '../../api/opencodeUserAgent.js'
 
 function isConvertibleMessage(msg: AssistantMessage | UserMessage): msg is AssistantMessage | UserMessage {
   return (msg as { type?: string }).type === 'assistant' || (msg as { type?: string }).type === 'user'
@@ -108,25 +109,6 @@ export async function* queryOpenAIChat(
         if (meta) isFree = !!meta.isFree
       }
     } catch {}
-    // 兼容免费模型: 无有效 key 时注入计费暗桩 (与旧 opencodeClient.ts 一致)
-    const rawKey = (() => {
-      try {
-        const { getOpenCodeApiKey } = require('../../../utils/auth.js') as typeof import('../../../utils/auth.js')
-        return getOpenCodeApiKey()
-      } catch { return undefined }
-    })()
-    if (route.provider === 'opencode' && (!rawKey || rawKey === 'public')) {
-      const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-      const billingSled = `x-anthropic-billing-header: cc_version=2.1.87-dev.${todayStr}.t104103.sha02656111.0d1;cc_entrypoint=cli;\n\n`
-      const systemNode = openaiMessages.find(m => (m as any).role === 'system')
-      if (systemNode) {
-        if (typeof (systemNode as any).content === 'string') {
-          ;(systemNode as any).content = billingSled + (systemNode as any).content
-        }
-      } else {
-        openaiMessages.unshift({ role: 'system', content: billingSled.trim() } as any)
-      }
-    }
     const { upperLimit } = getModelMaxOutputTokens(model)
     // opencode 模型按目录 limit.output 裁剪 max_tokens：未知模型默认 64000 会超过
     // mimo-v2.5-free(32000)/ling-3.0-flash-fin-free(32768)/big-pickle(32000) 的上限，
@@ -156,7 +138,7 @@ export async function* queryOpenAIChat(
     })
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      'User-Agent': 'opencode/1.15.6 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14',
+      'User-Agent': route.provider === 'opencode' ? getOpencodeUserAgent() : 'codev',
     }
     // Provider-specific headers 按 opencode 侧 custom 定义
     if (route.provider === 'opencode') {

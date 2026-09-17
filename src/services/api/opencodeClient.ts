@@ -10,6 +10,7 @@ import {
   resolveOpenAIModelSupportsImages,
   type AnthropicMessage,
 } from '@ant/model-provider'
+import { getOpencodeUserAgent, setOpencodeVersion } from './opencodeUserAgent.js'
 
 const OPENCODE_BASE_URL = 'https://opencode.ai/zen/v1'
 // 模型目录源与官方 opencode 对齐：优先自建镜像，失败回退上游 models.dev
@@ -18,9 +19,6 @@ const MODELS_META_PRIMARY_URL =
   process.env.OPENCODE_MODELS_URL || 'https://models.opencode.ai/api.json'
 const MODELS_META_FALLBACK_URL = 'https://models.dev/api.json'
 const GITHUB_RELEASE_URL = 'https://api.github.com/repos/anomalyco/opencode/releases/latest'
-
-// 安全兜底的初始 User-Agent
-let dynamicUserAgent = 'opencode/1.15.6 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14'
 
 type CachedOpencodeModel = {
   id: string
@@ -42,7 +40,7 @@ export async function fetchOpencodeModels(): Promise<void> {
       // -----------------------------------------------------------------
       // ✨ 步骤 1：复刻 TUI，先去 GitHub 动态探针摸出最新的 CLI 版本号
       // -----------------------------------------------------------------
-      let cliVersion = '1.15.6' // 默认兜底版本
+      let cliVersion = '1.18.31' // 默认兜底版本
       try {
         const ghRes = await fetch(GITHUB_RELEASE_URL, {
           headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AgentFramework/1.0)' }
@@ -63,7 +61,7 @@ export async function fetchOpencodeModels(): Promise<void> {
       // 主源 models.opencode.ai（官方行为），失败回退 models.dev
       // -----------------------------------------------------------------
       const metaHeaders = {
-        'User-Agent': `opencode/${cliVersion} ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14`,
+        'User-Agent': getOpencodeUserAgent(),
         'Accept-Encoding': 'gzip, deflate, br',
       }
       let res = await fetch(MODELS_META_PRIMARY_URL, { headers: metaHeaders }).catch(() => null)
@@ -81,13 +79,11 @@ export async function fetchOpencodeModels(): Promise<void> {
 
       const data = await res.json() as any
       const npmProvider = data?.opencode?.npm || '@ai-sdk/openai-compatible'
-      const currentBunVer = typeof Bun !== 'undefined' ? Bun.version : '1.3.14'
 
       // -----------------------------------------------------------------
       // ✨ 步骤 3：合体！将获取到的依赖名与最新版本号注入全局动态 UA 中
       // -----------------------------------------------------------------
-      dynamicUserAgent = `opencode/${cliVersion} ${npmProvider} ai-sdk/provider-utils/4.0.23 runtime/bun/${currentBunVer}`
-      console.error(`[opencodeClient] TUI 动态嗅探闭环成功，最新 UA 状态就绪: "${dynamicUserAgent}"`)
+      setOpencodeVersion(cliVersion, npmProvider)
 
       // -----------------------------------------------------------------
       // ✨ 步骤 4：摒弃死板的硬编码 Set，改用云端 cost 策略实时判定免费模型
@@ -251,29 +247,7 @@ export function createOpenCodeFetchOverride(
       { supportsImages },
     )
 
-    // =================================================================
-    // 🎯 核心修复：在这里对转换完的 openaiMessages 强行挂载鉴权暗桩
-    // =================================================================
     const apiKey = getOpenCodeApiKey()
-    
-    if (!apiKey || apiKey === 'public') {
-      // 1. 动态生成今天的特征时间标识
-      const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-      const billingSled = `x-anthropic-billing-header: cc_version=2.1.87-dev.${todayStr}.t104103.sha02656111.0d1;cc_entrypoint=cli;\n\n`
-
-      // 2. 注入特征码到 System Messages 链中
-      const systemNode = openaiMessages.find(m => m.role === 'system')
-      if (systemNode) {
-        if (typeof systemNode.content === 'string') {
-          systemNode.content = billingSled + systemNode.content
-        }
-      } else {
-        openaiMessages.unshift({
-          role: 'system',
-          content: billingSled.trim()
-        })
-      }
-    }
 
     const anthropicTools = (anthropicBody.tools || []) as Array<{
       name: string
@@ -286,7 +260,7 @@ export function createOpenCodeFetchOverride(
 
     const requestBody: Record<string, unknown> = {
       model: modelName,
-      messages: openaiMessages, // 此时已经携带暗桩凭证
+      messages: openaiMessages,
       stream: isStreaming,
     }
 
@@ -310,7 +284,7 @@ export function createOpenCodeFetchOverride(
     // =================================================================
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      'User-Agent': dynamicUserAgent,
+      'User-Agent': getOpencodeUserAgent(),
       'x-opencode-client': 'cli',
       'x-opencode-project': 'global',
       'x-opencode-session': `ses_${randomUUID().replace(/-/g, '').slice(0, 22)}`,
