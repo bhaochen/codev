@@ -21,8 +21,6 @@ import {
 } from 'src/utils/model/providers.js'
 import { getProxyFetchOptions } from 'src/utils/proxy.js'
 import { fetchOpencodeModels } from './opencodeClient.js'
-import { createOpenAIFetchOverride } from './openai/openaiClient.js'
-import { resolveOpenAIModel } from '@ant/model-provider'
 import {
   getIsNonInteractiveSession,
   getSessionId,
@@ -35,7 +33,7 @@ import {
   isEnvTruthy,
 } from '../../utils/envUtils.js'
 
-const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini'
+
 
 /**
  * Environment variables for different client types:
@@ -154,17 +152,7 @@ export async function getAnthropicClient({
 
   // NVIDIA 已迁原生 openai-chat (providers/nvidia.ts) 直连 native-http，无需 fetch-override legacy
 
-  // For OpenAI provider, use custom fetch to convert Anthropic format to OpenAI Chat
-  // Completions format and talk directly to the OpenAI-compatible endpoint
-  // (OPENAI_API_KEY / OPENAI_BASE_URL). Supports OpenAI official, DeepSeek,
-  // vLLM, Ollama etc. including thinking (reasoning_content) round-trips.
-  let openaiFetchOverride: ClientOptions['fetch'] | undefined
-  if (provider === 'openai') {
-    const resolvedModel = resolveOpenAIModel(model || DEFAULT_OPENAI_MODEL)
-    openaiFetchOverride = createOpenAIFetchOverride(resolvedModel)
-  }
-
-  const resolvedFetch = buildFetch(fetchOverride || openaiFetchOverride, source)
+  const resolvedFetch = buildFetch(fetchOverride, source)
 
   const ARGS = {
     defaultHeaders,
@@ -349,13 +337,6 @@ export async function getAnthropicClient({
     }
   }
 
-  // Handle OpenAI - uses custom fetch override to convert Anthropic format to
-  // OpenAI Chat Completions format. No baseURL needed — the fetch override
-  // handles the endpoint directly (OPENAI_API_KEY / OPENAI_BASE_URL).
-  if (provider === 'openai') {
-    clientConfig.apiKey = 'openai-compatible'
-  }
-
   // Handle Local
   if (provider === 'local') {
     const localBaseUrl = await getLocalBaseUrl()
@@ -388,7 +369,7 @@ async function configureApiKeyHeaders(
   const provider = getAPIProvider()
   
   // Skip for OpenRouter, OpenAI, Local, OpenCode, and NVIDIA - they use apiKey parameter instead
-  if (provider === 'openrouter' || provider === 'openai' || provider === 'local' || provider === 'opencode' || provider === 'nvidia') {
+  if (provider === 'openrouter' || provider === 'local' || provider === 'opencode' || provider === 'nvidia') {
     return
   }
 
