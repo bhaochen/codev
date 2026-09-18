@@ -322,6 +322,40 @@ export function splitSysPromptPrefix(
   systemPrompt: SystemPrompt,
   options?: { skipGlobalCacheForSystemPrompt?: boolean },
 ): SystemPromptBlock[] {
+  // Defensive: the Anthropic wire format requires every system-prompt block to
+  // be a plain string, and splitSysPromptPrefix splits each block via
+  // block.startsWith(...). A non-string block reaching here (custom
+  // system-prompt builders / hooks / the local provider) previously crashed
+  // with `l.startsWith is not a function`. Normalize once at this single
+  // choke point — the block classifier below (and the sibling loop in
+  // buildSystemPromptBlocks) both flow through here — and log the offending
+  // types so the real producer can be tracked down if it happens again.
+  const hasNonString = systemPrompt.some(
+    block => typeof block !== 'string',
+  )
+  if (hasNonString) {
+    const offendingTypes = [
+      ...new Set(systemPrompt.map(block => typeof block)),
+    ]
+    logEvent('tengu_sysprompt_nonstring_block', {
+      blockCount: systemPrompt.length,
+      offendingTypes: offendingTypes.join(',') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+    systemPrompt = systemPrompt
+      .map(block => {
+        if (typeof block === 'string') return block
+        // Block objects (SystemPromptBlock): surface their text body so
+        // downstream `.startsWith` classifiers still see the real content
+        // (e.g. x-anthropic-* attribution headers).
+        if (block && typeof block === 'object') {
+          const { text } = block as { text?: unknown }
+          if (typeof text === 'string' && text) return text
+        }
+        return JSON.stringify(block)
+      })
+      .filter(Boolean)
+  }
+
   const useGlobalCacheFeature = shouldUseGlobalCacheScope()
   if (useGlobalCacheFeature && options?.skipGlobalCacheForSystemPrompt) {
     logEvent('tengu_sysprompt_using_tool_based_cache', {

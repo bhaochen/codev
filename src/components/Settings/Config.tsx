@@ -405,6 +405,25 @@ export function Config({
       },
     },
     {
+      id: 'bareModeEnabled',
+      label: 'Bare mode (CLAUDE_CODE_SIMPLE)',
+      value: globalConfig.bareModeEnabled,
+      type: 'boolean' as const,
+      onChange(bareModeEnabled: boolean) {
+        saveGlobalConfig(current => ({ ...current, bareModeEnabled }))
+        setGlobalConfig({ ...getGlobalConfig(), bareModeEnabled })
+        // Apply immediately by setting the environment variable
+        if (bareModeEnabled) {
+          process.env.CLAUDE_CODE_SIMPLE = '1'
+        } else {
+          delete process.env.CLAUDE_CODE_SIMPLE
+        }
+        logEvent('tengu_bare_mode_setting_changed', {
+          enabled: bareModeEnabled,
+        })
+      },
+    },
+    {
       id: 'spinnerTipsEnabled',
       label: 'Show tips',
       value: settingsData?.spinnerTipsEnabled ?? true,
@@ -2219,6 +2238,7 @@ export function Config({
                                   setting.value.toString()
                                 ] ??
                                   setting.value.toString()}
+                              </Text>
                             ) : setting.id === 'fullscreenMode' ? (
                               <Text
                                 color={isSelected ? 'suggestion' : undefined}
@@ -2227,7 +2247,6 @@ export function Config({
                                   setting.value.toString()
                                 ] ??
                                   setting.value.toString()}
-                              </Text>
                               </Text>
                             ) : setting.id === 'theme' ? (
                               <Text

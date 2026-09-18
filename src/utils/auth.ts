@@ -501,7 +501,7 @@ export function getOpenCodeModelName(): null | string {
   return null
 }
 
-export async function saveLocalModelConfig(baseUrl: string, modelName: string): Promise<void> {
+export async function saveLocalModelConfig(baseUrl: string, modelName: string, contextWindow?: number): Promise<void> {
   if (!baseUrl.trim()) {
     throw new Error('Base URL cannot be empty')
   }
@@ -514,11 +514,14 @@ export async function saveLocalModelConfig(baseUrl: string, modelName: string): 
   }
   
   saveGlobalConfig(current => {
-    const newConfig = {
+    const newConfig: any = {
       ...current,
       authProvider: 'local',
       localBaseUrl: baseUrl,
       localModelName: modelName,
+    }
+    if (contextWindow !== undefined) {
+      newConfig.localModelContextWindow = contextWindow
     }
     return newConfig
   })
@@ -559,6 +562,25 @@ export function getLocalBaseUrl(): string | null {
 
     if (config.authProvider === 'local' && config.localBaseUrl) {
       return config.localBaseUrl
+    }
+    return null
+  } catch (error) {
+    return null
+  }
+}
+
+export function getLocalModelContextWindowConfig(): number | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { readFileSync } = require('fs') as typeof import('fs')
+    const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
+    const config = JSON.parse(raw) as {
+      authProvider?: string
+      localModelContextWindow?: number
+    }
+
+    if (config.authProvider === 'local' && config.localModelContextWindow) {
+      return config.localModelContextWindow
     }
     return null
   } catch (error) {

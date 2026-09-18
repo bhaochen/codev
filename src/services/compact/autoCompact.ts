@@ -45,7 +45,13 @@ export function getEffectiveContextWindowSize(model: string): number {
     }
   }
 
-  return contextWindow - reservedTokensForSummary
+  // For small context windows (e.g., local models with 8K-16K), ensure we don't
+  // reserve more tokens than the context window allows. Reserve at most 50% of
+  // the context window for summary output, with a minimum of 1000 tokens.
+  const maxReserved = Math.max(Math.floor(contextWindow * 0.5), 1_000)
+  const effectiveReserved = Math.min(reservedTokensForSummary, maxReserved)
+
+  return Math.max(contextWindow - effectiveReserved, 1_000)
 }
 
 export type AutoCompactTrackingState = {

@@ -481,6 +481,11 @@ export function filterToolsByDenyRules<T extends { name: string; mcpInfo?: ... }
 `getTools()` 函数（`src/tools.ts`）的组装流程：
 
 1. **Simple 模式**（`CLAUDE_CODE_SIMPLE=1`）：返回 `BashTool`、`FileReadTool`、`FileEditTool`（恒叠加 `REPLTool`），加上协调者模式所需的 `AgentTool` + `TaskStopTool`。
+
+   **注意**：此模式同时也会影响 system prompt 的身份介绍：
+   - system prompt 以 `"You are Codev, chenbhao's CLI."` 开头
+   - 详见 `src/constants/prompts.ts:447-451` 与 `docs/tools/overview.md`
+
 2. **完整模式**：通过 `getAllBaseTools()` 获取所有工具，移除特殊工具（`ListMcpResourcesTool`、`ReadMcpResourceTool`、`SYNTHETIC_OUTPUT_TOOL_NAME`）。
 3. **应用拒绝规则**：`filterToolsByDenyRules()`。
 4. **REPL 恒在**（不变量）：`REPL` 必在池中，无开关；所有原语始终可直接调用 —— REPL 是叠加的编程环境，不隐藏任何工具。

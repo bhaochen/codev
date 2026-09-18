@@ -224,17 +224,19 @@ export function getAPIProvider(): APIProvider | null {
       ? 'vertex'
       : isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY)
         ? 'foundry'
-        : isOpencodeConfigured()
-          ? 'opencode'
-          : isNvidiaConfigured()
-            ? 'nvidia'
-            : isOpenAIConfigured()
-            ? 'openai'
-            : isOpenRouterConfigured()
-              ? 'openrouter'
-                // This fork defaults to the OpenCode free gateway when no provider is
-                // configured (fresh machine / empty ~/.claude.json), not null -> firstParty Anthropic.
-              : getStoredProviderPreference() ?? 'opencode'
+        : isLocalConfigured()
+          ? 'local'
+          : isOpencodeConfigured()
+            ? 'opencode'
+            : isNvidiaConfigured()
+              ? 'nvidia'
+              : isOpenAIConfigured()
+                ? 'openai'
+                : isOpenRouterConfigured()
+                  ? 'openrouter'
+                  // This fork defaults to the OpenCode free gateway when no provider is
+                  // configured (fresh machine / empty ~/.claude.json), not null -> firstParty Anthropic.
+                : getStoredProviderPreference() ?? 'opencode'
 }
 
 export function getAPIProviderForStatsig(): AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS {

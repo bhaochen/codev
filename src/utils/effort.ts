@@ -89,7 +89,7 @@ export function modelSupportsEffort(model: string): boolean {
     return false
   }
   if (provider === 'opencode') {
-    const { getOpencodeModelReasoningOptions } = require('../services/api/opencodeClient.js') as {
+    const { getOpencodeModelReasoningOptions } = require('./model/opencodeModels.js') as {
       getOpencodeModelReasoningOptions: (id: string) => string[] | undefined
     }
     const opts = getOpencodeModelReasoningOptions(canonical)
@@ -210,7 +210,7 @@ export function getModelSupportedEfforts(model: string): EffortLevel[] {
   }
 
   if (getAPIProvider() === 'opencode') {
-    const { getOpencodeModelReasoningOptions } = require('../services/api/opencodeClient.js') as {
+    const { getOpencodeModelReasoningOptions } = require('./model/opencodeModels.js') as {
       getOpencodeModelReasoningOptions: (id: string) => string[] | undefined
     }
     const ocOpts = getOpencodeModelReasoningOptions(canonical)

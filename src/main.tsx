@@ -1017,6 +1017,16 @@ async function run(): Promise<CommanderCommand> {
       process.env.CLAUDE_CODE_SIMPLE = '1';
     }
 
+    // Apply bareModeEnabled from config (CLAUDE_CODE_SIMPLE)
+    // Must be set before setup() / any gated work runs (same as --bare flag)
+    {
+      const { enableConfigs, getGlobalConfig } = await import('./utils/config.js');
+      enableConfigs();
+      if (getGlobalConfig().bareModeEnabled) {
+        process.env.CLAUDE_CODE_SIMPLE = '1';
+      }
+    }
+
     // Ignore "code" as a prompt - treat it the same as no prompt
     if (prompt === 'code') {
       logEvent('tengu_code_prompt_ignored', {});

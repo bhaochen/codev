@@ -93,7 +93,7 @@ export async function call(
           const { getAPIProvider } = await import('../../utils/model/providers.js')
           const provider = getAPIProvider()
           if (provider === 'opencode') {
-            const { fetchOpencodeModels } = await import('../../services/api/opencodeClient.js')
+            const { fetchOpencodeModels } = await import('../../utils/model/opencodeModels.js')
             await fetchOpencodeModels()
           } else if (provider === 'nvidia') {
             const { fetchNvidiaModels } = await import('../../services/api/nvidiaClient.js')

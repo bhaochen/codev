@@ -1,4 +1,4 @@
-import { getLocalBaseUrl } from '../../utils/auth.js'
+import { getLocalBaseUrl, getLocalModelContextWindowConfig, getLocalModelName } from '../../utils/auth.js'
 
 type CachedLocalModel = {
   id: string
@@ -103,6 +103,12 @@ async function doFetchModels(): Promise<void> {
     modelIds = [...contextWindows.keys()]
   }
 
+  // Also include the saved model name from config if not already in the list
+  const savedModelName = getLocalModelName()
+  if (savedModelName && !modelIds.includes(savedModelName)) {
+    modelIds.push(savedModelName)
+  }
+
   cachedModels = modelIds.map(id => {
     const cw = contextWindows.get(id)
     return {
@@ -125,9 +131,12 @@ export function getCachedLocalModels(): CachedLocalModel[] {
 }
 
 export function getLocalModelContextWindow(modelId: string): number | undefined {
-  if (!cachedModels) return undefined
+  if (!cachedModels) {
+    // Fallback to config-saved context window
+    return getLocalModelContextWindowConfig() ?? undefined
+  }
   const model = cachedModels.find(m => m.id === modelId)
-  return model?.contextWindow
+  return model?.contextWindow ?? getLocalModelContextWindowConfig() ?? undefined
 }
 
 export function getLocalModelMaxTokens(modelId: string): number | undefined {

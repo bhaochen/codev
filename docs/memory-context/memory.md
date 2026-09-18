@@ -194,7 +194,9 @@ export type RelevantMemory = {
 
 禁用链（优先级从高到低）：
 1. `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1/true` 环境变量
-2. `CLAUDE_CODE_SIMPLE`（--bare 模式）
+2. `CLAUDE_CODE_SIMPLE`（--bare 模式）：同时影响 system prompt 身份介绍
+   - 启用后：system prompt 以 `"You are Codev, chenbhao's CLI."` 开头
+   - 未启用：使用完整 Claude Code system prompt，模型自我认知为 "Claude Code"
 3. 远程模式但未设置 `CLAUDE_CODE_REMOTE_MEMORY_DIR`
 4. `autoMemoryEnabled: false` 在 settings.json 中
 5. 默认：启用

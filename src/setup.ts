@@ -398,7 +398,7 @@ export async function setup(
     const { startOpenRouterModelsFetch } = await import('./utils/model/openRouterModels.js')
     startOpenRouterModelsFetch()
   } else if (configuredAuthProvider === 'opencode') {
-    const { fetchOpencodeModels } = await import('./services/api/opencodeClient.js')
+    const { fetchOpencodeModels } = await import('./utils/model/opencodeModels.js')
     void fetchOpencodeModels()
   } else if (configuredAuthProvider === 'nvidia') {
     const { fetchNvidiaModels } = await import('./services/api/nvidiaClient.js')

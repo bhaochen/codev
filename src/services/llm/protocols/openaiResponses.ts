@@ -424,7 +424,7 @@ export async function buildOpenAIResponsesBody(
   let effectiveUpperLimit = upperLimit
   if (route.provider === 'opencode') {
     try {
-      const { getOpencodeModelMaxTokens } = await import('../../api/opencodeClient.js')
+      const { getOpencodeModelMaxTokens } = await import('../../../utils/model/opencodeModels.js')
       const catalogCap = getOpencodeModelMaxTokens(model)
       if (typeof catalogCap === 'number' && catalogCap >= 4_096) {
         effectiveUpperLimit = Math.min(upperLimit, catalogCap)

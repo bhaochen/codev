@@ -96,7 +96,7 @@ export async function* queryOpenAIChat(
     )
     let isFree = model.includes('free') || model.includes('contributor')
     try {
-      const { getCachedOpencodeModels } = await import('../../api/opencodeClient.js')
+      const { getCachedOpencodeModels } = await import('../../../utils/model/opencodeModels.js')
       const list = getCachedOpencodeModels()
       if (list.length > 0) {
         const meta = list.find(m => m.id === model || model.includes(m.id) || m.id.includes(model))
@@ -110,7 +110,7 @@ export async function* queryOpenAIChat(
     let effectiveUpperLimit = upperLimit
     if (route.provider === 'opencode') {
       try {
-        const { getOpencodeModelMaxTokens } = await import('../../api/opencodeClient.js')
+        const { getOpencodeModelMaxTokens } = await import('../../../utils/model/opencodeModels.js')
         const catalogCap = getOpencodeModelMaxTokens(model)
         if (typeof catalogCap === 'number' && catalogCap >= 4_096) {
           effectiveUpperLimit = Math.min(upperLimit, catalogCap)

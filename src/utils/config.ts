@@ -199,6 +199,7 @@ export type GlobalConfig = {
   // Local model configuration
   localBaseUrl?: string
   localModelName?: string
+  localModelContextWindow?: number
   
   // OpenCode Zen configuration
   openCodeApiKey?: string
@@ -259,6 +260,7 @@ export type GlobalConfig = {
   hasUsedBackslashReturn?: boolean
   autoCompactEnabled: boolean // Controls whether auto-compact is enabled
   showTurnDuration: boolean // Controls whether to show turn duration message (e.g., "Cooked for 1m 6s")
+  bareModeEnabled: boolean // Controls whether bare/simple mode is enabled (CLAUDE_CODE_SIMPLE)
   /**
    * @deprecated Use settings.env instead.
    */
@@ -633,6 +635,7 @@ function createDefaultGlobalConfig(): GlobalConfig {
     editorMode: 'normal',
     autoCompactEnabled: true,
     showTurnDuration: true,
+    bareModeEnabled: false,
     hasSeenTasksHint: false,
     hasUsedStash: false,
     hasUsedBackgroundTask: false,
@@ -672,6 +675,7 @@ export const GLOBAL_CONFIG_KEYS = [
   'openAiAccessToken',
   'localBaseUrl',
   'localModelName',
+  'localModelContextWindow',
   'nvidiaApiKey',
   'installMethod',
   'autoUpdates',
@@ -684,6 +688,7 @@ export const GLOBAL_CONFIG_KEYS = [
   'shiftEnterKeyBindingInstalled',
   'editorMode',
   'hasUsedBackslashReturn',
+  'bareModeEnabled',
   'autoCompactEnabled',
   'showTurnDuration',
   'diffTool',

@@ -56,12 +56,25 @@ export function isEnvDefinedFalsy(
  * Checks argv directly (in addition to the env var) because several gates
  * run before main.tsx's action handler sets CLAUDE_CODE_SIMPLE=1 from --bare
  * — notably startKeychainPrefetch() at main.tsx top-level.
+ *
+ * Also checks global config for bareModeEnabled setting.
  */
 export function isBareMode(): boolean {
-  return (
-    isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE) ||
-    process.argv.includes('--bare')
-  )
+  if (isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)) return true
+  if (process.argv.includes('--bare')) return true
+
+  // Check config file for bareModeEnabled (sync read for early gates)
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { readFileSync } = require('fs') as typeof import('fs')
+    const { getGlobalClaudeFile } = require('./env.js') as typeof import('./env.js')
+    const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
+    const config = JSON.parse(raw) as { bareModeEnabled?: boolean }
+    if (config.bareModeEnabled === true) return true
+  } catch {
+    // Ignore errors (file not found, parse error, etc.)
+  }
+  return false
 }
 
 /**

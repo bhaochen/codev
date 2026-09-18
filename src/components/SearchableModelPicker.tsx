@@ -136,7 +136,7 @@ export function SearchableModelPicker({
           const MAX_RETRIES = 5
 
           async function tryFetch(): Promise<void> {
-            const { fetchOpencodeModels } = await import('../services/api/opencodeClient.js')
+            const { fetchOpencodeModels } = await import('../utils/model/opencodeModels.js')
             await fetchOpencodeModels()
           }
           void tryFetch()
@@ -147,7 +147,7 @@ export function SearchableModelPicker({
               return
             }
             try {
-              const { getCachedOpencodeModels } = await import('../services/api/opencodeClient.js')
+              const { getCachedOpencodeModels } = await import('../utils/model/opencodeModels.js')
               const models = getCachedOpencodeModels()
               if (models && models.length > 0) {
                 if (mounted) {

@@ -50,7 +50,7 @@ export type ModelOption = {
 function resolveOpencodeDisplayName(modelId: string): string {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { getOpencodeModelDisplayName } = require('../../services/api/opencodeClient.js') as typeof import('../../services/api/opencodeClient.js')
+    const { getOpencodeModelDisplayName } = require('./opencodeModels.js')
     return getOpencodeModelDisplayName(modelId) ?? modelId
   } catch {
     return modelId
@@ -401,10 +401,19 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
     const { getCachedLocalModels } = require('../../services/api/localClient.js')
     const models = getCachedLocalModels()
 
-    if (models && models.length > 0) {
+    // Also get the saved model name from config as fallback
+    const { getLocalModelName } = require('../../utils/auth.js')
+    const savedModelName = getLocalModelName()
+
+    const allModels = [...models]
+    if (savedModelName && !models.some(m => m.id === savedModelName)) {
+      allModels.push({ id: savedModelName, contextWindow: undefined, maxTokens: undefined })
+    }
+
+    if (allModels.length > 0) {
       return [
         getDefaultOptionForUser(fastMode),
-        ...models.map(m => ({
+        ...allModels.map(m => ({
           value: m.id,
           label: m.id,
           description: 'Llama.cpp model',
@@ -537,7 +546,8 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
   if (getAPIProvider() === 'opencode') {
     const defaultOpt = getDefaultOptionForUser(fastMode)
     try {
-      const { getCachedOpencodeModels } = require('../../services/api/opencodeClient.js')
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getCachedOpencodeModels } = require('./opencodeModels.js')
       const { getOpenCodeApiKey: getApiKey } = require('../../utils/auth.js')
       const models = getCachedOpencodeModels()
       const hasApiKey = !!getApiKey()

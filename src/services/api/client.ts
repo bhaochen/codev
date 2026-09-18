@@ -20,7 +20,7 @@ import {
   getOpenRouterBaseUrl,
 } from 'src/utils/model/providers.js'
 import { getProxyFetchOptions } from 'src/utils/proxy.js'
-import { fetchOpencodeModels } from './opencodeClient.js'
+import { fetchOpencodeModels } from '../../utils/model/opencodeModels.js'
 import {
   getIsNonInteractiveSession,
   getSessionId,

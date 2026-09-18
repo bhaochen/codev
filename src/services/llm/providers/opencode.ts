@@ -4,7 +4,7 @@ import { getOpencodeBaseUrl } from '../../../utils/model/providers.js'
 
 function isFreeModel(modelId: string): boolean {
   try {
-    const { getCachedOpencodeModels } = require('../../api/opencodeClient.js') as typeof import('../../api/opencodeClient.js')
+    const { getCachedOpencodeModels } = require('../../../utils/model/opencodeModels.js') as typeof import('../../../utils/model/opencodeModels.js')
     const list = getCachedOpencodeModels()
     const hit = list.find(m => m.id === modelId || modelId.includes(m.id) || m.id.includes(modelId))
     return hit?.isFree ?? false

@@ -509,7 +509,7 @@ export function getPublicModelDisplayName(model: ModelName): string | null {
   if (getAPIProvider() === 'opencode') {
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { getOpencodeModelDisplayName } = require('../../services/api/opencodeClient.js') as typeof import('../../services/api/opencodeClient.js')
+      const { getOpencodeModelDisplayName } = require('./opencodeModels.js') as typeof import('./opencodeModels.js')
       return getOpencodeModelDisplayName(model) ?? model
     } catch {
       return model
