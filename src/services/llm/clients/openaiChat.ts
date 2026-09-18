@@ -1,20 +1,17 @@
 /**
  * OpenAI Chat 协议共享客户端 — OpenAI / OpenCode / DeepSeek / Qwen 等凡走 openai-chat 的 Provider 共用。
  * Provider 仅提供 endpoint/protocol/model mapping/auth identity 元数据，Client 只懂协议。
+ *
+ * Native 实现：wire 装配（请求体/消息/工具/SSE 解析）位于 protocols/openaiChatWire.ts，
+ * 不经 @ant/model-provider / Anthropic 消息中间表示。reasoning 直接读
+ * LLMRequestConfig（config.thinking / context.effortValue）。
  */
 import type { LLMRoute } from '../types.js'
-import type { Tools } from '../../../Tool.js'
 import type { LLMRequest } from '../runtime/types.js'
-import type { StreamEvent, AssistantMessage, SystemAPIErrorMessage, UserMessage } from '../../../types/message.js'
-import { APIUserAbortError } from '@anthropic-ai/sdk'
+import type { StreamEvent, AssistantMessage, SystemAPIErrorMessage } from '../../../types/message.js'
+import type { AgentContentBlock } from '../../../types/agentMessage.js'
+import { APIUserAbortError } from '@anthropic-ai/sdk/error'
 import { randomUUID } from 'crypto'
-import {
-  anthropicToolChoiceToOpenAI,
-  adaptOpenAIStreamToAnthropic,
-  convertAnthropicMessagesToOpenAI,
-  convertAnthropicToolsToOpenAI,
-  type AnthropicMessage,
-} from '@ant/model-provider'
 import { httpRequest } from '../transport/http.js'
 import { parseOpenAIChunksFromSSE } from '../transport/sse.js'
 import { getSessionId } from '../../../bootstrap/state.js'
@@ -30,34 +27,34 @@ import { toolToAPISchema } from '../../../utils/api.js'
 import { calculateUSDCost } from '../../../utils/modelCost.js'
 import { addToTotalSessionCost } from '../../../cost-tracker.js'
 import { isAbortError } from '../../../utils/errors.js'
-import type { BetaMessage, BetaStopReason, BetaToolUnion, BetaUsage } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
-import { buildOpenAIRequestBody, resolveOpenAIMaxTokens } from '../../api/openai/requestBody.js'
+import { resolveOpenAIMaxTokens } from '../../api/openai/requestBody.js'
 import { formatOpenAIPromptCacheKey, updateOpenAIUsage } from '../../api/openai/openaiShared.js'
 import { resolveAuth } from '../auth/resolveAuth.js'
 import { createOpencodeId, getOpencodeProjectId, getOpencodeUserAgent } from '../../api/opencodeUserAgent.js'
+import {
+  adaptOpenAIChatSSE,
+  agentMessagesToOpenAIChatMessages,
+  buildOpenAIChatBody,
+  chatCompletionsUrlFromBase,
+  openAIChatToolChoiceFromLLM,
+  openAIChatToolsFromSchemas,
+  resolveOpenAIChatThinking,
+  type OpenAIChatNormalizedUsage,
+  type OpenAIChatStreamEvent,
+  type OpenAIChatWireChunk,
+} from '../protocols/openaiChatWire.js'
 
-function isConvertibleMessage(msg: AssistantMessage | UserMessage): msg is AssistantMessage | UserMessage {
-  return (msg as { type?: string }).type === 'assistant' || (msg as { type?: string }).type === 'user'
-}
-function toAnthropicMessage(msg: AssistantMessage | UserMessage): AnthropicMessage {
-  const inner = (msg as unknown as { message?: { role: 'user' | 'assistant'; content: AnthropicMessage['content'] } }).message
-  return { role: inner?.role ?? 'user', content: inner?.content ?? '' }
-}
-function chatCompletionsUrl(base: string): string {
-  const b = base.replace(/\/$/, '')
-  if (b.endsWith('/v1')) return `${b}/chat/completions`
-  return `${b}/v1/chat/completions`
-}
+type OpenAIChatStartMessage = Extract<OpenAIChatStreamEvent, { type: 'message_start' }>['message']
 
 export async function* queryOpenAIChat(
   route: LLMRoute,
   request: LLMRequest,
 ): AsyncGenerator<StreamEvent | AssistantMessage | SystemAPIErrorMessage, void> {
-  const { messages, systemPrompt, tools, signal } = request
-  let partialMessage: BetaMessage | null = null
+  const { messages, systemPrompt, tools, signal, config, context } = request
+  let partialMessage: OpenAIChatStartMessage | null = null
   let ttftMs = 0
   const start = Date.now()
-  let usage = { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
+  let usage: OpenAIChatNormalizedUsage = { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
   let stopReason: string | null = null
   let maxTokens = 0
   try {
@@ -69,31 +66,33 @@ export async function* queryOpenAIChat(
     const toolSchemas = await Promise.all(
       tools.map(tool =>
         toolToAPISchema(tool, {
-          getToolPermissionContext: request.context.getToolPermissionContext,
+          getToolPermissionContext: context.getToolPermissionContext,
           tools,
-          agents: request.context.agents,
-          allowedAgentTypes: request.context.allowedAgentTypes,
+          agents: context.agents,
+          allowedAgentTypes: context.allowedAgentTypes,
           model,
         }),
       ),
     )
-    const standardTools = toolSchemas.filter(
-      (t): t is BetaToolUnion & { type: string } => {
-        const anyT = t as unknown as Record<string, unknown>
-        return anyT.type !== 'advisor_20260301' && anyT.type !== 'computer_20250124'
-      },
-    )
-    let openaiMessages = convertAnthropicMessagesToOpenAI(
-      messagesForAPI.filter(isConvertibleMessage).map(toAnthropicMessage),
+    const openaiMessages = agentMessagesToOpenAIChatMessages(
+      messagesForAPI,
       systemPrompt?.join('\n'),
       { supportsImages: true },
     )
-    let openaiTools = convertAnthropicToolsToOpenAI(
-      standardTools.map(t => ({
-        name: (t as { name?: string }).name ?? '',
-        description: (t as { description?: string }).description,
-        input_schema: (t as { input_schema?: Record<string, unknown> }).input_schema,
-      })),
+    const openaiTools = openAIChatToolsFromSchemas(
+      toolSchemas
+        .filter(t => {
+          const anyT = t as unknown as Record<string, unknown>
+          return anyT.type !== 'advisor_20260301' && anyT.type !== 'computer_20250124'
+        })
+        .map(t => {
+          const rec = t as unknown as Record<string, unknown>
+          return {
+            name: (rec.name as string) ?? '',
+            description: rec.description as string | undefined,
+            input_schema: rec.input_schema as Record<string, unknown> | undefined,
+          }
+        }),
     )
     let isFree = model.includes('free') || model.includes('contributor')
     try {
@@ -118,17 +117,21 @@ export async function* queryOpenAIChat(
         }
       } catch {}
     }
-    maxTokens = resolveOpenAIMaxTokens(effectiveUpperLimit, request.config.maxOutputTokens)
+    maxTokens = resolveOpenAIMaxTokens(effectiveUpperLimit, config.maxOutputTokens)
     const promptCacheKey = formatOpenAIPromptCacheKey(getSessionId())
-    logForDebugging(`[OpenAIChat] provider=${route.provider} model=${model} endpoint=${endpoint} tools=${openaiTools.length}`)
-    const body = buildOpenAIRequestBody({
+    // reasoning 由 LLMRequestConfig 直构：config.thinking / context.effortValue /
+    // 模型与 env 检测都归口到 native thinking 配置，见 resolveOpenAIChatThinking。
+    const { enableThinking, reasoning_effort: reasoningEffort } = resolveOpenAIChatThinking(model, config, context)
+    logForDebugging(`[OpenAIChat] provider=${route.provider} model=${model} endpoint=${endpoint} tools=${openaiTools.length} thinking=${enableThinking ? 'on' : 'off'}`)
+    const body = buildOpenAIChatBody({
       model,
       messages: openaiMessages,
       tools: openaiTools,
-      toolChoice: anthropicToolChoiceToOpenAI(request.config.toolChoice as unknown as Parameters<typeof anthropicToolChoiceToOpenAI>[0]),
-      enableThinking: false,
+      toolChoice: openAIChatToolChoiceFromLLM(config.toolChoice),
+      enableThinking,
+      reasoningEffort,
       maxTokens,
-      temperatureOverride: request.config.temperature,
+      temperatureOverride: config.temperature,
       promptCacheKey,
     })
     const headers: Record<string, string> = {
@@ -148,8 +151,8 @@ export async function* queryOpenAIChat(
     }
     if (cred.type === 'bearer') headers.Authorization = `Bearer ${cred.token}`
     else headers.Authorization = 'Bearer public'
-    const fetchOverride = request.context.fetchOverride as unknown as typeof fetch | undefined
-    const url = endpoint.includes('/chat/completions') ? endpoint : chatCompletionsUrl(endpoint)
+    const fetchOverride = context.fetchOverride as unknown as typeof fetch | undefined
+    const url = endpoint.includes('/chat/completions') ? endpoint : chatCompletionsUrlFromBase(endpoint)
     let response = await httpRequest(
       { url, method: 'POST', headers, body: JSON.stringify(body), signal },
       fetchOverride,
@@ -164,7 +167,7 @@ export async function* queryOpenAIChat(
       )
       if (response.ok) {
         // 回退成功，更新 model 供后续 usage 统计
-        ;(body as any).model = 'big-pickle'
+        ;(body as { model?: string }).model = 'big-pickle'
       }
     }
     if (!response.ok) {
@@ -172,35 +175,34 @@ export async function* queryOpenAIChat(
       throw new Error(`Upstream ${route.provider} failed (${response.status})${text ? `: ${text.slice(0, 800)}` : ''}`)
     }
     if (!response.body) throw new Error('Upstream response missing body')
-    const adaptedStream = adaptOpenAIStreamToAnthropic(parseOpenAIChunksFromSSE(response.body) as AsyncIterable<never>, model, { includeCacheWriteTokens: false })
+    const adaptedStream = adaptOpenAIChatSSE(parseOpenAIChunksFromSSE(response.body) as AsyncIterable<OpenAIChatWireChunk>, model, { includeCacheWriteTokens: false })
     const newMessages: AssistantMessage[] = []
     const contentBlocks: Record<number, Record<string, unknown>> = {}
     for await (const event of adaptedStream) {
       switch (event.type) {
         case 'message_start': {
-          partialMessage = event.message as unknown as BetaMessage
+          partialMessage = event.message
           ttftMs = Date.now() - start
-          if (event.message?.usage) usage = { ...usage, ...(event.message.usage as unknown as typeof usage) }
+          if (event.message.usage) usage = { ...usage, ...(event.message.usage as unknown as typeof usage) }
           break
         }
         case 'content_block_start': {
           const idx = event.index
-          const cb = event.content_block as any
-          if (cb.type === 'tool_use') contentBlocks[idx] = { ...(cb as any), input: '' }
-          else if (cb.type === 'text') contentBlocks[idx] = { ...(cb as any), text: '' }
-          else if (cb.type === 'thinking') contentBlocks[idx] = { ...(cb as any), thinking: '', signature: '' }
-          else contentBlocks[idx] = { ...(cb as any) }
+          const cb = event.content_block as unknown as Record<string, unknown>
+          if (cb.type === 'tool_use') contentBlocks[idx] = { ...cb, input: '' }
+          else if (cb.type === 'text') contentBlocks[idx] = { ...cb, text: '' }
+          else if (cb.type === 'thinking') contentBlocks[idx] = { ...cb, thinking: '' }
+          else contentBlocks[idx] = { ...cb }
           break
         }
         case 'content_block_delta': {
           const idx = event.index
-          const block = contentBlocks[idx] as any
+          const block = contentBlocks[idx] as Record<string, unknown> | undefined
           if (!block) break
-          const delta = event.delta as any
+          const delta = event.delta as { type: string; text?: string; partial_json?: string; thinking?: string }
           if (delta.type === 'text_delta') block.text = ((block.text as string | undefined) || '') + delta.text
           else if (delta.type === 'input_json_delta') block.input = ((block.input as string | undefined) || '') + delta.partial_json
           else if (delta.type === 'thinking_delta') block.thinking = ((block.thinking as string | undefined) || '') + delta.thinking
-          else if (delta.type === 'signature_delta') block.signature = delta.signature
           break
         }
         case 'content_block_stop': {
@@ -209,7 +211,7 @@ export async function* queryOpenAIChat(
           const m: AssistantMessage = {
             message: {
               ...partialMessage,
-              content: normalizeContentFromAPI([contentBlock] as unknown as BetaMessage['content'], tools, request.context.agentId as AgentId | undefined),
+              content: normalizeContentFromAPI([contentBlock] as unknown as AgentContentBlock[], tools, context.agentId as AgentId | undefined),
             },
             requestId: undefined,
             type: 'assistant',
@@ -224,14 +226,14 @@ export async function* queryOpenAIChat(
           const deltaUsage = event.usage
           if (deltaUsage) usage = updateOpenAIUsage(usage, deltaUsage as unknown as Parameters<typeof updateOpenAIUsage>[1])
           if (event.delta?.stop_reason != null) stopReason = event.delta.stop_reason
-          const lastMsg = newMessages.at(-1) as (AssistantMessage & { message: BetaMessage }) | undefined
+          const lastMsg = newMessages.at(-1) as (AssistantMessage & { message: { usage?: typeof usage; stop_reason?: string | null } }) | undefined
           if (lastMsg) {
-            lastMsg.message.usage = usage as BetaUsage
-            lastMsg.message.stop_reason = stopReason as BetaStopReason | null
+            lastMsg.message.usage = usage
+            lastMsg.message.stop_reason = stopReason
           }
           if (usage.input_tokens + usage.output_tokens > 0) {
             const costUSD = calculateUSDCost(model, usage as unknown as Parameters<typeof calculateUSDCost>[1])
-            addToTotalSessionCost(costUSD, usage as unknown as Parameters<typeof addToTotalSessionCost>[1], request.model)
+            addToTotalSessionCost(costUSD, usage as unknown as Parameters<typeof addToTotalSessionCost>[1], context.model)
           }
           break
         }
@@ -239,12 +241,20 @@ export async function* queryOpenAIChat(
       }
       yield { type: 'stream_event', event, ...(event.type === 'message_start' ? { ttftMs } : undefined) } as unknown as StreamEvent
     }
-    const lastMsg = newMessages.at(-1) as (AssistantMessage & { message: BetaMessage }) | undefined
+    const lastMsg = newMessages.at(-1) as
+      | (AssistantMessage & {
+          message: {
+            content: unknown[]
+            usage?: OpenAIChatNormalizedUsage
+            stop_reason?: string | null
+          }
+        })
+      | undefined
     const lastHasToolUse = (lastMsg?.message.content ?? []).some(block => (block as { type?: string }).type === 'tool_use') ?? false
     if (stopReason === null && !lastHasToolUse) {
       if (lastMsg) {
-        lastMsg.message.usage = usage as BetaUsage
-        lastMsg.message.stop_reason = 'max_tokens' as BetaStopReason
+        lastMsg.message.usage = usage
+        lastMsg.message.stop_reason = 'max_tokens'
       }
       yield createAssistantAPIErrorMessage({
         content: `Upstream ${route.provider} response exceeded ${maxTokens} tokens`,
