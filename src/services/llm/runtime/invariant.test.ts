@@ -32,7 +32,6 @@ describe('P6 invariants', () => {
     expect(s).toContain('route.endpoint')
     expect(s).toContain('resolveAuth')
     // 不应出现按 Provider 分流 tool 逻辑
-    expect(s).not.toMatch(/if\s*\(\s*route\.provider\s*===\s*['"]openai['"]\s*\)\s*\{[^}]*queryModelOpenAI/)
     expect(s).not.toMatch(/if\s*\(\s*route\.provider\s*===\s*['"]opencode['"]\s*\)\s*\{[^}]*queryModelOpencode/)
     // AnthropicMessages 同样不应分支 provider
     const s2 = readFileSync('src/services/llm/clients/anthropicMessages.ts', 'utf8')

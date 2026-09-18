@@ -6,6 +6,7 @@
  * - requestBody.ts   thinking 模式检测 + 请求体构造（多格式 thinking 参数）
  * - openaiShared.ts  官方端点判定 / prompt cache key / usage 合并
  * - models.ts        模型列表获取（telegram /connect 用）
+ * - chatgptAuth.ts   ChatGPT 设备码登录
  *
  * 转换管线（消息/工具/流/usage/错误）由共享包 @ant/model-provider 提供。
  */
@@ -29,7 +30,6 @@ export {
   fetchOpenAICompatibleModelIds,
   fetchAnthropicCompatibleModelIds,
 } from './models.js'
-export { queryModelOpenAI } from './queryModelOpenAI.js'
 export {
   isChatGPTAuthEnabled,
   requestChatGPTDeviceCode,
