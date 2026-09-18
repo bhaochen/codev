@@ -265,6 +265,7 @@ import {
 import { StreamingSpecDispatcher } from '../../tools/StreamingSpecDispatcher.js'
 
 import type { LLMRoute } from '../types.js'
+import type { LLMRequest } from '../runtime/types.js'
 
 // Define a type that represents valid JSON values
 type JsonValue = string | number | boolean | null | JsonObject | JsonArray
@@ -970,14 +971,61 @@ export function stripExcessMediaItems(
 }
 
 
+/**
+ * Adapt the provider-neutral LLMRequest to this Anthropic-boundary Options.
+ * This is the only place the Anthropic protocol implementation reads the
+ * neutral service types; every value crosses by reference so runtime behavior
+ * is unchanged. `thinkingConfig` is a codev semantic (not an Anthropic SDK
+ * field) — it rides on the boundary bundle where the body below reads it.
+ */
+export function assembleAnthropicOptions(request: LLMRequest): Options {
+  const { config, context } = request
+  const providerOptions = config.providerOptions ?? {}
+  const options: Options = {
+    getToolPermissionContext: context.getToolPermissionContext,
+    model: context.model,
+    toolChoice: config.toolChoice as BetaToolChoiceTool | BetaToolChoiceAuto | undefined,
+    isNonInteractiveSession: context.isNonInteractiveSession,
+    extraToolSchemas: providerOptions.extraToolSchemas as BetaToolUnion[] | undefined,
+    maxOutputTokensOverride: config.maxOutputTokens,
+    fallbackModel: context.fallbackModel,
+    onStreamingFallback: context.onStreamingFallback,
+    querySource: context.querySource,
+    agents: context.agents,
+    hasAppendSystemPrompt: context.hasAppendSystemPrompt,
+    temperatureOverride: config.temperature,
+    effortValue: context.effortValue,
+    mcpTools: context.mcpTools,
+    hasPendingMcpServers: context.hasPendingMcpServers,
+    queryTracking: context.queryTracking,
+    agentId: context.agentId,
+    outputFormat: config.responseFormat as BetaJSONOutputFormat | undefined,
+    fastMode: context.fastMode,
+    addNotification: context.addNotification,
+    taskBudget: config.taskBudget,
+    specStore: context.specStore,
+    specBudget: context.specBudget,
+  }
+  // Only attach optional fields that actually have values — avoid polluting
+  // the Options object with undefined keys (preserves key-set equivalence
+  // with the caller-provided Options in round-trip tests).
+  if (context.allowedAgentTypes !== undefined) options.allowedAgentTypes = context.allowedAgentTypes
+  if (context.fetchOverride !== undefined) options.fetchOverride = context.fetchOverride as ClientOptions['fetch']
+  if (config.cache?.enabled !== undefined) options.enablePromptCaching = config.cache.enabled
+  if (config.cache?.skipWrite !== undefined) options.skipCacheWrite = config.cache.skipWrite
+  if (context.advisorModel !== undefined) options.advisorModel = context.advisorModel
+  ;(options as unknown as { thinkingConfig: ThinkingConfig }).thinkingConfig =
+    config.thinking ?? { type: 'disabled' }
+  return options
+}
+
 export async function* queryAnthropicMessages(
   route: LLMRoute,
-  messages: Message[],
-  systemPrompt: SystemPrompt,
-  tools: Tools,
-  signal: AbortSignal,
-  options: Options,
+  request: LLMRequest,
 ): AsyncGenerator<StreamEvent | AssistantMessage | SystemAPIErrorMessage, void> {
+  const options = assembleAnthropicOptions(request)
+  // `let` — the body reassigns systemPrompt (per-request sys-prompt append).
+  let { messages, systemPrompt, tools, signal } = request
   const thinkingConfig: ThinkingConfig = (options as unknown as { thinkingConfig?: ThinkingConfig }).thinkingConfig ?? { type: 'disabled' }
   // Check cheap conditions first — the off-switch await blocks on GrowthBook
   // init (~10ms). For non-Opus models (haiku, sonnet) this skips the await

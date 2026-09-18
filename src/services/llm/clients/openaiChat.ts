@@ -3,10 +3,8 @@
  * Provider 仅提供 endpoint/protocol/model mapping/auth identity 元数据，Client 只懂协议。
  */
 import type { LLMRoute } from '../types.js'
-import type { Message } from '../../../types/message.js'
 import type { Tools } from '../../../Tool.js'
-import type { SystemPrompt } from '../../../utils/systemPromptType.js'
-import type { Options } from './anthropicMessages.js'
+import type { LLMRequest } from '../runtime/types.js'
 import type { StreamEvent, AssistantMessage, SystemAPIErrorMessage, UserMessage } from '../../../types/message.js'
 import { APIUserAbortError } from '@anthropic-ai/sdk'
 import { randomUUID } from 'crypto'
@@ -53,12 +51,9 @@ function chatCompletionsUrl(base: string): string {
 
 export async function* queryOpenAIChat(
   route: LLMRoute,
-  messages: Message[],
-  systemPrompt: SystemPrompt,
-  tools: Tools,
-  signal: AbortSignal,
-  options: Options,
+  request: LLMRequest,
 ): AsyncGenerator<StreamEvent | AssistantMessage | SystemAPIErrorMessage, void> {
+  const { messages, systemPrompt, tools, signal } = request
   let partialMessage: BetaMessage | null = null
   let ttftMs = 0
   const start = Date.now()
@@ -74,10 +69,10 @@ export async function* queryOpenAIChat(
     const toolSchemas = await Promise.all(
       tools.map(tool =>
         toolToAPISchema(tool, {
-          getToolPermissionContext: options.getToolPermissionContext,
+          getToolPermissionContext: request.context.getToolPermissionContext,
           tools,
-          agents: options.agents,
-          allowedAgentTypes: options.allowedAgentTypes,
+          agents: request.context.agents,
+          allowedAgentTypes: request.context.allowedAgentTypes,
           model,
         }),
       ),
@@ -123,17 +118,17 @@ export async function* queryOpenAIChat(
         }
       } catch {}
     }
-    maxTokens = resolveOpenAIMaxTokens(effectiveUpperLimit, options.maxOutputTokensOverride)
+    maxTokens = resolveOpenAIMaxTokens(effectiveUpperLimit, request.config.maxOutputTokens)
     const promptCacheKey = formatOpenAIPromptCacheKey(getSessionId())
     logForDebugging(`[OpenAIChat] provider=${route.provider} model=${model} endpoint=${endpoint} tools=${openaiTools.length}`)
     const body = buildOpenAIRequestBody({
       model,
       messages: openaiMessages,
       tools: openaiTools,
-      toolChoice: anthropicToolChoiceToOpenAI(options.toolChoice),
+      toolChoice: anthropicToolChoiceToOpenAI(request.config.toolChoice as unknown as Parameters<typeof anthropicToolChoiceToOpenAI>[0]),
       enableThinking: false,
       maxTokens,
-      temperatureOverride: options.temperatureOverride,
+      temperatureOverride: request.config.temperature,
       promptCacheKey,
     })
     const headers: Record<string, string> = {
@@ -153,7 +148,7 @@ export async function* queryOpenAIChat(
     }
     if (cred.type === 'bearer') headers.Authorization = `Bearer ${cred.token}`
     else headers.Authorization = 'Bearer public'
-    const fetchOverride = options.fetchOverride as unknown as typeof fetch | undefined
+    const fetchOverride = request.context.fetchOverride as unknown as typeof fetch | undefined
     const url = endpoint.includes('/chat/completions') ? endpoint : chatCompletionsUrl(endpoint)
     let response = await httpRequest(
       { url, method: 'POST', headers, body: JSON.stringify(body), signal },
@@ -214,7 +209,7 @@ export async function* queryOpenAIChat(
           const m: AssistantMessage = {
             message: {
               ...partialMessage,
-              content: normalizeContentFromAPI([contentBlock] as unknown as BetaMessage['content'], tools, options.agentId as AgentId | undefined),
+              content: normalizeContentFromAPI([contentBlock] as unknown as BetaMessage['content'], tools, request.context.agentId as AgentId | undefined),
             },
             requestId: undefined,
             type: 'assistant',
@@ -236,7 +231,7 @@ export async function* queryOpenAIChat(
           }
           if (usage.input_tokens + usage.output_tokens > 0) {
             const costUSD = calculateUSDCost(model, usage as unknown as Parameters<typeof calculateUSDCost>[1])
-            addToTotalSessionCost(costUSD, usage as unknown as Parameters<typeof addToTotalSessionCost>[1], options.model)
+            addToTotalSessionCost(costUSD, usage as unknown as Parameters<typeof addToTotalSessionCost>[1], request.model)
           }
           break
         }

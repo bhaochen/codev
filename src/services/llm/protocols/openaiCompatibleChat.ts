@@ -5,10 +5,8 @@
  * 保持与 queryOpenAIChat 相同的 AsyncGenerator 输出契约。
  */
 import type { LLMRoute } from '../types.js'
-import type { Message } from '../../../types/message.js'
 import type { Tools } from '../../../Tool.js'
-import type { SystemPrompt } from '../../../utils/systemPromptType.js'
-import type { Options } from '../clients/anthropicMessages.js'
+import type { LLMRequest } from '../runtime/types.js'
 import type { StreamEvent, AssistantMessage, SystemAPIErrorMessage, UserMessage } from '../../../types/message.js'
 import { APIUserAbortError } from '@anthropic-ai/sdk'
 import { randomUUID } from 'crypto'
@@ -56,12 +54,9 @@ export function compatibleChatCompletionsUrl(base: string): string {
 
 export async function* queryOpenAICompatibleChat(
   route: LLMRoute,
-  messages: Message[],
-  systemPrompt: SystemPrompt,
-  tools: Tools,
-  signal: AbortSignal,
-  options: Options,
+  request: LLMRequest,
 ): AsyncGenerator<StreamEvent | AssistantMessage | SystemAPIErrorMessage, void> {
+  const { messages, systemPrompt, tools, signal } = request
   let partialMessage: BetaMessage | null = null
   let ttftMs = 0
   const start = Date.now()
@@ -77,10 +72,10 @@ export async function* queryOpenAICompatibleChat(
     const toolSchemas = await Promise.all(
       tools.map(tool =>
         toolToAPISchema(tool, {
-          getToolPermissionContext: options.getToolPermissionContext,
+          getToolPermissionContext: request.context.getToolPermissionContext,
           tools,
-          agents: options.agents,
-          allowedAgentTypes: options.allowedAgentTypes,
+          agents: request.context.agents,
+          allowedAgentTypes: request.context.allowedAgentTypes,
           model,
         }),
       ),
@@ -103,10 +98,10 @@ export async function* queryOpenAICompatibleChat(
         input_schema: (t as { input_schema?: Record<string, unknown> }).input_schema,
       })),
     )
-    const openaiToolChoice = anthropicToolChoiceToOpenAI(options.toolChoice)
+    const openaiToolChoice = anthropicToolChoiceToOpenAI(request.config.toolChoice as unknown as Parameters<typeof anthropicToolChoiceToOpenAI>[0])
 
     const { upperLimit } = getModelMaxOutputTokens(model)
-    maxTokens = resolveOpenAIMaxTokens(upperLimit, options.maxOutputTokensOverride)
+    maxTokens = resolveOpenAIMaxTokens(upperLimit, request.config.maxOutputTokens)
     const promptCacheKey = formatOpenAIPromptCacheKey(getSessionId())
     logForDebugging(`[OpenAICompatibleChat] provider=${route.provider} model=${model} endpoint=${endpoint} tools=${openaiTools.length}`)
     const body = buildOpenAIRequestBody({
@@ -116,7 +111,7 @@ export async function* queryOpenAICompatibleChat(
       toolChoice: openaiToolChoice,
       enableThinking: false,
       maxTokens,
-      temperatureOverride: options.temperatureOverride,
+      temperatureOverride: request.config.temperature,
       promptCacheKey,
     })
     const headers: Record<string, string> = {
@@ -126,7 +121,7 @@ export async function* queryOpenAICompatibleChat(
     if (cred.type === 'bearer') headers.Authorization = `Bearer ${cred.token}`
     else headers.Authorization = 'Bearer public'
 
-    const fetchOverride = options.fetchOverride as unknown as typeof fetch | undefined
+    const fetchOverride = request.context.fetchOverride as unknown as typeof fetch | undefined
     const url = endpoint.includes('/chat/completions') ? endpoint : compatibleChatCompletionsUrl(endpoint)
     const response = await httpRequest(
       { url, method: 'POST', headers, body: JSON.stringify(body), signal },
@@ -175,7 +170,7 @@ export async function* queryOpenAICompatibleChat(
           const m: AssistantMessage = {
             message: {
               ...partialMessage,
-              content: normalizeContentFromAPI([contentBlock] as unknown as BetaMessage['content'], tools, options.agentId as AgentId | undefined),
+              content: normalizeContentFromAPI([contentBlock] as unknown as BetaMessage['content'], tools, request.context.agentId as AgentId | undefined),
             },
             requestId: undefined,
             type: 'assistant',
@@ -197,7 +192,7 @@ export async function* queryOpenAICompatibleChat(
           }
           if (usage.input_tokens + usage.output_tokens > 0) {
             const costUSD = calculateUSDCost(model, usage as unknown as Parameters<typeof calculateUSDCost>[1])
-            addToTotalSessionCost(costUSD, usage as unknown as Parameters<typeof addToTotalSessionCost>[1], options.model)
+            addToTotalSessionCost(costUSD, usage as unknown as Parameters<typeof addToTotalSessionCost>[1], request.model)
           }
           break
         }

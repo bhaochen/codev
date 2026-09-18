@@ -3,11 +3,8 @@
  * Metadata + handler unified; clients/index.ts is now a thin facade.
  */
 import type { ProtocolId, LLMRoute } from '../types.js'
-import type { Message } from '../../../types/message.js'
-import type { Tools } from '../../../Tool.js'
-import type { SystemPrompt } from '../../../utils/systemPromptType.js'
-import type { Options } from '../clients/anthropicMessages.js'
-import type { StreamEvent, AssistantMessage, SystemAPIErrorMessage } from '../../../types/message.js'
+import type { LLMRequest, LLMStreamEvent } from '../runtime/types.js'
+import type { AssistantMessage, SystemAPIErrorMessage } from '../../../types/message.js'
 import { queryOpenAIChat } from '../clients/openaiChat.js'
 import { queryAnthropicMessages } from '../clients/anthropicMessages.js'
 import { queryOpenAIResponses } from './openaiResponses.js'
@@ -15,12 +12,8 @@ import { queryOpenAICompatibleChat } from './openaiCompatibleChat.js'
 
 export type ProtocolHandler = (
   route: LLMRoute,
-  messages: Message[],
-  systemPrompt: SystemPrompt,
-  tools: Tools,
-  signal: AbortSignal,
-  options: Options,
-) => AsyncGenerator<StreamEvent | AssistantMessage | SystemAPIErrorMessage, void>
+  request: LLMRequest,
+) => AsyncGenerator<LLMStreamEvent | AssistantMessage | SystemAPIErrorMessage, void>
 
 export interface ProtocolDef {
   id: ProtocolId
