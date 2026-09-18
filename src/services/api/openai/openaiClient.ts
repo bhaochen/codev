@@ -1,17 +1,9 @@
 /**
- * OpenAI 兼容 endpoint 的 fetch override —— codev 的 OpenAI 真直连。
- *
- * 通过 OPENAI_API_KEY（可选，本地端点可缺省）+ OPENAI_BASE_URL 直连任意
- * OpenAI Chat Completions 协议端点（OpenAI 官方、DeepSeek、vLLM、Ollama 等）。
- *
- * 拦截 Anthropic Messages API 调用，复用 @ant/model-provider 的完整转换管线
- * 转成 OpenAI 格式，再把响应（含 reasoning_content → thinking 思维流）转回
- * Anthropic 格式，下游 SDK/query 管线完全无感。
+ * Minimal OpenAI fetch override for legacy api/client.ts OpenAI provider path.
+ * Kept for active legacy consumer (api/client.ts) — not part of dead inference path.
  */
-import { getOpenAIApiKey } from 'src/utils/auth.js'
-import {
-  getOpenAIBaseUrl,
-} from 'src/utils/model/providers.js'
+import { getOpenAIApiKey } from '../../../utils/auth.js'
+import { getOpenAIBaseUrl } from '../../../utils/model/providers.js'
 import { getSessionId } from '../../../bootstrap/state.js'
 import { getModelMaxOutputTokens } from '../../../utils/context.js'
 import { logForDebugging } from '../../../utils/debug.js'
@@ -29,17 +21,13 @@ import {
   isOpenAIThinkingEnabled,
   resolveOpenAIMaxTokens,
   buildOpenAIRequestBody,
-} from './requestBody.js'
-import { getOfficialOpenAIPromptCacheKey } from './openaiShared.js'
-
-const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini'
+} from '../../../services/llm/utils/requestBody.js'
 
 function normalizeBaseUrl(url: string): string {
   return url.replace(/\/$/, '')
 }
 
-/** Supports `https://host` or `https://host/v1` style bases. */
-export function chatCompletionsUrl(base: string): string {
+function chatCompletionsUrl(base: string): string {
   const b = normalizeBaseUrl(base)
   if (b.endsWith('/v1')) {
     return `${b}/chat/completions`
@@ -47,23 +35,32 @@ export function chatCompletionsUrl(base: string): string {
   return `${b}/v1/chat/completions`
 }
 
+function getOfficialOpenAIPromptCacheKey(baseURL: string | undefined, sessionId: string): string | undefined {
+  if (!baseURL?.trim()) return `ccb:${sessionId}`
+  try {
+    const url = new URL(baseURL)
+    const isOfficialHost = url.hostname === 'api.openai.com' || url.hostname.endsWith('.api.openai.com')
+    if (url.protocol === 'https:' && isOfficialHost && (url.port === '' || url.port === '443')) {
+      return `ccb:${sessionId}`
+    }
+  } catch {}
+  return undefined
+}
+
 /**
- * 创建 OpenAI 兼容端点的 fetch override（env 直连版）。
+ * Creates OpenAI-compatible endpoint fetch override (env direct-connect version).
  *
- * @param model 已解析的 OpenAI 模型名（客户端侧 resolveOpenAIModel 的产物）
+ * @param model Pre-resolved OpenAI model name (result of client-side resolveOpenAIModel)
  */
 export function createOpenAIFetchOverride(
   model: string,
 ): (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> {
   const baseUrl = getOpenAIBaseUrl()
   const apiKey = getOpenAIApiKey()
-  const resolvedModel = model || DEFAULT_OPENAI_MODEL
+  const resolvedModel = model || 'gpt-4o-mini'
   const endpoint = chatCompletionsUrl(baseUrl)
 
-  const useOfficialCache = getOfficialOpenAIPromptCacheKey(
-    baseUrl,
-    getSessionId(),
-  )
+  const useOfficialCache = getOfficialOpenAIPromptCacheKey(baseUrl, getSessionId())
 
   logForDebugging(
     `[OpenAI] direct override: model=${resolvedModel}, endpoint=${endpoint}, thinking=${isOpenAIThinkingEnabled(resolvedModel)}`,
@@ -78,7 +75,9 @@ export function createOpenAIFetchOverride(
           : input.url
 
     const pathname = new URL(url).pathname
-    // 只拦截 Messages 系列端点；精确判断避免误伤含 /v1/ 的其他请求
+
+    // Only intercept Messages API calls — precise path matching avoids
+    // swallowing unrelated requests that happen to contain /v1/
     const isMessagesPath =
       pathname.endsWith('/messages') || pathname.includes('/messages/')
     const isModelsPath = pathname.endsWith('/models')
@@ -106,7 +105,7 @@ export function createOpenAIFetchOverride(
       }
     }
 
-    // count_tokens：本地估算，替代 0（0 会让上下文预算/compact 失效）
+    // count_tokens: local estimate instead of 0 (0 breaks context budgeting/compact)
     if (pathname.endsWith('/count_tokens')) {
       return new Response(
         JSON.stringify({
@@ -128,14 +127,15 @@ export function createOpenAIFetchOverride(
       systemPrompt = systemBlocks
     } else if (Array.isArray(systemBlocks)) {
       systemPrompt = systemBlocks
-        .filter(b => b.type === 'text')
-        .map(b => b.text)
+        .filter((b) => b.type === 'text')
+        .map((b) => b.text)
         .join('\n\n')
     }
 
     const anthropicMessages = (anthropicBody.messages || []) as AnthropicMessage[]
+    const selectedModel = (anthropicBody.model as string) || resolvedModel
     // models.dev 判定（带缓存），纯文本模型丢弃历史图片而不是发 image_url
-    const supportsImages = await resolveOpenAIModelSupportsImages(resolvedModel)
+    const supportsImages = await resolveOpenAIModelSupportsImages(selectedModel)
     const openaiMessages = convertAnthropicMessagesToOpenAI(
       anthropicMessages,
       systemPrompt,
@@ -147,96 +147,71 @@ export function createOpenAIFetchOverride(
       description?: string
       input_schema?: Record<string, unknown>
     }>
-    const openaiTools =
-      anthropicTools.length > 0
-        ? convertAnthropicToolsToOpenAI(anthropicTools)
-        : undefined
+    const openaiTools = anthropicTools.length > 0 ? convertAnthropicToolsToOpenAI(anthropicTools) : undefined
 
     const isStreaming = anthropicBody.stream === true
-    const enableThinking = isOpenAIThinkingEnabled(resolvedModel)
-    const maxTokens = resolveOpenAIMaxTokens(
-      getModelMaxOutputTokens(resolvedModel).upperLimit,
-    )
 
-    const requestBody = buildOpenAIRequestBody({
-      model: resolvedModel,
+    const requestBody: Record<string, unknown> = {
+      model: selectedModel,
       messages: openaiMessages,
-      tools: openaiTools,
-      toolChoice: openaiTools && openaiTools.length > 0 ? 'auto' : undefined,
-      enableThinking,
-      maxTokens,
-      promptCacheKey: useOfficialCache,
-    })
-    if (!isStreaming) {
-      requestBody.stream = false
-      delete requestBody.stream_options
+      stream: isStreaming,
+    }
+
+    // Ask the server to return a usage chunk in streaming mode, otherwise
+    // output token accounting is always 0
+    if (isStreaming) {
+      requestBody.stream_options = { include_usage: true }
+    }
+
+    if (anthropicBody.max_tokens) {
+      requestBody.max_tokens = anthropicBody.max_tokens
+    }
+
+    if (openaiTools && openaiTools.length > 0) {
+      requestBody.tools = openaiTools
+      requestBody.tool_choice = anthropicBody.tool_choice ?? 'auto'
     }
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'User-Agent': 'claude-code/2.1.88',
+      'HTTP-Referer': 'https://claude.ai/',
+      'X-Title': 'Better-Clawd',
     }
+
     if (apiKey) {
       headers.Authorization = `Bearer ${apiKey}`
     }
 
-    const openaiResponse = await fetch(endpoint, {
+    if (useOfficialCache) {
+      headers['prompt-cache-key'] = useOfficialCache
+    }
+
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers,
       body: JSON.stringify(requestBody),
       signal: init?.signal,
     })
 
-    if (!openaiResponse.ok) {
-      return createAnthropicErrorResponse(openaiResponse)
+    if (!response.ok) {
+      return createAnthropicErrorResponse(response, endpoint)
     }
 
     if (!isStreaming) {
-      const data = (await openaiResponse.json()) as {
-        id?: string
-        choices?: Array<{
-          message?: {
-            content?: string | null
-            reasoning_content?: string | null
-            tool_calls?: Array<{
-              id: string
-              function: { name: string; arguments: string }
-            }>
-          }
-          finish_reason?: string | null
-        }>
-        usage?: { prompt_tokens?: number; completion_tokens?: number }
-      }
-
-      const anthropicResponse = convertOpenAIResponseToAnthropic(
-        data,
-        resolvedModel,
-        'openai',
+      // Non-streaming: convert full response
+      const json = await response.json()
+      return new Response(
+        JSON.stringify(convertOpenAIResponseToAnthropic(json)),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
       )
-
-      return new Response(JSON.stringify(anthropicResponse), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      })
     }
 
-    if (!openaiResponse.body) {
-      return openaiResponse
-    }
-
-    const transformStream = convertOpenAIStreamToAnthropic(
-      openaiResponse.body,
-      resolvedModel,
-      { includeCacheWriteTokens: !!useOfficialCache },
-    )
-
-    return new Response(transformStream, {
+    // Streaming: convert chunk-by-chunk
+    const stream = convertOpenAIStreamToAnthropic(response.body!, selectedModel)
+    return new Response(stream, {
       status: 200,
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        Connection: 'keep-alive',
-      },
+      headers: { 'Content-Type': 'text/event-stream' },
     })
   }
 }

@@ -1,39 +1,41 @@
 /**
- * OpenAI 请求体构造与 thinking 模式检测（纯函数，无模块副作用）。
+ * OpenAI request body utilities — extracted from legacy api/openai/requestBody.ts
+ * for use by the native services/llm runtime.
  */
-import type { OpenAIMessage, OpenAITool } from '@ant/model-provider'
+
 import { isEnvTruthy, isEnvDefinedFalsy } from '../../../utils/envUtils.js'
 
 /**
- * 检测该模型是否启用 thinking 模式。
+ * Checks if thinking mode is enabled for the given model.
  *
- * 启用条件：
- * 1. OPENAI_ENABLE_THINKING=1 显式启用，或
- * 2. 模型名包含 "deepseek" 或 "mimo"（自动检测，大小写不敏感）
+ * Enabled if:
+ * 1. OPENAI_ENABLE_THINKING=1 explicitly set, or
+ * 2. Model name contains "deepseek" or "mimo" (auto-detect, case-insensitive)
  *
- * 禁用条件：
- * - OPENAI_ENABLE_THINKING=0/false/no/off 显式禁用（优先级最高，覆盖模型检测）
+ * Disabled if:
+ * - OPENAI_ENABLE_THINKING=0/false/no/off explicitly set (highest priority)
  *
- * Grok 有意排除：Grok 推理模型自动推理，不需要 thinking/enable_thinking 请求参数。
+ * Grok is intentionally excluded: Grok reasoning models reason automatically
+ * without needing thinking/enable_thinking request params.
  */
 export function isOpenAIThinkingEnabled(model: string): boolean {
-  // 显式禁用优先
+  // Explicit disable takes priority
   if (isEnvDefinedFalsy(process.env.OPENAI_ENABLE_THINKING)) return false
-  // 显式启用
+  // Explicit enable
   if (isEnvTruthy(process.env.OPENAI_ENABLE_THINKING)) return true
-  // 从模型名自动检测（DeepSeek 与 MiMo 支持 thinking 模式）
+  // Auto-detect from model name (DeepSeek and MiMo support thinking mode)
   const modelLower = model.toLowerCase()
   return modelLower.includes('deepseek') || modelLower.includes('mimo')
 }
 
 /**
- * 解析 OpenAI 兼容路径的最大输出 token。
+ * Resolves the max output tokens for OpenAI-compatible paths.
  *
- * 优先级：
- * 1. maxOutputTokensOverride（程序化，来自 query 管线）
- * 2. OPENAI_MAX_TOKENS env（OpenAI 专用，适用于本地小上下文模型）
- * 3. CLAUDE_CODE_MAX_OUTPUT_TOKENS env（通用覆盖）
- * 4. upperLimit 默认值
+ * Priority:
+ * 1. maxOutputTokensOverride (programmatic, from query pipeline)
+ * 2. OPENAI_MAX_TOKENS env (OpenAI-specific, for local small-context models)
+ * 3. CLAUDE_CODE_MAX_OUTPUT_TOKENS env (generic override)
+ * 4. upperLimit default value
  */
 export function resolveOpenAIMaxTokens(
   upperLimit: number,
@@ -59,22 +61,22 @@ export type OpenAIRequestBody = Record<string, unknown> & {
 }
 
 /**
- * 构造 OpenAI chat.completions 请求体。thinking 模式注入三套格式，
- * 每个端点识别其中自己认识的那套，其余忽略：
- * - 官方 DeepSeek API:    `thinking: { type: 'enabled' }`
- * - 自托管 DeepSeek:      `enable_thinking: true` + `chat_template_kwargs: { thinking: true }`
- * - MiMo (小米):          `chat_template_kwargs: { enable_thinking: true }`
- * HTTP 层对未知键透传，无兼容性问题。
+ * Builds the OpenAI chat.completions request body.
+ * Injects thinking parameters in three formats for different endpoints:
+ * - Official DeepSeek API:    `thinking: { type: 'enabled' }`
+ * - Self-hosted DeepSeek:      `enable_thinking: true` + `chat_template_kwargs: { thinking: true }`
+ * - MiMo (Xiaomi):             `chat_template_kwargs: { enable_thinking: true }`
+ * HTTP layer passes through unknown keys, no compatibility issues.
  */
 export function buildOpenAIRequestBody(params: {
   model: string
-  messages: OpenAIMessage[]
-  tools?: OpenAITool[]
+  messages: unknown[]
+  tools?: unknown[]
   toolChoice?: unknown
   enableThinking: boolean
   maxTokens: number
   temperatureOverride?: number
-  /** OpenAI 官方端点的会话级 prompt-cache 路由键。 */
+  /** OpenAI official endpoint session-level prompt-cache routing key. */
   promptCacheKey?: string
 }): OpenAIRequestBody {
   const {
@@ -98,13 +100,13 @@ export function buildOpenAIRequestBody(params: {
     }),
     stream: true,
     stream_options: { include_usage: true },
-    // DeepSeek / MiMo 的思维链输出；启用后温度 etc. 被端点忽略
+    // DeepSeek / MiMo chain-of-thought output; when enabled temperature etc. ignored by endpoint
     ...(enableThinking && {
       thinking: { type: 'enabled' },
       enable_thinking: true,
       chat_template_kwargs: { thinking: true, enable_thinking: true },
     }),
-    // 仅 thinking 关闭时发送 temperature（DeepSeek 不看，但其他 provider 可能看）
+    // Only send temperature when thinking disabled (DeepSeek ignores, but other providers may use)
     ...(!enableThinking &&
       temperatureOverride !== undefined && {
         temperature: temperatureOverride,
