@@ -5,7 +5,6 @@ import memoize from 'lodash-es/memoize.js'
 import { join } from 'path'
 import { z } from 'zod/v4'
 import { OAUTH_BETA_HEADER } from '../../constants/oauth.js'
-import { getAnthropicClient } from '../../services/api/client.js'
 import { isClaudeAISubscriber } from '../auth.js'
 import { logForDebugging } from '../debug.js'
 import { getClaudeConfigHomeDir } from '../envUtils.js'
@@ -14,6 +13,8 @@ import { lazySchema } from '../lazySchema.js'
 import { isEssentialTrafficOnly } from '../privacyLevel.js'
 import { jsonStringify } from '../slowOperations.js'
 import { getAPIProvider, isFirstPartyAnthropicBaseUrl } from './providers.js'
+import { getAnthropicApiKey } from '../auth.js'
+import { getClaudeAIOAuthTokens } from '../auth.js'
 
 // .strip() — don't persist internal-only fields (mycro_deployments etc.) to disk
 const ModelCapabilitySchema = lazySchema(() =>
@@ -90,18 +91,69 @@ export function getModelCapability(model: string): ModelCapability | undefined {
   return cached.find(c => m.includes(c.id.toLowerCase()))
 }
 
+/**
+ * Fetch model capabilities directly from Anthropic's /v1/models endpoint.
+ * Replaces the legacy Anthropic SDK client call.
+ */
+async function fetchModelCapabilities(): Promise<ModelCapability[]> {
+  const baseUrl = process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com'
+  const url = `${baseUrl.replace(/\/$/, '')}/v1/models`
+
+  // Get auth: try OAuth first (for Claude.ai subscribers), then API key
+  let authHeader: string
+  const oauthTokens = getClaudeAIOAuthTokens()
+  if (oauthTokens?.accessToken) {
+    authHeader = `Bearer ${oauthTokens.accessToken}`
+  } else {
+    const apiKey = getAnthropicApiKey()
+    if (!apiKey) {
+      throw new Error('No Anthropic API key or OAuth token available')
+    }
+    authHeader = `Bearer ${apiKey}`
+  }
+
+  const headers: Record<string, string> = {
+    'anthropic-version': '2023-06-01',
+    Authorization: authHeader,
+  }
+
+  if (isClaudeAISubscriber()) {
+    headers['anthropic-beta'] = OAUTH_BETA_HEADER
+  }
+
+  const res = await fetch(url, {
+    headers,
+    signal: AbortSignal.timeout(30_000),
+  })
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`Anthropic /v1/models failed (${res.status})${body ? `: ${body.slice(0, 200)}` : ''}`)
+  }
+
+  const data = (await res.json()) as {
+    data?: Array<{ id: string; max_input_tokens?: number; max_tokens?: number }>
+  }
+
+  if (!data.data || !Array.isArray(data.data)) {
+    throw new Error('Unexpected response format from /v1/models')
+  }
+
+  const parsed: ModelCapability[] = []
+  for (const entry of data.data) {
+    const result = ModelCapabilitySchema().safeParse(entry)
+    if (result.success) parsed.push(result.data)
+  }
+
+  return parsed
+}
+
 export async function refreshModelCapabilities(): Promise<void> {
   if (!isModelCapabilitiesEligible()) return
   if (isEssentialTrafficOnly()) return
 
   try {
-    const anthropic = await getAnthropicClient({ maxRetries: 1 })
-    const betas = isClaudeAISubscriber() ? [OAUTH_BETA_HEADER] : undefined
-    const parsed: ModelCapability[] = []
-    for await (const entry of anthropic.models.list({ betas })) {
-      const result = ModelCapabilitySchema().safeParse(entry)
-      if (result.success) parsed.push(result.data)
-    }
+    const parsed = await fetchModelCapabilities()
     if (parsed.length === 0) return
 
     const path = getCachePath()
