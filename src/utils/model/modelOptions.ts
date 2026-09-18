@@ -519,11 +519,11 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
   if (getAPIProvider() === 'nvidia') {
     // Trigger background fetch of NVIDIA models (non-blocking)
     // This will populate the cache for subsequent calls
-    void import('../../services/api/nvidiaClient.js').then(({ fetchNvidiaModels }) => {
+    void import('./nvidiaModels.js').then(({ fetchNvidiaModels }) => {
       fetchNvidiaModels()
     })
 
-    const { getCachedNvidiaModels } = require('../../services/api/nvidiaClient.js')
+    const { getCachedNvidiaModels } = require('./nvidiaModels.js')
     const models = getCachedNvidiaModels()
 
     if (models && models.length > 0) {

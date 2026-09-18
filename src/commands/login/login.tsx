@@ -96,7 +96,7 @@ export async function call(
             const { fetchOpencodeModels } = await import('../../utils/model/opencodeModels.js')
             await fetchOpencodeModels()
           } else if (provider === 'nvidia') {
-            const { fetchNvidiaModels } = await import('../../services/api/nvidiaClient.js')
+            const { fetchNvidiaModels } = await import('../../utils/model/nvidiaModels.js')
             await fetchNvidiaModels()
           } else if (provider === 'local') {
             const { fetchLocalModels } = await import('../../services/api/localClient.js')

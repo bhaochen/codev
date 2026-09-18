@@ -81,7 +81,7 @@ export function modelSupportsEffort(model: string): boolean {
   // have explicit reasoning_options in the cache.
   const provider = getAPIProvider()
   if (provider === 'nvidia') {
-    const { getNvidiaModelReasoningOptions } = require('../services/api/nvidiaClient.js') as {
+    const { getNvidiaModelReasoningOptions } = require('./model/nvidiaModels.js') as {
       getNvidiaModelReasoningOptions: (id: string) => string[] | undefined
     }
     const opts = getNvidiaModelReasoningOptions(canonical)
@@ -197,7 +197,7 @@ export function getModelSupportedEfforts(model: string): EffortLevel[] {
 
   // 3. Provider-specific reasoning_options from models.dev cache
   if (getAPIProvider() === 'nvidia') {
-    const { getNvidiaModelReasoningOptions } = require('../services/api/nvidiaClient.js') as {
+    const { getNvidiaModelReasoningOptions } = require('./model/nvidiaModels.js') as {
       getNvidiaModelReasoningOptions: (id: string) => string[] | undefined
     }
     const nvOpts = getNvidiaModelReasoningOptions(canonical)

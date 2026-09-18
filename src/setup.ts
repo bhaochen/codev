@@ -401,7 +401,7 @@ export async function setup(
     const { fetchOpencodeModels } = await import('./utils/model/opencodeModels.js')
     void fetchOpencodeModels()
   } else if (configuredAuthProvider === 'nvidia') {
-    const { fetchNvidiaModels } = await import('./services/api/nvidiaClient.js')
+    const { fetchNvidiaModels } = await import('./utils/model/nvidiaModels.js')
     void fetchNvidiaModels()
   } else if (configuredAuthProvider === 'local') {
     const { fetchLocalModels } = await import('./services/api/localClient.js')
