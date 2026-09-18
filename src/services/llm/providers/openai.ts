@@ -1,6 +1,6 @@
 import type { ProviderId, ProtocolId } from '../types.js'
 import { getOpenAIBaseUrl } from '../../../utils/model/providers.js'
-import { resolveOpenAIModel } from '@ant/model-provider'
+import { resolveOpenAIModel } from '../utils/modelMapping.js'
 
 export const openai = {
   id: 'openai' as ProviderId,

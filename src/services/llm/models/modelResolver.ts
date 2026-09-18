@@ -6,7 +6,7 @@
  */
 import type { ProviderId } from '../types.js'
 import { getOpenCodeModelName } from '../../../utils/auth.js'
-import { resolveOpenAIModel } from '@ant/model-provider'
+import { resolveOpenAIModel } from '../utils/modelMapping.js'
 
 export interface ModelResolver {
   id: string
