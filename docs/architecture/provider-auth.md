@@ -160,46 +160,41 @@ export async function* queryModel(messages, systemPrompt, thinkingConfig, tools,
 
 * **Fetch Override 仅 legacy**：`nvidia` 仍 `src/services/api/nvidiaClient.ts:createNvidiaFetchOverride()` 注入 `getAnthropicClient()`（`src/services/llm/clients/anthropicMessages.ts:1` 标注 `legacy→native HTTP` 待迁移）；`opencode` 的 `fetch-override fallback` 已在 `5f944f0` 删除，原生直连已验证 ok；`opencodeClient.ts` 仅保留 `getCachedOpencodeModels()` 等元数据查询供 `openaiChat.ts:104` 判定 `isFree`。
 
-### 3.3 协议转换通用模式（Native 与 Fetch Override 复用同一转换管线）
+### 3.3 协议转换通用模式（Native 协议客户端）
 
-所有路径共享相同的消息/工具转换（`@ant/model-provider`），差异仅在 Transport（Native `fetch` 直连 vs SDK `fetch` 钩子）：
+各 provider 由独立的原生协议客户端服务，共享 service-layer transport（`transport/http.ts` 的 `httpRequest` + `transport/sse.ts` 的 `parseSSERaw`），不再经 Anthropic SDK fetch 钩子。唯一的例外是 Bedrock / Vertex / Foundry：它们仍走 `api/client.ts` 的 SDK 客户端（deferred objective：`Native Bedrock / Vertex / Foundry providers`）：
 
 ```mermaid
 flowchart LR
-    A[SDK 发出请求] --> B{URL 匹配?}
-    B -->|/messages 或 /v1/| C{端点类型}
-    B -->|其他| D[透传 fetch]
-    C -->|/count_tokens| E[Stub: 返回 0]
-    C -->|/models| F[Stub: 返回空列表]
-    C -->|/messages| G[解析 Anthropic Body]
-    G --> H[转换消息格式]
-    H --> I[附加 Provider Auth Header]
-    I --> J[调用上游 API]
-    J --> K{流式?}
-    K -->|是| L[转换 SSE 流]
-    K -->|否| M[转换响应体]
-    L --> N[返回 Anthropic 格式 Response]
-    M --> N
+    A[LLMRequest] --> B{Protocol?}
+    B -->|anthropic-messages| C[clients/anthropicMessages.ts → transport/anthropicHttp.ts]
+    B -->|openai-chat| D[clients/openaiChat.ts → protocols/openaiChatWire.ts]
+    B -->|openai-compatible-chat| E[protocols/openaiCompatibleChat.ts]
+    B -->|openai-responses| F[protocols/openaiResponses.ts]
+    C --> G[AgentMessage StreamEvent / AssistantMessage]
+    D --> G
+    E --> G
+    F --> G
 ```
 
 ### 3.4 消息格式转换
 
-核心转换函数族位于共享包 `packages/@ant/model-provider`（进程内 provider 桥接层，`opencodeClient`/`nvidiaClient`/`openaiClient` 共用）：
+核心转换函数族位于原生 wire 模块 `src/services/llm/protocols/openaiChatWire.ts`（共享包 `@ant/model-provider` 已删除；`opencodeClient`/`nvidiaClient`/`openaiClient` 等 legacy fetch-override 文件已删除）：
 
 ```
 Anthropic → OpenAI:
-  convertAnthropicMessagesToOpenAI(messages, systemPrompt)
+  agentMessagesToOpenAIChatMessages(messages, systemPrompt)
   - system → role: 'system' 消息
   - image block → image_url (data: URI)
   - tool_result → role: 'tool' 消息
   - tool_use → tool_calls 数组
   - thinking → reasoning_content (提供商扩展)
 
-  convertAnthropicToolsToOpenAI(tools)
+  openAIChatToolsFromSchemas(tools)
   - { name, description, input_schema } → { type: 'function', function: { ... } }
 
 OpenAI → Anthropic (流式):
-  convertOpenAIStreamToAnthropic(openaiStream, model)
+  adaptOpenAIChatSSE(openaiStream, model)
   - SSE data: {"choices":[{ "delta":{ "content":"..." } }]}
     → event: content_block_delta\ndata: {"delta":{"type":"text_delta","text":"..."}}
 
@@ -328,15 +323,14 @@ function shouldUseDeepSeekReasoningCompat(baseUrl: string): boolean {
 
 ### 4.4 OpenAI 兼容直连 (openai provider)
 
-**目录**: `src/services/api/openai/`（转换管线来自 `@ant/model-provider`）
+**目录**: `src/services/api/openai/`（仅保留 `chatgptAuth.ts`；转换管线已迁移至原生 `src/services/llm/protocols/openaiChatWire.ts`）
 
 - **认证**: `OPENAI_API_KEY` → `Bearer <key>`（本地端点可缺省）; `OPENAI_BASE_URL` 指定端点
-- **协议**: `openai_chat` (Chat Completions) — 经 fetch override 拦截 Anthropic `/messages` 转换
-- **Model**: `resolveOpenAIModel()`（`OPENAI_MODEL` > `OPENAI_DEFAULT_*_MODEL` > 默认映射 > 透传）
+- **协议**: `openai-chat` (Chat Completions) — 原生直连，不经 fetch override
+- **Model**: `resolveOpenAIModel()`（`src/services/llm/utils/modelMapping.ts`：`OPENAI_MODEL` > `OPENAI_DEFAULT_*_MODEL` > 默认映射 > 透传）
 - **Thinking**: `OPENAI_ENABLE_THINKING` 或模型名含 `deepseek`/`mimo` 自动开启；
   请求体同时发送 `thinking`/`enable_thinking`/`chat_template_kwargs` 三套格式，
   `reasoning_content` 思维流映射为 Anthropic thinking 块（含空字符串往返）
-- **Model 拉取**: telegram `/connect` 用 `fetchOpenAICompatibleModelIds()` 从 `/v1/models` 获取
 - **适用场景**: OpenAI 官方、DeepSeek、vLLM、Ollama 等任何 OpenAI Chat Completions 端点
 
 ### 4.5 GitHub Copilot (模型列表)

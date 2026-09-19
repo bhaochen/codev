@@ -191,7 +191,7 @@ Agent → queryModel Facade(src/services/api/queryModel.ts:17) → ModelRuntime.
 `Phase5` 前曾抽象 `fetch-override/SDK/native HTTP`, 现仅保留最小 `httpRequest + parseSSERaw` (`a939f5a`), `Client=Protocol` 已足以复用；`openaiChat.ts` 不再 `fetch(chatCompletionsUrl)` 直调而经 `Transport`, `nvidia` 已从 `legacy→native` 完成。
 
 **追问：协议转换核心？**
-`@ant/model-provider` 统一管线：`convertAnthropicMessagesToOpenAI/Tools`（system→system message, image→image_url, tool_result→tool, tool_use→tool_calls, thinking→reasoning_content）→ `buildOpenAIRequestBody` → `fetch` → `parseOpenAIStream→adaptOpenAIStreamToAnthropic`（delta.content→text_delta, reasoning_content→thinking_delta, tool_calls→tool_use, finish_reason→stop_reason）。
+原生 wire 管线（`src/services/llm/protocols/openaiChatWire.ts`）：`agentMessagesToOpenAIChatMessages`（system→system message, image→image_url, tool_result→tool, tool_use→tool_calls, thinking→reasoning_content）→ `buildOpenAIChatBody`（`src/services/llm/utils/requestBody.ts`）→ `fetch` → `adaptOpenAIChatSSE`（delta.content→text_delta, reasoning_content→thinking_delta, tool_calls→tool_use, finish_reason→stop_reason）。共享包 `@ant/model-provider` 已删除。
 
 ---
 
@@ -551,7 +551,7 @@ fork 影子 VM 提前执行。
   缺点: 额外跳数，延迟+部署成本
 ```
 
-**协议转换 (Anthropic ↔ OpenAI，@ant/model-provider 统一管线):**
+**协议转换 (Anthropic ↔ OpenAI，原生 wire 管线 `src/services/llm/protocols/openaiChatWire.ts`):**
 
 ```
 Anthropic Messages → OpenAI Chat Completions
@@ -561,7 +561,7 @@ Anthropic Messages → OpenAI Chat Completions
   max_tokens:      → max_tokens（DeepSeek 需省略，见 provider-auth.md 10.2）
   stop_sequences:  → stop
 
-OpenAI → Anthropic 逆映射：adaptOpenAIStreamToAnthropic 处理 SSE 事件对照（含 thinking_delta/tool_use_delta/message_delta）
+OpenAI → Anthropic 逆映射：adaptOpenAIChatSSE 处理 SSE 事件对照（含 thinking_delta/tool_use_delta/message_delta）
 ```
 
 **模型列表管理:**

@@ -442,7 +442,7 @@ Anthropic Messages API 请求
 }
     │
     ▼
-convertAnthropicMessagesToOpenAI(@ant/model-provider) / convertAnthropicToolsToOpenAI
+agentMessagesToOpenAIChatMessages(src/services/llm/protocols/openaiChatWire.ts) / openAIChatToolsFromSchemas
     │
     │ 转换逻辑:
     │ - system → role:system 消息

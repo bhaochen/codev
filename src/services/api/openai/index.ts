@@ -3,7 +3,9 @@
  *
  * - chatgptAuth.ts   ChatGPT 设备码登录
  *
- * 转换管线（消息/工具/流/usage/错误）由共享包 @ant/model-provider 提供。
+ * OpenAI 协议转换（消息/工具/流/usage/错误）已迁移至原生实现：
+ * `src/services/llm/protocols/openaiChatWire.ts`（wire 装配与 SSE 适配），
+ * 请求体工具见 `src/services/llm/utils/requestBody.ts`。
  */
 export {
   isChatGPTAuthEnabled,
