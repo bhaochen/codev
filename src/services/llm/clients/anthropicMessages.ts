@@ -27,9 +27,13 @@ import type { TextBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
 import type { Stream } from '@anthropic-ai/sdk/streaming.mjs'
 import { randomUUID } from 'crypto'
 import { agentBlockToAnthropic } from '../../../types/anthropicAdapter.js'
+import { httpRequest } from '../transport/http.js'
+import { parseSSERaw } from '../transport/sse.js'
 import {
   getAPIProvider,
   isFirstPartyAnthropicBaseUrl,
+  getNvidiaBaseUrl,
+  getOpencodeBaseUrl,
 } from 'src/utils/model/providers.js'
 import {
   getAttributionHeader,
@@ -235,7 +239,9 @@ import {
 import { getInitializationStatus } from '../../lsp/manager.js'
 import { isToolFromMcpServer } from '../../mcp/utils.js'
 import { withStreamingVCR, withVCR } from '../../vcr.js'
-import { CLIENT_REQUEST_ID_HEADER, getAnthropicClient } from '../../api/client.js'
+
+import { httpRequest } from '../transport/http.js'
+
 import {
   API_ERROR_MESSAGE_PREFIX,
   CUSTOM_OFF_SWITCH_MESSAGE,
@@ -267,7 +273,299 @@ import { StreamingSpecDispatcher } from '../../tools/StreamingSpecDispatcher.js'
 import type { LLMRoute } from '../types.js'
 import type { LLMRequest } from '../runtime/types.js'
 
-// Define a type that represents valid JSON values
+// Native Anthropic wire protocol helpers
+function normalizeAnthropicUsage(usage: {
+  input_tokens?: number
+  output_tokens?: number
+  cache_creation_input_tokens?: number
+  cache_read_input_tokens?: number
+}): { input_tokens: number; output_tokens: number; cache_creation_input_tokens: number; cache_read_input_tokens: number } {
+  const totalInput = Math.max(0, usage.input_tokens ?? 0)
+  const cacheRead = Math.min(Math.max(0, usage.cache_read_input_tokens ?? 0), totalInput)
+  const remainingAfterRead = Math.max(0, totalInput - cacheRead)
+  const cacheCreation = Math.min(Math.max(0, usage.cache_creation_input_tokens ?? 0), remainingAfterRead)
+  return {
+    input_tokens: Math.max(0, remainingAfterRead - cacheCreation),
+    output_tokens: Math.max(0, usage.output_tokens ?? 0),
+    cache_creation_input_tokens: cacheCreation,
+    cache_read_input_tokens: cacheRead,
+  }
+}
+
+function buildAnthropicRequestBody(params: {
+  model: string
+  messages: any[]
+  system?: string | Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }>
+  tools?: any[]
+  toolChoice?: any
+  thinking?: { type: 'enabled'; budget_tokens: number } | { type: 'disabled' }
+  maxTokens: number
+  temperatureOverride?: number
+  stream?: boolean
+  streamOptions?: { include_usage: boolean }
+  metadata?: Record<string, unknown>
+}): any {
+  const { model, messages, system, tools, toolChoice, thinking, maxTokens, temperatureOverride, stream = true, streamOptions = { include_usage: true }, metadata } = params
+  const anthropicMessages = messages.map((msg: any) => {
+    const inner = msg.message
+    const role = inner.role === 'assistant' ? 'assistant' : 'user'
+    const content = inner.content
+    if (typeof content === 'string') return { role, content }
+    const blocks = content.map((block: any) => {
+      if (block.type === 'text') return { type: 'text', text: block.text }
+      if (block.type === 'image') return { type: 'image', source: block.source.type === 'base64' ? { type: 'base64', media_type: block.source.media_type, data: block.source.data } : { type: 'url', url: block.source.url } }
+      if (block.type === 'tool_use') return { type: 'tool_use', id: block.id, name: block.name, input: block.input }
+      if (block.type === 'tool_result') return { type: 'tool_result', tool_use_id: block.tool_use_id, content: block.content, is_error: block.is_error }
+      if (block.type === 'thinking') return { type: 'thinking', thinking: block.thinking, signature: block.signature }
+      return block
+    })
+    return { role, content: blocks }
+  })
+  return {
+    model,
+    max_tokens: maxTokens,
+    messages: anthropicMessages,
+    ...(system && { system: Array.isArray(system) ? system.map((s: any) => ({ type: 'text', text: s.text || s })) : system }),
+    ...(tools && tools.length > 0 && { tools: tools.map(t => ({ type: 'function', function: { name: t.name, description: t.description ?? '', parameters: t.input_schema } })) }),
+    ...(toolChoice && { tool_choice: toolChoice }),
+    ...(stream && { stream, stream_options: streamOptions }),
+    ...(thinking && { thinking: thinking.type === 'enabled' ? { type: 'enabled', budget_tokens: thinking.budgetTokens } : { type: 'disabled' } }),
+    ...(temperatureOverride !== undefined && { temperature: temperatureOverride }),
+    metadata,
+  }
+}
+
+// ============================================================================
+
+/**
+ * Normalize Anthropic usage to runtime contract (four fields).
+ */
+function normalizeAnthropicUsage(usage: {
+  input_tokens?: number
+  output_tokens?: number
+  cache_creation_input_tokens?: number
+  cache_read_input_tokens?: number
+}): { input_tokens: number; output_tokens: number; cache_creation_input_tokens: number; cache_read_input_tokens: number } {
+  const totalInput = Math.max(0, usage.input_tokens ?? 0)
+  const cacheRead = Math.min(Math.max(0, usage.cache_read_input_tokens ?? 0), totalInput)
+  const remainingAfterRead = Math.max(0, totalInput - cacheRead)
+  const cacheCreation = Math.min(Math.max(0, usage.cache_creation_input_tokens ?? 0), remainingAfterRead)
+  return {
+    input_tokens: Math.max(0, remainingAfterRead - cacheCreation),
+    output_tokens: Math.max(0, usage.output_tokens ?? 0),
+    cache_creation_input_tokens: cacheCreation,
+    cache_read_input_tokens: cacheRead,
+  }
+}
+
+/**
+ * Adapt Anthropic SSE stream to runtime StreamEvent.
+ * Produces the same event grammar as the legacy adapter but without Anthropic SDK types.
+ */
+async function* adaptAnthropicStreamSSE(
+  stream: ReadableStream<Uint8Array>,
+  model: string,
+  options?: { includeCacheWriteTokens?: boolean }
+): AsyncGenerator<
+  import('../../../types/message.js').StreamEvent | import('../../../types/message.js').AssistantMessage | import('../../../types/message.js').SystemAPIErrorMessage,
+  void
+> {
+  // State for processing chunks
+  const state = {
+    started: false,
+    currentContentIndex: -1,
+    thinkingBlockOpen: false,
+    textBlockOpen: false,
+    rawInputTokens: 0,
+    outputTokens: 0,
+    rawCacheReadTokens: 0,
+    rawCacheWriteTokens: 0,
+    usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+  }
+
+  const { parseSSERaw } = await import('../transport/sse.js')
+
+  // Helper function to process a chunk and return events
+  function processChunk(chunk: any): Array<
+    import('../../../types/message.js').StreamEvent |
+    import('../../../types/message.js').AssistantMessage |
+    import('../../../types/message.js').SystemAPIErrorMessage
+  > {
+    if (!chunk.type) return []
+
+    const events: any[] = []
+
+    // Accumulate usage from any chunk
+    if (chunk.type === 'message_start' && chunk.message?.usage) {
+      // Note: usage will be handled in main loop
+    }
+    if (chunk.usage) {
+      // handled in main loop
+    }
+
+    if (!chunk.type) return []
+
+    // Use if-else chains instead of switch to avoid TypeScript parsing issues
+    if (chunk.type === 'message_start') {
+      if (chunk.message?.usage) {
+        // usage will be handled in main loop
+      }
+      return [{
+        type: 'message_start',
+        message: {
+          id: `msg_${crypto.getRandomValues(new Uint8Array(12)).reduce((h, b) => h + b.toString(16).padStart(2, '0'), '')}`,
+          type: 'message',
+          role: 'assistant',
+          content: [],
+          model: 'default',
+          stop_reason: null,
+          stop_sequence: null,
+          usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+        },
+      }]
+    } else if (chunk.type === 'content_block_start') {
+      const cb = chunk.content_block
+      const currentContentIndex = chunk.index
+
+      if (cb.type === 'thinking') {
+        return [{
+          type: 'content_block_start',
+          index: chunk.index,
+          content_block: { type: 'thinking', thinking: '' },
+        }]
+      } else if (cb.type === 'text') {
+        return [{
+          type: 'content_block_start',
+          index: chunk.index,
+          content_block: { type: 'text', text: '' },
+        }]
+      } else if (cb.type === 'tool_use') {
+        return [{
+          type: 'content_block_start',
+          index: chunk.index,
+          content_block: {
+            type: 'tool_use',
+            id: cb.id,
+            name: cb.name,
+            input: {},
+          },
+        }]
+      } else if (chunk.type === 'content_block_delta') {
+        const delta = chunk.delta
+
+        if (delta.type === 'thinking_delta' && delta.thinking) {
+          return [{
+            type: 'content_block_delta',
+            index: chunk.index,
+            delta: { type: 'thinking_delta', thinking: delta.thinking },
+          }]
+        }
+        if (delta.type === 'text_delta' && delta.text) {
+          return [{
+            type: 'content_block_delta',
+            index: chunk.index,
+            delta: { type: 'text_delta', text: delta.text },
+          }]
+        }
+        if (delta.type === 'input_json_delta' && delta.partial_json) {
+          return [{
+            type: 'content_block_delta',
+            index: chunk.index,
+            delta: { type: 'input_json_delta', partial_json: delta.partial_json },
+          }]
+        }
+        if (delta.type === 'signature_delta' && delta.signature) {
+          return [{
+            type: 'content_block_delta',
+            index: chunk.index,
+            delta: { type: 'thinking_delta', thinking: delta.signature },
+          }]
+        }
+        return []
+      } else if (chunk.type === 'content_block_stop') {
+        return [{
+          type: 'content_block_stop',
+          index: chunk.index,
+        }]
+      } else if (chunk.type === 'message_delta') {
+        if (chunk.delta?.stop_reason) {
+          const stopReason = chunk.delta.stop_reason === 'max_tokens' ? 'max_tokens' :
+            chunk.delta.stop_reason === 'tool_use' ? 'tool_use' :
+            chunk.delta.stop_reason === 'stop_sequence' ? 'stop_sequence' : 'end_turn'
+
+          return [
+            {
+              type: 'message_delta',
+              delta: { stop_reason: chunk.delta.stop_reason, stop_sequence: null },
+              usage: normalizeAnthropicUsage(chunk.usage || {}),
+            },
+            { type: 'message_stop' },
+          ]
+        }
+        return []
+      } else if (chunk.type === 'message_stop') {
+        // Final stop - will be handled after loop
+        return []
+      }
+
+      return []
+    }
+  }
+
+  for await (const rawEvent of parseSSERaw(stream)) {
+    const data = rawEvent.data.trim()
+    if (data === '' || data === '[DONE]') continue
+
+    let chunk: any
+    try {
+      chunk = JSON.parse(data)
+    } catch {
+      continue
+    }
+
+    // Accumulate usage from any chunk
+    if (chunk.type === 'message_start' && chunk.message?.usage) {
+      const usageData = chunk.message.usage
+      const rawInputTokens = usageData.input_tokens ?? 0
+      const outputTokens = usageData.output_tokens ?? 0
+      const rawCacheReadTokens = usageData.cache_read_input_tokens ?? 0
+      const rawCacheWriteTokens = usageData.cache_creation_input_tokens ?? 0
+      const usage = normalizeAnthropicUsage(usageData)
+
+      // We'll handle this in the main loop
+    }
+    if (chunk.usage) {
+      // handled in main loop
+    }
+
+    if (!started) {
+      yield [{
+        type: 'message_start',
+        message: {
+          id: `msg_${crypto.getRandomValues(new Uint8Array(12)).reduce((h, b) => h + b.toString(16).padStart(2, '0'), '')}`,
+          type: 'message',
+          role: 'assistant',
+          content: [],
+          model: 'default',
+          stop_reason: null,
+          stop_sequence: null,
+          usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+        },
+      }]
+      continue
+    }
+
+    if (!chunk.type) continue
+
+    const events = processChunk(chunk)
+    for (const event of events) {
+      yield event
+    }
+  }
+
+  // Final message_stop
+  yield { type: 'message_stop' }
+}
 type JsonValue = string | number | boolean | null | JsonObject | JsonArray
 type JsonObject = { [key: string]: JsonValue }
 type JsonArray = JsonValue[]
@@ -1783,86 +2081,126 @@ export async function* queryAnthropicMessages(
 
   try {
     queryCheckpoint('query_client_creation_start')
-    const generator = withRetry(
-      () =>
-        getAnthropicClient({
-          maxRetries: 0, // Disabled auto-retry in favor of manual implementation
-          model: route.model,
-          fetchOverride: options.fetchOverride,
-          source: options.querySource,
-        }),
-      async (anthropic, attempt, context) => {
-        attemptNumber = attempt
-        isFastModeRequest = context.fastMode ?? false
-        start = Date.now()
-        attemptStartTimes.push(start)
-        // Client has been created by withRetry's getClient() call. This fires
-        // once per attempt; on retries the client is usually cached (withRetry
-        // only calls getClient() again after auth errors), so the delta from
-        // client_creation_start is meaningful on attempt 1.
-        queryCheckpoint('query_client_creation_end')
 
-        const params = paramsFromContext(context)
-        captureAPIRequest(params, options.querySource) // Capture for bug reports
+    let attemptNumber = 0
+    let isFastModeRequest = isFastMode
+    let streamResponse: Response | undefined
+    let streamRequestId: string | null | undefined
 
-        maxOutputTokens = params.max_tokens
+    // Build request params once (they don't change across retries except for max_tokens)
+    const baseParams = paramsFromContext({ model: route.model, thinkingConfig })
+    captureAPIRequest(baseParams, options.querySource)
 
-        // Fire immediately before the fetch is dispatched. .withResponse() below
-        // awaits until response headers arrive, so this MUST be before the await
-        // or the "Network TTFB" phase measurement is wrong.
-        queryCheckpoint('query_api_request_sent')
-        if (!options.agentId) {
-          headlessProfilerCheckpoint('api_request_sent')
+    // Generate client request ID for first-party tracking
+    const clientRequestId =
+      getAPIProvider() === 'firstParty' && isFirstPartyAnthropicBaseUrl()
+        ? randomUUID()
+        : undefined
+
+    // Build the Anthropic wire-format request body
+    const requestBody = buildAnthropicRequestBody({
+      model: route.model,
+      messages: baseParams.messages,
+      system: baseParams.system,
+      tools: baseParams.tools,
+      toolChoice: baseParams.tool_choice,
+      enableThinking: baseParams.thinking?.type === 'enabled',
+      maxTokens: baseParams.max_tokens,
+      temperatureOverride: baseParams.temperature,
+      stream: true,
+      streamOptions: { include_usage: true },
+      metadata: baseParams.metadata,
+    })
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'User-Agent': 'claude-code',
+      'X-Claude-Code-Session-Id': getSessionId(),
+      'anthropic-version': '2023-06-01',
+      ...(clientRequestId && { [CLIENT_REQUEST_ID_HEADER]: clientRequestId }),
+      ...(baseParams.metadata && { metadata: JSON.stringify(baseParams.metadata) }),
+    }
+
+    // Determine auth headers
+    const authHeaders = await (async () => {
+      const provider = getAPIProvider()
+      if (provider === 'firstParty') {
+        const token = isClaudeAISubscriber() ? getClaudeAIOAuthTokens()?.accessToken : await getAnthropicApiKey()
+        return token ? { Authorization: `Bearer ${token}` } : {}
+      }
+      return {}
+    })()
+
+    const url = `${getOauthConfig().BASE_API_URL || 'https://api.anthropic.com'}/v1/messages`
+
+    // Retry loop for streaming
+    while (true) {
+      attemptNumber++
+      const attemptStart = Date.now()
+      queryCheckpoint('query_api_request_sent')
+
+      try {
+        const response = await httpRequest(
+          {
+            url,
+            method: 'POST',
+            headers: { ...headers, ...(clientRequestId && { [CLIENT_REQUEST_ID_HEADER]: clientRequestId }) },
+            body: JSON.stringify(requestBody),
+            signal,
+          },
+          options.fetchOverride,
+        )
+
+        queryCheckpoint('query_response_headers_received')
+        streamResponse = response
+        streamRequestId = response.headers.get('x-request-id') ?? null
+
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => '')
+          throw new Error(`Upstream Anthropic failed (${response.status}): ${errorText}`)
         }
 
-        // Generate and track client request ID so timeouts (which return no
-        // server request ID) can still be correlated with server logs.
-        // First-party only — 3P providers don't log it (inc-4029 class).
-        clientRequestId =
-          getAPIProvider() === 'firstParty' && isFirstPartyAnthropicBaseUrl()
-            ? randomUUID()
-            : undefined
+        if (!response.body) {
+          throw new Error('Upstream response missing body')
+        }
 
-        // Use raw stream instead of BetaMessageStream to avoid O(n²) partial JSON parsing
-        // BetaMessageStream calls partialParse() on every input_json_delta, which we don't need
-        // since we handle tool input accumulation ourselves
-        // biome-ignore lint/plugin: main conversation loop handles attribution separately
-        const result = await anthropic.beta.messages
-          .create(
-            { ...params, stream: true },
-            {
-              signal,
-              ...(clientRequestId && {
-                headers: { [CLIENT_REQUEST_ID_HEADER]: clientRequestId },
-              }),
-            },
-          )
-          .withResponse()
-        queryCheckpoint('query_response_headers_received')
-        streamRequestId = result.request_id
-        streamResponse = result.response
-        return result.data
-      },
-      {
-        model: route.model,
-        fallbackModel: options.fallbackModel,
-        thinkingConfig,
-        ...(isFastModeEnabled() ? { fastMode: isFastMode } : false),
-        signal,
-        querySource: options.querySource,
-      },
-    )
+        // Parse the SSE stream using native adapter
+        const adaptedStream = adaptAnthropicStreamSSE(response.body, route.model, { includeCacheWriteTokens: false })
 
-    let e
-    do {
-      e = await generator.next()
+        // Process the adapted stream
+        let e
+        do {
+          e = await adaptedStream.next()
 
-      // yield API error messages (the stream has a 'controller' property, error messages don't)
-      if (!('controller' in e.value)) {
-        yield e.value
+          // yield API error messages (the stream has a 'controller' property, error messages don't)
+          if (!('controller' in e.value)) {
+            yield e.value
+          }
+        } while (!e.done)
+
+        stream = e.value as any // The stream is fully consumed by the adapter
+        break // Success - exit retry loop
+
+      } catch (error) {
+        if (isAbortError(error)) throw error
+
+        // Check if we should retry
+        const retryable = error instanceof Error && (
+          error.name === 'APIConnectionTimeoutError' ||
+          error.name === 'APIConnectionError' ||
+          (error as any).status === 529 ||
+          (error as any).status === 503 ||
+          (error as any).status === 429
+        )
+
+        if (retryable && attemptNumber < 3) {
+          const delay = Math.min(1000 * 2 ** (attemptNumber - 1), 30000)
+          await new Promise(r => setTimeout(r, delay))
+          continue
+        }
+        throw error
       }
-    } while (!e.done)
-    stream = e.value as Stream<BetaRawMessageStreamEvent>
+    }
 
     // reset state
     newMessages.length = 0
