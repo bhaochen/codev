@@ -408,12 +408,12 @@ export function Config({
       id: 'bareModeLevel',
       label: 'Bare mode level',
       value: globalConfig.bareModeLevel ?? (globalConfig.bareModeEnabled ? 'max' : 'off'),
-      options: ['off', 'ultra', 'max', 'high', 'medium', 'low'],
+      options: ['off', 'extreme', 'ultra', 'max', 'high', 'medium', 'low'],
       type: 'enum' as const,
       onChange(bareModeLevel: string) {
         const enabled = bareModeLevel !== 'off'
         const nextLevel = enabled
-          ? (bareModeLevel as 'ultra' | 'max' | 'high' | 'medium' | 'low')
+          ? (bareModeLevel as 'extreme' | 'ultra' | 'max' | 'high' | 'medium' | 'low')
           : undefined
         saveGlobalConfig(current => ({
           ...current,

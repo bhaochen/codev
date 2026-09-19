@@ -3,6 +3,7 @@ import type { UUID } from 'crypto'
 import { randomUUID } from 'crypto'
 import uniqBy from 'lodash-es/uniqBy.js'
 import { logForDebugging } from 'src/utils/debug.js'
+import { shouldSuppressBarePromptExtras } from '../../utils/envUtils.js'
 import { getProjectRoot, getSessionId } from '../../bootstrap/state.js'
 import { getCommand, getSkillToolCommands, hasCommand } from '../../commands.js'
 import {
@@ -377,9 +378,10 @@ export async function* runAgent({
       ? cloneFileStateCache(toolUseContext.readFileState)
       : createFileStateCacheWithSizeLimit(READ_FILE_STATE_CACHE_SIZE)
 
+  const suppressPromptExtras = shouldSuppressBarePromptExtras()
   const [baseUserContext, baseSystemContext] = await Promise.all([
-    override?.userContext ?? getUserContext(),
-    override?.systemContext ?? getSystemContext(),
+    override?.userContext ?? (suppressPromptExtras ? {} : getUserContext()),
+    override?.systemContext ?? (suppressPromptExtras ? {} : getSystemContext()),
   ])
 
   // Read-only agents (Explore, Plan) don't act on commit/PR/lint rules from

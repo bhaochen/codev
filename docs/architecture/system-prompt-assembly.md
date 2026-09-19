@@ -28,6 +28,7 @@ Bare mode 由 `bareModeLevel` 配置或 `CLAUDE_CODE_BARE_LEVEL` 环境变量控
 
 | 等级 | system prompt 内容 |
 |------|--------------------|
+| `extreme` | 仅身份：`You are Codev, chenbhao's CLI`；不发送工具、Git 或 user context |
 | `ultra` | 仅身份：`You are Codev, chenbhao's CLI.`；同时跳过 Git/user context |
 | `max` | 身份、CWD、会话日期 |
 | `high` | `max` + 输出效率和语气风格 |

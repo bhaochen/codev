@@ -290,8 +290,17 @@ export function getPartialCompactPrompt(
   return prompt
 }
 
-export function getCompactPrompt(customInstructions?: string): string {
-  let prompt = NO_TOOLS_PREAMBLE + BASE_COMPACT_PROMPT
+const SMALL_CONTEXT_COMPACT_PROMPT = `Summarize the conversation into a compact, actionable state.
+Preserve only the user's goal, decisions, files changed, errors, and pending tasks.
+Omit analysis, repeated explanations, long tool output, and details that are not needed
+to continue the work. Use concise bullets and keep the summary under 800 tokens.
+Respond with plain text only.`
+
+export function getCompactPrompt(
+  customInstructions?: string,
+  smallContext = false,
+): string {
+  let prompt = NO_TOOLS_PREAMBLE + (smallContext ? SMALL_CONTEXT_COMPACT_PROMPT : BASE_COMPACT_PROMPT)
 
   if (customInstructions && customInstructions.trim() !== '') {
     prompt += `\n\nAdditional Instructions:\n${customInstructions}`

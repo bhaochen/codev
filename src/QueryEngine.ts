@@ -45,7 +45,11 @@ import { createAbortController } from './utils/abortController.js'
 import type { AttributionState } from './utils/commitAttribution.js'
 import { getGlobalConfig } from './utils/config.js'
 import { getCwd } from './utils/cwd.js'
-import { isBareMode, isEnvTruthy } from './utils/envUtils.js'
+import {
+  isBareMode,
+  isEnvTruthy,
+  shouldSuppressBarePromptExtras,
+} from './utils/envUtils.js'
 import { getFastModeState } from './utils/fastMode.js'
 import {
   type FileHistoryState,
@@ -285,6 +289,7 @@ export class QueryEngine {
     // Narrow once so TS tracks the type through the conditionals below.
     const customPrompt =
       typeof customSystemPrompt === 'string' ? customSystemPrompt : undefined
+    const suppressPromptExtras = shouldSuppressBarePromptExtras()
     const {
       defaultSystemPrompt,
       userContext: baseUserContext,
@@ -319,9 +324,11 @@ export class QueryEngine {
         : null
 
     const systemPrompt = asSystemPrompt([
-      ...(customPrompt !== undefined ? [customPrompt] : defaultSystemPrompt),
-      ...(memoryMechanicsPrompt ? [memoryMechanicsPrompt] : []),
-      ...(appendSystemPrompt ? [appendSystemPrompt] : []),
+      ...((customPrompt !== undefined && !suppressPromptExtras)
+        ? [customPrompt]
+        : defaultSystemPrompt),
+      ...(memoryMechanicsPrompt && !suppressPromptExtras ? [memoryMechanicsPrompt] : []),
+      ...(appendSystemPrompt && !suppressPromptExtras ? [appendSystemPrompt] : []),
     ])
 
     // Register function hook for structured output enforcement

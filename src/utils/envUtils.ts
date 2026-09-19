@@ -46,9 +46,17 @@ export function isEnvDefinedFalsy(
   return ['0', 'false', 'no', 'off'].includes(normalizedValue)
 }
 
-export type BareModeLevel = 'max' | 'high' | 'medium' | 'low'
+export type BareModeLevel =
+  | 'extreme'
+  | 'ultra'
+  | 'max'
+  | 'high'
+  | 'medium'
+  | 'low'
 
 const BARE_MODE_LEVELS: readonly BareModeLevel[] = [
+  'extreme',
+  'ultra',
   'max',
   'high',
   'medium',
@@ -102,6 +110,11 @@ export function getBareModeLevel(): BareModeLevel | null {
  */
 export function isBareMode(): boolean {
   return getBareModeLevel() !== null
+}
+
+export function shouldSuppressBarePromptExtras(): boolean {
+  const bareLevel = getBareModeLevel()
+  return bareLevel !== null && bareLevel !== 'low'
 }
 
 /**

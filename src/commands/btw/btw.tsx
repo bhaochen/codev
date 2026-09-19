@@ -17,6 +17,7 @@ import type { LocalJSXCommandOnDone } from '../../types/command.js';
 import type { Message } from '../../types/message.js';
 import { createAbortController } from '../../utils/abortController.js';
 import { saveGlobalConfig } from '../../utils/config.js';
+import { shouldSuppressBarePromptExtras } from '../../utils/envUtils.js';
 import { errorMessage } from '../../utils/errors.js';
 import { type CacheSafeParams, getLastCacheSafeParams } from '../../utils/forkedAgent.js';
 import { getMessagesAfterCompactBoundary } from '../../utils/messages.js';
@@ -217,7 +218,8 @@ async function buildCacheSafeParams(context: ProcessUserInputContext): Promise<C
       forkContextMessages
     };
   }
-  const [rawSystemPrompt, userContext, systemContext] = await Promise.all([getSystemPrompt(context.options.tools, context.options.mainLoopModel, [], context.options.mcpClients), getUserContext(), getSystemContext()]);
+  const suppressPromptExtras = shouldSuppressBarePromptExtras();
+  const [rawSystemPrompt, userContext, systemContext] = await Promise.all([getSystemPrompt(context.options.tools, context.options.mainLoopModel, [], context.options.mcpClients), suppressPromptExtras ? Promise.resolve({}) : getUserContext(), suppressPromptExtras ? Promise.resolve({}) : getSystemContext()]);
   return {
     systemPrompt: asSystemPrompt(rawSystemPrompt),
     userContext,

@@ -446,6 +446,9 @@ export async function getSystemPrompt(
 ): Promise<string[]> {
   const bareLevel = getBareModeLevel()
   if (bareLevel && bareLevel !== 'low') {
+    if (bareLevel === 'extreme') return ['You are Codev, chenbhao\'s CLI']
+    if (bareLevel === 'ultra') return ['You are Codev, chenbhao\'s CLI.']
+
     const identity = `You are Codev, chenbhao's CLI.\n\nCWD: ${getCwd()}\nDate: ${getSessionStartDate()}`
     if (bareLevel === 'max') return [identity]
 

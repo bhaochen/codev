@@ -39,7 +39,11 @@ import {
   getMcpInstructionsDeltaAttachment,
 } from '../../utils/attachments.js'
 import { getMemoryPath } from '../../utils/config.js'
-import { COMPACT_MAX_OUTPUT_TOKENS } from '../../utils/context.js'
+import {
+  COMPACT_MAX_OUTPUT_TOKENS,
+  getCompactOutputTokenBudget,
+  getContextWindowForModel,
+} from '../../utils/context.js'
 import {
   analyzeContext,
   tokenStatsToStatsigMetrics,
@@ -435,7 +439,10 @@ export async function compactConversation(
       true,
     )
 
-    const compactPrompt = getCompactPrompt(customInstructions)
+    const compactPrompt = getCompactPrompt(
+      customInstructions,
+      getContextWindowForModel(context.options.mainLoopModel) <= 32_000,
+    )
     const summaryRequest = createUserMessage({
       content: compactPrompt,
     })
@@ -1150,10 +1157,11 @@ async function streamCompactSummary({
   // main conversation's cached prefix (system prompt, tools, context messages).
   // Falls back to regular streaming path on failure.
   // 3P default: true — see comment at the other tengu_compact_cache_prefix read above.
-  const promptCacheSharingEnabled = getFeatureValue_CACHED_MAY_BE_STALE(
-    'tengu_compact_cache_prefix',
-    true,
-  )
+  const smallContextModel =
+    getContextWindowForModel(context.options.mainLoopModel) <= 32_000
+  const promptCacheSharingEnabled =
+    !smallContextModel &&
+    getFeatureValue_CACHED_MAY_BE_STALE('tengu_compact_cache_prefix', true)
   // Send keep-alive signals during compaction to prevent remote session
   // WebSocket idle timeouts from dropping bridge connections. Compaction
   // API calls can take 5-10+ seconds, during which no other messages
@@ -1312,10 +1320,14 @@ async function streamCompactSummary({
           toolChoice: undefined,
           isNonInteractiveSession: context.options.isNonInteractiveSession,
           hasAppendSystemPrompt: !!context.options.appendSystemPrompt,
-          maxOutputTokensOverride: Math.min(
-            COMPACT_MAX_OUTPUT_TOKENS,
-            getMaxOutputTokensForModel(context.options.mainLoopModel),
-          ),
+          maxOutputTokensOverride: smallContextModel
+            ? getCompactOutputTokenBudget(
+                getContextWindowForModel(context.options.mainLoopModel),
+              )
+            : Math.min(
+                COMPACT_MAX_OUTPUT_TOKENS,
+                getMaxOutputTokensForModel(context.options.mainLoopModel),
+              ),
           querySource: 'compact',
           agents: context.options.agentDefinitions.activeAgents,
           mcpTools: [],

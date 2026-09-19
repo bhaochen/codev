@@ -18,6 +18,8 @@ export const MODEL_CONTEXT_WINDOW_DEFAULT = 200_000
 
 // Maximum output tokens for compact operations
 export const COMPACT_MAX_OUTPUT_TOKENS = 20_000
+const COMPACT_MIN_OUTPUT_TOKENS = 512
+const COMPACT_CONTEXT_RATIO = 0.08
 
 // Default max output tokens
 const MAX_OUTPUT_TOKENS_DEFAULT = 32_000
@@ -31,6 +33,24 @@ const MAX_OUTPUT_TOKENS_UPPER_LIMIT = 64_000
 // import cycle.
 export const CAPPED_DEFAULT_MAX_TOKENS = 8_000
 export const ESCALATED_MAX_TOKENS = 64_000
+
+/**
+ * Derive a compaction summary budget from the model's context window.
+ * The ratio leaves room for the fixed prompt/tool overhead and the next turn.
+ */
+export function getCompactOutputTokenBudget(
+  contextWindow: number,
+  fixedPromptTokens = 0,
+): number {
+  const availableTokens = Math.max(0, contextWindow - fixedPromptTokens)
+  return Math.min(
+    COMPACT_MAX_OUTPUT_TOKENS,
+    Math.max(
+      COMPACT_MIN_OUTPUT_TOKENS,
+      Math.floor(availableTokens * COMPACT_CONTEXT_RATIO),
+    ),
+  )
+}
 
 /**
  * Check if 1M context is disabled via environment variable.

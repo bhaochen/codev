@@ -22,6 +22,7 @@ import type { FileStateCache } from './fileStateCache.js'
 import type { CacheSafeParams } from './forkedAgent.js'
 import { getMainLoopModel } from './model/model.js'
 import { asSystemPrompt } from './systemPromptType.js'
+import { getBareModeLevel, shouldSuppressBarePromptExtras } from './envUtils.js'
 import {
   shouldEnableThinkingByDefault,
   type ThinkingConfig,
@@ -58,8 +59,12 @@ export async function fetchSystemPromptParts({
   userContext: { [k: string]: string }
   systemContext: { [k: string]: string }
 }> {
+  const bareLevel = getBareModeLevel()
+  const suppressPromptExtras = shouldSuppressBarePromptExtras()
+  const shouldUseCustomPrompt = customSystemPrompt !== undefined && !suppressPromptExtras
+
   const [defaultSystemPrompt, userContext, systemContext] = await Promise.all([
-    customSystemPrompt !== undefined
+    shouldUseCustomPrompt
       ? Promise.resolve([])
       : getSystemPrompt(
           tools,
@@ -67,8 +72,10 @@ export async function fetchSystemPromptParts({
           additionalWorkingDirectories,
           mcpClients,
         ),
-    getUserContext(),
-    customSystemPrompt !== undefined ? Promise.resolve({}) : getSystemContext(),
+    suppressPromptExtras ? Promise.resolve({}) : getUserContext(),
+    suppressPromptExtras || customSystemPrompt !== undefined
+      ? Promise.resolve({})
+      : getSystemContext(),
   ])
   return { defaultSystemPrompt, userContext, systemContext }
 }
@@ -112,6 +119,8 @@ export async function buildSideQuestionFallbackParams({
 }): Promise<CacheSafeParams> {
   const mainLoopModel = getMainLoopModel()
   const appState = getAppState()
+  const bareLevel = getBareModeLevel()
+  const suppressPromptExtras = bareLevel !== null && bareLevel !== 'low'
 
   const { defaultSystemPrompt, userContext, systemContext } =
     await fetchSystemPromptParts({
@@ -125,10 +134,10 @@ export async function buildSideQuestionFallbackParams({
     })
 
   const systemPrompt = asSystemPrompt([
-    ...(customSystemPrompt !== undefined
+    ...((customSystemPrompt !== undefined && !suppressPromptExtras)
       ? [customSystemPrompt]
       : defaultSystemPrompt),
-    ...(appendSystemPrompt ? [appendSystemPrompt] : []),
+    ...(appendSystemPrompt && !suppressPromptExtras ? [appendSystemPrompt] : []),
   ])
 
   // Strip in-progress assistant message (stop_reason === null) — same guard

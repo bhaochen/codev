@@ -80,7 +80,10 @@ import { asSessionId, asAgentId } from '../types/ids.js'
 import { logForDebugging } from '../utils/debug.js'
 import { QueryGuard } from '../utils/QueryGuard.js'
 import { useGoalAutoContinue } from '../hooks/useGoalAutoContinue.js'
-import { isEnvTruthy } from '../utils/envUtils.js'
+import {
+  isEnvTruthy,
+  shouldSuppressBarePromptExtras,
+} from '../utils/envUtils.js'
 import { formatTokens, truncateToWidth } from '../utils/format.js'
 import { consumeEarlyInput } from '../utils/earlyInput.js'
 
@@ -3440,6 +3443,7 @@ export function REPL({
         mainLoopModel,
       )
 
+      const suppressPromptExtras = shouldSuppressBarePromptExtras()
       const [defaultSystemPrompt, userContext, systemContext] =
         await Promise.all([
           getSystemPrompt(
@@ -3450,8 +3454,8 @@ export function REPL({
             ),
             toolUseContext.options.mcpClients,
           ),
-          getUserContext(),
-          getSystemContext(),
+          suppressPromptExtras ? Promise.resolve({}) : getUserContext(),
+          suppressPromptExtras ? Promise.resolve({}) : getSystemContext(),
         ])
 
       const systemPrompt = buildEffectiveSystemPrompt({
@@ -3791,6 +3795,7 @@ export function REPL({
       }
 
       queryCheckpoint('query_context_loading_start')
+      const suppressPromptExtras = shouldSuppressBarePromptExtras()
       const [, , defaultSystemPrompt, baseUserContext, systemContext] =
         await Promise.all([
           // IMPORTANT: do this after setMessages() above, to avoid UI jank
@@ -3814,8 +3819,8 @@ export function REPL({
             ),
             freshMcpClients,
           ),
-          getUserContext(),
-          getSystemContext(),
+          suppressPromptExtras ? Promise.resolve({}) : getUserContext(),
+          suppressPromptExtras ? Promise.resolve({}) : getSystemContext(),
         ])
       const userContext = {
         ...baseUserContext,
@@ -7052,9 +7057,10 @@ export function REPL({
                         defaultSystemPrompt: defaultSysPrompt,
                         appendSystemPrompt: context.options.appendSystemPrompt,
                       })
+                      const suppressPromptExtras = shouldSuppressBarePromptExtras()
                       const [userContext, systemContext] = await Promise.all([
-                        getUserContext(),
-                        getSystemContext(),
+                        suppressPromptExtras ? Promise.resolve({}) : getUserContext(),
+                        suppressPromptExtras ? Promise.resolve({}) : getSystemContext(),
                       ])
 
                       const result = await partialCompactConversation(

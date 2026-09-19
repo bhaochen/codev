@@ -22,6 +22,7 @@ import type { ToolUseContext } from '../../Tool.js'
 import type { LocalCommandCall } from '../../types/command.js'
 import type { Message } from '../../types/message.js'
 import { hasExactErrorMessage } from '../../utils/errors.js'
+import { shouldSuppressBarePromptExtras } from '../../utils/envUtils.js'
 import { executePreCompactHooks } from '../../utils/hooks.js'
 import { logError } from '../../utils/log.js'
 import { getMessagesAfterCompactBoundary } from '../../utils/messages.js'
@@ -273,9 +274,10 @@ async function getCacheSharingParams(
     defaultSystemPrompt: defaultSysPrompt,
     appendSystemPrompt: context.options.appendSystemPrompt,
   })
+  const suppressPromptExtras = shouldSuppressBarePromptExtras()
   const [userContext, systemContext] = await Promise.all([
-    getUserContext(),
-    getSystemContext(),
+    suppressPromptExtras ? Promise.resolve({}) : getUserContext(),
+    suppressPromptExtras ? Promise.resolve({}) : getSystemContext(),
   ])
   return {
     systemPrompt,

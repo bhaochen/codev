@@ -311,6 +311,8 @@ export const getTools = (permissionContext: ToolPermissionContext): Tools => {
   // the small context windows commonly used by local providers.
   const bareLevel = getBareModeLevel()
   if (bareLevel && bareLevel !== 'low') {
+    if (bareLevel === 'extreme') return []
+
     const simpleTools: Tool[] = [
       BashTool,
       FileReadTool,

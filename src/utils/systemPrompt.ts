@@ -6,7 +6,7 @@ import {
 import type { ToolUseContext } from '../Tool.js'
 import type { AgentDefinition } from '../tools/AgentTool/loadAgentsDir.js'
 import { isBuiltInAgent } from '../tools/AgentTool/loadAgentsDir.js'
-import { isEnvTruthy } from './envUtils.js'
+import { isEnvTruthy, shouldSuppressBarePromptExtras } from './envUtils.js'
 import { asSystemPrompt, type SystemPrompt } from './systemPromptType.js'
 
 export { asSystemPrompt, type SystemPrompt } from './systemPromptType.js'
@@ -53,7 +53,9 @@ export function buildEffectiveSystemPrompt({
   appendSystemPrompt: string | undefined
   overrideSystemPrompt?: string | null
 }): SystemPrompt {
-  if (overrideSystemPrompt) {
+  const suppressPromptExtras = shouldSuppressBarePromptExtras()
+
+  if (overrideSystemPrompt && !suppressPromptExtras) {
     return asSystemPrompt([overrideSystemPrompt])
   }
   // Coordinator mode: use coordinator prompt instead of default
@@ -70,7 +72,7 @@ export function buildEffectiveSystemPrompt({
       require('../coordinator/coordinatorMode.js') as typeof import('../coordinator/coordinatorMode.js')
     return asSystemPrompt([
       getCoordinatorSystemPrompt(),
-      ...(appendSystemPrompt ? [appendSystemPrompt] : []),
+      ...(appendSystemPrompt && !suppressPromptExtras ? [appendSystemPrompt] : []),
     ])
   }
 
@@ -107,17 +109,17 @@ export function buildEffectiveSystemPrompt({
   ) {
     return asSystemPrompt([
       ...defaultSystemPrompt,
-      `\n# Custom Agent Instructions\n${agentSystemPrompt}`,
-      ...(appendSystemPrompt ? [appendSystemPrompt] : []),
+      ...(agentSystemPrompt && !suppressPromptExtras ? [`\n# Custom Agent Instructions\n${agentSystemPrompt}`] : []),
+      ...(appendSystemPrompt && !suppressPromptExtras ? [appendSystemPrompt] : []),
     ])
   }
 
   return asSystemPrompt([
-    ...(agentSystemPrompt
+    ...((agentSystemPrompt && !suppressPromptExtras)
       ? [agentSystemPrompt]
-      : customSystemPrompt
+      : customSystemPrompt && !suppressPromptExtras
         ? [customSystemPrompt]
         : defaultSystemPrompt),
-    ...(appendSystemPrompt ? [appendSystemPrompt] : []),
+    ...(appendSystemPrompt && !suppressPromptExtras ? [appendSystemPrompt] : []),
   ])
 }
