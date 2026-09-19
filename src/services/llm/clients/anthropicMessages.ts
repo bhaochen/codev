@@ -249,6 +249,10 @@ import {
   getErrorMessageIfRefusal,
 } from '../../api/errors.js'
 import {
+  CLIENT_REQUEST_ID_HEADER,
+  getAnthropicClient,
+} from '../../api/client.js'
+import {
   EMPTY_USAGE,
   type GlobalCacheStrategy,
   logAPIError,
