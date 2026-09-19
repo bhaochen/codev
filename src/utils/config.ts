@@ -261,7 +261,7 @@ export type GlobalConfig = {
   autoCompactEnabled: boolean // Controls whether auto-compact is enabled
   showTurnDuration: boolean // Controls whether to show turn duration message (e.g., "Cooked for 1m 6s")
   bareModeEnabled: boolean // Legacy max bare mode switch
-  bareModeLevel?: 'max' | 'high' | 'medium' | 'low'
+  bareModeLevel?: 'ultra' | 'max' | 'high' | 'medium' | 'low'
   /**
    * @deprecated Use settings.env instead.
    */

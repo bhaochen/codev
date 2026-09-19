@@ -28,6 +28,7 @@ Bare mode 由 `bareModeLevel` 配置或 `CLAUDE_CODE_BARE_LEVEL` 环境变量控
 
 | 等级 | system prompt 内容 |
 |------|--------------------|
+| `ultra` | 仅身份：`You are Codev, chenbhao's CLI.`；同时跳过 Git/user context |
 | `max` | 身份、CWD、会话日期 |
 | `high` | `max` + 输出效率和语气风格 |
 | `medium` | `high` + 环境信息和语言偏好 |
@@ -287,6 +288,12 @@ export const SYSTEM_PROMPT_DYNAMIC_BOUNDARY = '__SYSTEM_PROMPT_DYNAMIC_BOUNDARY_
 ---
 
 ## 示例输出
+
+### 当 Bare mode 为 `ultra` 时
+
+```text
+You are Codev, chenbhao's CLI.
+```
 
 ### 当 Bare mode 为 `max` 时
 

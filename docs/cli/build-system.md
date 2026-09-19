@@ -480,7 +480,7 @@ export function filterToolsByDenyRules<T extends { name: string; mcpInfo?: ... }
 
 `getTools()` 函数（`src/tools.ts`）的组装流程：
 
-1. **Bare 模式分级**：`max` 返回 Bash/Read/Edit；`high` 额外返回 Write/Glob/Grep；`medium` 再额外返回 WebFetch/TodoWrite/AskUserQuestion；`low` 使用完整工具池。协调者模式仍会按其自身规则增加 Agent/TaskStop 工具。
+1. **Bare 模式分级**：`ultra` 和 `max` 返回 Bash/Read/Edit；`ultra` 还跳过 Git/user context；`high` 额外返回 Write/Glob/Grep；`medium` 再额外返回 WebFetch/TodoWrite/AskUserQuestion；`low` 使用完整工具池。协调者模式仍会按其自身规则增加 Agent/TaskStop 工具。
 
    **注意**：此模式同时也会影响 system prompt 的身份介绍：
    - system prompt 以 `"You are Codev, chenbhao's CLI."` 开头

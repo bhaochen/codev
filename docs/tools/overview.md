@@ -69,6 +69,7 @@ getTools(permissionContext) → Tool[]
 执行流程：
 
 1. **Bare mode 分级**：
+   - `ultra`：Bash、Read、Edit，且不发送 Git/user context
    - `max`：Bash、Read、Edit
    - `high`：`max` + Write、Glob、Grep
    - `medium`：`high` + WebFetch、TodoWrite、AskUserQuestion
@@ -80,7 +81,7 @@ getTools(permissionContext) → Tool[]
 
 2. **`getAllBaseTools()`**：收集所有内置工具，按 feature flag 和条件编译；普通模式包含 `REPL`，由 `getReplTool()` 运行时解析（lazy require 仅为规避模块循环依赖）
 3. **`filterToolsByDenyRules()`**：检查 deny rules，过滤被禁止的工具
-4. **REPL 模式范围**：普通模式和 `low` 下 `REPL` 是叠加的编程环境，所有原语仍可直接调用；`max`、`high`、`medium` 为节省本地模型上下文，不将 REPL 加入主工具池
+4. **REPL 模式范围**：普通模式和 `low` 下 `REPL` 是叠加的编程环境，所有原语仍可直接调用；`ultra`、`max`、`high`、`medium` 为节省本地模型上下文，不将 REPL 加入主工具池
 5. **`isEnabled()` 过滤**：逐个检查工具是否启用
 
 ### assembleToolPool()
