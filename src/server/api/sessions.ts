@@ -17,6 +17,7 @@
 
 import * as path from 'node:path'
 import * as fs from 'node:fs/promises'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { sessionService } from '../services/sessionService.js'
 import { conversationService } from '../services/conversationService.js'
 import { ApiError, errorResponse } from '../middleware/errorHandler.js'
@@ -35,7 +36,6 @@ import {
   previewSessionRewind,
   type RewindTargetSelector,
 } from '../services/sessionRewindService.js'
-import { SessionStore } from '../../../adapters/common/session-store.js'
 import {
   createSessionBranch,
   SessionBranchingError,
@@ -441,9 +441,31 @@ function normalizeSessionIds(value: unknown): string[] {
 }
 
 function cleanupAdapterSessionMappings(sessionId: string): void {
-  const removedChatIds = new SessionStore().deleteBySessionId(sessionId)
+  const removedChatIds = deleteAdapterSessionMappings(sessionId)
   if (removedChatIds.length > 0) {
     console.log(`[Sessions API] Removed ${removedChatIds.length} adapter session mapping(s) for ${sessionId}`)
+  }
+
+  function deleteAdapterSessionMappings(sessionId: string): string[] {
+    const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(process.env.HOME || '', '.claude')
+    const filePath = path.join(configDir, 'adapter-sessions.json')
+    try {
+      const raw = readFileSync(filePath, 'utf8')
+      const mappings = JSON.parse(raw) as Record<string, { sessionId?: string }>
+      const removed: string[] = []
+      for (const [chatId, mapping] of Object.entries(mappings)) {
+        if (mapping?.sessionId === sessionId) {
+          removed.push(chatId)
+          delete mappings[chatId]
+        }
+      }
+      if (removed.length > 0) {
+        writeFileSync(filePath, JSON.stringify(mappings, null, 2), 'utf8')
+      }
+      return removed
+    } catch {
+      return []
+    }
   }
 }
 

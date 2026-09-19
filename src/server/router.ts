@@ -15,7 +15,6 @@ import { handleFilesystemRoute } from './api/filesystem.js'
 import { handleAdaptersApi } from './api/adapters.js'
 import { handlePluginsApi } from './api/plugins.js'
 import { handleSkillsApi } from './api/skills.js'
-import { handleComputerUseApi } from './api/computer-use.js'
 import { handleMcpApi } from './api/mcp.js'
 import { handleDiagnosticsApi } from './api/diagnostics.js'
 import { handleDoctorApi } from './api/doctor.js'
@@ -83,9 +82,6 @@ export async function handleApiRequest(req: Request, url: URL): Promise<Response
 
     case 'plugins':
       return handlePluginsApi(req, url, segments)
-
-    case 'computer-use':
-      return handleComputerUseApi(req, url, segments)
 
     case 'diagnostics':
       return handleDiagnosticsApi(req, url, segments)
