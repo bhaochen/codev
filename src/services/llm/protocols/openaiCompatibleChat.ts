@@ -31,7 +31,7 @@ import { isAbortError } from '../../../utils/errors.js'
 import { resolveOpenAIMaxTokens } from '../utils/requestBody.js'
 import { formatOpenAIPromptCacheKey, updateOpenAIUsage } from '../utils/openaiShared.js'
 import { resolveAuth } from '../auth/resolveAuth.js'
-import { getOpencodeUserAgent } from '../../api/opencodeUserAgent.js'
+import { createOpencodeId, getOpencodeProjectId, getOpencodeUserAgent } from '../../api/opencodeUserAgent.js'
 import {
   adaptOpenAIChatSSE,
   agentMessagesToOpenAIChatMessages,
@@ -120,6 +120,12 @@ export async function* queryOpenAICompatibleChat(
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'User-Agent': route.provider === 'opencode' ? getOpencodeUserAgent() : 'codev',
+    }
+    if (route.provider === 'opencode') {
+      headers['x-opencode-client'] = 'cli'
+      headers['x-opencode-project'] = await getOpencodeProjectId()
+      headers['x-opencode-session'] = createOpencodeId('ses')
+      headers['x-opencode-request'] = createOpencodeId('msg')
     }
     if (cred.type === 'bearer') headers.Authorization = `Bearer ${cred.token}`
     else headers.Authorization = 'Bearer public'
