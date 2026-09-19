@@ -187,6 +187,61 @@ describe('native non-streaming fallback', () => {
   }, 15000)
 })
 
+describe('verifyApiKey over native transport', () => {
+  const PREV_FETCH = globalThis.fetch
+
+  afterEach(() => {
+    globalThis.fetch = PREV_FETCH
+  })
+
+  function stubFetch(handler: (url: any, init?: any) => Response | Promise<Response>) {
+    const calls: CapturedCall[] = []
+    ;(globalThis as any).fetch = async (url: any, init?: any) => {
+      calls.push({ url: String(url), init: init ?? {} })
+      return handler(url, init)
+    }
+    return calls
+  }
+
+  test('valid key returns true and sends the passed key, not the env key', async () => {
+    const calls = stubFetch(async () => jsonResponse(betaMessage()))
+    const ok = await verifyApiKey('verify-key-abc', false)
+    expect(ok).toBe(true)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.url).toMatch(/\/v1\/messages$/)
+    const headers = new Headers(calls[0]!.init.headers)
+    expect(headers.get('x-api-key')).toBe('verify-key-abc')
+    expect(headers.get('anthropic-version')).toBe('2023-06-01')
+    const body = JSON.parse(calls[0]!.init.body as string)
+    expect(body.max_tokens).toBe(1)
+    expect(body.messages).toEqual([{ role: 'user', content: 'test' }])
+    expect(body.stream).toBeUndefined()
+  })
+
+  test('invalid key returns false', async () => {
+    stubFetch(async () =>
+      jsonResponse(
+        { type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } },
+        401,
+      ),
+    )
+    await expect(verifyApiKey('bad-key', false)).resolves.toBe(false)
+  })
+
+  test('non-auth API error is thrown', async () => {
+    stubFetch(async () =>
+      jsonResponse({ type: 'error', error: { type: 'invalid_request', message: 'bad' } }, 400),
+    )
+    await expect(verifyApiKey('verify-key-abc', false)).rejects.toMatchObject({ status: 400 })
+  })
+
+  test('non-interactive session skips the network call', async () => {
+    const calls = stubFetch(async () => jsonResponse(betaMessage()))
+    await expect(verifyApiKey('verify-key-abc', true)).resolves.toBe(true)
+    expect(calls).toHaveLength(0)
+  })
+})
+
 describe('api/client decoupling invariants', () => {
   test('main streaming path does not call getAnthropicClient', () => {
     expect(queryAnthropicMessages.toString()).not.toContain('getAnthropicClient')
@@ -196,11 +251,15 @@ describe('api/client decoupling invariants', () => {
     expect(executeNonStreamingRequest.toString()).not.toContain('getAnthropicClient')
   })
 
-  test('verifyApiKey remains the only legacy client caller in this module', () => {
-    expect(verifyApiKey.toString()).toContain('getAnthropicClient')
+  test('verifyApiKey no longer calls getAnthropicClient', () => {
+    expect(verifyApiKey.toString()).not.toContain('getAnthropicClient')
+  })
+
+  test('only the Bedrock/Vertex/Foundry branch keeps the legacy client', () => {
     const source = readFileSync('src/services/llm/clients/anthropicMessages.ts', 'utf8')
     const matches = source.match(/getAnthropicClient\(/g) ?? []
-    // verifyApiKey call + legacy Bedrock/Vertex/Foundry branch helper
-    expect(matches.length).toBeLessThanOrEqual(2)
+    // Dynamic import inside getLegacyNonStreamingClient only
+    expect(matches).toHaveLength(1)
+    expect(source).toContain('usesLegacySdkProvider')
   })
 })

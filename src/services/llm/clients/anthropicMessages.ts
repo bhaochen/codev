@@ -417,12 +417,14 @@ async function buildNativeFirstPartyHeaders(): Promise<{ headers: Record<string,
   return { headers, baseUrl: resolveNativeAnthropicBaseUrl() }
 }
 
-async function resolveNativeFirstPartyAuth(): Promise<Record<string, string>> {
+async function resolveNativeFirstPartyAuth(
+  apiKeyOverride?: string | null,
+): Promise<Record<string, string>> {
   if (isClaudeAISubscriber()) {
     const token = getClaudeAIOAuthTokens()?.accessToken
     return token ? { Authorization: `Bearer ${token}` } : {}
   }
-  const apiKey = getAnthropicApiKey()
+  const apiKey = apiKeyOverride ?? getAnthropicApiKey()
   return apiKey ? { 'x-api-key': apiKey } : {}
 }
 
@@ -867,24 +869,28 @@ export async function verifyApiKey(
     return await returnValue(
       withRetry(
         () =>
-          getAnthropicClient({
-            apiKey,
-            maxRetries: 3,
+          getNonStreamingClient({
             model,
             source: 'verify_api_key',
+            apiKeyOverride: apiKey,
           }),
         async anthropic => {
           const messages: MessageParam[] = [{ role: 'user', content: 'test' }]
           // biome-ignore lint/plugin: API key verification is intentionally a minimal direct call
-          await anthropic.beta.messages.create({
-            model,
-            max_tokens: 1,
-            messages,
-            temperature: 1,
-            ...(betas.length > 0 && { betas }),
-            metadata: getAPIMetadata(),
-            ...getExtraBodyParams(),
-          })
+          await anthropic.beta.messages.create(
+            {
+              model,
+              max_tokens: 1,
+              messages,
+              temperature: 1,
+              ...(betas.length > 0 && { betas }),
+              metadata: getAPIMetadata(),
+              ...getExtraBodyParams(),
+            },
+            // SDK default timeout (10 minutes) — mirrors the legacy path,
+            // which passed no explicit timeout to the SDK client.
+            { timeout: 600_000 },
+          )
           return true
         },
         { maxRetries: 2, model, thinkingConfig: { type: 'disabled' } }, // Use fewer retries for API key verification
@@ -1117,11 +1123,12 @@ async function nativeNonStreamingCreate(
     timeoutMs: number
     fetchOverride?: Options['fetchOverride']
     source: string
+    apiKeyOverride?: string | null
   },
 ): Promise<BetaMessage> {
   const { betas, ...body } = params
   const { headers: nativeHeaders, baseUrl } = await buildNativeFirstPartyHeaders()
-  const authHeaders = await resolveNativeFirstPartyAuth()
+  const authHeaders = await resolveNativeFirstPartyAuth(opts.apiKeyOverride)
   const headers: Record<string, string> = {
     ...nativeHeaders,
     ...authHeaders,
@@ -1158,17 +1165,15 @@ async function nativeNonStreamingCreate(
   }
   if (!response.ok) {
     const text = await response.text().catch(() => '')
-    let errorBody: any = { type: 'error', error: { type: 'api_error', message: text } }
+    let errorBody: any
     try {
       errorBody = JSON.parse(text)
     } catch {
-      // keep synthesized body
+      errorBody = undefined
     }
-    const message =
-      (errorBody?.error as any)?.message ??
-      (typeof errorBody?.error === 'string' ? errorBody.error : text) ??
-      `Request failed with status ${response.status}`
-    throw new APIError(response.status, errorBody, message, response.headers)
+    // Use the SDK's own error factory so status-specific subclasses and the
+    // `${status} ${compact JSON}` message format match the legacy SDK path.
+    throw APIError.generate(response.status, errorBody, text || undefined, response.headers)
   }
   return (await response.json()) as BetaMessage
 }
@@ -1181,6 +1186,7 @@ async function getNonStreamingClient(clientOptions: {
   model: string
   fetchOverride?: Options['fetchOverride']
   source: string
+  apiKeyOverride?: string | null
 }): Promise<Anthropic> {
   if (usesLegacySdkProvider()) {
     return getLegacyNonStreamingClient(clientOptions)
@@ -1198,6 +1204,7 @@ async function getNonStreamingClient(clientOptions: {
             timeoutMs: opts?.timeout ?? timeoutMs,
             fetchOverride: clientOptions.fetchOverride,
             source: clientOptions.source,
+            apiKeyOverride: clientOptions.apiKeyOverride,
           }),
       },
     },
