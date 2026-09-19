@@ -405,21 +405,37 @@ export function Config({
       },
     },
     {
-      id: 'bareModeEnabled',
-      label: 'Bare mode (CLAUDE_CODE_SIMPLE)',
-      value: globalConfig.bareModeEnabled,
-      type: 'boolean' as const,
-      onChange(bareModeEnabled: boolean) {
-        saveGlobalConfig(current => ({ ...current, bareModeEnabled }))
-        setGlobalConfig({ ...getGlobalConfig(), bareModeEnabled })
-        // Apply immediately by setting the environment variable
-        if (bareModeEnabled) {
+      id: 'bareModeLevel',
+      label: 'Bare mode level',
+      value: globalConfig.bareModeLevel ?? (globalConfig.bareModeEnabled ? 'max' : 'off'),
+      options: ['off', 'max', 'high', 'medium', 'low'],
+      type: 'enum' as const,
+      onChange(bareModeLevel: string) {
+        const enabled = bareModeLevel !== 'off'
+        const nextLevel = enabled
+          ? (bareModeLevel as 'max' | 'high' | 'medium' | 'low')
+          : undefined
+        saveGlobalConfig(current => ({
+          ...current,
+          bareModeEnabled: enabled,
+          bareModeLevel: nextLevel,
+        }))
+        setGlobalConfig({
+          ...getGlobalConfig(),
+          bareModeEnabled: enabled,
+          bareModeLevel: nextLevel,
+        })
+        // Apply immediately by setting the environment variables.
+        if (enabled) {
           process.env.CLAUDE_CODE_SIMPLE = '1'
+          process.env.CLAUDE_CODE_BARE_LEVEL = nextLevel
         } else {
           delete process.env.CLAUDE_CODE_SIMPLE
+          delete process.env.CLAUDE_CODE_BARE_LEVEL
         }
         logEvent('tengu_bare_mode_setting_changed', {
-          enabled: bareModeEnabled,
+          enabled,
+          level: nextLevel ?? 'off',
         })
       },
     },

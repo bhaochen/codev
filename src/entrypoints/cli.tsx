@@ -282,6 +282,7 @@ async function main(): Promise<void> {
   // option building (not just inside the action handler).
   if (args.includes('--bare')) {
     process.env.CLAUDE_CODE_SIMPLE = '1';
+    process.env.CLAUDE_CODE_BARE_LEVEL = 'max';
   }
 
   // No special flags detected, load and run the full CLI

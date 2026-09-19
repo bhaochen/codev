@@ -140,7 +140,7 @@ const WorkflowTool = feature('WORKFLOW_SCRIPTS')
 import type { ToolPermissionContext } from './Tool.js'
 import { getDenyRuleForTool } from './utils/permissions/permissions.js'
 import { hasEmbeddedSearchTools } from './utils/embeddedTools.js'
-import { isEnvTruthy } from './utils/envUtils.js'
+import { getBareModeLevel, isEnvTruthy } from './utils/envUtils.js'
 import { isPowerShellToolEnabled } from './utils/shell/shellToolUtils.js'
 import { isAgentSwarmsEnabled } from './utils/agentSwarmsEnabled.js'
 import { isWorktreeModeEnabled } from './utils/worktreeModeEnabled.js'
@@ -309,12 +309,19 @@ export function filterToolsByDenyRules<
 export const getTools = (permissionContext: ToolPermissionContext): Tools => {
   // Simple mode keeps only the primitive tools so their schemas do not consume
   // the small context windows commonly used by local providers.
-  if (isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)) {
+  const bareLevel = getBareModeLevel()
+  if (bareLevel && bareLevel !== 'low') {
     const simpleTools: Tool[] = [
       BashTool,
       FileReadTool,
       FileEditTool,
     ]
+    if (bareLevel === 'high' || bareLevel === 'medium') {
+      simpleTools.push(FileWriteTool, GlobTool, GrepTool)
+    }
+    if (bareLevel === 'medium') {
+      simpleTools.push(WebFetchTool, TodoWriteTool, AskUserQuestionTool)
+    }
     // When coordinator mode is also active, include AgentTool and TaskStopTool
     // so the coordinator gets Task+TaskStop (via useMergedTools filtering) and
     // workers get Bash/Read/Edit (via filterToolsForAgent filtering).

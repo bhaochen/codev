@@ -192,7 +192,7 @@ AgentTool({ prompt: "Based on your findings, implement the fix" }) // 错误：�
 - `SendMessageTool`
 - `SyntheticOutputTool`
 
-在简单模式（`CLAUDE_CODE_SIMPLE`）下，Worker 仅有权访问：Bash、Read、Edit 工具，外加 MCP 工具。
+在 `max` Bare 模式下，Worker 仅有权访问 Bash、Read、Edit 工具；更高能力的 `high`、`medium`、`low` 等级会按主会话工具池逐级增加工具。
 
 ### Worker 错误处理
 

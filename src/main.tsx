@@ -1015,15 +1015,19 @@ async function run(): Promise<CommanderCommand> {
       bare?: boolean;
     }).bare) {
       process.env.CLAUDE_CODE_SIMPLE = '1';
+      process.env.CLAUDE_CODE_BARE_LEVEL = 'max';
     }
 
-    // Apply bareModeEnabled from config (CLAUDE_CODE_SIMPLE)
+    // Apply bare mode level from config (CLAUDE_CODE_SIMPLE)
     // Must be set before setup() / any gated work runs (same as --bare flag)
     {
       const { enableConfigs, getGlobalConfig } = await import('./utils/config.js');
       enableConfigs();
-      if (getGlobalConfig().bareModeEnabled) {
+      const globalConfig = getGlobalConfig();
+      const bareLevel = globalConfig.bareModeLevel ?? (globalConfig.bareModeEnabled ? 'max' : null);
+      if (bareLevel) {
         process.env.CLAUDE_CODE_SIMPLE = '1';
+        process.env.CLAUDE_CODE_BARE_LEVEL = bareLevel;
       }
     }
 

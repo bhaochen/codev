@@ -46,6 +46,47 @@ export function isEnvDefinedFalsy(
   return ['0', 'false', 'no', 'off'].includes(normalizedValue)
 }
 
+export type BareModeLevel = 'max' | 'high' | 'medium' | 'low'
+
+const BARE_MODE_LEVELS: readonly BareModeLevel[] = [
+  'max',
+  'high',
+  'medium',
+  'low',
+]
+
+export function getBareModeLevel(): BareModeLevel | null {
+  const configuredLevel = process.env.CLAUDE_CODE_BARE_LEVEL?.trim().toLowerCase()
+  if (BARE_MODE_LEVELS.includes(configuredLevel as BareModeLevel)) {
+    return configuredLevel as BareModeLevel
+  }
+
+  const simple = process.env.CLAUDE_CODE_SIMPLE?.trim().toLowerCase()
+  if (simple && BARE_MODE_LEVELS.includes(simple as BareModeLevel)) {
+    return simple as BareModeLevel
+  }
+  if (isEnvTruthy(simple)) return 'max'
+  if (process.argv.includes('--bare')) return 'max'
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { readFileSync } = require('fs') as typeof import('fs')
+    const { getGlobalClaudeFile } = require('./env.js') as typeof import('./env.js')
+    const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
+    const config = JSON.parse(raw) as {
+      bareModeLevel?: string
+      bareModeEnabled?: boolean
+    }
+    if (BARE_MODE_LEVELS.includes(config.bareModeLevel as BareModeLevel)) {
+      return config.bareModeLevel as BareModeLevel
+    }
+    if (config.bareModeEnabled === true) return 'max'
+  } catch {
+    // Ignore errors while resolving early startup configuration.
+  }
+  return null
+}
+
 /**
  * --bare / CLAUDE_CODE_SIMPLE — skip hooks, LSP, plugin sync, skill dir-walk,
  * attribution, background prefetches, and ALL keychain/credential reads.
@@ -60,21 +101,7 @@ export function isEnvDefinedFalsy(
  * Also checks global config for bareModeEnabled setting.
  */
 export function isBareMode(): boolean {
-  if (isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)) return true
-  if (process.argv.includes('--bare')) return true
-
-  // Check config file for bareModeEnabled (sync read for early gates)
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { readFileSync } = require('fs') as typeof import('fs')
-    const { getGlobalClaudeFile } = require('./env.js') as typeof import('./env.js')
-    const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
-    const config = JSON.parse(raw) as { bareModeEnabled?: boolean }
-    if (config.bareModeEnabled === true) return true
-  } catch {
-    // Ignore errors (file not found, parse error, etc.)
-  }
-  return false
+  return getBareModeLevel() !== null
 }
 
 /**

@@ -68,15 +68,19 @@ getTools(permissionContext) → Tool[]
 
 执行流程：
 
-1. **`CLAUDE_CODE_SIMPLE` 模式**：返回 BashTool、FileReadTool、FileEditTool（极简模式；恒叠加 REPL，不替换原语）
+1. **Bare mode 分级**：
+   - `max`：Bash、Read、Edit
+   - `high`：`max` + Write、Glob、Grep
+   - `medium`：`high` + WebFetch、TodoWrite、AskUserQuestion
+   - `low`：完整工具池
 
    **副作用**：同时影响 system prompt 的身份介绍：
    - 启用后：system prompt 以 `"You are Codev, chenbhao's CLI."` 开头（`src/constants/prompts.ts:447-451`）
    - 未启用：使用完整的 Claude Code system prompt，模型因训练原因自我认知为 "Claude Code"
 
-2. **`getAllBaseTools()`**：收集所有内置工具，按 feature flag 和条件编译；`REPL` 是恒在基础工具，由 `getReplTool()` 运行时解析（lazy require 仅为规避模块循环依赖）
+2. **`getAllBaseTools()`**：收集所有内置工具，按 feature flag 和条件编译；普通模式包含 `REPL`，由 `getReplTool()` 运行时解析（lazy require 仅为规避模块循环依赖）
 3. **`filterToolsByDenyRules()`**：检查 deny rules，过滤被禁止的工具
-4. **REPL 恒在**（不变量）：`REPL` 必在工具池中，无开关、无任何配置/环境剔除路径；所有原语始终可直接调用 —— REPL 是叠加的编程环境，不隐藏任何工具
+4. **REPL 模式范围**：普通模式和 `low` 下 `REPL` 是叠加的编程环境，所有原语仍可直接调用；`max`、`high`、`medium` 为节省本地模型上下文，不将 REPL 加入主工具池
 5. **`isEnabled()` 过滤**：逐个检查工具是否启用
 
 ### assembleToolPool()

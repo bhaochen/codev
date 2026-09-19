@@ -20,21 +20,36 @@ export async function getSystemPrompt(
 
 ## 组装流程
 
-### 1. `CLAUDE_CODE_SIMPLE` 模式
+### 1. Bare mode 分级
 
-当 `CLAUDE_CODE_SIMPLE=1` 时，返回简短的 system prompt：
+Bare mode 由 `bareModeLevel` 配置或 `CLAUDE_CODE_BARE_LEVEL` 环境变量控制，支持
+`max`、`high`、`medium`、`low` 四档。旧配置
+`bareModeEnabled: true` 兼容映射为 `max`，`--bare` 也等同于 `max`。
 
-```typescript
-if (isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)) {
-  return [
-    `You are Codev, chenbhao's CLI.\n\nCWD: ${getCwd()}\nDate: ${getSessionStartDate()}`,
-  ]
-}
-```
+| 等级 | system prompt 内容 |
+|------|--------------------|
+| `max` | 身份、CWD、会话日期 |
+| `high` | `max` + 输出效率和语气风格 |
+| `medium` | `high` + 环境信息和语言偏好 |
+| `low` | 完整 system prompt（仍保留 Bare mode 的启动级精简 gates） |
 
-### 2. 完整 system prompt 组装
+`CLAUDE_CODE_SIMPLE=1` 仍作为兼容标记使用；具体等级通过
+`CLAUDE_CODE_BARE_LEVEL` 传递。Bare mode 的 system prompt 仍不等于一次 API
+请求的全部上下文，额外内容包括：
 
-当未设置 `CLAUDE_CODE_SIMPLE` 时，返回完整的 system prompt：
+- `CWD: ...`：当前工作目录，位于同一个 system prompt 字符串中
+- `Date: ...`：会话启动日期，位于同一个 system prompt 字符串中
+- `systemContext`：通常包含 `gitStatus`，在请求发送前通过 `appendSystemContext()` 追加；启用对应 feature 时还可能包含 cache breaker
+- `userContext`：通常包含当前日期等内容，通过一个 `<system-reminder>` 元消息插入用户消息列表；Bare mode 会禁用 CLAUDE.md 自动发现，但不代表消息列表为空
+- 工具定义：根据等级发送不同工具集合的名称、描述和 JSON Schema
+- 对话历史：当前会话已有的用户消息、助手消息和工具结果仍会随请求发送
+
+因此，Bare mode 的含义是“按等级精简默认指令和工具集合”，不是“只发送
+`You are Codev, chenbhao's CLI.`”。工具 JSON Schema 和历史消息同样计入模型上下文。
+
+### 2. 完整 system prompt 组装（`low` 或未启用 Bare mode）
+
+当 Bare mode 为 `low`，或未启用 Bare mode 时，返回完整的 system prompt：
 
 ```typescript
 return [
@@ -266,14 +281,14 @@ export const SYSTEM_PROMPT_DYNAMIC_BOUNDARY = '__SYSTEM_PROMPT_DYNAMIC_BOUNDARY_
 
 ### 内容精简
 
-- `CLAUDE_CODE_SIMPLE=1` 时，只返回简短的简介，大幅减少 token 消耗
+- `max`、`high`、`medium` 按等级返回精简 prompt；`low` 保留完整 prompt 结构
 - 动态 sections 按需包含，避免不必要的内容
 
 ---
 
 ## 示例输出
 
-### 当 `CLAUDE_CODE_SIMPLE=1` 时
+### 当 Bare mode 为 `max` 时
 
 ```
 You are Codev, chenbhao's CLI.
@@ -282,7 +297,9 @@ CWD: /home/user/codev-project
 Date: 2026-09-16
 ```
 
-### 当 `CLAUDE_CODE_SIMPLE` 未设置时
+实际请求还会在上述文本之外追加 `gitStatus` 等 system context，并在消息列表前插入 user context 元消息；如果使用 OpenAI Chat provider，还会把当前等级对应的工具转换为 `tools` 数组发送。
+
+### 当 Bare mode 为 `low` 或未启用时
 
 完整的 system prompt 会是几百行的文字，包含所有 sections 的内容，最终拼接成一个长字符串。
 
@@ -319,6 +336,6 @@ codev --dump-system-prompt
 ## 最佳实践
 
 1. **理解缓存边界**: 静态内容（边界之前）可全局缓存，动态内容（边界之后）会话级缓存
-2. **合理使用 `CLAUDE_CODE_SIMPLE`**: 在需要精简 system prompt 时启用
+2. **合理选择 Bare 等级**: 本地小上下文模型使用 `max` 或 `high`，需要项目上下文时使用 `medium`，完整能力使用 `low`
 3. **条件 sections**: 利用 feature flags 控制是否包含特定 sections，避免不必要的 token 消耗
 4. **避免修改边界**: `SYSTEM_PROMPT_DYNAMIC_BOUNDARY` 是性能关键点，不要随意移动或删除

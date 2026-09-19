@@ -43,7 +43,7 @@ import {
   isScratchpadEnabled,
   getScratchpadDir,
 } from '../utils/permissions/filesystem.js'
-import { isEnvTruthy } from '../utils/envUtils.js'
+import { getBareModeLevel, isEnvTruthy } from '../utils/envUtils.js'
 import { REPL_TOOL_NAME } from '../tools/REPLTool/constants.js'
 import { feature } from 'bun:bundle'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
@@ -444,10 +444,20 @@ export async function getSystemPrompt(
   additionalWorkingDirectories?: string[],
   mcpClients?: MCPServerConnection[],
 ): Promise<string[]> {
-  if (isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)) {
-    return [
-      `You are Codev, chenbhao's CLI.\n\nCWD: ${getCwd()}\nDate: ${getSessionStartDate()}`,
-    ]
+  const bareLevel = getBareModeLevel()
+  if (bareLevel && bareLevel !== 'low') {
+    const identity = `You are Codev, chenbhao's CLI.\n\nCWD: ${getCwd()}\nDate: ${getSessionStartDate()}`
+    if (bareLevel === 'max') return [identity]
+
+    const prompt = [identity, getOutputEfficiencySection(), getSimpleToneAndStyleSection()]
+    if (bareLevel === 'medium') {
+      const [envInfo, settings] = await Promise.all([
+        computeSimpleEnvInfo(model, additionalWorkingDirectories),
+        Promise.resolve(getInitialSettings()),
+      ])
+      prompt.push(envInfo, getLanguageSection(settings.language))
+    }
+    return prompt
   }
 
   const cwd = getCwd()

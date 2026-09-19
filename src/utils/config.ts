@@ -260,7 +260,8 @@ export type GlobalConfig = {
   hasUsedBackslashReturn?: boolean
   autoCompactEnabled: boolean // Controls whether auto-compact is enabled
   showTurnDuration: boolean // Controls whether to show turn duration message (e.g., "Cooked for 1m 6s")
-  bareModeEnabled: boolean // Controls whether bare/simple mode is enabled (CLAUDE_CODE_SIMPLE)
+  bareModeEnabled: boolean // Legacy max bare mode switch
+  bareModeLevel?: 'max' | 'high' | 'medium' | 'low'
   /**
    * @deprecated Use settings.env instead.
    */
@@ -636,6 +637,7 @@ function createDefaultGlobalConfig(): GlobalConfig {
     autoCompactEnabled: true,
     showTurnDuration: true,
     bareModeEnabled: false,
+    bareModeLevel: undefined,
     hasSeenTasksHint: false,
     hasUsedStash: false,
     hasUsedBackgroundTask: false,
@@ -689,6 +691,7 @@ export const GLOBAL_CONFIG_KEYS = [
   'editorMode',
   'hasUsedBackslashReturn',
   'bareModeEnabled',
+  'bareModeLevel',
   'autoCompactEnabled',
   'showTurnDuration',
   'diffTool',

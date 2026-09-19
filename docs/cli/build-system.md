@@ -480,7 +480,7 @@ export function filterToolsByDenyRules<T extends { name: string; mcpInfo?: ... }
 
 `getTools()` 函数（`src/tools.ts`）的组装流程：
 
-1. **Simple 模式**（`CLAUDE_CODE_SIMPLE=1`）：返回 `BashTool`、`FileReadTool`、`FileEditTool`（恒叠加 `REPLTool`），加上协调者模式所需的 `AgentTool` + `TaskStopTool`。
+1. **Bare 模式分级**：`max` 返回 Bash/Read/Edit；`high` 额外返回 Write/Glob/Grep；`medium` 再额外返回 WebFetch/TodoWrite/AskUserQuestion；`low` 使用完整工具池。协调者模式仍会按其自身规则增加 Agent/TaskStop 工具。
 
    **注意**：此模式同时也会影响 system prompt 的身份介绍：
    - system prompt 以 `"You are Codev, chenbhao's CLI."` 开头
@@ -488,7 +488,7 @@ export function filterToolsByDenyRules<T extends { name: string; mcpInfo?: ... }
 
 2. **完整模式**：通过 `getAllBaseTools()` 获取所有工具，移除特殊工具（`ListMcpResourcesTool`、`ReadMcpResourceTool`、`SYNTHETIC_OUTPUT_TOOL_NAME`）。
 3. **应用拒绝规则**：`filterToolsByDenyRules()`。
-4. **REPL 恒在**（不变量）：`REPL` 必在池中，无开关；所有原语始终可直接调用 —— REPL 是叠加的编程环境，不隐藏任何工具。
+4. **REPL 按 Bare 等级加载**：普通模式和 `low` 会加载 REPL；`max`、`high`、`medium` 为小上下文模型省略 REPL，但不影响 Bash/Read/Edit 等直接工具。
 5. **应用 `isEnabled()`**：每个工具自身的 `isEnabled()` 检查。
 
 ### 4.3 条件工具（`feature()` 门控导入）

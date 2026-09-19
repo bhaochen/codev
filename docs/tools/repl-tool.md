@@ -13,9 +13,9 @@
 > - `src/tools/REPLTool/primitiveTools.ts` — primitive 工具集
 > - `src/tools/REPLTool/constants.ts` — `REPL_TOOL_NAME` 常量（无启用开关）
 > - `src/tools/REPLTool/__tests__/engine.test.ts` — VM 引擎测试
-> - `src/tools/REPLTool/__tests__/replToggle.test.ts` — 恒在不变量回归测试
+> - `src/tools/REPLTool/__tests__/replToggle.test.ts` — 普通模式与子代理工具池回归测试
 >
-> 注册方式：`REPLTool` 由 `src/tools.ts:getReplTool()` 运行时解析（lazy require，为规避模块循环依赖，与 config/import 顺序无关）。REPL 是恒在基础工具，无开关（见 §3.7）。
+> 注册方式：`REPLTool` 由 `src/tools.ts:getReplTool()` 运行时解析（lazy require，为规避模块循环依赖，与 config/import 顺序无关）。普通模式和 `low` Bare mode 会注册 REPL；`max`、`high`、`medium` 为小上下文模型省略它（见 §3.7）。
 
 ---
 
@@ -27,7 +27,7 @@ REPL 给模型的是一个可以"编程"的环境——`for`/`while`/`if`/函数
 regex/数据处理，自己组合逻辑。模型获得的不是"这里有 20 个工具"，
 而是"这里有一个可以编程的环境"。
 
-因此 REPL 是**恒在且叠加**的能力：模型既保留全部直接工具，又多了一把
+在普通模式和 `low` Bare mode 下，REPL 是**叠加**的能力：模型既保留全部直接工具，又多了一把
 "把多步逻辑写成一端代码"的钥匙。没有开关——REPL 是每个 agent 都不可少的
 基础工具。单次操作用直接工具，多步/批量/需要中间状态的操作才写程序。
 
@@ -245,13 +245,13 @@ type ContextResult = {
 
 ### 3.7 恒在注册与叠加语义（always-on）
 
-REPL 是恒在基础工具：**没有开关**——`/config` 无 `replEnabled` 字段，
+REPL 在普通模式和 `low` Bare mode 下默认启用；`max`、`high`、`medium` 会自动省略它，
 无 `CODEV_REPL` / `CLAUDE_CODE_REPL` 环境变量，任何配置/环境都无法把 REPL
 从工具池剔除。历史上 REPL 曾有开关（`isReplModeEnabled()` 读 config + env，
 存在 import 顺序冻结问题），现已被移除：
 
 - `getAllBaseTools()` 直接包含 `getReplTool()`；`getTools()` 不再做任何 REPL 存在性过滤；
-- `CLAUDE_CODE_SIMPLE`（--bare）模式恒叠加 `REPL`（Bash/Read/Edit + REPL）；
+- `max`、`high`、`medium` Bare 模式不加载 `REPL` 以节省小上下文模型的工具 schema；普通模式和 `low` 仍加载 `REPL`；
 - `assembleToolPool({ forAgent })` 恒确保子 agent 池中有 REPL；
 - `getReplTool()` 保留 lazy require，仅为规避 tools.ts ↔ REPLTool 的模块循环依赖，与 config/import 顺序无关；
 - 提示词（`prompts.ts:getUsingYourToolsSection`）恒追加一条 REPL 叠加说明，
@@ -283,7 +283,7 @@ REPL 是 spec-ptc Layer 3（Shadow Execution）的目标宿主：
 - 大小写不敏感工具查找
 - tool_calls 计数
 
-`src/tools/REPLTool/__tests__/replToggle.test.ts`（恒在不变量，5 用例）：
+`src/tools/REPLTool/__tests__/replToggle.test.ts`（工具池回归测试）：
 
 - `getTools()` 恒含 `REPL`，原语（Read/Write/Edit/Glob/Grep/Bash）恒可直接调用（叠加，非网关）
 - `getReplTool()` 恒解析出 Tool（非空）
