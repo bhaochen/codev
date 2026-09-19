@@ -7,7 +7,10 @@ import type { Message } from '../../types/message.js'
 import { getGlobalConfig } from '../../utils/config.js'
 import { getContextWindowForModel } from '../../utils/context.js'
 import { logForDebugging } from '../../utils/debug.js'
-import { isEnvTruthy } from '../../utils/envUtils.js'
+import {
+  getBarePromptPressureRatio,
+  isEnvTruthy,
+} from '../../utils/envUtils.js'
 import { hasExactErrorMessage } from '../../utils/errors.js'
 import type { CacheSafeParams } from '../../utils/forkedAgent.js'
 import { logError } from '../../utils/log.js'
@@ -99,15 +102,25 @@ export function getAutoCompactThreshold(model: string): number {
     }
   }
 
-  // Buffer scales with context window: minimum 2 000, maximum 3 000
-  // For small local models (8K), 2 000 buffer leaves 6 000 usable tokens.
-  // For large Anthropic models (200K), 3 000 cap keeps existing behavior.
-  const buffer = Math.min(
+  // Bare mode shrinks the prompt payload substantially, so compact should trigger
+  // later for minimal modes: the effective prompt is lighter, hence we preserve a
+  // larger portion of the context window instead of compacting too early.
+  const promptPressureRatio = getBarePromptPressureRatio()
+  const triggerPercent = Math.min(
+    0.95,
+    Math.max(0.75, 0.75 + (1 - promptPressureRatio) * 0.2),
+  )
+
+  // Keep the original buffer-based behavior as the baseline when not in bare mode.
+  // In bare mode, we shift the trigger point upward according to how much the
+  // system prompt and tool schema have been trimmed.
+  const baseThreshold = effectiveContextWindow * triggerPercent
+  const bufferThreshold = effectiveContextWindow - Math.min(
     Math.max(Math.round(effectiveContextWindow * 0.25), 2_000),
     3_000,
   )
 
-  return effectiveContextWindow - buffer
+  return Math.max(Math.floor(Math.max(baseThreshold, bufferThreshold)), 1_000)
 }
 
 export function calculateTokenWarningState(

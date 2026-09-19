@@ -7,7 +7,7 @@ import {
 import { microcompactMessages } from 'src/services/compact/microCompact.js'
 import { getSdkBetas } from '../bootstrap/state.js'
 import { getCommandName } from '../commands.js'
-import { getSystemContext } from '../context.js'
+import { getSystemContext, getUserContext } from '../context.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import {
   getEffectiveContextWindowSize,
@@ -314,6 +314,122 @@ async function countSystemTokens(
   )
 
   return { systemPromptTokens, systemPromptSections }
+}
+
+export async function estimatePromptCostBySource({
+  tools,
+  mainLoopModel,
+  getToolPermissionContext,
+  agentDefinitions,
+  messages,
+  customSystemPrompt,
+  appendSystemPrompt,
+}: {
+  tools: Tools
+  mainLoopModel: string
+  getToolPermissionContext: () => Promise<ToolPermissionContext>
+  agentDefinitions: AgentDefinitionsResult
+  messages: Message[]
+  customSystemPrompt?: string
+  appendSystemPrompt?: string
+}): Promise<{
+  totalTokens: number
+  systemPromptTokens: number
+  toolSchemaTokens: number
+  userContextTokens: number
+  systemContextTokens: number
+  customPromptTokens: number
+  appendPromptTokens: number
+  historyTokens: number
+}> {
+  const permissionContext = await getToolPermissionContext()
+  const runtimeModel = getRuntimeMainLoopModel({
+    permissionMode: permissionContext.mode,
+    mainLoopModel: mainLoopModel,
+  })
+
+  const defaultSystemPrompt = await getSystemPrompt(
+    tools,
+    runtimeModel,
+    Array.from(permissionContext.additionalWorkingDirectories.keys()),
+  )
+  const effectiveSystemPrompt = buildEffectiveSystemPrompt({
+    mainThreadAgentDefinition: undefined,
+    toolUseContext: {
+      options: {
+        customSystemPrompt,
+        appendSystemPrompt,
+      },
+    } as ToolUseContext,
+    customSystemPrompt,
+    defaultSystemPrompt,
+    appendSystemPrompt,
+  })
+
+  const [{ systemPromptTokens }, userContext, systemContext, messageBreakdown] =
+    await Promise.all([
+      countSystemTokens(effectiveSystemPrompt),
+      getUserContext(),
+      getSystemContext(),
+      approximateMessageTokens(messages),
+    ])
+
+  const toolSchemaTokens = await countToolDefinitionTokens(
+    tools,
+    getToolPermissionContext,
+    agentDefinitions,
+    runtimeModel,
+  )
+
+  const userContextTokens =
+    Object.keys(userContext).length > 0
+      ? (await countTokensWithFallback(
+          [{ role: 'user', content: jsonStringify(userContext) }],
+          [],
+        )) ?? 0
+      : 0
+
+  const systemContextTokens =
+    Object.keys(systemContext).length > 0
+      ? (await countTokensWithFallback(
+          [{ role: 'user', content: jsonStringify(systemContext) }],
+          [],
+        )) ?? 0
+      : 0
+
+  const customPromptTokens = customSystemPrompt
+    ? (await countTokensWithFallback(
+        [{ role: 'user', content: customSystemPrompt }],
+        [],
+      )) ?? 0
+    : 0
+
+  const appendPromptTokens = appendSystemPrompt
+    ? (await countTokensWithFallback(
+        [{ role: 'user', content: appendSystemPrompt }],
+        [],
+      )) ?? 0
+    : 0
+
+  const totalTokens =
+    systemPromptTokens +
+    toolSchemaTokens +
+    userContextTokens +
+    systemContextTokens +
+    customPromptTokens +
+    appendPromptTokens +
+    messageBreakdown.totalTokens
+
+  return {
+    totalTokens,
+    systemPromptTokens,
+    toolSchemaTokens,
+    userContextTokens,
+    systemContextTokens,
+    customPromptTokens,
+    appendPromptTokens,
+    historyTokens: messageBreakdown.totalTokens,
+  }
 }
 
 async function countMemoryFileTokens(): Promise<{

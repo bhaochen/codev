@@ -117,6 +117,73 @@ export function shouldSuppressBarePromptExtras(): boolean {
   return bareLevel !== null && bareLevel !== 'low'
 }
 
+export function getBarePromptPressureRatio(): number {
+  const bareLevel = getBareModeLevel()
+  if (!bareLevel || bareLevel === 'low') return 1
+
+  // Bare mode is implemented by suppressing specific prompt sources rather than
+  // by shortening a single visible string. Compute the ratio from the sources
+  // actually disabled in each level so compact thresholds reflect the real
+  // request cost, not just the length of the identity line.
+  // Tool schema is often the dominant prompt consumer in small-context local
+  // models, so it gets a heavier weight than the visible system prompt string.
+  const sourceWeights = {
+    systemPrompt: 0.2,
+    toolSchema: 0.6,
+    userContext: 0.1,
+    systemContext: 0.05,
+    customPrompt: 0.05,
+  } as const
+
+  const levelRatios: Record<Exclude<BareModeLevel, 'low'>, typeof sourceWeights> = {
+    medium: {
+      systemPrompt: 0.8,
+      toolSchema: 0.75,
+      userContext: 0,
+      systemContext: 0,
+      customPrompt: 0,
+    },
+    high: {
+      systemPrompt: 0.62,
+      toolSchema: 0.55,
+      userContext: 0,
+      systemContext: 0,
+      customPrompt: 0,
+    },
+    max: {
+      systemPrompt: 0.36,
+      toolSchema: 0.3,
+      userContext: 0,
+      systemContext: 0,
+      customPrompt: 0,
+    },
+    ultra: {
+      systemPrompt: 0.12,
+      toolSchema: 0.04,
+      userContext: 0,
+      systemContext: 0,
+      customPrompt: 0,
+    },
+    extreme: {
+      systemPrompt: 0.04,
+      toolSchema: 0,
+      userContext: 0,
+      systemContext: 0,
+      customPrompt: 0,
+    },
+  }
+
+  const sourceRatio = levelRatios[bareLevel]
+  const weightedRatio =
+    sourceWeights.systemPrompt * sourceRatio.systemPrompt +
+    sourceWeights.toolSchema * sourceRatio.toolSchema +
+    sourceWeights.userContext * sourceRatio.userContext +
+    sourceWeights.systemContext * sourceRatio.systemContext +
+    sourceWeights.customPrompt * sourceRatio.customPrompt
+
+  return Math.min(1, Math.max(0, weightedRatio))
+}
+
 /**
  * Parses an array of environment variable strings into a key-value object
  * @param envVars Array of strings in KEY=VALUE format
