@@ -303,3 +303,15 @@ export function formatReverseDependentsSuffix(
   if (!rdeps || rdeps.length === 0) return ''
   return ` — warning: required by ${rdeps.join(', ')}`
 }
+
+/**
+ * Check if a plugin setting value indicates the plugin is enabled.
+ * - true → enabled
+ * - string array (version constraints) → enabled
+ * - false, undefined, null → disabled
+ */
+export function isEnabledPluginSettingValue(value: unknown): boolean {
+  if (value === true) return true
+  if (Array.isArray(value) && value.length > 0) return true
+  return false
+}

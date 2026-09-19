@@ -1,3 +1,4 @@
+process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "test-key-for-wire-tests"
 import { describe, test, expect } from 'bun:test'
 import {
   anthropicBlockToAgent,

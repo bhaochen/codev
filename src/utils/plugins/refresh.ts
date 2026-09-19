@@ -29,6 +29,7 @@ import { errorMessage } from '../errors.js'
 import { logError } from '../log.js'
 import { clearAllCaches } from './cacheUtils.js'
 import { getPluginCommands } from './loadPluginCommands.js'
+import { resetSettingsCache } from "../settings/settingsCache.js"
 import { loadPluginHooks } from './loadPluginHooks.js'
 import { loadPluginLspServers } from './lspPluginIntegration.js'
 import { loadPluginMcpServers } from './mcpPluginIntegration.js'
@@ -74,6 +75,8 @@ export async function refreshActivePlugins(
 ): Promise<RefreshActivePluginsResult> {
   logForDebugging('refreshActivePlugins: clearing all plugin caches')
   clearAllCaches()
+  resetSettingsCache()
+  // clearAllCaches() prunes removed-plugin hooks; this does the FULL swap
   // Orphan exclusions are session-frozen by default, but /reload-plugins is
   // an explicit "disk changed, re-read it" signal — recompute them too.
   clearPluginCacheExclusions()

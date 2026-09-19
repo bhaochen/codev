@@ -13,32 +13,7 @@ import { ApiError, errorResponse } from '../middleware/errorHandler.js'
 import { hasOpenAIAuthLogin } from '../../utils/auth.js'
 import { OPENAI_CODEX_MODEL_CATALOG } from '../../services/openaiAuth/models.js'
 
-// ─── Fallback models (used when no provider is configured) ────────────────────
-
-const DEFAULT_MODELS = [
-  {
-    id: 'claude-opus-4-7',
-    name: 'Opus 4.7',
-    description: 'Most capable for ambitious work',
-    context: '1m',
-  },
-  {
-    id: 'claude-sonnet-4-6',
-    name: 'Sonnet 4.6',
-    description: 'Most efficient for everyday tasks',
-    context: '200k',
-  },
-  {
-    id: 'claude-haiku-4-5',
-    name: 'Haiku 4.5',
-    description: 'Fastest for quick answers',
-    context: '200k',
-  },
-] as const
-
 const EFFORT_LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
-
-const DEFAULT_MODEL = 'claude-opus-4-7'
 const DEFAULT_EFFORT = 'medium'
 
 const settingsService = new SettingsService()
@@ -136,10 +111,6 @@ function getOpenAIAuthModels(): ApiModelInfo[] {
 function getStandaloneModelList(): ApiModelInfo[] {
   const models = [...getEnvConfiguredAnthropicModels()]
 
-  if (models.length === 0) {
-    models.push(...DEFAULT_MODELS)
-  }
-
   for (const model of getOpenAIAuthModels()) {
     addUniqueModel(models, model)
   }
@@ -176,7 +147,8 @@ async function fetchCliProviderModels(): Promise<ApiModelInfo[]> {
     const { join } = await import('node:path')
     let config: Record<string, unknown> = {}
     try {
-      const raw = readFileSync(join(homedir(), '.claude.json'), 'utf8')
+      const configDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
+      const raw = readFileSync(join(configDir, '.claude.json'), 'utf8')
       config = JSON.parse(raw)
     } catch {
       return []
@@ -315,7 +287,8 @@ export async function readCliAuthProvider(): Promise<{
     const { homedir } = await import('node:os')
     const { readFileSync } = await import('node:fs')
     const { join } = await import('node:path')
-    const raw = readFileSync(join(homedir(), '.claude.json'), 'utf8')
+    const configDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
+    const raw = readFileSync(join(configDir, '.claude.json'), 'utf8')
     return JSON.parse(raw)
   } catch {
     return null
@@ -358,8 +331,8 @@ async function handleCurrentModel(req: Request): Promise<Response> {
     const contextTier = (settings.modelContext as string) || undefined
     const envModel = process.env.ANTHROPIC_MODEL?.trim() || ''
 
-    const currentModelId = explicitModel || envModel || DEFAULT_MODEL
-    const currentModelName = currentModelId
+    const currentModelId = explicitModel || envModel
+    const currentModelName = currentModelId || 'No model configured'
 
     const lookupId = contextTier ? `${currentModelId}:${contextTier}` : currentModelId
 
