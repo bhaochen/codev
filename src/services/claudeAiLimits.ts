@@ -11,7 +11,7 @@ import { isEssentialTrafficOnly } from '../utils/privacyLevel.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from './analytics/index.js'
 import { logEvent } from './analytics/index.js'
 import { getAPIMetadata } from './llm/utils/metadata.js'
-import { getAnthropicClient } from './api/client.js'
+import { nativeAnthropicPost } from './llm/transport/anthropicHttp.js'
 import {
   processRateLimitHeaders,
   shouldProcessRateLimits,
@@ -196,25 +196,25 @@ export function emitStatusChange(limits: ClaudeAILimits) {
   })
 }
 
-async function makeTestQuery() {
+export async function makeTestQuery() {
   const model = getSmallFastModel()
-  const anthropic = await getAnthropicClient({
-    maxRetries: 0,
-    model,
-    source: 'quota_check',
-  })
   const messages: MessageParam[] = [{ role: 'user', content: 'quota' }]
   const betas = getModelBetas(model)
-  // biome-ignore lint/plugin: quota check needs raw response access via asResponse()
-  return anthropic.beta.messages
-    .create({
+  // Native first-party request; raw response headers carry the quota state.
+  const { headers } = await nativeAnthropicPost({
+    path: '/v1/messages',
+    body: {
       model,
       max_tokens: 1,
       messages,
       metadata: getAPIMetadata(),
       ...(betas.length > 0 ? { betas } : {}),
-    })
-    .asResponse()
+    },
+    // SDK default timeout (10 minutes) — the legacy path passed no timeout.
+    timeoutMs: 600_000,
+    source: 'quota_check',
+  })
+  return { headers }
 }
 
 export async function checkQuotaStatus(): Promise<void> {
@@ -373,7 +373,8 @@ function getEarlyWarningFromHeaders(
   return null
 }
 
-function computeNewLimitsFromHeaders(
+// Exported for testing only
+export function computeNewLimitsFromHeaders(
   headers: globalThis.Headers,
 ): ClaudeAILimits {
   const status =
