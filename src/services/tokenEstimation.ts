@@ -24,13 +24,34 @@ import {
 import { jsonStringify } from '../utils/slowOperations.js'
 import { isToolReferenceBlock } from '../utils/toolSearch.js'
 import { getAPIMetadata, getExtraBodyParams } from './llm/utils/metadata.js'
-import { getAnthropicClient } from './api/client.js'
+import { nativeAnthropicPost } from './llm/transport/anthropicHttp.js'
 import { withTokenCountVCR } from './vcr.js'
 
 // Minimal values for token counting with thinking enabled
 // API constraint: max_tokens must be greater than thinking.budget_tokens
 const TOKEN_COUNT_THINKING_BUDGET = 1024
 const TOKEN_COUNT_MAX_TOKENS = 2048
+// SDK default timeout (10 minutes) for token-count requests, matching the
+// legacy path which passed no explicit timeout to the Anthropic SDK client.
+const TOKEN_COUNT_TIMEOUT_MS = 600_000
+
+function usesLegacyTokenProvider(): boolean {
+  return getAPIProvider() !== 'firstParty'
+}
+
+/**
+ * Legacy SDK client for non-first-party token counting (Vertex / Foundry /
+ * OpenRouter / local / OpenCode / NVIDIA). Out of scope for the native
+ * migration; preserves previous legacy-client behavior unchanged.
+ */
+async function getLegacyTokenClient(model: string) {
+  const { getAnthropicClient } = await import('./api/client.js')
+  return getAnthropicClient({
+    maxRetries: 1,
+    model,
+    source: 'count_tokens',
+  })
+}
 
 /**
  * Check if messages contain thinking blocks
@@ -158,41 +179,66 @@ export async function countMessagesTokensWithAPI(
         })
       }
 
-      const anthropic = await getAnthropicClient({
-        maxRetries: 1,
-        model,
-        source: 'count_tokens',
-      })
-
       const filteredBetas =
         getAPIProvider() === 'vertex'
           ? betas.filter(b => VERTEX_COUNT_TOKENS_ALLOWED_BETAS.has(b))
           : betas
 
-      const response = await anthropic.beta.messages.countTokens({
-        model: normalizeModelStringForAPI(model),
-        messages:
-          // When we pass tools and no messages, we need to pass a dummy message
-          // to get an accurate tool token count.
-          messages.length > 0 ? messages : [{ role: 'user', content: 'foo' }],
-        tools,
-        ...(filteredBetas.length > 0 && { betas: filteredBetas }),
-        // Enable thinking if messages contain thinking blocks
-        ...(containsThinking && {
-          thinking: {
-            type: 'enabled',
-            budget_tokens: TOKEN_COUNT_THINKING_BUDGET,
-          },
-        }),
+      if (usesLegacyTokenProvider()) {
+        const anthropic = await getLegacyTokenClient(model)
+        const response = await anthropic.beta.messages.countTokens({
+          model: normalizeModelStringForAPI(model),
+          messages:
+            // When we pass tools and no messages, we need to pass a dummy message
+            // to get an accurate tool token count.
+            messages.length > 0 ? messages : [{ role: 'user', content: 'foo' }],
+          tools,
+          ...(filteredBetas.length > 0 && { betas: filteredBetas }),
+          // Enable thinking if messages contain thinking blocks
+          ...(containsThinking && {
+            thinking: {
+              type: 'enabled',
+              budget_tokens: TOKEN_COUNT_THINKING_BUDGET,
+            },
+          }),
+        })
+
+        if (typeof response.input_tokens !== 'number') {
+          // Vertex client throws
+          // Bedrock client succeeds with { Output: { __type: 'com.amazon.coral.service#UnknownOperationException' }, Version: '1.0' }
+          return null
+        }
+
+        return response.input_tokens
+      }
+
+      const { json } = await nativeAnthropicPost<{ input_tokens?: unknown }>({
+        path: '/v1/messages/count_tokens',
+        body: {
+          model: normalizeModelStringForAPI(model),
+          messages:
+            // When we pass tools and no messages, we need to pass a dummy message
+            // to get an accurate tool token count.
+            messages.length > 0 ? messages : [{ role: 'user', content: 'foo' }],
+          tools,
+          ...(filteredBetas.length > 0 && { betas: filteredBetas }),
+          // Enable thinking if messages contain thinking blocks
+          ...(containsThinking && {
+            thinking: {
+              type: 'enabled',
+              budget_tokens: TOKEN_COUNT_THINKING_BUDGET,
+            },
+          }),
+        },
+        timeoutMs: TOKEN_COUNT_TIMEOUT_MS,
+        source: 'count_tokens',
       })
 
-      if (typeof response.input_tokens !== 'number') {
-        // Vertex client throws
-        // Bedrock client succeeds with { Output: { __type: 'com.amazon.coral.service#UnknownOperationException' }, Version: '1.0' }
+      if (typeof json.input_tokens !== 'number') {
         return null
       }
 
-      return response.input_tokens
+      return json.input_tokens
     } catch (error) {
       logError(error)
       return null
@@ -275,11 +321,6 @@ export async function countTokensViaHaikuFallback(
     isVertexGlobalEndpoint || isBedrockWithThinking || isVertexWithThinking
       ? getDefaultSonnetModel()
       : getSmallFastModel()
-  const anthropic = await getAnthropicClient({
-    maxRetries: 1,
-    model,
-    source: 'count_tokens',
-  })
 
   // Strip tool search-specific fields (caller, tool_reference) before sending
   // These fields are only valid with the tool search beta header
@@ -299,7 +340,7 @@ export async function countTokensViaHaikuFallback(
       : betas
 
   // biome-ignore lint/plugin: token counting needs specialized parameters (thinking, betas) that sideQuery doesn't support
-  const response = await anthropic.beta.messages.create({
+  const requestBody = {
     model: normalizeModelStringForAPI(model),
     max_tokens: containsThinking ? TOKEN_COUNT_MAX_TOKENS : 1,
     messages: messagesToSend,
@@ -314,14 +355,35 @@ export async function countTokensViaHaikuFallback(
         budget_tokens: TOKEN_COUNT_THINKING_BUDGET,
       },
     }),
-  })
+  }
 
-  const usage = response.usage
+  const usage = usesLegacyTokenProvider()
+    ? (
+        await (
+          await getLegacyTokenClient(model)
+        ).beta.messages.create(requestBody as any)
+      ).usage
+    : (
+        await nativeAnthropicPost<{ usage: NonStreamingUsage }>({
+          path: '/v1/messages',
+          body: requestBody as Record<string, any>,
+          timeoutMs: TOKEN_COUNT_TIMEOUT_MS,
+          source: 'count_tokens',
+        })
+      ).json.usage
+
   const inputTokens = usage.input_tokens
   const cacheCreationTokens = usage.cache_creation_input_tokens || 0
   const cacheReadTokens = usage.cache_read_input_tokens || 0
 
   return inputTokens + cacheCreationTokens + cacheReadTokens
+}
+
+type NonStreamingUsage = {
+  input_tokens: number
+  output_tokens: number
+  cache_creation_input_tokens?: number | null
+  cache_read_input_tokens?: number | null
 }
 
 export function roughTokenCountEstimationForMessages(

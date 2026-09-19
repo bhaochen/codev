@@ -66,15 +66,7 @@ import {
   splitSysPromptPrefix,
   toolToAPISchema,
 } from '../../../utils/api.js'
-import {
-  checkAndRefreshOAuthTokenIfNeeded,
-  getAnthropicApiKey,
-  getApiKeyFromApiKeyHelper,
-  getClaudeAIOAuthTokens,
-  getOauthAccountInfo,
-} from '../../../utils/auth.js'
-import { getUserAgent } from '../../../utils/http.js'
-import { getOauthConfig } from '../../../constants/oauth.js'
+import { getOauthAccountInfo } from '../../../utils/auth.js'
 import {
   getBedrockExtraBodyParamsBetas,
   getMergedBetas,
@@ -137,7 +129,6 @@ import {
   getAfkModeHeaderLatched,
   getCacheEditingHeaderLatched,
   getFastModeHeaderLatched,
-  getIsNonInteractiveSession,
   getLastApiCompletionTimestamp,
   getPromptCache1hAllowlist,
   getPromptCache1hEligible,
@@ -257,9 +248,11 @@ import {
   getErrorMessageIfRefusal,
 } from '../../api/errors.js'
 import {
+  buildNativeFirstPartyHeaders,
   CLIENT_REQUEST_ID_HEADER,
-  getAnthropicClient,
-} from '../../api/client.js'
+  nativeAnthropicPost,
+  resolveNativeFirstPartyAuth,
+} from '../transport/anthropicHttp.js'
 import {
   EMPTY_USAGE,
   type GlobalCacheStrategy,
@@ -358,76 +351,6 @@ function buildAnthropicRequestBody(params: {
  * container/remote/client-app, additional protection), API-key-helper
  * Authorization, staging base URL.
  */
-function getNativeCustomHeaders(): Record<string, string> {
-  const customHeaders: Record<string, string> = {}
-  const customHeadersEnv = process.env.ANTHROPIC_CUSTOM_HEADERS
-  if (!customHeadersEnv) return customHeaders
-  for (const headerString of customHeadersEnv.split(/\n|\r\n/)) {
-    if (!headerString.trim()) continue
-    const colonIdx = headerString.indexOf(':')
-    if (colonIdx === -1) continue
-    const name = headerString.slice(0, colonIdx).trim()
-    const value = headerString.slice(colonIdx + 1).trim()
-    if (name) customHeaders[name] = value
-  }
-  return customHeaders
-}
-
-async function configureNativeApiKeyHeaders(
-  headers: Record<string, string>,
-  isNonInteractiveSession: boolean,
-): Promise<void> {
-  const token =
-    process.env.ANTHROPIC_AUTH_TOKEN ||
-    (await getApiKeyFromApiKeyHelper(isNonInteractiveSession))
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`
-  }
-}
-
-function resolveNativeAnthropicBaseUrl(): string {
-  if (process.env.USER_TYPE === 'ant' && isEnvTruthy(process.env.USE_STAGING_OAUTH)) {
-    return getOauthConfig().BASE_API_URL
-  }
-  return process.env.ANTHROPIC_BASE_URL?.replace(/\/$/, '') || 'https://api.anthropic.com'
-}
-
-async function buildNativeFirstPartyHeaders(): Promise<{ headers: Record<string, string>; baseUrl: string }> {
-  const containerId = process.env.CLAUDE_CODE_CONTAINER_ID
-  const remoteSessionId = process.env.CLAUDE_CODE_REMOTE_SESSION_ID
-  const clientApp = process.env.CLAUDE_AGENT_SDK_CLIENT_APP
-  const customHeaders = getNativeCustomHeaders()
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'x-app': 'cli',
-    'User-Agent': getUserAgent(),
-    'X-Claude-Code-Session-Id': getSessionId(),
-    ...customHeaders,
-    ...(containerId ? { 'x-claude-remote-container-id': containerId } : {}),
-    ...(remoteSessionId ? { 'x-claude-remote-session-id': remoteSessionId } : {}),
-    ...(clientApp ? { 'x-client-app': clientApp } : {}),
-  }
-  if (isEnvTruthy(process.env.CLAUDE_CODE_ADDITIONAL_PROTECTION)) {
-    headers['x-anthropic-additional-protection'] = 'true'
-  }
-  await checkAndRefreshOAuthTokenIfNeeded()
-  if (!isClaudeAISubscriber()) {
-    await configureNativeApiKeyHeaders(headers, getIsNonInteractiveSession())
-  }
-  return { headers, baseUrl: resolveNativeAnthropicBaseUrl() }
-}
-
-async function resolveNativeFirstPartyAuth(
-  apiKeyOverride?: string | null,
-): Promise<Record<string, string>> {
-  if (isClaudeAISubscriber()) {
-    const token = getClaudeAIOAuthTokens()?.accessToken
-    return token ? { Authorization: `Bearer ${token}` } : {}
-  }
-  const apiKey = apiKeyOverride ?? getAnthropicApiKey()
-  return apiKey ? { 'x-api-key': apiKey } : {}
-}
-
 // ============================================================================
 
 /**
@@ -1112,9 +1035,9 @@ async function getLegacyNonStreamingClient(clientOptions: {
 }
 
 /**
- * Native non-streaming create() for first-party Anthropic: same wire shape
- * the SDK would send (betas as header, JSON body), same timeout/abort/error
- * semantics, parsed BetaMessage on success.
+ * Native non-streaming create() for first-party Anthropic: delegates to the
+ * shared transport with the caller's timeout, preserving SDK wire shape
+ * (betas as header) and timeout/abort/error semantics.
  */
 async function nativeNonStreamingCreate(
   params: Record<string, any>,
@@ -1126,56 +1049,16 @@ async function nativeNonStreamingCreate(
     apiKeyOverride?: string | null
   },
 ): Promise<BetaMessage> {
-  const { betas, ...body } = params
-  const { headers: nativeHeaders, baseUrl } = await buildNativeFirstPartyHeaders()
-  const authHeaders = await resolveNativeFirstPartyAuth(opts.apiKeyOverride)
-  const headers: Record<string, string> = {
-    ...nativeHeaders,
-    ...authHeaders,
-    'anthropic-version': '2023-06-01',
-    ...(Array.isArray(betas) && betas.length > 0 && {
-      'anthropic-beta': betas.join(','),
-    }),
-  }
-  const timeoutSignal =
-    typeof AbortSignal.timeout === 'function'
-      ? AbortSignal.timeout(opts.timeoutMs)
-      : AbortSignal.abort()
-  const signal =
-    opts.signal && typeof AbortSignal.any === 'function'
-      ? AbortSignal.any([opts.signal, timeoutSignal])
-      : (opts.signal ?? timeoutSignal)
-  let response: Response
-  try {
-    response = await httpRequest(
-      {
-        url: `${baseUrl}/v1/messages`,
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-        signal,
-      },
-      opts.fetchOverride as typeof fetch | undefined,
-    )
-  } catch (err) {
-    if (opts.signal?.aborted) throw new APIUserAbortError()
-    throw new APIConnectionTimeoutError({
-      message: err instanceof Error ? err.message : String(err),
-    })
-  }
-  if (!response.ok) {
-    const text = await response.text().catch(() => '')
-    let errorBody: any
-    try {
-      errorBody = JSON.parse(text)
-    } catch {
-      errorBody = undefined
-    }
-    // Use the SDK's own error factory so status-specific subclasses and the
-    // `${status} ${compact JSON}` message format match the legacy SDK path.
-    throw APIError.generate(response.status, errorBody, text || undefined, response.headers)
-  }
-  return (await response.json()) as BetaMessage
+  const { json } = await nativeAnthropicPost<BetaMessage>({
+    path: '/v1/messages',
+    body: params,
+    signal: opts.signal,
+    timeoutMs: opts.timeoutMs,
+    fetchOverride: opts.fetchOverride as typeof fetch | undefined,
+    apiKeyOverride: opts.apiKeyOverride,
+    source: opts.source,
+  })
+  return json
 }
 
 /**
