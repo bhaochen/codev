@@ -307,15 +307,13 @@ export function filterToolsByDenyRules<
 }
 
 export const getTools = (permissionContext: ToolPermissionContext): Tools => {
-  // Simple mode: only Bash, Read, and Edit tools (+ REPL, which is an
-  // always-on additive programming environment — it never replaces the
-  // primitives).
+  // Simple mode keeps only the primitive tools so their schemas do not consume
+  // the small context windows commonly used by local providers.
   if (isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)) {
     const simpleTools: Tool[] = [
       BashTool,
       FileReadTool,
       FileEditTool,
-      getReplTool(),
     ]
     // When coordinator mode is also active, include AgentTool and TaskStopTool
     // so the coordinator gets Task+TaskStop (via useMergedTools filtering) and

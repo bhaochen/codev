@@ -194,7 +194,11 @@ export function isOpenAIChatThinkingEnabled(model: string): boolean {
   if (isEnvDefinedFalsy(process.env.OPENAI_ENABLE_THINKING)) return false
   if (isEnvTruthy(process.env.OPENAI_ENABLE_THINKING)) return true
   const modelLower = model.toLowerCase()
-  return modelLower.includes('deepseek') || modelLower.includes('mimo')
+  return (
+    modelLower.includes('deepseek') ||
+    modelLower.includes('mimo') ||
+    modelLower.includes('gpt-oss')
+  )
 }
 
 /**
@@ -268,8 +272,8 @@ export function buildOpenAIChatBody(params: {
       thinking: { type: 'enabled' },
       enable_thinking: true,
       chat_template_kwargs: { thinking: true, enable_thinking: true },
-      ...(reasoningEffort && { reasoning_effort: reasoningEffort }),
     }),
+    ...(reasoningEffort && { reasoning_effort: reasoningEffort }),
     // temperature only when thinking is off (thinking endpoints ignore it)
     ...(!enableThinking &&
       temperatureOverride !== undefined && {

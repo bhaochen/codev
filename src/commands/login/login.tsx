@@ -197,9 +197,9 @@ export function Login(props: {
       {
         label: (
           <Text>
-            Llama.cpp{' '}
+            Local{' '}
             <Text dimColor={true}>
-              Llama.cpp server API
+              Local Llama.cpp server API
             </Text>
             {'\n'}
           </Text>
@@ -264,7 +264,7 @@ export function Login(props: {
     ) : selectedProvider === 'local' ? (
       <LocalLoginFlow
         onDone={onFlowDone}
-        startingMessage="Configure Llama.cpp server."
+        startingMessage="Configure Local provider."
       />
     ) : selectedProvider === 'nvidia' ? (
       <NvidiaLoginFlow

@@ -31,6 +31,7 @@ import { resolveOpenAIMaxTokens } from '../utils/requestBody.js'
 import { formatOpenAIPromptCacheKey, updateOpenAIUsage } from '../utils/openaiShared.js'
 import { resolveAuth } from '../auth/resolveAuth.js'
 import { createOpencodeId, getOpencodeProjectId, getOpencodeUserAgent } from '../../api/opencodeUserAgent.js'
+import { getNvidiaModelMaxTokens } from '../../../utils/model/nvidiaModels.js'
 import {
   adaptOpenAIChatSSE,
   agentMessagesToOpenAIChatMessages,
@@ -117,19 +118,38 @@ export async function* queryOpenAIChat(
         }
       } catch {}
     }
+    if (route.provider === 'nvidia') {
+      const catalogCap = getNvidiaModelMaxTokens(model)
+      if (typeof catalogCap === 'number' && catalogCap >= 4_096) {
+        effectiveUpperLimit = Math.min(effectiveUpperLimit, catalogCap)
+      }
+    }
     maxTokens = resolveOpenAIMaxTokens(effectiveUpperLimit, config.maxOutputTokens)
-    const promptCacheKey = formatOpenAIPromptCacheKey(getSessionId())
+    // NVIDIA NIM implements the OpenAI Chat API but does not accept
+    // OpenAI's provider-specific prompt_cache_key extension.
+    const promptCacheKey =
+      route.provider === 'nvidia' ? undefined : formatOpenAIPromptCacheKey(getSessionId())
     // reasoning 由 LLMRequestConfig 直构：config.thinking / context.effortValue /
     // 模型与 env 检测都归口到 native thinking 配置，见 resolveOpenAIChatThinking。
     const { enableThinking, reasoning_effort: reasoningEffort } = resolveOpenAIChatThinking(model, config, context)
-    logForDebugging(`[OpenAIChat] provider=${route.provider} model=${model} endpoint=${endpoint} tools=${openaiTools.length} thinking=${enableThinking ? 'on' : 'off'}`)
+    // NVIDIA NIM rejects the generic enable_thinking/thinking fields.
+    const isNvidiaGptOss =
+      route.provider === 'nvidia' && model.toLowerCase().includes('gpt-oss')
+    const providerEnableThinking = route.provider !== 'nvidia' && enableThinking
+    const providerReasoningEffort =
+      route.provider === 'nvidia'
+        ? isNvidiaGptOss
+          ? reasoningEffort
+          : undefined
+        : reasoningEffort
+    logForDebugging(`[OpenAIChat] provider=${route.provider} model=${model} endpoint=${endpoint} tools=${openaiTools.length} thinking=${providerEnableThinking ? 'on' : 'off'}`)
     const body = buildOpenAIChatBody({
       model,
       messages: openaiMessages,
       tools: openaiTools,
       toolChoice: openAIChatToolChoiceFromLLM(config.toolChoice),
-      enableThinking,
-      reasoningEffort,
+      enableThinking: providerEnableThinking,
+      reasoningEffort: providerReasoningEffort,
       maxTokens,
       temperatureOverride: config.temperature,
       promptCacheKey,

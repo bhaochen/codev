@@ -202,7 +202,7 @@ export function LocalLoginFlow({ onDone, startingMessage }: Props) {
   return (
     <Box flexDirection="column" gap={1}>
       <Text bold={true}>
-        {startingMessage ?? 'Configure Llama.cpp server.'}
+        {startingMessage ?? 'Configure Local provider.'}
       </Text>
       
       <Box flexDirection="column" gap={1}>

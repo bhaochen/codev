@@ -70,6 +70,18 @@ export const WARNING_THRESHOLD_BUFFER_TOKENS = 20_000
 export const ERROR_THRESHOLD_BUFFER_TOKENS = 20_000
 export const MANUAL_COMPACT_BUFFER_TOKENS = 3_000
 
+function getContextWarningBuffer(
+  threshold: number,
+  configuredBuffer: number,
+  minimumBuffer: number,
+): number {
+  // Fixed 20K buffers become negative thresholds for small local windows.
+  return Math.min(
+    configuredBuffer,
+    Math.max(Math.round(threshold * 0.25), minimumBuffer),
+  )
+}
+
 // Stop trying autocompact after this many consecutive failures.
 // BQ 2026-03-10: 1,279 sessions had 50+ consecutive failures (up to 3,272)
 // in a single session, wasting ~250K API calls/day globally.
@@ -118,8 +130,12 @@ export function calculateTokenWarningState(
     Math.round(((threshold - tokenUsage) / threshold) * 100),
   )
 
-  const warningThreshold = threshold - WARNING_THRESHOLD_BUFFER_TOKENS
-  const errorThreshold = threshold - ERROR_THRESHOLD_BUFFER_TOKENS
+  const warningThreshold =
+    threshold -
+    getContextWarningBuffer(threshold, WARNING_THRESHOLD_BUFFER_TOKENS, 1_000)
+  const errorThreshold =
+    threshold -
+    getContextWarningBuffer(threshold, ERROR_THRESHOLD_BUFFER_TOKENS, 1_000)
 
   const isAboveWarningThreshold = tokenUsage >= warningThreshold
   const isAboveErrorThreshold = tokenUsage >= errorThreshold
@@ -129,7 +145,11 @@ export function calculateTokenWarningState(
 
   const actualContextWindow = getEffectiveContextWindowSize(model)
   const defaultBlockingLimit =
-    actualContextWindow - MANUAL_COMPACT_BUFFER_TOKENS
+    actualContextWindow -
+    Math.min(
+      MANUAL_COMPACT_BUFFER_TOKENS,
+      Math.max(Math.round(actualContextWindow * 0.1), 1_000),
+    )
 
   // Allow override for testing
   const blockingLimitOverride = process.env.CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE

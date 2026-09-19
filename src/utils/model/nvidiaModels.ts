@@ -35,6 +35,12 @@ export function getNvidiaModelContextWindow(modelId: string): number | undefined
   return model?.contextWindow
 }
 
+export function getNvidiaModelMaxTokens(modelId: string): number | undefined {
+  if (!cachedNvidiaModels) return undefined
+  const model = cachedNvidiaModels.find(m => m.id === modelId)
+  return model?.maxTokens
+}
+
 export function getNvidiaModelReasoningOptions(modelId: string): string[] | undefined {
   if (!cachedNvidiaModels) return undefined
   const model = cachedNvidiaModels.find(m => m.id === modelId)
