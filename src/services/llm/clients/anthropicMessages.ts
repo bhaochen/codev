@@ -279,24 +279,6 @@ import type { LLMRoute } from '../types.js'
 import type { LLMRequest } from '../runtime/types.js'
 
 // Native Anthropic wire protocol helpers
-function normalizeAnthropicUsage(usage: {
-  input_tokens?: number
-  output_tokens?: number
-  cache_creation_input_tokens?: number
-  cache_read_input_tokens?: number
-}): { input_tokens: number; output_tokens: number; cache_creation_input_tokens: number; cache_read_input_tokens: number } {
-  const totalInput = Math.max(0, usage.input_tokens ?? 0)
-  const cacheRead = Math.min(Math.max(0, usage.cache_read_input_tokens ?? 0), totalInput)
-  const remainingAfterRead = Math.max(0, totalInput - cacheRead)
-  const cacheCreation = Math.min(Math.max(0, usage.cache_creation_input_tokens ?? 0), remainingAfterRead)
-  return {
-    input_tokens: Math.max(0, remainingAfterRead - cacheCreation),
-    output_tokens: Math.max(0, usage.output_tokens ?? 0),
-    cache_creation_input_tokens: cacheCreation,
-    cache_read_input_tokens: cacheRead,
-  }
-}
-
 function buildAnthropicRequestBody(params: {
   model: string
   messages: any[]
@@ -344,167 +326,6 @@ function buildAnthropicRequestBody(params: {
   }
 }
 
-/**
- * Native first-party header/auth preparation — replicates the first-party
- * branch of the legacy api/client.ts client factory without the SDK:
- * OAuth refresh, default headers (x-app, User-Agent, session, custom,
- * container/remote/client-app, additional protection), API-key-helper
- * Authorization, staging base URL.
- */
-// ============================================================================
-
-/**
- * Convert one Anthropic SSE chunk into runtime stream events.
- * Plain function (no yield) returning an event list; the generator below
- * yields them. Keeps block open/close tracking in the passed state.
- */
-function anthropicChunkToEvents(
-  chunk: any,
-  model: string,
-  state: {
-    started: boolean
-    thinkingBlockOpen: boolean
-    textBlockOpen: boolean
-  },
-): any[] {
-  if (!chunk || typeof chunk.type !== 'string') return []
-  const t: string = chunk.type
-
-  if (t === 'message_start') {
-    state.started = true
-    return [{
-      type: 'message_start',
-      message: {
-        id: `msg_${crypto.getRandomValues(new Uint8Array(12)).reduce((h, b) => h + b.toString(16).padStart(2, '0'), '')}`,
-        type: 'message',
-        role: 'assistant',
-        content: [],
-        model,
-        stop_reason: null,
-        stop_sequence: null,
-        usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
-      },
-    }]
-  }
-  if (t === 'content_block_start') {
-    const cb = chunk.content_block ?? {}
-    if (cb.type === 'thinking') {
-      state.thinkingBlockOpen = true
-      return [{ type: 'content_block_start', index: chunk.index, content_block: { type: 'thinking', thinking: '' } }]
-    }
-    if (cb.type === 'text') {
-      state.textBlockOpen = true
-      return [{ type: 'content_block_start', index: chunk.index, content_block: { type: 'text', text: '' } }]
-    }
-    if (cb.type === 'tool_use') {
-      return [{ type: 'content_block_start', index: chunk.index, content_block: { type: 'tool_use', id: cb.id, name: cb.name, input: {} } }]
-    }
-    return []
-  }
-  if (t === 'content_block_delta') {
-    const delta = chunk.delta ?? {}
-    if (delta.type === 'thinking_delta' && delta.thinking) {
-      if (!state.thinkingBlockOpen) {
-        state.thinkingBlockOpen = true
-        return [
-          { type: 'content_block_start', index: chunk.index, content_block: { type: 'thinking', thinking: '' } },
-          { type: 'content_block_delta', index: chunk.index, delta: { type: 'thinking_delta', thinking: delta.thinking } },
-        ]
-      }
-      return [{ type: 'content_block_delta', index: chunk.index, delta: { type: 'thinking_delta', thinking: delta.thinking } }]
-    }
-    if (delta.type === 'text_delta' && delta.text) {
-      if (!state.textBlockOpen) {
-        const events: any[] = []
-        if (state.thinkingBlockOpen) {
-          events.push({ type: 'content_block_stop', index: chunk.index })
-          state.thinkingBlockOpen = false
-        }
-        state.textBlockOpen = true
-        events.push({ type: 'content_block_start', index: chunk.index, content_block: { type: 'text', text: '' } })
-        events.push({ type: 'content_block_delta', index: chunk.index, delta: { type: 'text_delta', text: delta.text } })
-        return events
-      }
-      return [{ type: 'content_block_delta', index: chunk.index, delta: { type: 'text_delta', text: delta.text } }]
-    }
-    if (delta.type === 'input_json_delta' && delta.partial_json) {
-      return [{ type: 'content_block_delta', index: chunk.index, delta: { type: 'input_json_delta', partial_json: delta.partial_json } }]
-    }
-    if (delta.type === 'signature_delta' && delta.signature) {
-      return [{ type: 'content_block_delta', index: chunk.index, delta: { type: 'thinking_delta', thinking: delta.signature } }]
-    }
-    return []
-  }
-  if (t === 'content_block_stop') {
-    state.thinkingBlockOpen = false
-    state.textBlockOpen = false
-    return [{ type: 'content_block_stop', index: chunk.index }]
-  }
-  if (t === 'message_delta') {
-    if (chunk.delta?.stop_reason) {
-      return [
-        {
-          type: 'message_delta',
-          delta: { stop_reason: chunk.delta.stop_reason, stop_sequence: null },
-          usage: normalizeAnthropicUsage(chunk.usage || {}),
-        },
-        { type: 'message_stop' },
-      ]
-    }
-    return []
-  }
-  if (t === 'message_stop') return []
-  return []
-}
-
-/**
- * Adapt Anthropic SSE stream to runtime StreamEvent.
- * Produces the same event grammar as the legacy adapter but without Anthropic SDK types.
- */
-async function* adaptAnthropicStreamSSE(
-  stream: ReadableStream<Uint8Array>,
-  model: string,
-  options?: { includeCacheWriteTokens?: boolean },
-): AsyncGenerator<any, void> {
-  void options
-  const { parseSSERaw } = await import('../transport/sse.js')
-  const state = { started: false, thinkingBlockOpen: false, textBlockOpen: false }
-  let usage = { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
-
-  for await (const rawEvent of parseSSERaw(stream)) {
-    const data = rawEvent.data.trim()
-    if (data === '' || data === '[DONE]') continue
-    let chunk: any
-    try {
-      chunk = JSON.parse(data)
-    } catch {
-      continue
-    }
-    if (chunk.type === 'message_start' && chunk.message?.usage) {
-      usage = normalizeAnthropicUsage(chunk.message.usage)
-    }
-    if (chunk.usage) {
-      usage = normalizeAnthropicUsage(chunk.usage)
-    }
-    const events = anthropicChunkToEvents(chunk, model, state)
-    if (chunk.type === 'message_start' && events.length > 0) {
-      ;(events[0] as any).message.usage = { ...usage, output_tokens: 0 }
-    }
-    if (chunk.type === 'message_delta') {
-      for (const e of events) {
-        if ((e as any).type === 'message_delta') (e as any).usage = usage
-      }
-    }
-    for (const event of events) {
-      yield event
-    }
-  }
-
-  if (state.thinkingBlockOpen || state.textBlockOpen) {
-    yield { type: 'content_block_stop', index: 0 }
-  }
-  yield { type: 'message_stop' }
-}
 type JsonValue = string | number | boolean | null | JsonObject | JsonArray
 type JsonObject = { [key: string]: JsonValue }
 type JsonArray = JsonValue[]
@@ -1013,6 +834,36 @@ function usesLegacySdkProvider(): boolean {
     isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY) ||
     isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX)
   )
+}
+
+/**
+ * Whether the Anthropic-messages streaming path may use the native
+ * first-party transport. Only the firstParty provider is proven native:
+ * Bedrock / Vertex / Foundry need their SDK clients, and local/openrouter
+ * style providers need their own base-URL routing — both still served by
+ * the legacy SDK client factory.
+ */
+export function usesNativeAnthropicStreaming(): boolean {
+  return getAPIProvider() === 'firstParty'
+}
+
+/**
+ * Legacy SDK client for streaming under non-firstParty providers.
+ * Mirrors getLegacyNonStreamingClient; kept for Bedrock / Vertex / Foundry /
+ * local until those providers gain native transports.
+ */
+async function getLegacyStreamingClient(clientOptions: {
+  model: string
+  fetchOverride?: Options['fetchOverride']
+  source: string
+}): Promise<Anthropic> {
+  const { getAnthropicClient } = await import('../../api/client.js')
+  return getAnthropicClient({
+    maxRetries: 0, // Disabled auto-retry in favor of manual implementation
+    model: clientOptions.model,
+    fetchOverride: clientOptions.fetchOverride,
+    source: clientOptions.source,
+  })
 }
 
 /**
@@ -1830,7 +1681,7 @@ export async function* queryAnthropicMessages(
   let start = Date.now()
   let attemptNumber = 0
   const attemptStartTimes: number[] = []
-  let stream: Stream<BetaRawMessageStreamEvent> | undefined = undefined
+  let stream: Stream<BetaRawMessageStreamEvent> | AsyncGenerator<any, void> | undefined = undefined
   let streamRequestId: string | null | undefined = undefined
   let clientRequestId: string | undefined = undefined
   // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins -- Response is available in Node 18+ and is used by the SDK
@@ -1841,7 +1692,11 @@ export async function* queryAnthropicMessages(
   // V8 heap (observed on the Node.js/npm path; see GH #32920), so we must
   // explicitly cancel and release it regardless of how the generator exits.
   function releaseStreamResources(): void {
-    cleanupStream(stream)
+    // Native generators have no SDK controller; cleanupStream guards via
+    // try/catch and `in` check, so this stays safe for both transports.
+    if (stream && 'controller' in (stream as object)) {
+      cleanupStream(stream as Stream<BetaRawMessageStreamEvent>)
+    }
     stream = undefined
     if (streamResponse) {
       streamResponse.body?.cancel().catch(() => {})
@@ -2111,112 +1966,198 @@ export async function* queryAnthropicMessages(
     let streamResponse: Response | undefined
     let streamRequestId: string | null | undefined
 
-    // Build request params once (they don't change across retries except for max_tokens)
-    const baseParams = paramsFromContext({ model: route.model, thinkingConfig })
-    captureAPIRequest(baseParams, options.querySource)
+    // Provider gating: only firstParty has a proven native transport.
+    // Bedrock / Vertex / Foundry / local keep the legacy SDK streaming path.
+    if (usesNativeAnthropicStreaming()) {
+      // Build request params once (they don't change across retries except for max_tokens)
+      const baseParams = paramsFromContext({ model: route.model, thinkingConfig })
+      captureAPIRequest(baseParams, options.querySource)
 
-    // Generate client request ID for first-party tracking
-    const clientRequestId =
-      getAPIProvider() === 'firstParty' && isFirstPartyAnthropicBaseUrl()
-        ? randomUUID()
-        : undefined
+      // Generate client request ID for first-party tracking
+      const clientRequestId =
+        getAPIProvider() === 'firstParty' && isFirstPartyAnthropicBaseUrl()
+          ? randomUUID()
+          : undefined
 
-    // Build the Anthropic wire-format request body. baseParams fields are
-    // already Anthropic-shaped (built by paramsFromContext) and pass through.
-    const requestBody = buildAnthropicRequestBody({
-      model: route.model,
-      messages: baseParams.messages,
-      system: baseParams.system,
-      tools: baseParams.tools,
-      toolChoice: baseParams.tool_choice,
-      thinking: baseParams.thinking,
-      maxTokens: baseParams.max_tokens,
-      temperatureOverride: baseParams.temperature,
-      stream: true,
-      streamOptions: { include_usage: true },
-      metadata: baseParams.metadata,
-    })
+      // Build the Anthropic wire-format request body. baseParams fields are
+      // already Anthropic-shaped (built by paramsFromContext) and pass through.
+      const requestBody = buildAnthropicRequestBody({
+        model: route.model,
+        messages: baseParams.messages,
+        system: baseParams.system,
+        tools: baseParams.tools,
+        toolChoice: baseParams.tool_choice,
+        thinking: baseParams.thinking,
+        maxTokens: baseParams.max_tokens,
+        temperatureOverride: baseParams.temperature,
+        stream: true,
+        streamOptions: { include_usage: true },
+        metadata: baseParams.metadata,
+      })
+      maxOutputTokens = requestBody.max_tokens
 
-    // Native first-party headers + OAuth refresh (replicates the legacy
-    // api/client.ts client factory without the SDK).
-    const { headers: nativeHeaders, baseUrl } = await buildNativeFirstPartyHeaders()
-    const authHeaders = await resolveNativeFirstPartyAuth()
-    const headers: Record<string, string> = {
-      ...nativeHeaders,
-      ...authHeaders,
-      'anthropic-version': '2023-06-01',
-      ...(clientRequestId && { [CLIENT_REQUEST_ID_HEADER]: clientRequestId }),
-    }
-
-    const url = `${baseUrl}/v1/messages`
-
-    // Retry loop for streaming
-    while (true) {
-      attemptNumber++
-      const attemptStart = Date.now()
-      queryCheckpoint('query_api_request_sent')
-
-      try {
-        const response = await httpRequest(
-          {
-            url,
-            method: 'POST',
-            headers: { ...headers, ...(clientRequestId && { [CLIENT_REQUEST_ID_HEADER]: clientRequestId }) },
-            body: JSON.stringify(requestBody),
-            signal,
-          },
-          options.fetchOverride as typeof fetch | undefined,
-        )
-
-        queryCheckpoint('query_response_headers_received')
-        streamResponse = response
-        streamRequestId = response.headers.get('x-request-id') ?? null
-
-        if (!response.ok) {
-          const errorText = await response.text().catch(() => '')
-          throw new Error(`Upstream Anthropic failed (${response.status}): ${errorText}`)
-        }
-
-        if (!response.body) {
-          throw new Error('Upstream response missing body')
-        }
-
-        // Parse the SSE stream using native adapter
-        const adaptedStream = adaptAnthropicStreamSSE(response.body, route.model, { includeCacheWriteTokens: false })
-
-        // Process the adapted stream
-        let e
-        do {
-          e = await adaptedStream.next()
-
-          // yield API error messages (the stream has a 'controller' property, error messages don't)
-          if (!('controller' in e.value)) {
-            yield e.value
-          }
-        } while (!e.done)
-
-        stream = e.value as any // The stream is fully consumed by the adapter
-        break // Success - exit retry loop
-
-      } catch (error) {
-        if (isAbortError(error)) throw error
-
-        // Check if we should retry
-        const retryable = error instanceof Error && (
-          error.name === 'APIConnectionTimeoutError' ||
-          error.name === 'APIConnectionError' ||
-          (error as any).status === 529 ||
-          (error as any).status === 503 ||
-          (error as any).status === 429
-        )
-
-        if (retryable && attemptNumber < 3) {
-          const delay = Math.min(1000 * 2 ** (attemptNumber - 1), 30000)
-          await new Promise(r => setTimeout(r, delay))
-          continue
-        }
-        throw error
+      // Native first-party headers + OAuth refresh (replicates the legacy
+      // api/client.ts client factory without the SDK).
+      const { headers: nativeHeaders, baseUrl } = await buildNativeFirstPartyHeaders()
+      const authHeaders = await resolveNativeFirstPartyAuth()
+      const headers: Record<string, string> = {
+        ...nativeHeaders,
+        ...authHeaders,
+        'anthropic-version': '2023-06-01',
+        ...(clientRequestId && { [CLIENT_REQUEST_ID_HEADER]: clientRequestId }),
       }
+
+      const url = `${baseUrl}/v1/messages`
+
+      // Retry loop for streaming
+      while (true) {
+        attemptNumber++
+        const attemptStart = Date.now()
+        queryCheckpoint('query_api_request_sent')
+
+        try {
+          const response = await httpRequest(
+            {
+              url,
+              method: 'POST',
+              headers: { ...headers, ...(clientRequestId && { [CLIENT_REQUEST_ID_HEADER]: clientRequestId }) },
+              body: JSON.stringify(requestBody),
+              signal,
+            },
+            options.fetchOverride as typeof fetch | undefined,
+          )
+
+          queryCheckpoint('query_response_headers_received')
+          streamResponse = response
+          streamRequestId = response.headers.get('x-request-id') ?? null
+
+          if (!response.ok) {
+            const errorText = await response.text().catch(() => '')
+            throw new Error(`Upstream Anthropic failed (${response.status}): ${errorText}`)
+          }
+
+          if (!response.body) {
+            throw new Error('Upstream response missing body')
+          }
+
+          // Raw Anthropic SSE chunks feed the shared event-processing loop
+          // below; no adapter in between.
+          const responseBody = response.body
+          stream = (async function* () {
+            for await (const rawEvent of parseSSERaw(responseBody)) {
+              const data = rawEvent.data.trim()
+              if (data === '' || data === '[DONE]') continue
+              try {
+                yield JSON.parse(data)
+              } catch {
+                continue
+              }
+            }
+          })()
+          break // Success - exit retry loop
+
+        } catch (error) {
+          if (isAbortError(error)) throw error
+
+          // Check if we should retry
+          const retryable = error instanceof Error && (
+            error.name === 'APIConnectionTimeoutError' ||
+            error.name === 'APIConnectionError' ||
+            (error as any).status === 529 ||
+            (error as any).status === 503 ||
+            (error as any).status === 429
+          )
+
+          if (retryable && attemptNumber < 3) {
+            const delay = Math.min(1000 * 2 ** (attemptNumber - 1), 30000)
+            await new Promise(r => setTimeout(r, delay))
+            continue
+          }
+          throw error
+        }
+      }
+    } else {
+      // Legacy providers (Bedrock / Vertex / Foundry / local): previous SDK
+      // streaming behavior unchanged.
+      const generator = withRetry(
+        () =>
+          getLegacyStreamingClient({
+            model: route.model,
+            fetchOverride: options.fetchOverride,
+            source: options.querySource,
+          }),
+        async (anthropic, attempt, context) => {
+          attemptNumber = attempt
+          isFastModeRequest = context.fastMode ?? false
+          start = Date.now()
+          attemptStartTimes.push(start)
+          // Client has been created by withRetry's getClient() call. This fires
+          // once per attempt; on retries the client is usually cached (withRetry
+          // only calls getClient() again after auth errors), so the delta from
+          // client_creation_start is meaningful on attempt 1.
+          queryCheckpoint('query_client_creation_end')
+
+          const params = paramsFromContext(context)
+          captureAPIRequest(params, options.querySource) // Capture for bug reports
+
+          maxOutputTokens = params.max_tokens
+
+          // Fire immediately before the fetch is dispatched. .withResponse() below
+          // awaits until response headers arrive, so this MUST be before the await
+          // or the "Network TTFB" phase measurement is wrong.
+          queryCheckpoint('query_api_request_sent')
+          if (!options.agentId) {
+            headlessProfilerCheckpoint('api_request_sent')
+          }
+
+          // Generate and track client request ID so timeouts (which return no
+          // server request ID) can still be correlated with server logs.
+          // First-party only — 3P providers don't log it (inc-4029 class).
+          clientRequestId =
+            getAPIProvider() === 'firstParty' && isFirstPartyAnthropicBaseUrl()
+              ? randomUUID()
+              : undefined
+
+          // Use raw stream instead of BetaMessageStream to avoid O(n²) partial JSON parsing
+          // BetaMessageStream calls partialParse() on every input_json_delta, which we don't need
+          // since we handle tool input accumulation ourselves
+          // biome-ignore lint/plugin: main conversation loop handles attribution separately
+          const result = await anthropic.beta.messages
+            .create(
+              { ...params, stream: true },
+              {
+                signal,
+                ...(clientRequestId && {
+                  headers: { [CLIENT_REQUEST_ID_HEADER]: clientRequestId },
+                }),
+              },
+            )
+            .withResponse()
+          queryCheckpoint('query_response_headers_received')
+          streamRequestId = result.request_id
+          streamResponse = result.response
+          return result.data
+        },
+        {
+          model: route.model,
+          fallbackModel: options.fallbackModel,
+          thinkingConfig,
+          ...(isFastModeEnabled() ? { fastMode: isFastMode } : false),
+          signal,
+          querySource: options.querySource,
+        },
+      )
+
+      let e
+      do {
+        e = await generator.next()
+
+        // yield API error messages (the stream has a 'controller' property, error messages don't)
+        if (!('controller' in e.value)) {
+          yield e.value
+        }
+      } while (!e.done)
+      stream = e.value as Stream<BetaRawMessageStreamEvent>
     }
 
     // reset state

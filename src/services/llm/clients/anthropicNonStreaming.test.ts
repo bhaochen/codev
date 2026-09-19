@@ -255,11 +255,17 @@ describe('api/client decoupling invariants', () => {
     expect(verifyApiKey.toString()).not.toContain('getAnthropicClient')
   })
 
-  test('only the Bedrock/Vertex/Foundry branch keeps the legacy client', () => {
+  test('only the Bedrock/Vertex/Foundry branches keep the legacy client', () => {
     const source = readFileSync('src/services/llm/clients/anthropicMessages.ts', 'utf8')
     const matches = source.match(/getAnthropicClient\(/g) ?? []
-    // Dynamic import inside getLegacyNonStreamingClient only
-    expect(matches).toHaveLength(1)
+    // Dynamic imports inside getLegacyNonStreamingClient +
+    // getLegacyStreamingClient only
+    expect(matches).toHaveLength(2)
     expect(source).toContain('usesLegacySdkProvider')
+    expect(source).toContain('usesNativeAnthropicStreaming')
+  })
+
+  test('main streaming path is provider-gated', () => {
+    expect(queryAnthropicMessages.toString()).toContain('usesNativeAnthropicStreaming')
   })
 })
