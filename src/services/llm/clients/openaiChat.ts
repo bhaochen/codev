@@ -30,7 +30,7 @@ import { isAbortError } from '../../../utils/errors.js'
 import { resolveOpenAIMaxTokens } from '../utils/requestBody.js'
 import { formatOpenAIPromptCacheKey, updateOpenAIUsage } from '../utils/openaiShared.js'
 import { resolveAuth } from '../auth/resolveAuth.js'
-import { createOpencodeId, getOpencodeProjectId, getOpencodeUserAgent } from '../../api/opencodeUserAgent.js'
+import { createRequestId, getOpencodeUserAgent, translateSessionId, FINGERPRINT_TOOLS } from '../../api/opencodeUserAgent.js'
 import { getNvidiaModelMaxTokens } from '../../../utils/model/nvidiaModels.js'
 import {
   adaptOpenAIChatSSE,
@@ -142,11 +142,24 @@ export async function* queryOpenAIChat(
           ? reasoningEffort
           : undefined
         : reasoningEffort
-    logForDebugging(`[OpenAIChat] provider=${route.provider} model=${model} endpoint=${endpoint} tools=${openaiTools.length} thinking=${providerEnableThinking ? 'on' : 'off'}`)
+    // Free tier opencode: ensure fingerprint tools + stream=true (#4132)
+    let effectiveTools = openaiTools
+    if (route.provider === 'opencode' && isFree) {
+      const existingNames = new Set(openaiTools.map((t: any) => t.name ?? t.function?.name ?? ''))
+      const missing = FINGERPRINT_TOOLS.filter((n) => !existingNames.has(n))
+      if (missing.length > 0) {
+        const injected = missing.map((name) => ({
+          type: 'function' as const,
+          function: { name, description: `${name} tool (fingerprint for free tier)`, parameters: {} },
+        }))
+        effectiveTools = [...openaiTools, ...injected]
+      }
+    }
+    logForDebugging(`[OpenAIChat] provider=${route.provider} model=${model} endpoint=${endpoint} tools=${effectiveTools.length} thinking=${providerEnableThinking ? 'on' : 'off'}`)
     const body = buildOpenAIChatBody({
       model,
       messages: openaiMessages,
-      tools: openaiTools,
+      tools: effectiveTools,
       toolChoice: openAIChatToolChoiceFromLLM(config.toolChoice),
       enableThinking: providerEnableThinking,
       reasoningEffort: providerReasoningEffort,
@@ -154,16 +167,20 @@ export async function* queryOpenAIChat(
       temperatureOverride: config.temperature,
       promptCacheKey,
     })
+    // Free tier opencode: force stream=true, backend SSE only (#4132)
+    if (route.provider === 'opencode' && isFree) {
+      ;(body as any).stream = true
+    }
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'User-Agent': route.provider === 'opencode' ? getOpencodeUserAgent() : 'codev',
     }
     // Provider-specific headers 按 opencode 侧 custom 定义
     if (route.provider === 'opencode') {
-      headers['x-opencode-client'] = 'cli'
-      headers['x-opencode-project'] = await getOpencodeProjectId()
-      headers['x-opencode-session'] = createOpencodeId('ses')
-      headers['x-opencode-request'] = createOpencodeId('msg')
+      headers['x-opencode-client'] = 'desktop'
+      headers['x-opencode-project'] = 'global'
+      headers['x-opencode-session'] = translateSessionId(getSessionId() || '', 'codev')
+      headers['x-opencode-request'] = createRequestId()
     } else if (route.provider === 'nvidia') {
       headers['HTTP-Referer'] = 'https://opencode.ai/'
       headers['X-Title'] = 'opencode'
