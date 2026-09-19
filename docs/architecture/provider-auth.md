@@ -307,9 +307,41 @@ function shouldUseDeepSeekReasoningCompat(baseUrl: string): boolean {
 - **免费模型健壮性** (`src/services/llm/clients/openaiChat.ts:101`): `model.includes('free'/'contributor')` 或 `getCachedOpencodeModels().isFree` 判定（请求体不裁剪，全量发送）；瞬态 `500` 自动 `fallback to big-pickle` 重试（`f141d7c`），确保 `hi` 在无 shim 下可用；`5f944f0` 已移除 `fetch-override fallback`，原生直连验证 ok
 - **优势**: 规避 `fetch-override` 的 `x-anthropic-billing-header` 版本漂移与 `effort/beta` 透传导致的 `500`，`muse-spark` 等非 Claude 模型可直接 `tool_choice:auto`
 
+#### Free Tier 验证与请求格式规范 (参考 [decolua/9router#4105](https://github.com/decolua/9router/pull/4105))
+
+OpenCode Console 对 `Authorization: Bearer public` 的请求实施严格的服务端校验，不合规的请求会返回 `403 FreeTierError: OpenCode's free tier can only be used from within OpenCode`。校验规则如下：
+
+| 校验项 | 规范 | 实现位置 |
+|--------|------|----------|
+| **User-Agent** | 必须为 `opencode/<version>`，版本 >= 1.17.0；裸 `opencode` 或第三方 UA（如 `codev`、`curl`）被拒 | `opencodeUserAgent.ts:buildUserAgent()` → `opencode/1.18.31` |
+| **x-opencode-session** | 必须匹配 `/^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/`（30 字符，`ses_` + 12 hex descending 时间戳 + 14 Base62） | `opencodeUserAgent.ts:createSessionId()` 使用 `~current`（descending）生成 |
+| **x-opencode-request** | 格式 `msg_` + 12 hex ascending + 14 Base62 | `opencodeUserAgent.ts:createRequestId()` |
+| **x-opencode-client** | 客户端标识；`desktop` 为官方默认 | `openaiChat.ts` → `'desktop'` |
+| **x-opencode-project** | 项目标识；匿名用户用 `'global'` | `openaiChat.ts` → `'global'` |
+| **stream** | 免费 tier 强制 `stream: true`，仅支持 SSE 响应 | `openaiChat.ts` → `body.stream = true` |
+| **fingerprint tools** | 请求必须包含 `bash`/`glob`/`grep`/`read` 工具声明 | `openaiChat.ts` → `FINGERPRINT_TOOLS` 注入 |
+
+**Session ID 生成算法**（对齐 [opencode/packages/schema/src/identifier.ts](https://github.com/anomalyco/opencode)）：
+
+```
+descending (ses_): current = BigInt(timestamp) * 0x1000n + BigInt(counter)
+                   value = ~current   // 位取反，时间越大 hex 越小
+                   timeHex = 6 bytes (12 hex chars) from value
+                   random = 14 chars from BASE62 charset
+                   result = "ses_" + timeHex + random  // 共 30 字符
+
+ascending  (msg_): 同上，但 value = current（不取反）
+```
+
+**Session 稳定性**：`translateSessionId(foreignId, clientTool)` 通过 SHA-256 确定性映射，将任意 foreign session identity（Claude UUID、codex ID 等）翻译为合法的 `ses_...` 格式，确保同一对话复用同一 session，保留上游多轮 prompt caching。
+
+**验证结果**（curl 测试 `opencode.ai/zen/v1`）：
+- `big-pickle`、`mimo-v2.5-free`、`ling-3.0-flash-fin-free` → **429**（格式正确，仅速率限制）
+- `nemotron-3-ultra-free` → 403（模型本身对匿名用户服务端禁用，与请求格式无关）
+
 **遗留兼容** (`src/services/api/opencodeClient.ts`):
 - 保留 `getCachedOpencodeModels()` / `getOpenCodeApiKey()` 等元数据查询供 `openaiChat.ts` 判定 `isFree`；`createOpenCodeFetchOverride()` 的 `fetch-override` 路径已删除
-- Model 发现仍从 `https://models.dev/api.json` + `https://api.github.com/repos/anomalyco/opencode/releases/latest` 动态拉取，缓存于 `cachedModels`
+- Model 发现仍从 `https://models.opencode.ai/api.json` + `https://models.dev/api.json` 动态拉取，缓存于 `cachedModels`
 
 ### 4.3 OpenAI / Codex Official
 
