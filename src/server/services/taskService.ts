@@ -9,11 +9,13 @@ import * as fs from 'fs/promises'
 import * as path from 'path'
 import * as os from 'os'
 
-export type TaskStatus = 'pending' | 'in_progress' | 'completed'
+export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'failed'
 
 export type TaskInfo = {
   id: string
   subject: string
+  name?: string
+  teamName?: string
   description: string
   activeForm?: string
   owner?: string
@@ -103,41 +105,79 @@ export class TaskService {
 
   /** 列出所有任务（跨所有 task list） */
   async listTasks(): Promise<TaskInfo[]> {
-    const taskLists = await this.listTaskLists()
+    const tasksDir = this.getTasksDir()
     const allTasks: TaskInfo[] = []
-    for (const list of taskLists) {
-      const tasks = await this.getTasksForList(list.id)
-      allTasks.push(...tasks)
+
+    const scan = async (directory: string, taskListId: string): Promise<void> => {
+      let entries
+      try {
+        entries = await fs.readdir(directory, { withFileTypes: true })
+      } catch (err: any) {
+        if (err.code === 'ENOENT') return
+        throw err
+      }
+
+      for (const entry of entries) {
+        const entryPath = path.join(directory, entry.name)
+        if (entry.isDirectory()) {
+          await scan(entryPath, taskListId || entry.name)
+          continue
+        }
+        if (!entry.isFile() || !entry.name.endsWith('.json')) continue
+        try {
+          const task = this.parseTaskFile(
+            JSON.parse(await fs.readFile(entryPath, 'utf-8')),
+            taskListId,
+          )
+          if (task) allTasks.push(task)
+        } catch {
+          // Skip malformed task files.
+        }
+      }
     }
-    return allTasks
+
+    await scan(tasksDir, '')
+    return allTasks.sort((a, b) => {
+      const createdA = Number(a.metadata?.createdAt ?? 0)
+      const createdB = Number(b.metadata?.createdAt ?? 0)
+      if (createdA !== createdB) return createdB - createdA
+      return a.id.localeCompare(b.id)
+    })
   }
 
   /** 获取单个任务详情 */
-  async getTask(taskListId: string, taskId: string): Promise<TaskInfo | null> {
-    const tasks = await this.getTasksForList(taskListId)
-    return tasks.find((t) => t.id === taskId) || null
+  async getTask(taskListId: string, taskId?: string): Promise<TaskInfo | null> {
+    const tasks = taskId === undefined
+      ? await this.listTasks()
+      : await this.getTasksForList(taskListId)
+    return tasks.find((t) => t.id === (taskId ?? taskListId)) || null
   }
 
   /** 解析单个任务文件 — 匹配 CLI V2 Task 格式 */
   private parseTaskFile(data: any, taskListId: string): TaskInfo | null {
     if (!data || typeof data !== 'object') return null
-    if (!data.id || !data.subject) return null
+    if (!data.id) return null
 
     // Skip internal tasks
     if (data.metadata?._internal) return null
 
     return {
       id: String(data.id),
-      subject: data.subject || '',
+      subject: data.subject || data.name || '',
+      name: data.name,
+      teamName: data.teamName,
       description: data.description || '',
       activeForm: data.activeForm,
       owner: data.owner,
-      status: (['pending', 'in_progress', 'completed'].includes(data.status)
+      status: (['pending', 'in_progress', 'completed', 'failed'].includes(data.status)
         ? data.status
         : 'pending') as TaskStatus,
       blocks: Array.isArray(data.blocks) ? data.blocks : [],
       blockedBy: Array.isArray(data.blockedBy) ? data.blockedBy : [],
-      metadata: data.metadata,
+      metadata: {
+        ...(data.metadata ?? {}),
+        ...(data.createdAt !== undefined ? { createdAt: data.createdAt } : {}),
+      },
       taskListId,
     }
   }

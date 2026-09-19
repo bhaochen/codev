@@ -16,11 +16,13 @@
  */
 
 import * as path from 'node:path'
+import * as fs from 'node:fs/promises'
 import { sessionService } from '../services/sessionService.js'
 import { conversationService } from '../services/conversationService.js'
 import { ApiError, errorResponse } from '../middleware/errorHandler.js'
 import { closeSessionConnection, getSlashCommands } from '../ws/handler.js'
 import { listSkillSlashCommands, type SkillSlashCommand } from './skills.js'
+import { parseFrontmatter } from '../../utils/frontmatterParser.js'
 import { WorkspaceService } from '../services/workspaceService.js'
 import {
   getRepositoryContext,
@@ -480,11 +482,54 @@ async function getSessionSlashCommands(sessionId: string): Promise<Response> {
   }
 
   const skillCommands = await listSkillSlashCommands(workDir)
+  const legacyCommands = await loadSessionLegacyCommands(
+    await sessionService.getSessionConfigDir(sessionId),
+    workDir,
+  )
   const slashCommands = cachedCommands.length > 0
-    ? mergeSessionSlashCommands(cachedCommands, skillCommands)
-    : skillCommands
+    ? mergeSessionSlashCommands(cachedCommands, [...skillCommands, ...legacyCommands])
+    : mergeSessionSlashCommands([], [...skillCommands, ...legacyCommands])
 
   return Response.json({ commands: slashCommands })
+}
+
+async function loadSessionLegacyCommands(
+  configDir: string | null,
+  workDir: string,
+): Promise<SkillSlashCommand[]> {
+  const roots = [
+    configDir ? path.join(configDir, 'commands') : null,
+    path.join(workDir, '.claude', 'commands'),
+  ].filter((root): root is string => root !== null)
+  const commands: SkillSlashCommand[] = []
+
+  for (const root of roots) {
+    let entries
+    try {
+      entries = await fs.readdir(root, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.md')) continue
+      const filePath = path.join(root, entry.name)
+      try {
+        const parsed = parseFrontmatter(await fs.readFile(filePath, 'utf8'), filePath)
+        commands.push({
+          name: entry.name.slice(0, -3),
+          description: typeof parsed.frontmatter.description === 'string'
+            ? parsed.frontmatter.description
+            : '',
+          ...(typeof parsed.frontmatter['argument-hint'] === 'string'
+            ? { argumentHint: parsed.frontmatter['argument-hint'] }
+            : {}),
+        })
+      } catch {
+        // Ignore malformed custom command files.
+      }
+    }
+  }
+  return commands
 }
 
 async function getSessionInspection(sessionId: string, url: URL): Promise<Response> {

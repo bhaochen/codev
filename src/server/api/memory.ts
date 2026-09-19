@@ -8,6 +8,7 @@
  */
 
 import * as fs from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import * as path from 'node:path'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
@@ -369,11 +370,11 @@ function getProjectsDir(): string {
 }
 
 function getProjectIdForCwd(cwd: string): string {
-  return sanitizePath(findCanonicalGitRoot(cwd) ?? cwd)
+  return sanitizePath(getUsableGitRoot(cwd) ?? cwd)
 }
 
 async function resolveProjectLabel(projectId: string, currentCwd: string): Promise<string> {
-  const currentRoot = findCanonicalGitRoot(currentCwd) ?? currentCwd
+  const currentRoot = getUsableGitRoot(currentCwd) ?? currentCwd
   if (sanitizePath(currentRoot) === projectId) return currentRoot
 
   const sessionPath = await inferProjectPathFromSessionFiles(projectId)
@@ -381,6 +382,12 @@ async function resolveProjectLabel(projectId: string, currentCwd: string): Promi
 
   const filesystemPath = await inferProjectPathFromExistingDirectory(projectId)
   return filesystemPath ?? unsanitizeProjectLabel(projectId)
+}
+
+function getUsableGitRoot(cwd: string): string | null {
+  const root = findCanonicalGitRoot(cwd)
+  if (!root) return null
+  return existsSync(path.join(root, '.git', 'HEAD')) ? root : null
 }
 
 async function inferProjectPathFromSessionFiles(projectId: string): Promise<string | undefined> {

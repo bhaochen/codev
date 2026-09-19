@@ -350,7 +350,18 @@ export class SessionService {
     if (!candidate) return null
 
     const canonicalCandidate = await this.canonicalizeProjectPath(candidate)
-    const gitRoot = findCanonicalGitRoot(canonicalCandidate)
+    if (workDir) {
+      const marker = `${path.sep}.claude${path.sep}worktrees${path.sep}`
+      const markerIndex = workDir.indexOf(marker)
+      if (markerIndex > 0) {
+        const sourceRoot = workDir.slice(0, markerIndex)
+        if (await this.pathExists(sourceRoot)) {
+          return await this.canonicalizeProjectPath(sourceRoot)
+        }
+      }
+    }
+    const candidateExists = await this.pathExists(canonicalCandidate)
+    const gitRoot = candidateExists ? findCanonicalGitRoot(canonicalCandidate) : null
     if (gitRoot) return gitRoot
 
     if (workDir) {
@@ -1569,6 +1580,12 @@ export class SessionService {
 
     const entries = await this.readJsonlFile(found.filePath)
     return this.resolveWorkDirFromEntries(entries, found.projectDir)
+  }
+
+  async getSessionConfigDir(sessionId: string): Promise<string | null> {
+    const found = await this.findSessionFile(sessionId)
+    if (!found) return null
+    return path.dirname(path.dirname(path.dirname(found.filePath)))
   }
 
   async getSessionMessageCwd(

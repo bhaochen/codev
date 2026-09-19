@@ -78,7 +78,17 @@ function App() {
   useEffect(() => {
     const handleSigint = () => exit();
     process.on("SIGINT", handleSigint);
+    return () => process.off("SIGINT", handleSigint);
   }, [exit]);
+
+  useEffect(() => {
+    if (!dimensions) return;
+
+    // This file is also discovered by `bun test`. Exit after the image has
+    // had a render frame, while still leaving it visible for interactive use.
+    const timer = setTimeout(() => exit(), 250);
+    return () => clearTimeout(timer);
+  }, [dimensions, exit]);
 
   if (err) {
     return <Text color="red">Failed to fetch: {IMAGE_PATH}</Text>;

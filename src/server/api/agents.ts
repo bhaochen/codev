@@ -176,6 +176,12 @@ async function handleTasksApi(
     )
   }
 
+  if (segments[2]) {
+    const task = await taskService.getTask(segments[2])
+    if (!task) throw ApiError.notFound(`Task not found: ${segments[2]}`)
+    return Response.json({ task })
+  }
+
   // GET /api/tasks — list all tasks
   const tasks = await taskService.listTasks()
   return Response.json({ tasks })

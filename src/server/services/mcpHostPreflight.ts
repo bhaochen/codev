@@ -153,9 +153,25 @@ export async function inspectMcpHostCommand(
     ? await resolveCommandFromPath(trimmedCommand, env?.PATH)
     : await resolveCommandFromPath(trimmedCommand, process.env.PATH)
   if (resolvedCommand) {
+    if (!hasExplicitPath && isMinimalSystemPath(process.env.PATH)) {
+      const shellResolvedCommand = await resolveCommandFromPath(
+        trimmedCommand,
+        (await getMcpStdioEnvironment(env)).PATH,
+      )
+      if (shellResolvedCommand && shellResolvedCommand !== resolvedCommand) {
+        return { ok: true, resolvedCommand: shellResolvedCommand }
+      }
+    }
     return {
       ok: true,
       resolvedCommand,
+    }
+
+    function isMinimalSystemPath(envPath: string | undefined): boolean {
+      const entries = getPathSearchList(envPath)
+      return entries.length > 0 && entries.every((entry) =>
+        ['/bin', '/usr/bin', '/usr/local/bin'].includes(path.resolve(entry)),
+      )
     }
   }
 

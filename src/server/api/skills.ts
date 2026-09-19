@@ -13,7 +13,7 @@ import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 import { getProjectDirsUpToHome } from '../../utils/markdownConfigLoader.js'
 import { getCwd } from '../../utils/cwd.js'
 import { loadAllPlugins, loadAllPluginsCacheOnly } from '../../utils/plugins/pluginLoader.js'
-import { getSkillDirCommands } from '../../skills/loadSkillsDir.js'
+import { clearSkillCaches, getSkillDirCommands } from '../../skills/loadSkillsDir.js'
 import type { LoadedPlugin } from '../../types/plugin.js'
 import { ApiError, errorResponse } from '../middleware/errorHandler.js'
 
@@ -283,6 +283,7 @@ export type SkillSlashCommand = {
 }
 
 async function collectLegacySlashCommands(cwd: string): Promise<SkillSlashCommand[]> {
+  clearSkillCaches()
   const commands = await getSkillDirCommands(cwd)
   return commands
     .filter((command) =>

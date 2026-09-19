@@ -360,6 +360,20 @@ export async function getRepositoryContext(workDir: string): Promise<RepositoryC
   }
 
   try {
+    const repositoryCheck = await runGit(gitRoot, ['rev-parse', '--is-inside-work-tree'])
+    if (repositoryCheck.code !== 0 || repositoryCheck.stdout.trim() !== 'true') {
+      return {
+        state: 'not_git_repo',
+        workDir: absWorkDir,
+        repoRoot: null,
+        repoName: null,
+        currentBranch: null,
+        defaultBranch: null,
+        dirty: false,
+        branches: [],
+        worktrees: [],
+      }
+    }
     const repoRoot = findCanonicalGitRoot(gitRoot) ?? gitRoot
     registerFilesystemAccessRoot(repoRoot)
     const [branchResult, defaultBranch, statusResult, worktreeResult] = await Promise.all([

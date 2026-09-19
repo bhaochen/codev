@@ -82,11 +82,16 @@ function DetectionApp() {
   const [probeResult, setProbeResult] = useState<string>('probing...')
 
   useEffect(() => {
+    let exitTimer: ReturnType<typeof setTimeout> | undefined
     probeKittyDirect().then(r => {
       setProbeResult(JSON.stringify(r))
+      exitTimer = setTimeout(() => exit(), 250)
     })
-    const timer = setTimeout(() => exit(), 5000)
-    return () => clearTimeout(timer)
+    const fallbackTimer = setTimeout(() => exit(), 5000)
+    return () => {
+      clearTimeout(fallbackTimer)
+      if (exitTimer) clearTimeout(exitTimer)
+    }
   }, [exit])
 
   const env: Record<string, string | undefined> = {
