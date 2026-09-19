@@ -66,7 +66,15 @@ import {
   splitSysPromptPrefix,
   toolToAPISchema,
 } from '../../../utils/api.js'
-import { getOauthAccountInfo } from '../../../utils/auth.js'
+import {
+  checkAndRefreshOAuthTokenIfNeeded,
+  getAnthropicApiKey,
+  getApiKeyFromApiKeyHelper,
+  getClaudeAIOAuthTokens,
+  getOauthAccountInfo,
+} from '../../../utils/auth.js'
+import { getUserAgent } from '../../../utils/http.js'
+import { getOauthConfig } from '../../../constants/oauth.js'
 import {
   getBedrockExtraBodyParamsBetas,
   getMergedBetas,
@@ -80,7 +88,7 @@ import {
 } from '../../../utils/context.js'
 import { resolveAppliedEffort } from '../../../utils/effort.js'
 import { isEnvTruthy } from '../../../utils/envUtils.js'
-import { errorMessage } from '../../../utils/errors.js'
+import { errorMessage, isAbortError } from '../../../utils/errors.js'
 import { computeFingerprintFromMessages } from '../../../utils/fingerprint.js'
 import { captureAPIRequest, logError } from '../../../utils/log.js'
 import {
@@ -118,6 +126,7 @@ const autoModeStateModule = feature('TRANSCRIPT_CLASSIFIER')
   : null
 
 import { feature } from 'bun:bundle'
+import type Anthropic from '@anthropic-ai/sdk'
 import type { ClientOptions } from '@anthropic-ai/sdk'
 import {
   APIConnectionTimeoutError,
@@ -128,6 +137,7 @@ import {
   getAfkModeHeaderLatched,
   getCacheEditingHeaderLatched,
   getFastModeHeaderLatched,
+  getIsNonInteractiveSession,
   getLastApiCompletionTimestamp,
   getPromptCache1hAllowlist,
   getPromptCache1hEligible,
@@ -240,8 +250,6 @@ import { getInitializationStatus } from '../../lsp/manager.js'
 import { isToolFromMcpServer } from '../../mcp/utils.js'
 import { withStreamingVCR, withVCR } from '../../vcr.js'
 
-import { httpRequest } from '../transport/http.js'
-
 import {
   API_ERROR_MESSAGE_PREFIX,
   CUSTOM_OFF_SWITCH_MESSAGE,
@@ -299,10 +307,10 @@ function normalizeAnthropicUsage(usage: {
 function buildAnthropicRequestBody(params: {
   model: string
   messages: any[]
-  system?: string | Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }>
-  tools?: any[]
-  toolChoice?: any
-  thinking?: { type: 'enabled'; budget_tokens: number } | { type: 'disabled' }
+  system?: unknown
+  tools?: any
+  toolChoice?: unknown
+  thinking?: unknown
   maxTokens: number
   temperatureOverride?: number
   stream?: boolean
@@ -310,11 +318,15 @@ function buildAnthropicRequestBody(params: {
   metadata?: Record<string, unknown>
 }): any {
   const { model, messages, system, tools, toolChoice, thinking, maxTokens, temperatureOverride, stream = true, streamOptions = { include_usage: true }, metadata } = params
+  // messages arrive in Agent semantic form; convert to Anthropic wire blocks.
+  // system/tools/tool_choice/thinking are already Anthropic-shaped (built by
+  // paramsFromContext) and pass through untouched.
   const anthropicMessages = messages.map((msg: any) => {
-    const inner = msg.message
+    const inner = msg.message ?? msg
     const role = inner.role === 'assistant' ? 'assistant' : 'user'
     const content = inner.content
     if (typeof content === 'string') return { role, content }
+    if (!Array.isArray(content)) return { role, content: '' }
     const blocks = content.map((block: any) => {
       if (block.type === 'text') return { type: 'text', text: block.text }
       if (block.type === 'image') return { type: 'image', source: block.source.type === 'base64' ? { type: 'base64', media_type: block.source.media_type, data: block.source.data } : { type: 'url', url: block.source.url } }
@@ -329,37 +341,195 @@ function buildAnthropicRequestBody(params: {
     model,
     max_tokens: maxTokens,
     messages: anthropicMessages,
-    ...(system && { system: Array.isArray(system) ? system.map((s: any) => ({ type: 'text', text: s.text || s })) : system }),
-    ...(tools && tools.length > 0 && { tools: tools.map(t => ({ type: 'function', function: { name: t.name, description: t.description ?? '', parameters: t.input_schema } })) }),
-    ...(toolChoice && { tool_choice: toolChoice }),
+    ...(system !== undefined && { system }),
+    ...(tools && (tools as any[]).length > 0 && { tools }),
+    ...(toolChoice !== undefined && { tool_choice: toolChoice }),
     ...(stream && { stream, stream_options: streamOptions }),
-    ...(thinking && { thinking: thinking.type === 'enabled' ? { type: 'enabled', budget_tokens: thinking.budgetTokens } : { type: 'disabled' } }),
+    ...(thinking !== undefined && { thinking }),
     ...(temperatureOverride !== undefined && { temperature: temperatureOverride }),
-    metadata,
+    ...(metadata !== undefined && { metadata }),
   }
+}
+
+/**
+ * Native first-party header/auth preparation — replicates the first-party
+ * branch of the legacy api/client.ts client factory without the SDK:
+ * OAuth refresh, default headers (x-app, User-Agent, session, custom,
+ * container/remote/client-app, additional protection), API-key-helper
+ * Authorization, staging base URL.
+ */
+function getNativeCustomHeaders(): Record<string, string> {
+  const customHeaders: Record<string, string> = {}
+  const customHeadersEnv = process.env.ANTHROPIC_CUSTOM_HEADERS
+  if (!customHeadersEnv) return customHeaders
+  for (const headerString of customHeadersEnv.split(/\n|\r\n/)) {
+    if (!headerString.trim()) continue
+    const colonIdx = headerString.indexOf(':')
+    if (colonIdx === -1) continue
+    const name = headerString.slice(0, colonIdx).trim()
+    const value = headerString.slice(colonIdx + 1).trim()
+    if (name) customHeaders[name] = value
+  }
+  return customHeaders
+}
+
+async function configureNativeApiKeyHeaders(
+  headers: Record<string, string>,
+  isNonInteractiveSession: boolean,
+): Promise<void> {
+  const token =
+    process.env.ANTHROPIC_AUTH_TOKEN ||
+    (await getApiKeyFromApiKeyHelper(isNonInteractiveSession))
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+}
+
+function resolveNativeAnthropicBaseUrl(): string {
+  if (process.env.USER_TYPE === 'ant' && isEnvTruthy(process.env.USE_STAGING_OAUTH)) {
+    return getOauthConfig().BASE_API_URL
+  }
+  return process.env.ANTHROPIC_BASE_URL?.replace(/\/$/, '') || 'https://api.anthropic.com'
+}
+
+async function buildNativeFirstPartyHeaders(): Promise<{ headers: Record<string, string>; baseUrl: string }> {
+  const containerId = process.env.CLAUDE_CODE_CONTAINER_ID
+  const remoteSessionId = process.env.CLAUDE_CODE_REMOTE_SESSION_ID
+  const clientApp = process.env.CLAUDE_AGENT_SDK_CLIENT_APP
+  const customHeaders = getNativeCustomHeaders()
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'x-app': 'cli',
+    'User-Agent': getUserAgent(),
+    'X-Claude-Code-Session-Id': getSessionId(),
+    ...customHeaders,
+    ...(containerId ? { 'x-claude-remote-container-id': containerId } : {}),
+    ...(remoteSessionId ? { 'x-claude-remote-session-id': remoteSessionId } : {}),
+    ...(clientApp ? { 'x-client-app': clientApp } : {}),
+  }
+  if (isEnvTruthy(process.env.CLAUDE_CODE_ADDITIONAL_PROTECTION)) {
+    headers['x-anthropic-additional-protection'] = 'true'
+  }
+  await checkAndRefreshOAuthTokenIfNeeded()
+  if (!isClaudeAISubscriber()) {
+    await configureNativeApiKeyHeaders(headers, getIsNonInteractiveSession())
+  }
+  return { headers, baseUrl: resolveNativeAnthropicBaseUrl() }
+}
+
+async function resolveNativeFirstPartyAuth(): Promise<Record<string, string>> {
+  if (isClaudeAISubscriber()) {
+    const token = getClaudeAIOAuthTokens()?.accessToken
+    return token ? { Authorization: `Bearer ${token}` } : {}
+  }
+  const apiKey = getAnthropicApiKey()
+  return apiKey ? { 'x-api-key': apiKey } : {}
 }
 
 // ============================================================================
 
 /**
- * Normalize Anthropic usage to runtime contract (four fields).
+ * Convert one Anthropic SSE chunk into runtime stream events.
+ * Plain function (no yield) returning an event list; the generator below
+ * yields them. Keeps block open/close tracking in the passed state.
  */
-function normalizeAnthropicUsage(usage: {
-  input_tokens?: number
-  output_tokens?: number
-  cache_creation_input_tokens?: number
-  cache_read_input_tokens?: number
-}): { input_tokens: number; output_tokens: number; cache_creation_input_tokens: number; cache_read_input_tokens: number } {
-  const totalInput = Math.max(0, usage.input_tokens ?? 0)
-  const cacheRead = Math.min(Math.max(0, usage.cache_read_input_tokens ?? 0), totalInput)
-  const remainingAfterRead = Math.max(0, totalInput - cacheRead)
-  const cacheCreation = Math.min(Math.max(0, usage.cache_creation_input_tokens ?? 0), remainingAfterRead)
-  return {
-    input_tokens: Math.max(0, remainingAfterRead - cacheCreation),
-    output_tokens: Math.max(0, usage.output_tokens ?? 0),
-    cache_creation_input_tokens: cacheCreation,
-    cache_read_input_tokens: cacheRead,
+function anthropicChunkToEvents(
+  chunk: any,
+  model: string,
+  state: {
+    started: boolean
+    thinkingBlockOpen: boolean
+    textBlockOpen: boolean
+  },
+): any[] {
+  if (!chunk || typeof chunk.type !== 'string') return []
+  const t: string = chunk.type
+
+  if (t === 'message_start') {
+    state.started = true
+    return [{
+      type: 'message_start',
+      message: {
+        id: `msg_${crypto.getRandomValues(new Uint8Array(12)).reduce((h, b) => h + b.toString(16).padStart(2, '0'), '')}`,
+        type: 'message',
+        role: 'assistant',
+        content: [],
+        model,
+        stop_reason: null,
+        stop_sequence: null,
+        usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      },
+    }]
   }
+  if (t === 'content_block_start') {
+    const cb = chunk.content_block ?? {}
+    if (cb.type === 'thinking') {
+      state.thinkingBlockOpen = true
+      return [{ type: 'content_block_start', index: chunk.index, content_block: { type: 'thinking', thinking: '' } }]
+    }
+    if (cb.type === 'text') {
+      state.textBlockOpen = true
+      return [{ type: 'content_block_start', index: chunk.index, content_block: { type: 'text', text: '' } }]
+    }
+    if (cb.type === 'tool_use') {
+      return [{ type: 'content_block_start', index: chunk.index, content_block: { type: 'tool_use', id: cb.id, name: cb.name, input: {} } }]
+    }
+    return []
+  }
+  if (t === 'content_block_delta') {
+    const delta = chunk.delta ?? {}
+    if (delta.type === 'thinking_delta' && delta.thinking) {
+      if (!state.thinkingBlockOpen) {
+        state.thinkingBlockOpen = true
+        return [
+          { type: 'content_block_start', index: chunk.index, content_block: { type: 'thinking', thinking: '' } },
+          { type: 'content_block_delta', index: chunk.index, delta: { type: 'thinking_delta', thinking: delta.thinking } },
+        ]
+      }
+      return [{ type: 'content_block_delta', index: chunk.index, delta: { type: 'thinking_delta', thinking: delta.thinking } }]
+    }
+    if (delta.type === 'text_delta' && delta.text) {
+      if (!state.textBlockOpen) {
+        const events: any[] = []
+        if (state.thinkingBlockOpen) {
+          events.push({ type: 'content_block_stop', index: chunk.index })
+          state.thinkingBlockOpen = false
+        }
+        state.textBlockOpen = true
+        events.push({ type: 'content_block_start', index: chunk.index, content_block: { type: 'text', text: '' } })
+        events.push({ type: 'content_block_delta', index: chunk.index, delta: { type: 'text_delta', text: delta.text } })
+        return events
+      }
+      return [{ type: 'content_block_delta', index: chunk.index, delta: { type: 'text_delta', text: delta.text } }]
+    }
+    if (delta.type === 'input_json_delta' && delta.partial_json) {
+      return [{ type: 'content_block_delta', index: chunk.index, delta: { type: 'input_json_delta', partial_json: delta.partial_json } }]
+    }
+    if (delta.type === 'signature_delta' && delta.signature) {
+      return [{ type: 'content_block_delta', index: chunk.index, delta: { type: 'thinking_delta', thinking: delta.signature } }]
+    }
+    return []
+  }
+  if (t === 'content_block_stop') {
+    state.thinkingBlockOpen = false
+    state.textBlockOpen = false
+    return [{ type: 'content_block_stop', index: chunk.index }]
+  }
+  if (t === 'message_delta') {
+    if (chunk.delta?.stop_reason) {
+      return [
+        {
+          type: 'message_delta',
+          delta: { stop_reason: chunk.delta.stop_reason, stop_sequence: null },
+          usage: normalizeAnthropicUsage(chunk.usage || {}),
+        },
+        { type: 'message_stop' },
+      ]
+    }
+    return []
+  }
+  if (t === 'message_stop') return []
+  return []
 }
 
 /**
@@ -369,205 +539,45 @@ function normalizeAnthropicUsage(usage: {
 async function* adaptAnthropicStreamSSE(
   stream: ReadableStream<Uint8Array>,
   model: string,
-  options?: { includeCacheWriteTokens?: boolean }
-): AsyncGenerator<
-  import('../../../types/message.js').StreamEvent | import('../../../types/message.js').AssistantMessage | import('../../../types/message.js').SystemAPIErrorMessage,
-  void
-> {
-  // State for processing chunks
-  const state = {
-    started: false,
-    currentContentIndex: -1,
-    thinkingBlockOpen: false,
-    textBlockOpen: false,
-    rawInputTokens: 0,
-    outputTokens: 0,
-    rawCacheReadTokens: 0,
-    rawCacheWriteTokens: 0,
-    usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
-  }
-
+  options?: { includeCacheWriteTokens?: boolean },
+): AsyncGenerator<any, void> {
+  void options
   const { parseSSERaw } = await import('../transport/sse.js')
-
-  // Helper function to process a chunk and return events
-  function processChunk(chunk: any): Array<
-    import('../../../types/message.js').StreamEvent |
-    import('../../../types/message.js').AssistantMessage |
-    import('../../../types/message.js').SystemAPIErrorMessage
-  > {
-    if (!chunk.type) return []
-
-    const events: any[] = []
-
-    // Accumulate usage from any chunk
-    if (chunk.type === 'message_start' && chunk.message?.usage) {
-      // Note: usage will be handled in main loop
-    }
-    if (chunk.usage) {
-      // handled in main loop
-    }
-
-    if (!chunk.type) return []
-
-    // Use if-else chains instead of switch to avoid TypeScript parsing issues
-    if (chunk.type === 'message_start') {
-      if (chunk.message?.usage) {
-        // usage will be handled in main loop
-      }
-      return [{
-        type: 'message_start',
-        message: {
-          id: `msg_${crypto.getRandomValues(new Uint8Array(12)).reduce((h, b) => h + b.toString(16).padStart(2, '0'), '')}`,
-          type: 'message',
-          role: 'assistant',
-          content: [],
-          model: 'default',
-          stop_reason: null,
-          stop_sequence: null,
-          usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
-        },
-      }]
-    } else if (chunk.type === 'content_block_start') {
-      const cb = chunk.content_block
-      const currentContentIndex = chunk.index
-
-      if (cb.type === 'thinking') {
-        return [{
-          type: 'content_block_start',
-          index: chunk.index,
-          content_block: { type: 'thinking', thinking: '' },
-        }]
-      } else if (cb.type === 'text') {
-        return [{
-          type: 'content_block_start',
-          index: chunk.index,
-          content_block: { type: 'text', text: '' },
-        }]
-      } else if (cb.type === 'tool_use') {
-        return [{
-          type: 'content_block_start',
-          index: chunk.index,
-          content_block: {
-            type: 'tool_use',
-            id: cb.id,
-            name: cb.name,
-            input: {},
-          },
-        }]
-      } else if (chunk.type === 'content_block_delta') {
-        const delta = chunk.delta
-
-        if (delta.type === 'thinking_delta' && delta.thinking) {
-          return [{
-            type: 'content_block_delta',
-            index: chunk.index,
-            delta: { type: 'thinking_delta', thinking: delta.thinking },
-          }]
-        }
-        if (delta.type === 'text_delta' && delta.text) {
-          return [{
-            type: 'content_block_delta',
-            index: chunk.index,
-            delta: { type: 'text_delta', text: delta.text },
-          }]
-        }
-        if (delta.type === 'input_json_delta' && delta.partial_json) {
-          return [{
-            type: 'content_block_delta',
-            index: chunk.index,
-            delta: { type: 'input_json_delta', partial_json: delta.partial_json },
-          }]
-        }
-        if (delta.type === 'signature_delta' && delta.signature) {
-          return [{
-            type: 'content_block_delta',
-            index: chunk.index,
-            delta: { type: 'thinking_delta', thinking: delta.signature },
-          }]
-        }
-        return []
-      } else if (chunk.type === 'content_block_stop') {
-        return [{
-          type: 'content_block_stop',
-          index: chunk.index,
-        }]
-      } else if (chunk.type === 'message_delta') {
-        if (chunk.delta?.stop_reason) {
-          const stopReason = chunk.delta.stop_reason === 'max_tokens' ? 'max_tokens' :
-            chunk.delta.stop_reason === 'tool_use' ? 'tool_use' :
-            chunk.delta.stop_reason === 'stop_sequence' ? 'stop_sequence' : 'end_turn'
-
-          return [
-            {
-              type: 'message_delta',
-              delta: { stop_reason: chunk.delta.stop_reason, stop_sequence: null },
-              usage: normalizeAnthropicUsage(chunk.usage || {}),
-            },
-            { type: 'message_stop' },
-          ]
-        }
-        return []
-      } else if (chunk.type === 'message_stop') {
-        // Final stop - will be handled after loop
-        return []
-      }
-
-      return []
-    }
-  }
+  const state = { started: false, thinkingBlockOpen: false, textBlockOpen: false }
+  let usage = { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
 
   for await (const rawEvent of parseSSERaw(stream)) {
     const data = rawEvent.data.trim()
     if (data === '' || data === '[DONE]') continue
-
     let chunk: any
     try {
       chunk = JSON.parse(data)
     } catch {
       continue
     }
-
-    // Accumulate usage from any chunk
     if (chunk.type === 'message_start' && chunk.message?.usage) {
-      const usageData = chunk.message.usage
-      const rawInputTokens = usageData.input_tokens ?? 0
-      const outputTokens = usageData.output_tokens ?? 0
-      const rawCacheReadTokens = usageData.cache_read_input_tokens ?? 0
-      const rawCacheWriteTokens = usageData.cache_creation_input_tokens ?? 0
-      const usage = normalizeAnthropicUsage(usageData)
-
-      // We'll handle this in the main loop
+      usage = normalizeAnthropicUsage(chunk.message.usage)
     }
     if (chunk.usage) {
-      // handled in main loop
+      usage = normalizeAnthropicUsage(chunk.usage)
     }
-
-    if (!started) {
-      yield [{
-        type: 'message_start',
-        message: {
-          id: `msg_${crypto.getRandomValues(new Uint8Array(12)).reduce((h, b) => h + b.toString(16).padStart(2, '0'), '')}`,
-          type: 'message',
-          role: 'assistant',
-          content: [],
-          model: 'default',
-          stop_reason: null,
-          stop_sequence: null,
-          usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
-        },
-      }]
-      continue
+    const events = anthropicChunkToEvents(chunk, model, state)
+    if (chunk.type === 'message_start' && events.length > 0) {
+      ;(events[0] as any).message.usage = { ...usage, output_tokens: 0 }
     }
-
-    if (!chunk.type) continue
-
-    const events = processChunk(chunk)
+    if (chunk.type === 'message_delta') {
+      for (const e of events) {
+        if ((e as any).type === 'message_delta') (e as any).usage = usage
+      }
+    }
     for (const event of events) {
       yield event
     }
   }
 
-  // Final message_stop
+  if (state.thinkingBlockOpen || state.textBlockOpen) {
+    yield { type: 'content_block_stop', index: 0 }
+  }
   yield { type: 'message_stop' }
 }
 type JsonValue = string | number | boolean | null | JsonObject | JsonArray
@@ -1068,6 +1078,132 @@ function getNonstreamingFallbackTimeoutMs(): number {
   return isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) ? 120_000 : 300_000
 }
 
+function usesLegacySdkProvider(): boolean {
+  return (
+    isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK) ||
+    isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY) ||
+    isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX)
+  )
+}
+
+/**
+ * Legacy SDK client for Bedrock / Foundry / Vertex non-streaming fallback.
+ * These providers are out of scope for the native migration; they keep the
+ * previous legacy-client behavior unchanged.
+ */
+async function getLegacyNonStreamingClient(clientOptions: {
+  model: string
+  fetchOverride?: Options['fetchOverride']
+  source: string
+}): Promise<Anthropic> {
+  const { getAnthropicClient } = await import('../../api/client.js')
+  return getAnthropicClient({
+    maxRetries: 0,
+    model: clientOptions.model,
+    fetchOverride: clientOptions.fetchOverride,
+    source: clientOptions.source,
+  })
+}
+
+/**
+ * Native non-streaming create() for first-party Anthropic: same wire shape
+ * the SDK would send (betas as header, JSON body), same timeout/abort/error
+ * semantics, parsed BetaMessage on success.
+ */
+async function nativeNonStreamingCreate(
+  params: Record<string, any>,
+  opts: {
+    signal?: AbortSignal
+    timeoutMs: number
+    fetchOverride?: Options['fetchOverride']
+    source: string
+  },
+): Promise<BetaMessage> {
+  const { betas, ...body } = params
+  const { headers: nativeHeaders, baseUrl } = await buildNativeFirstPartyHeaders()
+  const authHeaders = await resolveNativeFirstPartyAuth()
+  const headers: Record<string, string> = {
+    ...nativeHeaders,
+    ...authHeaders,
+    'anthropic-version': '2023-06-01',
+    ...(Array.isArray(betas) && betas.length > 0 && {
+      'anthropic-beta': betas.join(','),
+    }),
+  }
+  const timeoutSignal =
+    typeof AbortSignal.timeout === 'function'
+      ? AbortSignal.timeout(opts.timeoutMs)
+      : AbortSignal.abort()
+  const signal =
+    opts.signal && typeof AbortSignal.any === 'function'
+      ? AbortSignal.any([opts.signal, timeoutSignal])
+      : (opts.signal ?? timeoutSignal)
+  let response: Response
+  try {
+    response = await httpRequest(
+      {
+        url: `${baseUrl}/v1/messages`,
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal,
+      },
+      opts.fetchOverride as typeof fetch | undefined,
+    )
+  } catch (err) {
+    if (opts.signal?.aborted) throw new APIUserAbortError()
+    throw new APIConnectionTimeoutError({
+      message: err instanceof Error ? err.message : String(err),
+    })
+  }
+  if (!response.ok) {
+    const text = await response.text().catch(() => '')
+    let errorBody: any = { type: 'error', error: { type: 'api_error', message: text } }
+    try {
+      errorBody = JSON.parse(text)
+    } catch {
+      // keep synthesized body
+    }
+    const message =
+      (errorBody?.error as any)?.message ??
+      (typeof errorBody?.error === 'string' ? errorBody.error : text) ??
+      `Request failed with status ${response.status}`
+    throw new APIError(response.status, errorBody, message, response.headers)
+  }
+  return (await response.json()) as BetaMessage
+}
+
+/**
+ * Client factory for executeNonStreamingRequest: native transport for
+ * first-party, legacy SDK client for Bedrock / Foundry / Vertex.
+ */
+async function getNonStreamingClient(clientOptions: {
+  model: string
+  fetchOverride?: Options['fetchOverride']
+  source: string
+}): Promise<Anthropic> {
+  if (usesLegacySdkProvider()) {
+    return getLegacyNonStreamingClient(clientOptions)
+  }
+  const timeoutMs = getNonstreamingFallbackTimeoutMs()
+  return {
+    beta: {
+      messages: {
+        create: (
+          params: Record<string, any>,
+          opts?: { signal?: AbortSignal; timeout?: number },
+        ) =>
+          nativeNonStreamingCreate(params, {
+            signal: opts?.signal,
+            timeoutMs: opts?.timeout ?? timeoutMs,
+            fetchOverride: clientOptions.fetchOverride,
+            source: clientOptions.source,
+          }),
+      },
+    },
+  } as unknown as Anthropic
+}
+
 /**
  * Helper generator for non-streaming API requests.
  * Encapsulates the common pattern of creating a withRetry generator,
@@ -1099,13 +1235,7 @@ export async function* executeNonStreamingRequest(
 ): AsyncGenerator<SystemAPIErrorMessage, BetaMessage> {
   const fallbackTimeoutMs = getNonstreamingFallbackTimeoutMs()
   const generator = withRetry(
-    () =>
-      getAnthropicClient({
-        maxRetries: 0,
-        model: clientOptions.model,
-        fetchOverride: clientOptions.fetchOverride,
-        source: clientOptions.source,
-      }),
+    () => getNonStreamingClient(clientOptions),
     async (anthropic, attempt, context) => {
       const start = Date.now()
       const retryParams = paramsFromContext(context)
@@ -2101,14 +2231,15 @@ export async function* queryAnthropicMessages(
         ? randomUUID()
         : undefined
 
-    // Build the Anthropic wire-format request body
+    // Build the Anthropic wire-format request body. baseParams fields are
+    // already Anthropic-shaped (built by paramsFromContext) and pass through.
     const requestBody = buildAnthropicRequestBody({
       model: route.model,
       messages: baseParams.messages,
       system: baseParams.system,
       tools: baseParams.tools,
       toolChoice: baseParams.tool_choice,
-      enableThinking: baseParams.thinking?.type === 'enabled',
+      thinking: baseParams.thinking,
       maxTokens: baseParams.max_tokens,
       temperatureOverride: baseParams.temperature,
       stream: true,
@@ -2116,26 +2247,18 @@ export async function* queryAnthropicMessages(
       metadata: baseParams.metadata,
     })
 
+    // Native first-party headers + OAuth refresh (replicates the legacy
+    // api/client.ts client factory without the SDK).
+    const { headers: nativeHeaders, baseUrl } = await buildNativeFirstPartyHeaders()
+    const authHeaders = await resolveNativeFirstPartyAuth()
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'User-Agent': 'claude-code',
-      'X-Claude-Code-Session-Id': getSessionId(),
+      ...nativeHeaders,
+      ...authHeaders,
       'anthropic-version': '2023-06-01',
       ...(clientRequestId && { [CLIENT_REQUEST_ID_HEADER]: clientRequestId }),
-      ...(baseParams.metadata && { metadata: JSON.stringify(baseParams.metadata) }),
     }
 
-    // Determine auth headers
-    const authHeaders = await (async () => {
-      const provider = getAPIProvider()
-      if (provider === 'firstParty') {
-        const token = isClaudeAISubscriber() ? getClaudeAIOAuthTokens()?.accessToken : await getAnthropicApiKey()
-        return token ? { Authorization: `Bearer ${token}` } : {}
-      }
-      return {}
-    })()
-
-    const url = `${getOauthConfig().BASE_API_URL || 'https://api.anthropic.com'}/v1/messages`
+    const url = `${baseUrl}/v1/messages`
 
     // Retry loop for streaming
     while (true) {
@@ -2152,7 +2275,7 @@ export async function* queryAnthropicMessages(
             body: JSON.stringify(requestBody),
             signal,
           },
-          options.fetchOverride,
+          options.fetchOverride as typeof fetch | undefined,
         )
 
         queryCheckpoint('query_response_headers_received')
