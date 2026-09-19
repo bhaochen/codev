@@ -58,7 +58,7 @@ export function OpenRouterLoginFlow({
       <Box flexDirection="column" gap={1}>
         <Box>
           <Spinner />
-          <Text>Configuring OpenRouter login for Better-Clawd...</Text>
+          <Text>Configuring OpenRouter login for Codev...</Text>
         </Box>
         <Text dimColor={true}>
           OpenRouter support uses your OpenRouter API key with the
@@ -72,7 +72,7 @@ export function OpenRouterLoginFlow({
     <Box flexDirection="column" gap={1}>
       <Text>
         {startingMessage ??
-          'Better-Clawd can use OpenRouter with your OpenRouter API key.'}
+          'Codev can use OpenRouter with your OpenRouter API key.'}
       </Text>
       <Text dimColor={true}>
         Paste your OpenRouter key to use the Anthropic-compatible OpenRouter base

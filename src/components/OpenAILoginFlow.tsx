@@ -220,7 +220,7 @@ export function OpenAILoginFlow({
       <Box flexDirection="column" gap={1}>
         <Box>
           <Spinner />
-          <Text>Configuring OpenAI login for Better-Clawd…</Text>
+          <Text>Configuring OpenAI login for Codev…</Text>
         </Box>
         <Text dimColor={true}>
           ChatGPT login uses Codex&apos;s shared auth cache and API-key login uses
@@ -300,7 +300,7 @@ export function OpenAILoginFlow({
     <Box flexDirection="column" gap={1}>
       <Text>
         {startingMessage ??
-          'Better-Clawd can use OpenAI via ChatGPT-managed Codex login or with a standard OpenAI API key.'}
+          'Codev can use OpenAI via ChatGPT-managed Codex login or with a standard OpenAI API key.'}
       </Text>
       <Text dimColor={true}>
         Codex shares cached credentials between the CLI and IDE. If browser login

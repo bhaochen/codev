@@ -57,7 +57,7 @@ export function LoginOnboarding({
             goToNextStep();
           }
         }}
-        startingMessage="Choose which provider you want Better-Clawd to use."
+        startingMessage="Choose which provider you want Codev to use."
       />
     </Box>
   );

@@ -230,7 +230,7 @@ export function Login(props: {
       <Box flexDirection="column" gap={1}>
         <Text bold={true}>
           {props.startingMessage ??
-            'Choose which provider you want Better-Clawd to use.'}
+            'Choose which provider you want Codev to use.'}
         </Text>
         <Text dimColor={true}>
           Current default: {configuredAuthProvider}. Pick a provider first, then
@@ -249,17 +249,17 @@ export function Login(props: {
     ) : selectedProvider === 'openai' ? (
       <OpenAILoginFlow
         onDone={onFlowDone}
-        startingMessage="Better-Clawd can use OpenAI with your Codex/ChatGPT login or a standard OpenAI API key."
+        startingMessage="Codev can use OpenAI with your Codex/ChatGPT login or a standard OpenAI API key."
       />
     ) : selectedProvider === 'openrouter' ? (
       <OpenRouterLoginFlow
         onDone={onFlowDone}
-        startingMessage="Better-Clawd can use OpenRouter with your OpenRouter API key."
+        startingMessage="Codev can use OpenRouter with your OpenRouter API key."
       />
     ) : selectedProvider === 'opencode' ? (
       <OpenCodeLoginFlow
         onDone={onFlowDone}
-        startingMessage="Better-Clawd can use OpenCode Zen free models or with a Zen API key."
+        startingMessage="Codev can use OpenCode Zen free models or with a Zen API key."
       />
     ) : selectedProvider === 'local' ? (
       <LocalLoginFlow
@@ -269,12 +269,12 @@ export function Login(props: {
     ) : selectedProvider === 'nvidia' ? (
       <NvidiaLoginFlow
         onDone={onFlowDone}
-        startingMessage="Better-Clawd can use NVIDIA with your NVIDIA API key."
+        startingMessage="Codev can use NVIDIA with your NVIDIA API key."
       />
     ) : (
       <ConsoleOAuthFlow
         onDone={onFlowDone}
-        startingMessage="Better-Clawd can use Anthropic login, Anthropic Console billing, or Anthropic-compatible 3rd-party platforms."
+        startingMessage="Codev can use Anthropic login, Anthropic Console billing, or Anthropic-compatible 3rd-party platforms."
       />
     )
 

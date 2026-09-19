@@ -66,7 +66,7 @@ export function OpenCodeLoginFlow({
   if (isBusy) {
     return (
       <Box flexDirection="column" gap={1}>
-        <Text>Configuring OpenCode Zen for Better-Clawd...</Text>
+        <Text>Configuring OpenCode Zen for Codev...</Text>
       </Box>
     )
   }
@@ -111,7 +111,7 @@ export function OpenCodeLoginFlow({
     <Box flexDirection="column" gap={1}>
       <Text bold={true}>
         {startingMessage ??
-          'Better-Clawd can use OpenCode Zen free models or with a Zen API key.'}
+          'Codev can use OpenCode Zen free models or with a Zen API key.'}
       </Text>
       <Text dimColor={true}>
         Free models require no API key. Use an API key to access paid models.

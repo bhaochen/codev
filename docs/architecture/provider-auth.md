@@ -290,7 +290,7 @@ function shouldUseDeepSeekReasoningCompat(baseUrl: string): boolean {
 **文件**: `src/services/api/nvidiaClient.ts`（legacy fetch-override，待迁 `src/services/llm/clients/anthropicMessages.ts:1 native HTTP`）
 
 - **认证**: `getNvidiaApiKey()` → `Authorization: Bearer <key>`（经 `src/services/llm/auth/resolveAuth.ts:18 resolveAuth('nvidia')` 统一）
-- **特殊头**: `HTTP-Referer: https://claude.ai/`, `X-BILLING-INVOKE-ORIGIN: Better-Clawd`
+- **特殊头**: `HTTP-Referer: https://claude.ai/`, `X-BILLING-INVOKE-ORIGIN: Codev`
 - **端点**: `{baseUrl}/v1/chat/completions` (默认 `https://integrate.api.nvidia.com/v1`)
 - **Model 列表**: 从 `/v1/models` 动态拉取，缓存于 `cachedNvidiaModels` 模块变量
 - **默认 Model**: `nvidia/llama-3.1-nemotron-70b-instruct` (可通过 `NVIDIA_MODEL` 环境变量覆盖)

@@ -537,11 +537,13 @@ export function getLocalModelName(): string | null {
     const { readFileSync } = require('fs') as typeof import('fs')
     const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
     const config = JSON.parse(raw) as {
-      authProvider?: string
       localModelName?: string
     }
 
-    if (config.authProvider === 'local' && config.localModelName) {
+    // Return the stored value regardless of the active authProvider so the
+    // /login Local screen can pre-fill it after switching providers.
+    // Runtime callers already gate on authProvider === 'local' themselves.
+    if (config.localModelName) {
       return config.localModelName
     }
     return null
@@ -556,11 +558,13 @@ export function getLocalBaseUrl(): string | null {
     const { readFileSync } = require('fs') as typeof import('fs')
     const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
     const config = JSON.parse(raw) as {
-      authProvider?: string
       localBaseUrl?: string
     }
 
-    if (config.authProvider === 'local' && config.localBaseUrl) {
+    // Return the stored value regardless of the active authProvider so the
+    // /login Local screen can pre-fill it after switching providers.
+    // Runtime callers already gate on authProvider === 'local' themselves.
+    if (config.localBaseUrl) {
       return config.localBaseUrl
     }
     return null
@@ -575,11 +579,13 @@ export function getLocalModelContextWindowConfig(): number | null {
     const { readFileSync } = require('fs') as typeof import('fs')
     const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
     const config = JSON.parse(raw) as {
-      authProvider?: string
       localModelContextWindow?: number
     }
 
-    if (config.authProvider === 'local' && config.localModelContextWindow) {
+    // Return the stored value regardless of the active authProvider so the
+    // /login Local screen can pre-fill it after switching providers.
+    // Runtime callers already gate on authProvider === 'local' themselves.
+    if (config.localModelContextWindow) {
       return config.localModelContextWindow
     }
     return null

@@ -58,7 +58,7 @@ export function NvidiaLoginFlow({
       <Box flexDirection="column" gap={1}>
         <Box>
           <Spinner />
-          <Text>Configuring NVIDIA login for Better-Clawd...</Text>
+          <Text>Configuring NVIDIA login for Codev...</Text>
         </Box>
         <Text dimColor={true}>
           NVIDIA GPU-accelerated models are accessed via the NVIDIA API
@@ -72,7 +72,7 @@ export function NvidiaLoginFlow({
     <Box flexDirection="column" gap={1}>
       <Text>
         {startingMessage ??
-          'Better-Clawd can use NVIDIA with your NVIDIA API key.'}
+          'Codev can use NVIDIA with your NVIDIA API key.'}
       </Text>
       <Text dimColor={true}>
         Paste your NVIDIA API key to use models from the NVIDIA API catalog
