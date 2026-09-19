@@ -115,7 +115,6 @@ import {
 } from '../utils/swarm/leaderPermissionBridge.js'
 import { endInteractionSpan } from '../utils/telemetry/sessionTracing.js'
 import { useLogMessages } from '../hooks/useLogMessages.js'
-import { useFeishuBridge } from '../hooks/useFeishuBridge.js'
 import { useReplBridge } from '../hooks/useReplBridge.js'
 import {
   type Command,
@@ -5497,8 +5496,6 @@ export function REPL({
   })
 
   useMailboxBridge({ isLoading, onSubmitMessage: handleIncomingPrompt })
-
-  useFeishuBridge({ messages, isLoading })
 
   // Scheduled tasks from .claude/scheduled_tasks.json (CronCreate/Delete/List)
   if (feature('AGENT_TRIGGERS')) {

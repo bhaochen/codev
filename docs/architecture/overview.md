@@ -7,7 +7,7 @@ Codev 是一个 AI CLI 智能代理，基于 Anthropic Claude Code 源代码构�
 - **VRM 桌面伴侣**（Friend）：在同一进程中运行 HTTP/SSE 服务，驱动 3D VRM 角色的表情、语音和文本气泡
 - **多模型提供者**：单轨 Native LLM Runtime，Protocol Client 直连上游（OpenAI Chat / Anthropic Messages），支持数十种第三方模型
 - **语音对话**：基于 cpal（Rust 原生音频库）的进程内音频捕获，结合 Silero VAD（ONNX 实时语音活动检测）和多种 STT/TTS 引擎
-- **自动化模式**：目标系统（Goals）、后台任务（Background Tasks）、MCP 工具集成、Feishu/Telegram Bot 桥接
+- **自动化模式**：目标系统（Goals）、后台任务（Background Tasks）和 MCP 工具集成
 - **REPL 批量引擎**：Bun `node:vm` 沙箱 + ToolResult/ContextAggregator 契约，一次调用批量执行多工具
 
 ## 技术栈

@@ -29,9 +29,6 @@
 - **2026-06-19** 📋 /release-notes — New command to display version release notes and what's new.
 - **2026-06-15** 🎯 Goal Tracking — New `/goal` command with prompt input footsider and lastline display for real-time goal tracking.
 - **2026-06-15** 🖼️ WebSearch Image Preview — WebSearch markdown now displays inline image links natively.
-- **2026-06-15** 🔊 Feishu Voice — Feishu integration now supports both VoxCPM and Edge-TTS voice synthesis.
-- **2026-06-15** 📝 Feishu Markdown — Feishu bot messages render with full markdown styling.
-- **2026-06-15** 🤖 Feishu Connect — New Feishu (飞书) bot integration with message relay and voice TTS.
 - **2026-06-14** 📱 Desktop Provider Sync — Desktop now syncs provider config from TUI; model list uses sidecar proxy to avoid CORS.
 - **2026-06-14** 🛡️ NVIDIA Sidecar Fix — Use sidecar for NVIDIA, direct fetch for OpenRouter/OpenCode.
 - **2026-06-13** 🗣️ Voice CN/TW — Added Chinese (zh-CN) and Taiwanese (zh-TW) voice support for TTS.
@@ -56,8 +53,6 @@
 - **2026-04-08** 🌐 Full WebSearch toolchain — SearXNG integration, Jina AI websearch & fetch, WebFetch UI notes, build fix. Four search approaches landed in one day.
 - **2026-04-07** 🔍 Zero-search prototype; Python env removed; TLS-enabled web search working end-to-end.
 - **2026-04-06** 🛠️ Open ripgrep via USE_BUILTIN_RIPGREP=0; WebFetch UI notes; skill message renamed; WebSearch API error fixed.
-- **2026-04-05** 🤖 AutoMode — autonomous decision-making execution mode. `/sandbox` with sandbox-runtime @0.0.44. Project renamed to codev. OpenRouter ↔ Local model switching, auto-refresh TUI, Telegram `/login` local model transition.
-- **2026-04-04** 📱 Telegram backend — `/telegram` command, interactive commands, message receiving in TUI, chatId overflow fixed. `/buddy` companion mode; recent activity in individual directories.
 - **2026-04-03** 🔄 Reborn as verspercode **v0.1.0** — complete `/login` system (OpenRouter + local models), `/model` search & UI, free OpenRouter model auto-load, onboarding flow. Local model filesystem-based provider.
 
 <details>
@@ -70,7 +65,6 @@
 - **2026-03-28** 📄 Academic paper pipeline — `/evolve` autonomous evolution, `/compact` context compression, LaTeX paper template, main.pdf compilation. Chrome-based research v1.0.
 - **2026-03-27** 🔬 Research workflow — `/paper` and `/code` commands, 4-step research + autoresearch, ANN vector index, hybrid retrieval with semantic cache, external memory, token-budgeted evidence pipeline, IncompleteRead retry, long-term index cache. Workflows engine, `/resume` session toggle, CLI UI refresh.
 - **2026-03-26** 🏗️ Configuration overhaul — YAML → JSON + .env + TOML. Clean config dir.
-- **2026-03-24** 🌐 Browser control — Chrome DevTools MCP integration, WeChat gateway, Telegram gateway. Setup wizard, README with demo GIF, version menu.
 - **2026-03-22** 🎉 Initial commit — codev **v0.1.0** born.
 
 </details>

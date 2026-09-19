@@ -657,8 +657,6 @@ TypeScript 配置（`tsconfig.json`）：
 - **MCP 协议**：`@modelcontextprotocol/sdk` 和 `@anthropic-ai/mcpb`
 - **功能标记运行时**：`@growthbook/growthbook` 用于运行时功能开关（与编译时 `feature()` 互补）
 - **WebView**：通过 Bun 内置的 `WebView` 支持 Web 浏览器工具
-- **Feishu/Lark**：`@larksuiteoapi/node-sdk` 集成飞书机器人
-- **Telegram**：telegram 命令集成
 
 ### 6.5 构建脚本快速参考
 

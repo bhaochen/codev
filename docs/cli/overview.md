@@ -134,8 +134,6 @@ CLI 入口由 **Commander.js** 解析命令行参数，随后启动 **REPL**（�
 |------|------|------|
 | `/login` | - | 登录（非 3P 用户） |
 | `/logout` | - | 登出 |
-| `/feishu` | - | 飞书集成 |
-| `/telegram` | - | Telegram 集成 |
 | `/desktop` | - | 桌面应用模式 |
 | `/mobile` | - | 移动端二维码 |
 | `/install-github-app` | - | 安装 GitHub App |

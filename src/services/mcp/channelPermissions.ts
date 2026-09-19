@@ -1,5 +1,5 @@
 /**
- * Permission prompts over channels (Telegram, iMessage, Discord).
+ * Permission prompts over external channels.
  *
  * Mirrors `BridgePermissionCallbacks` — when CC hits a permission dialog,
  * it ALSO sends the prompt via active channels and races the reply against
@@ -39,7 +39,7 @@ export function isChannelPermissionRelayEnabled(): boolean {
 
 export type ChannelPermissionResponse = {
   behavior: 'allow' | 'deny'
-  /** Which channel server the reply came from (e.g., "plugin:telegram:tg"). */
+  /** Which channel server the reply came from. */
   fromServer: string
 }
 

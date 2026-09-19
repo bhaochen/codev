@@ -11,11 +11,6 @@ import * as os from 'os'
 import * as crypto from 'crypto'
 import { ApiError } from '../middleware/errorHandler.js'
 
-export type TaskNotificationConfig = {
-  enabled: boolean
-  channels: ('desktop' | 'telegram' | 'feishu')[]
-}
-
 export type CronTask = {
   id: string
   name?: string
@@ -32,7 +27,6 @@ export type CronTask = {
   providerId?: string | null
   folderPath?: string
   useWorktree?: boolean
-  notification?: TaskNotificationConfig
 }
 
 type TasksFile = {

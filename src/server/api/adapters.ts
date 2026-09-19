@@ -7,13 +7,7 @@
 
 import { adapterService } from '../services/adapterService.js'
 import { ApiError, errorResponse } from '../middleware/errorHandler.js'
-import {
-  pollWechatLoginWithQr,
-  startWechatLoginWithQr,
-  WECHAT_DEFAULT_BASE_URL,
-} from '../../../adapters/wechat/protocol.js'
-
-const ALLOWED_TOP_KEYS = new Set(['serverUrl', 'defaultProjectDir', 'telegram', 'feishu', 'wechat', 'dingtalk', 'pairing'])
+const ALLOWED_TOP_KEYS = new Set(['serverUrl', 'defaultProjectDir', 'dingtalk', 'pairing'])
 
 type RegistrationApiResponse<T extends Record<string, unknown>> = T & {
   errcode: number
@@ -140,9 +134,6 @@ export async function handleAdaptersApi(
 ): Promise<Response> {
   try {
     const tail = _segments.slice(2)
-    if (tail[0] === 'wechat') {
-      return handleWechatAdaptersApi(req, tail.slice(1))
-    }
     if (tail[0] === 'dingtalk' && req.method === 'POST' && tail[1] === 'unbind') {
       await adapterService.updateConfig({
         dingtalk: {
@@ -187,45 +178,4 @@ export async function handleAdaptersApi(
   } catch (error) {
     return errorResponse(error)
   }
-}
-
-async function handleWechatAdaptersApi(req: Request, tail: string[]): Promise<Response> {
-  if (req.method === 'POST' && tail[0] === 'login' && tail[1] === 'start') {
-    const result = await startWechatLoginWithQr({ force: true })
-    return Response.json(result)
-  }
-
-  if (req.method === 'POST' && tail[0] === 'login' && tail[1] === 'poll') {
-    const body = (await req.json()) as { sessionKey?: string }
-    if (!body.sessionKey) throw ApiError.badRequest('Missing sessionKey')
-    const result = await pollWechatLoginWithQr({ sessionKey: body.sessionKey })
-    if (result.connected) {
-      await adapterService.updateConfig({
-        wechat: {
-          accountId: result.accountId,
-          botToken: result.botToken,
-          baseUrl: result.baseUrl || WECHAT_DEFAULT_BASE_URL,
-          userId: result.userId,
-          pairedUsers: [],
-        },
-      })
-    }
-    return Response.json(result.connected ? await adapterService.getConfig() : result)
-  }
-
-  if (req.method === 'POST' && tail[0] === 'unbind') {
-    await adapterService.updateConfig({
-      wechat: {
-        accountId: undefined,
-        botToken: undefined,
-        baseUrl: WECHAT_DEFAULT_BASE_URL,
-        userId: undefined,
-        pairedUsers: [],
-        allowedUsers: [],
-      },
-    })
-    return Response.json(await adapterService.getConfig())
-  }
-
-  throw new ApiError(404, 'Unknown WeChat adapter endpoint', 'NOT_FOUND')
 }

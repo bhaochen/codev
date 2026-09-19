@@ -12,8 +12,6 @@ import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { Box, Text } from '../../ink.js';
 import type { MCPServerConnection } from '../../services/mcp/types.js';
 import { getAutoCompactThreshold, getEffectiveContextWindowSize } from '../../services/compact/autoCompact.js';
-import { telegramService } from '../../services/telegram/TelegramService.js';
-import { feishuService } from '../../services/feishu/FeishuService.js';
 import { useAppState } from '../../state/AppState.js';
 import type { ToolPermissionContext } from '../../Tool.js';
 import type { Message } from '../../types/message.js';
@@ -157,8 +155,6 @@ function PromptInputFooter({
         <Box flexShrink={1} gap={1}>
           {isFullscreen ? null : <Notifications apiKeyStatus={apiKeyStatus} autoUpdaterResult={autoUpdaterResult} debug={debug} isAutoUpdating={isAutoUpdating} verbose={verbose} messages={messages} onAutoUpdaterResult={onAutoUpdaterResult} onChangeIsUpdating={onChangeIsUpdating} ideSelection={ideSelection} mcpClients={mcpClients} isInputWrapped={isInputWrapped} isNarrow={isNarrow} />}
           {"external" === 'ant' && isUndercover() && <Text dimColor>undercover</Text>}
-          <TelegramStatusIndicator />
-          <FeishuStatusIndicator />
           <BridgeStatusIndicator bridgeSelected={bridgeSelected} />
         </Box>
       </Box>
@@ -166,38 +162,6 @@ function PromptInputFooter({
     </>;
 }
 export default memo(PromptInputFooter);
-
-function TelegramStatusIndicator(): React.ReactNode {
-  const state = React.useSyncExternalStore(
-    telegramService.subscribe,
-    telegramService.getStateSnapshot,
-    telegramService.getStateSnapshot,
-  );
-
-  if (state.status !== 'running' && state.status !== 'starting') {
-    return null;
-  }
-
-  return <Text color={state.status === 'running' ? 'notice' : 'warning'}>
-      ✈
-    </Text>;
-}
-
-function FeishuStatusIndicator(): React.ReactNode {
-  const state = React.useSyncExternalStore(
-    feishuService.subscribe,
-    feishuService.getStateSnapshot,
-    feishuService.getStateSnapshot,
-  );
-
-  if (state.status !== 'running' && state.status !== 'starting') {
-    return null;
-  }
-
-  return <Text color={state.status === 'running' ? 'notice' : 'warning'}>
-      ✉
-    </Text>;
-}
 
 type BridgeStatusProps = {
   bridgeSelected: boolean;

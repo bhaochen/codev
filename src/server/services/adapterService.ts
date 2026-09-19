@@ -26,31 +26,6 @@ export type AdapterFileConfig = {
   serverUrl?: string
   defaultProjectDir?: string
   pairing?: PairingState
-  telegram?: {
-    botToken?: string
-    allowedUsers?: number[]
-    pairedUsers?: PairedUser[]
-    defaultWorkDir?: string
-  }
-  feishu?: {
-    appId?: string
-    appSecret?: string
-    encryptKey?: string
-    verificationToken?: string
-    allowedUsers?: string[]
-    pairedUsers?: PairedUser[]
-    defaultWorkDir?: string
-    streamingCard?: boolean
-  }
-  wechat?: {
-    accountId?: string
-    botToken?: string
-    baseUrl?: string
-    userId?: string
-    allowedUsers?: string[]
-    pairedUsers?: PairedUser[]
-    defaultWorkDir?: string
-  }
   dingtalk?: {
     clientId?: string
     clientSecret?: string
@@ -94,17 +69,6 @@ class AdapterService {
   /** 读取配置（敏感字段脱敏） */
   async getConfig(): Promise<AdapterFileConfig> {
     const config = await this.getRawConfig()
-    if (config.telegram?.botToken) {
-      config.telegram.botToken = maskSecret(config.telegram.botToken)
-    }
-    if (config.feishu) {
-      if (config.feishu.appSecret) config.feishu.appSecret = maskSecret(config.feishu.appSecret)
-      if (config.feishu.encryptKey) config.feishu.encryptKey = maskSecret(config.feishu.encryptKey)
-      if (config.feishu.verificationToken) config.feishu.verificationToken = maskSecret(config.feishu.verificationToken)
-    }
-    if (config.wechat?.botToken) {
-      config.wechat.botToken = maskSecret(config.wechat.botToken)
-    }
     if (config.dingtalk?.clientSecret) {
       config.dingtalk.clientSecret = maskSecret(config.dingtalk.clientSecret)
     }
@@ -119,17 +83,6 @@ class AdapterService {
     const current = await this.getRawConfig()
 
     // 保留已存储的密钥（如果前端传回的是脱敏值）
-    if (patch.telegram && isMasked(patch.telegram.botToken)) {
-      patch.telegram.botToken = current.telegram?.botToken
-    }
-    if (patch.feishu) {
-      if (isMasked(patch.feishu.appSecret)) patch.feishu.appSecret = current.feishu?.appSecret
-      if (isMasked(patch.feishu.encryptKey)) patch.feishu.encryptKey = current.feishu?.encryptKey
-      if (isMasked(patch.feishu.verificationToken)) patch.feishu.verificationToken = current.feishu?.verificationToken
-    }
-    if (patch.wechat && isMasked(patch.wechat.botToken)) {
-      patch.wechat.botToken = current.wechat?.botToken
-    }
     if (patch.dingtalk && isMasked(patch.dingtalk.clientSecret)) {
       patch.dingtalk.clientSecret = current.dingtalk?.clientSecret
     }
@@ -140,9 +93,6 @@ class AdapterService {
     const merged: AdapterFileConfig = {
       ...current,
       ...patch,
-      telegram: patch.telegram ? { ...current.telegram, ...patch.telegram } : current.telegram,
-      feishu: patch.feishu ? { ...current.feishu, ...patch.feishu } : current.feishu,
-      wechat: patch.wechat ? { ...current.wechat, ...patch.wechat } : current.wechat,
       dingtalk: patch.dingtalk ? { ...current.dingtalk, ...patch.dingtalk } : current.dingtalk,
       pairing: patch.pairing !== undefined ? { ...current.pairing, ...patch.pairing } : current.pairing,
     }

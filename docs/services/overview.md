@@ -1,6 +1,6 @@
 # 后端服务
 
-Codev 提供一系列后台服务，涵盖 MCP 集成、上下文压缩、自主记忆整合、即时通讯集成、OAuth 认证、分析监控及工具执行引擎。
+Codev 提供一系列后台服务，涵盖 MCP 集成、上下文压缩、自主记忆整合、OAuth 认证、分析监控及工具执行引擎。
 
 ---
 
@@ -110,46 +110,6 @@ Auto Dream 是一个后台记忆整合系统，在对话间期自动运行，将
 - 分析近期会话记录（transcript）
 - 合成新的记忆，整理现有知识
 - 确保记忆文件对后续会话具有良好可读性
-
----
-
-## 飞书集成
-
-**目录**: `src/services/feishu/`
-
-飞书（Feishu/Lark）机器人集成，基于 `@larksuite/channel` SDK 的 WebSocket 长连接机器人。
-
-详见 [飞书集成文档](feishu.md)。
-
-### 功能速览
-
-- 应用注册（支持 QR 码一键创建）
-- DM 私聊 / Group 群聊模式
-- 访问控制（白名单 / 管理员 / 拥有者）
-- 引用上下文回复
-- Markdown 格式化输出
-- 语音回复（Edge TTS / VoxCPM 语音克隆）
-- Keepalive 自动保活
-
----
-
-## Telegram 集成
-
-**文件**: `src/services/telegram/TelegramService.ts`
-
-Telegram 机器人服务，基于 Telegram Bot API 实现消息收发、指令处理、行内键盘等功能。
-
-### 功能
-
-- `getMe` — 获取机器人信息
-- `sendMessage` — 发送消息（支持 Markdown / HTML 格式）
-- `editMessageText` — 编辑已发送消息
-- `answerCallbackQuery` — 响应回调查询
-- `sendChatAction` — 发送聊天动作指示器
-- `setMyCommands` — 设置机器人命令列表
-- `getUpdates` — 轮询获取更新
-
-配置管理: `telegramConfig.ts` / `telegramTypes.ts`
 
 ---
 

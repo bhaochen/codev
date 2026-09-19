@@ -57,8 +57,7 @@
 ### 后端服务
 | 文档 | 说明 |
 |------|------|
-| [服务总览](services/overview.md) | MCP、上下文压缩、Auto Dream、飞书/Telegram |
-| [飞书集成](services/feishu.md) | 飞书/Lark 机器人架构、访问控制、语音回复、配置 |
+| [服务总览](services/overview.md) | MCP、上下文压缩、Auto Dream、OAuth |
 | [上下文压缩深度解析](services/compact-deep-dive.md) | 906 行 | 5 层压缩管线、Budget Reduction、Snip、Microcompact、Context Collapse、Auto-compact |
 
 ### 协调与自动化

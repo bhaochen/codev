@@ -339,7 +339,6 @@ function shouldUseDeepSeekReasoningCompat(baseUrl: string): boolean {
 
 - **认证**: OAuth Token (通过 `connectedProviders['github-copilot']`)
 - **Model 发现**: 双源策略 — 优先从 Copilot API 获取，fallback 到 `models.dev/api.json`
-- **用途**: telegram `/connect` 流程预览可用模型
 
 ### 4.6 Llama.cpp (Local)
 

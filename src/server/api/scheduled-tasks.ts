@@ -62,7 +62,6 @@ export async function handleScheduledTasksApi(
         providerId: body.providerId as string | null | undefined,
         folderPath: body.folderPath as string | undefined,
         useWorktree: body.useWorktree as boolean | undefined,
-        notification: body.notification as CronTask['notification'],
       })
       return Response.json({ task }, { status: 201 })
     }

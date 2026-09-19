@@ -4,7 +4,6 @@ const COPILOT_API_BASE = 'https://api.githubcopilot.com'
 const MODELS_DEV_URL = 'https://models.dev/api.json'
 
 /**
- * GlobalConfig 未声明 connectedProviders 字段（telegram 流程以「多余字段」写入）；
  * 此处给出读取侧的最小形状，避免依赖不存在的 ConnectedProviderInfo 类型。
  */
 export type CopilotProviderInfo = {

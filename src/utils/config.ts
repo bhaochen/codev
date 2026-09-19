@@ -605,17 +605,6 @@ export type GlobalConfig = {
   // (avoiding 11× saveGlobalConfig lock+re-read on every startup).
   migrationVersion?: number
 
-  // Telegram bot bridge configuration (/telegram)
-  telegram?: TelegramConfig
-}
-
-export type TelegramConfig = {
-  botToken?: string
-  allowedUserIds?: string[]
-  autoStart?: boolean
-  lastAuthorizedUserId?: string
-  lastChatId?: string
-  updatedAt?: string
 }
 
 /**

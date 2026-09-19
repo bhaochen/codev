@@ -37,31 +37,9 @@ describe('Adapters API', () => {
   beforeEach(setup)
   afterEach(teardown)
 
-  it('masks WeChat bot tokens in GET responses', async () => {
-    const put = makeRequest('PUT', '/api/adapters', {
-      wechat: {
-        accountId: 'bot-1',
-        botToken: 'wechat-secret-token',
-        baseUrl: 'https://ilinkai.weixin.qq.com',
-        userId: 'wx-user',
-        pairedUsers: [{ userId: 'wx-user', displayName: 'WeChat User', pairedAt: 1 }],
-      },
-    })
-    expect((await handleAdaptersApi(put.req, put.url, put.segments)).status).toBe(200)
-
-    const get = makeRequest('GET', '/api/adapters')
-    const res = await handleAdaptersApi(get.req, get.url, get.segments)
-    expect(res.status).toBe(200)
-    const json = await res.json() as any
-    expect(json.wechat.botToken).toBe('****oken')
-    expect(json.wechat.accountId).toBe('bot-1')
-  })
-
   it('writes adapter credentials with owner-only permissions', async () => {
     const put = makeRequest('PUT', '/api/adapters', {
-      telegram: {
-        botToken: 'telegram-secret-token',
-      },
+      dingtalk: { clientId: 'ding-client-1' },
     })
     expect((await handleAdaptersApi(put.req, put.url, put.segments)).status).toBe(200)
 
@@ -105,29 +83,6 @@ describe('Adapters API', () => {
     expect(raw.dingtalk.clientSecret).toBe('dingtalk-client-secret')
     expect(raw.dingtalk.allowedUsers).toEqual(['ding-user'])
     expect(raw.dingtalk.permissionCardTemplateId).toBe('permission-template')
-  })
-
-  it('clears WeChat credentials on unbind', async () => {
-    const put = makeRequest('PUT', '/api/adapters', {
-      wechat: {
-        accountId: 'bot-1',
-        botToken: 'wechat-secret-token',
-        userId: 'wx-user',
-        allowedUsers: ['wx-allowed-user'],
-        pairedUsers: [{ userId: 'wx-user', displayName: 'WeChat User', pairedAt: 1 }],
-      },
-    })
-    await handleAdaptersApi(put.req, put.url, put.segments)
-
-    const unbind = makeRequest('POST', '/api/adapters/wechat/unbind')
-    const res = await handleAdaptersApi(unbind.req, unbind.url, unbind.segments)
-    expect(res.status).toBe(200)
-    const json = await res.json() as any
-    expect(json.wechat.botToken).toBeUndefined()
-    expect(json.wechat.accountId).toBeUndefined()
-    expect(json.wechat.userId).toBeUndefined()
-    expect(json.wechat.allowedUsers).toEqual([])
-    expect(json.wechat.pairedUsers).toEqual([])
   })
 
   it('clears DingTalk credentials on unbind', async () => {
