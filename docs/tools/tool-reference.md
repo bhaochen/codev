@@ -145,7 +145,6 @@
 
 | 工具名称 | 分类 | 用途描述 | 关键参数 |
 |----------|------|----------|----------|
-| **REPL** (REPLTool) | 可编程环境 | 在 Bun `node:vm` 沙箱中执行 JavaScript：可写任意逻辑（循环/条件/函数/regex/数据结构），并通过 `await callTool(name, input)` 调用 primitive tools（Read/Write/Edit/Glob/Grep/Bash）。变量跨调用持久化；`isTransparentWrapper` 使 UI 只显示内部工具调用。叠加在工具池之上，原始工具仍可直接调用 | `code` (必填) |
 | **Benchmark** (BenchmarkTool) | 评测 | 渲染 `/benchmark` deepsearch 评测报告（折叠、点击展开） | 取决于报告数据 |
 
 ---

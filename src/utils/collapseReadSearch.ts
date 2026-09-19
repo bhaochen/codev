@@ -5,8 +5,6 @@ import { extractBashCommentLabel } from '../tools/BashTool/commentLabel.js'
 import { BASH_TOOL_NAME } from '../tools/BashTool/toolName.js'
 import { FILE_EDIT_TOOL_NAME } from '../tools/FileEditTool/constants.js'
 import { FILE_WRITE_TOOL_NAME } from '../tools/FileWriteTool/prompt.js'
-import { REPL_TOOL_NAME } from '../tools/REPLTool/constants.js'
-import { getReplPrimitiveTools } from '../tools/REPLTool/primitiveTools.js'
 import {
   type BranchAction,
   type CommitKind,
@@ -150,18 +148,6 @@ export function getToolSearchOrReadInfo(
   // messages (isVirtual: true) via newMessages and flow through this function
   // as regular Read/Grep/Bash messages. The REPL wrapper itself contributes
   // no counts and doesn't break the group, so consecutive REPL calls merge.
-  if (toolName === REPL_TOOL_NAME) {
-    return {
-      isCollapsible: true,
-      isSearch: false,
-      isRead: false,
-      isList: false,
-      isREPL: true,
-      isMemoryWrite: false,
-      isAbsorbedSilently: true,
-    }
-  }
-
   // WebFetch is absorbed silently — counted separately so display says
   // "Fetched N URLs" instead of "Read N files". Remains visible in verbose
   // mode via the groupMessages iteration.
@@ -212,9 +198,7 @@ export function getToolSearchOrReadInfo(
   // stripped from the execution tools list, but REPL emits them as virtual
   // messages. Without the fallback they'd return isCollapsible: false and
   // vanish from the summary line.
-  const tool =
-    findToolByName(tools, toolName) ??
-    findToolByName(getReplPrimitiveTools(), toolName)
+  const tool = findToolByName(tools, toolName)
   if (!tool?.isSearchOrReadCommand) {
     return {
       isCollapsible: false,

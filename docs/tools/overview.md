@@ -79,10 +79,9 @@ getTools(permissionContext) → Tool[]
 
    这不是单纯的 system prompt 文本裁剪，而是“按级别收缩工具池 + 关闭额外 prompt 来源”。最小模式不会仅仅更改一行 greeting；它还会抑制 `userContext`、`systemContext`、附加 prompt，并把 tool schema 量压到最少。
 
-2. **`getAllBaseTools()`**：收集所有内置工具，按 feature flag 和条件编译；普通模式包含 `REPL`，由 `getReplTool()` 运行时解析（lazy require 仅为规避模块循环依赖）
+2. **`getAllBaseTools()`**：收集所有内置工具，按 feature flag 和条件编译
 3. **`filterToolsByDenyRules()`**：检查 deny rules，过滤被禁止的工具
-4. **REPL 模式范围**：普通模式和 `low` 下 `REPL` 是叠加的编程环境，所有原语仍可直接调用；`extreme`、`ultra`、`max`、`high`、`medium` 为节省本地模型上下文，不将 REPL 加入主工具池
-5. **`isEnabled()` 过滤**：逐个检查工具是否启用
+4. **`isEnabled()` 过滤**：逐个检查工具是否启用
 
 这部分实现位于 `src/tools.ts`，并且与 `src/constants/prompts.ts` 里的 `getSystemPrompt()` 和 `src/utils/envUtils.ts` 里的 `shouldSuppressBarePromptExtras()` 一起协作，以确保不同入口（主循环、side question、compact、sub-agent）采用一致的裁剪原则。
 
@@ -215,7 +214,6 @@ LLM 请求工具调用
 | `TaskOutputProgress` | 后台任务输出进度 | TaskOutputTool |
 | `WebSearchProgress` | 网络搜索进度 | WebSearchTool |
 | `LocationToolProgress` | 地理位置搜索进度 | LocationTool |
-| `REPLToolProgress` | REPL 工具进度 | REPLTool |
 | `HookProgress` | 钩子执行进度 | Hooks |
 
 相关文件：
@@ -282,22 +280,6 @@ WebSearchTool 支持两个搜索后端：
 - `/home/yuki/Code/Agent/Codev/src/services/tools/toolHooks.ts` — 工具钩子
 
 ---
-
-### REPLTool — VM 沙箱可编程执行环境（P6.6 最终契约）
-
-在 Bun `node:vm` 沙箱中执行 JavaScript 的可编程环境（**恒在基础工具**，无开关，不可关闭）。**叠加**在普通工具池之上，不取代任何直接工具。详见 [REPL Tool 深度解析](repl-tool.md)。
-
-- **输入参数**: `code` (必填) — JS 代码；可写任意逻辑（循环/条件/函数/regex/数据结构），并通过 `await callTool(name, input)` 调用 primitive tools
-- **行为**: 单次调用内完成多步批量操作或纯计算；变量跨调用持久化（会话级 `engineCache:Map<sessionId,ReplEngine>`，`src/tools/REPLTool/REPLTool.ts`）
-- **primitive 工具集**: Read / Write / Edit / Glob / Grep / Bash（`src/tools/REPLTool/primitiveTools.ts`，大小写不敏感查找）
-- **透明包装**: `isTransparentWrapper()=true`，UI 只显示内部 tool 调用与 `repl_tool_call` 进度；`innerMessages(isVirtual:true)` 仅 UI/history，`src/utils/messages.ts:1999 normalizeMessagesForAPI` 过滤不进 LLM
-- **3 层契约** (`src/tools/REPLTool/engine.ts:35`):
-  ```
-  Tool → ToolResult{tool,ok,isError,exitCode,stdout/stderr,data,truncated,outputPath,noOutputExpected}
-       → ExecutionStore(innerMessages isVirtual)
-       → ContextAggregator.buildContextResult() → ContextResult{ok,tool_calls,calls:[{tool,ok,preview,summary,truncated,outputPath}],logs} JSON → LLM
-  ```
-  `callTool()成功必捕获 ToolResult → ContextAggregator 决定暴露`，`console.log` 仅补充 `logs` 字段；`Bash` 截断 4000/`head2000+tail500`，超大走 `outputPath` 按需二次 `Read`。REPL 叠加在工具池之上，原语工具始终可直接调用（无隐藏、无开关）；`REPL != SubAgent`（无二次 LLM 调用，SubAgent 为 `AgentTool/task` 独立会话）。
 
 ### BenchmarkTool
 

@@ -323,29 +323,6 @@ export type AppState = DeepImmutable<{
     // changed since — keeps the resolver from yanking on every screenshot.
     displayResolvedForApps?: string
   }
-  // REPL tool VM context - persists across REPL calls for state sharing
-  replContext?: {
-    vmContext: import('vm').Context
-    registeredTools: Map<
-      string,
-      {
-        name: string
-        description: string
-        schema: Record<string, unknown>
-        handler: (args: Record<string, unknown>) => Promise<unknown>
-      }
-    >
-    console: {
-      log: (...args: unknown[]) => void
-      error: (...args: unknown[]) => void
-      warn: (...args: unknown[]) => void
-      info: (...args: unknown[]) => void
-      debug: (...args: unknown[]) => void
-      getStdout: () => string
-      getStderr: () => string
-      clear: () => void
-    }
-  }
   teamContext?: {
     teamName: string
     teamFilePath: string

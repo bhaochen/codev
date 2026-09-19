@@ -329,7 +329,6 @@ if (feature("VOICE_MODE")) {
 ### Q: REPL 沙箱是如何设计的?（P6.6 契约：ToolResult + ContextAggregator + isVirtual）
 
 REPL Tool 让模型在 Bun `node:vm` 沙箱里写 JS，通过 `await callTool("Grep", {...})`
-批量调用 primitive tools（详见 [repl-tool 文档](tools/repl-tool.md)，`src/tools/REPLTool/engine.ts:35`）。
 
 **三层沙箱防御:**
 

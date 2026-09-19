@@ -73,7 +73,6 @@ Friend VRM 服务与 CLI 运行在**同一 Bun 进程**中：
 - **Friend 特有**: `FriendEmotionTool`（VRM 表情 + 心情管理）, `FriendScreenObserveTool`
 - **目标系统**: `GoalCreateTool`, `GoalGetTool`, `GoalUpdateTool`
 - **工作流**: `WorkflowTool`（通过 WORKFLOW_SCRIPTS feature flag）
-- **REPL 批量**: `REPLTool`（Bun `node:vm` 沙箱，`callTool()` 批量执行，见 `src/tools/REPLTool/engine.ts:35` ToolResult/ ContextAggregator）
 - **其他**: `AgentTool`, `SkillTool`, `TodoWriteTool`, `ToolSearchTool`, `ConfigTool` 等
 
 工具通过 `assembleToolPool()` 与 MCP 工具合并去重，统一提供给 AI 模型。
@@ -164,7 +163,6 @@ const assistantModule = feature('KAIROS')
 | `src/commands.ts` | 命令注册中心，从各模块加载并导出命令列表 |
 | `src/tools/` | 60+ AI 工具实现（Bash, Read, Edit, WebSearch, FriendEmotion 等） |
 | `src/tools.ts` | 工具注册中心，`getAllBaseTools()` 与 `assembleToolPool()` |
-| `src/tools/REPLTool/` | REPL 批量引擎（`engine.ts:35 ToolResult`, `engine.ts:299 ContextAggregator`, `REPLTool.ts` 透明包装） |
 | `src/services/llm/` | **单轨 Native LLM Runtime**（`types.ts:22 LLMRoute`, `router/resolveRoute.ts:11`, `runtime/ModelRuntime.ts:10`, `clients/{openaiChat,anthropicMessages}.ts`, `auth/resolveAuth.ts:8`, `models/registry.ts:16`） |
 | `src/services/api/queryModel.ts` | LLM 稳定 Facade（`queryModel() → modelRuntime.generate()`） |
 | `src/ink/` | Ink 终端渲染引擎（自定义 fork，包含 reconciler、layout、renderer 等） |
@@ -238,7 +236,6 @@ const assistantModule = feature('KAIROS')
 │  └─────────────────────────────────────┘                              │
 │                                                                      │
 │  ┌─────────────────────────────────────────────────┐                 │
-│  │  REPL 批量引擎 (src/tools/REPLTool/engine.ts)    │                 │
 │  │  callTool → ToolResult → innerMessages(isVirtual) │                 │
 │  │           → ContextAggregator → ContextResult JSON → LLM API       │
 │  └─────────────────────────────────────────────────┘                 │

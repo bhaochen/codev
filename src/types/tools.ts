@@ -17,11 +17,6 @@ export interface MCPProgress {
   [key: string]: unknown
 }
 
-export interface REPLToolProgress {
-  type: string
-  [key: string]: unknown
-}
-
 export interface SkillToolProgress {
   type: string
   [key: string]: unknown
@@ -36,6 +31,5 @@ export type ToolProgressData =
   | WebSearchProgress
   | BashProgress
   | MCPProgress
-  | REPLToolProgress
   | SkillToolProgress
   | TaskOutputProgress

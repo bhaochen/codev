@@ -86,7 +86,6 @@ Agent query() → queryModel Facade(src/services/api/queryModel.ts:17)
 ### REPL 批量引擎契约（a1325f2）
 
 ```
-LLM → REPL tool_use{code} → ReplEngine.execute(src/tools/REPLTool/engine.ts:130)
         ├─ callTool(name,input) → ToolResult{tool,ok,exitCode,stdout/stderr/data,outputPath,truncated}
         ├─ ExecutionStore: innerMessages(isVirtual:true) → UI/history（normalizeMessagesForAPI 过滤不进 LLM）
         └─ ContextAggregator.buildContextResult() → ContextResult{ok,tool_calls,calls:[preview,summary,truncated,outputPath],logs} JSON → LLM API

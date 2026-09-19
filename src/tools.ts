@@ -144,22 +144,7 @@ import { getBareModeLevel, isEnvTruthy } from './utils/envUtils.js'
 import { isPowerShellToolEnabled } from './utils/shell/shellToolUtils.js'
 import { isAgentSwarmsEnabled } from './utils/agentSwarmsEnabled.js'
 import { isWorktreeModeEnabled } from './utils/worktreeModeEnabled.js'
-import { REPL_TOOL_NAME } from './tools/REPLTool/constants.js'
 /* eslint-disable @typescript-eslint/no-require-imports */
-/**
- * Runtime REPLTool resolver.
- *
- * REPL is an always-on base tool (a programming environment every agent
- * needs), so this is resolved lazily here NOT because of a config toggle but
- * to keep the module-boundary cycle-free: REPLTool pulls in the VM engine and
- * tool dependencies, so requiring it on first use avoids an import-time cycle
- * with tools.ts being imported by many modules.
- */
-export function getReplTool(): Tool {
-  return (
-    require('./tools/REPLTool/REPLTool.js') as typeof import('./tools/REPLTool/REPLTool.js')
-  ).REPLTool
-}
 /**
  * Runtime RLMTool resolver.
  *
@@ -215,8 +200,6 @@ export function getToolsForDefaultPreset(): string[] {
  * NOTE: This MUST stay in sync with https://console.statsig.com/4aF3Ewatb6xPVpCwxb5nA3/dynamic_configs/claude_code_global_system_caching, in order to cache the system prompt across users.
  */
 export function getAllBaseTools(): Tools {
-  // REPLTool resolved lazily here to keep the module-boundary cycle-free
-  // (REPLTool pulls in the VM engine and tool dependencies).
   return [
     AgentTool,
     TaskOutputTool,
@@ -255,7 +238,6 @@ export function getAllBaseTools(): Tools {
       ? [getTeamCreateTool(), getTeamDeleteTool()]
       : []),
     ...(VerifyPlanExecutionTool ? [VerifyPlanExecutionTool] : []),
-    getReplTool(),
     getRlmTool(),
     ...(WorkflowTool ? [WorkflowTool] : []),
     ...(SleepTool ? [SleepTool] : []),
@@ -356,8 +338,8 @@ export const getTools = (permissionContext: ToolPermissionContext): Tools => {
  * Assemble the full tool pool for a given permission context and MCP tools.
  *
  * This is the single source of truth for combining built-in tools with MCP tools.
- * Both REPL.tsx (via useMergedTools hook) and runAgent.ts (for coordinator workers)
- * use this function to ensure consistent tool pool assembly.
+ * Both interactive sessions and runAgent.ts use this function to ensure
+ * consistent tool pool assembly.
  *
  * The function:
  * 1. Gets built-in tools via getTools() (respects mode filtering)
@@ -391,19 +373,6 @@ export function assembleToolPool(
     [...builtInTools].sort(byName).concat(allowedMcpTools.sort(byName)),
     'name',
   )
-
-  // When building the tool pool for a sub-agent, expose the REPL tool so the
-  // agent gains the same `await callTool('Read'/'Bash'/...)` programming
-  // capability the main session has. REPL is always-on, so this guarantees it
-  // survives any pool-assembly path (dedup when getTools() already added it).
-  // The agent's own tools/disallowedTools still govern what it may actually
-  // invoke (resolved in resolveAgentTools/filterToolsForAgent).
-  if (
-    options.forAgent &&
-    !pool.some(t => toolMatchesName(t, REPL_TOOL_NAME))
-  ) {
-    return uniqBy([getReplTool(), ...pool], 'name')
-  }
 
   return pool
 }

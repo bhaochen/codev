@@ -5,7 +5,7 @@
  * into `context`, and runs the RLM engine loop: model writes ```repl``` blocks,
  * the sandbox executes them, and the engine terminates on answer or limit.
  *
- * Distinct from the REPLTool (JavaScript VM). RLM mode must be enabled via /rlm.
+ * RLM mode must be enabled via /rlm.
  */
 
 import { z } from 'zod/v4'

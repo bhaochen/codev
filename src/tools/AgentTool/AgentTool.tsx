@@ -13,7 +13,7 @@ import { type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS, logEve
 import { clearDumpState } from '../../services/api/dumpPrompts.js';
 import { completeAgentTask as completeAsyncAgent, createActivityDescriptionResolver, createProgressTracker, enqueueAgentNotification, failAgentTask as failAsyncAgent, getProgressUpdate, getTokenCountFromTracker, isLocalAgentTask, killAsyncAgent, registerAgentForeground, registerAsyncAgent, unregisterAgentForeground, updateAgentProgress as updateAsyncAgentProgress, updateProgressFromMessage } from '../../tasks/LocalAgentTask/LocalAgentTask.js';
 import { checkRemoteAgentEligibility, formatPreconditionError, getRemoteTaskSessionUrl, registerRemoteAgentTask } from '../../tasks/RemoteAgentTask/RemoteAgentTask.js';
-import { assembleToolPool, getReplTool } from '../../tools.js';
+import { assembleToolPool } from '../../tools.js';
 import { asAgentId } from '../../types/ids.js';
 import { runWithAgentContext } from '../../utils/agentContext.js';
 import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.js';
@@ -626,20 +626,7 @@ export const AgentTool = buildTool({
       } : enhancedSystemPrompt && !worktreeInfo && !cwd ? {
         systemPrompt: asSystemPrompt(enhancedSystemPrompt)
       } : undefined,
-      // Normal path: workerTools already includes REPLTool (via assembleToolPool's
-      // forAgent flag). Fork path inherits the parent's exact tool array for
-      // prompt-cache stability, so append the runtime-resolved (always-on)
-      // REPLTool there too if missing.
-      availableTools: isForkPath
-        ? (() => {
-            const replToolForFork = getReplTool()
-            return !toolUseContext.options.tools.some(
-              t => t.name === 'REPL',
-            )
-              ? [...toolUseContext.options.tools, replToolForFork]
-              : toolUseContext.options.tools
-          })()
-        : workerTools,
+      availableTools: isForkPath ? toolUseContext.options.tools : workerTools,
       // Pass parent conversation when the fork-subagent path needs full
       // context. useExactTools inherits thinkingConfig (runAgent.ts:624).
       forkContextMessages: isForkPath ? toolUseContext.messages : undefined,

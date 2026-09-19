@@ -253,6 +253,5 @@ Agent loop：把"模型生成参数"和"工具执行"这两段原本串行的阶
 claim miss 只是回退到正常执行路径。
 
 **Q: 如何扩展到 Layer 3？**
-对 REPLTool 这类代码执行工具，可以在代码流式输出过程中 fork 一个影子 VM
 上下文，边解析边执行已完整的语句（shadow.py 的思路）；主 VM 只在
 content_block_stop 后接管。难点在于语句级解析与副作用隔离。

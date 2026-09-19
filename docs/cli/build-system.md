@@ -454,7 +454,7 @@ export default { isEnabled: () => false, isHidden: true, name: 'stub' }
 `USER_TYPE` 控制以下差异：
 
 1. **内部命令注册**：`INTERNAL_ONLY_COMMANDS` 数组（包含 `backfillSessions`、`breakCache`、`bughunter`、`initVerifiers` 等 ~30 个内部命令）仅在 `USER_TYPE === 'ant'` 时注册。
-2. **工具可用性**：`ConfigTool`、`TungstenTool`、`REPLTool` 仅在内部构建中可用。
+2. **工具可用性**：`ConfigTool`、`TungstenTool` 仅在内部构建中可用。
 3. **YOLO 分类器**：内部构建使用更详细的权限分类模板。
 
 ---
@@ -514,7 +514,6 @@ export function filterToolsByDenyRules<T extends { name: string; mcpInfo?: ... }
 
 内部构建特有的工具（不受 `feature()` 控制，受 `USER_TYPE === 'ant'` 控制）：
 
-- `REPLTool`：REPL 交互式开发环境
 - `SuggestBackgroundPRTool`：PR 建议工具
 - `ConfigTool`、`TungstenTool`：内部配置工具
 

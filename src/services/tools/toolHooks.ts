@@ -326,7 +326,7 @@ export async function* runPostToolUseFailureHooks<Input extends AnyObject>(
  * Also handles the requiresUserInteraction/requireCanUseTool guards and the
  * 'ask' forceDecision passthrough.
  *
- * Shared by toolExecution.ts (main query loop) and REPLTool/toolWrappers.ts
+ * Shared by the main query loop and tool wrappers.
  * (REPL inner calls) so the permission semantics stay in lockstep.
  */
 export async function resolveHookPermissionDecision(
