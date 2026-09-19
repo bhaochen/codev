@@ -23,31 +23,29 @@ export async function getSystemPrompt(
 ### 1. Bare mode 分级
 
 Bare mode 由 `bareModeLevel` 配置或 `CLAUDE_CODE_BARE_LEVEL` 环境变量控制，支持
-`max`、`high`、`medium`、`low` 四档。旧配置
-`bareModeEnabled: true` 兼容映射为 `max`，`--bare` 也等同于 `max`。
+`extreme`、`ultra`、`max`、`high`、`medium`、`low` 六档。UI 中的 `off` 表示“关闭 Bare mode”，其底层语义是 `null` / 不启用。
 
-| 等级 | system prompt 内容 |
-|------|--------------------|
-| `extreme` | 仅身份：`You are Codev, chenbhao's CLI`；不发送工具、Git 或 user context |
-| `ultra` | 仅身份：`You are Codev, chenbhao's CLI.`；同时跳过 Git/user context |
-| `max` | 身份、CWD、会话日期 |
-| `high` | `max` + 输出效率和语气风格 |
-| `medium` | `high` + 环境信息和语言偏好 |
-| `low` | 完整 system prompt（仍保留 Bare mode 的启动级精简 gates） |
+旧配置 `bareModeEnabled: true` 兼容映射为 `max`，`--bare` 也等同于 `max`；`CLAUDE_CODE_SIMPLE=1` 仍作为兼容标记使用，但实际级别优先取 `CLAUDE_CODE_BARE_LEVEL`。
 
-`CLAUDE_CODE_SIMPLE=1` 仍作为兼容标记使用；具体等级通过
-`CLAUDE_CODE_BARE_LEVEL` 传递。Bare mode 的 system prompt 仍不等于一次 API
-请求的全部上下文，额外内容包括：
+| 等级 | system prompt 内容 | 实际节流效果 |
+|------|--------------------|--------------|
+| `extreme` | 仅身份：`You are Codev, chenbhao's CLI` | 不发送工具 schema；同时关闭 user/system context、append/custom prompt、额外 system prompt 追加 |
+| `ultra` | 仅身份：`You are Codev, chenbhao's CLI.` | 仅保留最小身份提示；仍然禁止 user/system context 和额外 prompt 来源 |
+| `max` | 身份 + `CWD` + `Date` | 进一步保留当前工作目录与会话日期；比 `ultra` 仅多出最小环境信息 |
+| `high` | `max` + 输出效率 + 语气风格 | 适合小上下文场景，但仍不发送完整章节 |
+| `medium` | `high` + 环境信息 + 语言偏好 | 适合中等压缩，保留更强的环境感知 |
+| `low` | 完整 system prompt（保留标准行为） | 仅启用启动阶段的 bare gates，不做额外 prompt 裁剪 |
 
-- `CWD: ...`：当前工作目录，位于同一个 system prompt 字符串中
-- `Date: ...`：会话启动日期，位于同一个 system prompt 字符串中
-- `systemContext`：通常包含 `gitStatus`，在请求发送前通过 `appendSystemContext()` 追加；启用对应 feature 时还可能包含 cache breaker
-- `userContext`：通常包含当前日期等内容，通过一个 `<system-reminder>` 元消息插入用户消息列表；Bare mode 会禁用 CLAUDE.md 自动发现，但不代表消息列表为空
-- 工具定义：根据等级发送不同工具集合的名称、描述和 JSON Schema
-- 对话历史：当前会话已有的用户消息、助手消息和工具结果仍会随请求发送
+`bare mode` 的关键语义不是“只显示一行身份字符串”，而是“在请求组装阶段按等级移除或缩减多个 prompt 来源”。`shouldSuppressBarePromptExtras()` 会在 `low` 之外启用，因此以下内容会被抑制：
 
-因此，Bare mode 的含义是“按等级精简默认指令和工具集合”，不是“只发送
-`You are Codev, chenbhao's CLI.`”。工具 JSON Schema 和历史消息同样计入模型上下文。
+- `userContext`：通过 `<system-reminder>` / 用户上下文消息插入，通常包含日期等提醒
+- `systemContext`：如 `gitStatus`、session metadata 等系统上下文
+- `customSystemPrompt` / `appendSystemPrompt`：自定义追加 prompt
+- 额外的 agent/system 说明 prompt：比如 memory、mcp instructions、scratchpad 等
+- 工具 schema：按等级控制工具 pool，最小模式只保留基础工具，`extreme` 甚至返回空工具池
+- 对话历史：历史消息仍会随请求发送，但它是必要的会话状态，不属于“额外系统 prompt”来源
+
+因此，Bare mode 的意思是“按等级压缩默认指令、工具集合与上下文来源”，不是“只发送一条字符串”。在小模型 4k/8k 场景中，工具 schema 和隐藏的 system prompt 额外内容往往才是最终造成 context 上限触发的关键。
 
 ### 2. 完整 system prompt 组装（`low` 或未启用 Bare mode）
 

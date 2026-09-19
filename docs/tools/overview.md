@@ -69,21 +69,22 @@ getTools(permissionContext) → Tool[]
 执行流程：
 
 1. **Bare mode 分级**：
-   - `extreme`：不发送工具 schema，仅适合纯聊天或模型连通性测试
-   - `ultra`：Bash、Read、Edit，且不发送 Git/user context
-   - `max`：Bash、Read、Edit
-   - `high`：`max` + Write、Glob、Grep
-   - `medium`：`high` + WebFetch、TodoWrite、AskUserQuestion
+   - `extreme`：返回空工具池，适合最小化纯聊天或连通性验证；不发送任何工具 schema
+   - `ultra`：仅保留最小身份提示；不发送工具 schema（并且不注入 user/system context）
+   - `max`：`Bash` + `Read` + `Edit`
+   - `high`：`max` + `Write` + `Glob` + `Grep`
+   - `medium`：`high` + `WebFetch` + `TodoWrite` + `AskUserQuestion`
    - `low`：完整工具池
+   - `off`：UI 层的关闭状态，底层等价于未启用 Bare mode
 
-   **副作用**：同时影响 system prompt 的身份介绍：
-   - 启用后：system prompt 以 `"You are Codev, chenbhao's CLI."` 开头（`src/constants/prompts.ts:447-451`）
-   - 未启用：使用完整的 Claude Code system prompt，模型因训练原因自我认知为 "Claude Code"
+   这不是单纯的 system prompt 文本裁剪，而是“按级别收缩工具池 + 关闭额外 prompt 来源”。最小模式不会仅仅更改一行 greeting；它还会抑制 `userContext`、`systemContext`、附加 prompt，并把 tool schema 量压到最少。
 
 2. **`getAllBaseTools()`**：收集所有内置工具，按 feature flag 和条件编译；普通模式包含 `REPL`，由 `getReplTool()` 运行时解析（lazy require 仅为规避模块循环依赖）
 3. **`filterToolsByDenyRules()`**：检查 deny rules，过滤被禁止的工具
 4. **REPL 模式范围**：普通模式和 `low` 下 `REPL` 是叠加的编程环境，所有原语仍可直接调用；`extreme`、`ultra`、`max`、`high`、`medium` 为节省本地模型上下文，不将 REPL 加入主工具池
 5. **`isEnabled()` 过滤**：逐个检查工具是否启用
+
+这部分实现位于 `src/tools.ts`，并且与 `src/constants/prompts.ts` 里的 `getSystemPrompt()` 和 `src/utils/envUtils.ts` 里的 `shouldSuppressBarePromptExtras()` 一起协作，以确保不同入口（主循环、side question、compact、sub-agent）采用一致的裁剪原则。
 
 ### assembleToolPool()
 
