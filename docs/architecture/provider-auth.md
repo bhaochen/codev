@@ -179,10 +179,10 @@ flowchart LR
 
 ### 3.4 消息格式转换
 
-核心转换函数族位于原生 wire 模块 `src/services/llm/protocols/openaiChatWire.ts`（共享包 `@ant/model-provider` 已删除；`opencodeClient`/`nvidiaClient`/`openaiClient` 等 legacy fetch-override 文件已删除）：
+核心转换函数族位于原生 wire 模块 `src/services/llm/protocols/openaiChatWire.ts`（共享包 `@ant/model-provider` 已删除；`opencodeClient`/`nvidiaClient`/`openaiClient` 等 legacy fetch-override 文件已删除）。注意：这里的转换起点是 Agent 语义层（`AssistantMessage | UserMessage`），不是 Anthropic SDK 类型 —— “Anthropic 风格”只体现在 Agent 层沿用的 block/event 词汇（text/image/tool_use/tool_result/thinking），wire 上已无 Anthropic 中间表示：
 
 ```
-Anthropic → OpenAI:
+Agent 语义 → OpenAI wire:
   agentMessagesToOpenAIChatMessages(messages, systemPrompt)
   - system → role: 'system' 消息
   - image block → image_url (data: URI)
@@ -193,12 +193,12 @@ Anthropic → OpenAI:
   openAIChatToolsFromSchemas(tools)
   - { name, description, input_schema } → { type: 'function', function: { ... } }
 
-OpenAI → Anthropic (流式):
+OpenAI wire → Agent 语义（流式）:
   adaptOpenAIChatSSE(openaiStream, model)
   - SSE data: {"choices":[{ "delta":{ "content":"..." } }]}
     → event: content_block_delta\ndata: {"delta":{"type":"text_delta","text":"..."}}
 
-OpenAI → Anthropic (非流式):
+OpenAI wire → Agent 语义（非流式）:
   - choices[0].message.content → content: [{ type: 'text', text: ... }]
   - tool_calls → tool_use content blocks
   - finish_reason 'stop' → 'end_turn'

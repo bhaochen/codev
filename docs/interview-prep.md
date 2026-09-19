@@ -551,17 +551,17 @@ fork 影子 VM 提前执行。
   缺点: 额外跳数，延迟+部署成本
 ```
 
-**协议转换 (Anthropic ↔ OpenAI，原生 wire 管线 `src/services/llm/protocols/openaiChatWire.ts`):**
+**协议转换 (Agent 语义 ↔ OpenAI wire，原生管线 `src/services/llm/protocols/openaiChatWire.ts`)：**
 
 ```
-Anthropic Messages → OpenAI Chat Completions
+Agent Messages → OpenAI Chat Completions
   system:          → role:system 消息
   messages:        → messages（image→image_url, tool_result→tool, tool_use→tool_calls, thinking→reasoning_content）
   tools:           → {type:'function', function:{name,description,parameters}}
   max_tokens:      → max_tokens（DeepSeek 需省略，见 provider-auth.md 10.2）
   stop_sequences:  → stop
 
-OpenAI → Anthropic 逆映射：adaptOpenAIChatSSE 处理 SSE 事件对照（含 thinking_delta/tool_use_delta/message_delta）
+OpenAI wire → Agent 语义逆映射：adaptOpenAIChatSSE 处理 SSE 事件对照（含 thinking_delta/tool_use_delta/message_delta）
 ```
 
 **模型列表管理:**
