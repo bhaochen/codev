@@ -1,10 +1,24 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
+import * as fs from 'fs/promises'
+import * as os from 'os'
+import * as path from 'path'
 import { resolveRoute } from './resolveRoute.js'
 import { getClientForRoute } from '../clients/index.js'
+import { clearStoredProviderCache } from '../../../utils/model/providers.js'
 
 describe('resolveRoute', () => {
+  let tmpDir: string
+  let originalConfigDir: string | undefined
   const origEnv: Record<string, string | undefined> = {}
-  beforeEach(() => {
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'resolve-route-test-'))
+    // Write a minimal config that defaults to opencode (no authProvider set)
+    await fs.writeFile(path.join(tmpDir, '.claude.json'), '{}', 'utf8')
+
+    originalConfigDir = process.env.CLAUDE_CONFIG_DIR
+    process.env.CLAUDE_CONFIG_DIR = tmpDir
+
     origEnv.CLAUDE_CODE_API_PROVIDER = process.env.CLAUDE_CODE_API_PROVIDER
     origEnv.BETTER_CLAWD_API_PROVIDER = process.env.BETTER_CLAWD_API_PROVIDER
     origEnv.CLAUDE_CODE_USE_BEDROCK = process.env.CLAUDE_CODE_USE_BEDROCK
@@ -13,12 +27,20 @@ describe('resolveRoute', () => {
     delete process.env.BETTER_CLAWD_API_PROVIDER
     delete process.env.CLAUDE_CODE_USE_BEDROCK
     delete process.env.CLAUDE_CODE_USE_VERTEX
+    clearStoredProviderCache()
   })
-  afterEach(() => {
+  afterEach(async () => {
     for (const [k, v] of Object.entries(origEnv)) {
       if (v === undefined) delete (process.env as any)[k]
       else (process.env as any)[k] = v
     }
+    clearStoredProviderCache()
+    if (originalConfigDir !== undefined) {
+      process.env.CLAUDE_CONFIG_DIR = originalConfigDir
+    } else {
+      delete process.env.CLAUDE_CONFIG_DIR
+    }
+    await fs.rm(tmpDir, { recursive: true, force: true })
   })
 
   test('no config → opencode / fallback model / openai-chat', () => {
