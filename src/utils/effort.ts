@@ -8,6 +8,7 @@ import { get3PModelCapabilityOverride } from './model/modelSupportOverrides.js'
 import { isEnvTruthy } from './envUtils.js'
 import { getCanonicalName } from './model/model.js'
 import { MODEL_EFFORT_CONFIGS_ENV_KEY } from './model/modelContextWindows.js'
+import { getAntModelOverrideConfig, resolveAntModel } from './model/antModels.js'
 import type { EffortLevel } from 'src/entrypoints/sdk/runtimeTypes.js'
 
 export type { EffortLevel }
