@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test'
 import { z } from 'zod/v4'
 import { guardToolInput } from '../toolCallGuard.js'
-import type { Tool } from '../../Tool.js'
+import type { Tool } from '../../../Tool.js'
 
 function makeTool(name: string, schema: z.ZodTypeAny): Tool {
   return { name, inputSchema: schema } as unknown as Tool
