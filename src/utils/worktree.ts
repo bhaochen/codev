@@ -9,6 +9,7 @@ import {
   stat,
   symlink,
   utimes,
+  writeFile,
 } from 'fs/promises'
 import ignore from 'ignore'
 import { basename, dirname, join } from 'path'

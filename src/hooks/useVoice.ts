@@ -395,7 +395,9 @@ export function useVoice({
         ) {
           // Groq (batch backend) doesn't support silent-drop replay — just
           // close and report no transcript.
-          callbacks.onClose()
+          cleanup()
+          onErrorRef.current?.('No speech detected.')
+          updateState('idle')
           return
         }
         fullAudioRef.current = []

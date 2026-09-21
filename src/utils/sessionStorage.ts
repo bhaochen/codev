@@ -3675,7 +3675,10 @@ export async function loadTranscriptFile(
           prUrls.set(entry.sessionId, entry.prUrl)
           prRepositories.set(entry.sessionId, entry.prRepository)
         } else if (entry.type === 'goal' && entry.sessionId) {
-          goal = entry.id === '__cleared__' ? undefined : entry
+          goalStore =
+            entry.id === '__cleared__'
+              ? undefined
+              : legacyGoalEntryToState(entry)
         }
       }
     }
