@@ -132,8 +132,14 @@ function isExcludedModel(model: string): boolean {
 
 /**
  * Returns the tracking key for a querySource, or null if untracked.
- * Compact shares the same server-side cache as repl_main_thread
- * (same cacheSafeParams), so they share tracking state.
+ *
+ * Compact is intentionally untracked. It must NOT share the
+ * repl_main_thread key: the cache-sharing fork reuses the main prompt, but
+ * the streaming fallback sends a dedicated summarizer prompt (different
+ * system + tools), and either way a compact call would overwrite the main
+ * thread's snapshot and flag a false break on the next response. The main
+ * thread's cache read baseline is reset explicitly via notifyCompaction()
+ * after compaction, so compact needs no tracking of its own.
  *
  * For subagents with a tracked querySource, uses the unique agentId to
  * isolate tracking state. This prevents false positive cache break
@@ -146,11 +152,10 @@ function isExcludedModel(model: string): boolean {
  * nothing meaningful to compare against. Their cache metrics are still
  * logged via tengu_api_success for analytics.
  */
-function getTrackingKey(
+export function getTrackingKey(
   querySource: QuerySource,
   agentId?: AgentId,
 ): string | null {
-  if (querySource === 'compact') return 'repl_main_thread'
   for (const prefix of TRACKED_SOURCE_PREFIXES) {
     if (querySource.startsWith(prefix)) return agentId || querySource
   }
@@ -703,6 +708,11 @@ export function cleanupAgentTracking(agentId: AgentId): void {
 
 export function resetPromptCacheBreakDetection(): void {
   previousStateBySource.clear()
+}
+
+/** Test-only: the tracking keys currently holding a snapshot. */
+export function __getTrackedKeysForTesting(): string[] {
+  return [...previousStateBySource.keys()]
 }
 
 async function writeCacheBreakDiff(
