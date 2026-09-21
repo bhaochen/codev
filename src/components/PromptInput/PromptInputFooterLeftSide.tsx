@@ -265,7 +265,7 @@ function ModeIndicator({
   const goal = useAppState(getFocusedGoal);
   const goals = useAppState(s => s.goals);
   const goalMode = useAppState(s => s.toolPermissionContext.mode);
-  const hasTmuxSession = useAppState(s_4 => "external" === 'ant' && s_4.tungstenActiveSession !== undefined);
+  const hasTmuxSession = useAppState(s_4 => ("external" as string) === 'ant' && s_4.tungstenActiveSession !== undefined);
   const nextTickAt = useSyncExternalStore(proactiveModule?.subscribeToProactiveChanges ?? NO_OP_SUBSCRIBE, proactiveModule?.getNextTickAt ?? NULL, NULL);
   // biome-ignore lint/correctness/useHookAtTopLevel: feature() is a compile-time constant
   const voiceEnabled = feature('VOICE_MODE') ? useVoiceEnabled() : false;
@@ -279,7 +279,7 @@ function ModeIndicator({
   const selGetState = useSelection().getState;
   const hasNextTick = nextTickAt !== null;
   const isCoordinator = feature('COORDINATOR_MODE') ? coordinatorModule?.isCoordinatorMode() === true : false;
-  const runningTaskCount = useMemo(() => count(Object.values(tasks), t => isBackgroundTask(t) && !("external" === 'ant' && isPanelAgentTask(t))), [tasks]);
+  const runningTaskCount = useMemo(() => count(Object.values(tasks), t => isBackgroundTask(t) && !(("external" as string) === 'ant' && isPanelAgentTask(t))), [tasks]);
   const tasksV2 = useTasksV2();
   const hasTaskItems = tasksV2 !== undefined && tasksV2.length > 0;
   const escShortcut = useShortcutDisplay('chat:cancel', 'Chat', 'esc').toLowerCase();
@@ -388,7 +388,7 @@ function ModeIndicator({
   // its click-target Box isn't nested inside the <Text wrap="truncate">
   // wrapper (reconciler throws on Box-in-Text).
   // Tmux pill (ant-only) — appears right after tasks in nav order
-  ...("external" === 'ant' && hasTmuxSession ? [<TungstenPill key="tmux" selected={tmuxSelected} />] : []),
+  ...(("external" as string) === 'ant' && hasTmuxSession ? [<TungstenPill key="tmux" selected={tmuxSelected} />] : []),
   ...(isAgentSwarmsEnabled() && hasTeams ? [<TeamStatus key="teams" teamsSelected={teamsSelected} showHint={showHint && !hasBackgroundTasks} />] : []),
   ...(shouldShowPrStatus ? [<PrBadge key="pr-status" number={prStatus.number} url={prStatus.url} reviewState={prStatus.reviewState!} />] : []),
   ]
@@ -411,7 +411,7 @@ function ModeIndicator({
   }
 
   // Add "↓ to manage tasks" hint when panel has visible rows
-  const hasCoordinatorTasks = "external" === 'ant' && getVisibleAgentTasks(tasks).length > 0;
+  const hasCoordinatorTasks = ("external" as string) === 'ant' && getVisibleAgentTasks(tasks).length > 0;
 
   // Tasks pill renders as a Box sibling (not a parts entry) so its
   // click-target Box isn't nested inside <Text wrap="truncate"> — the
