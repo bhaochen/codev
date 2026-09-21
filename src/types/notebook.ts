@@ -32,3 +32,11 @@ export const markToolsSentToAPI = stub
 export const resetCachedMCState = stub
 export const checkProtectedNamespace = stub
 export const getCoordinatorUserContext = stub
+
+export type NotebookCell<T = any> = any
+export type NotebookCellOutput<T = any> = any
+export type NotebookCellSource<T = any> = any
+export type NotebookCellSourceOutput<T = any> = any
+export type NotebookCellType<T = any> = any
+export type NotebookContent<T = any> = any
+export type NotebookOutputImage<T = any> = any

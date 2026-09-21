@@ -57,3 +57,5 @@ export type ForkSessionResult = {
 export type SDKSession = {
   id: string
 }
+
+export type SessionMessage = any

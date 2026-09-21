@@ -267,3 +267,7 @@ export type RequestStartEvent = {
  * shape and each provider's native stream events at the client boundary.
  */
 export type StreamEvent = AgentStreamEvent
+
+export type CompactMetadata = any
+export type SystemFileSnapshotMessage = any
+export type SystemThinkingMessage = any

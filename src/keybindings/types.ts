@@ -32,3 +32,10 @@ export const markToolsSentToAPI = stub
 export const resetCachedMCState = stub
 export const checkProtectedNamespace = stub
 export const getCoordinatorUserContext = stub
+
+export type Chord<T = any> = any
+export type KeybindingAction<T = any> = any
+export type KeybindingBlock<T = any> = any
+export type KeybindingContextName<T = any> = any
+export type ParsedBinding<T = any> = any
+export type ParsedKeystroke<T = any> = any

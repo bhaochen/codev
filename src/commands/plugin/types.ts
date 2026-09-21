@@ -32,3 +32,6 @@ export const markToolsSentToAPI = stub
 export const resetCachedMCState = stub
 export const checkProtectedNamespace = stub
 export const getCoordinatorUserContext = stub
+
+export type PluginSettingsProps<T = any> = any
+export type ViewState<T = any> = any

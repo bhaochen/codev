@@ -32,3 +32,10 @@ export const markToolsSentToAPI = stub
 export const resetCachedMCState = stub
 export const checkProtectedNamespace = stub
 export const getCoordinatorUserContext = stub
+
+export type SDKControlCancelRequest<T = any> = any
+export type SDKControlPermissionRequest<T = any> = any
+export type SDKControlRequest<T = any> = any
+export type SDKControlRequestInner<T = any> = any
+export type SDKControlResponse<T = any> = any
+export type StdoutMessage<T = any> = any

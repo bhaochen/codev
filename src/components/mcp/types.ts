@@ -32,3 +32,11 @@ export const markToolsSentToAPI = stub
 export const resetCachedMCState = stub
 export const checkProtectedNamespace = stub
 export const getCoordinatorUserContext = stub
+
+export type AgentMcpServerInfo<T = any> = any
+export type ClaudeAIServerInfo<T = any> = any
+export type HTTPServerInfo<T = any> = any
+export type MCPViewState<T = any> = any
+export type SSEServerInfo<T = any> = any
+export type ServerInfo<T = any> = any
+export type StdioServerInfo<T = any> = any

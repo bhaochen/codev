@@ -32,3 +32,15 @@ export const markToolsSentToAPI = stub
 export const resetCachedMCState = stub
 export const checkProtectedNamespace = stub
 export const getCoordinatorUserContext = stub
+
+export type BillingType<T = any> = any
+export type OAuthProfileResponse<T = any> = any
+export type OAuthTokenExchangeResponse<T = any> = any
+export type OAuthTokens<T = any> = any
+export type RateLimitTier<T = any> = any
+export type ReferralCampaign<T = any> = any
+export type ReferralEligibilityResponse<T = any> = any
+export type ReferralRedemptionsResponse<T = any> = any
+export type ReferrerRewardInfo<T = any> = any
+export type SubscriptionType<T = any> = any
+export type UserRolesResponse<T = any> = any

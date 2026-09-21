@@ -32,3 +32,7 @@ export const markToolsSentToAPI = stub
 export const resetCachedMCState = stub
 export const checkProtectedNamespace = stub
 export const getCoordinatorUserContext = stub
+
+export type ComputerExecutor<T = any> = any
+export type InstalledApp<T = any> = any
+export type ScreenshotResult<T = any> = any

@@ -32,3 +32,6 @@ export const markToolsSentToAPI = stub
 export const resetCachedMCState = stub
 export const checkProtectedNamespace = stub
 export const getCoordinatorUserContext = stub
+
+export type Tip<T = any> = any
+export type TipContext<T = any> = any

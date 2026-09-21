@@ -33,3 +33,7 @@ export type ToolProgressData =
   | MCPProgress
   | SkillToolProgress
   | TaskOutputProgress
+
+export type AgentToolProgress = any
+export type PowerShellProgress = any
+export type SdkWorkflowProgress = any
