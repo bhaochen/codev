@@ -14,9 +14,14 @@ import { toCompatSessionId } from './sessionIdCompat.js'
  */
 
 let handle: ReplBridgeHandle | null = null
+let outboundOnly = false
 
-export function setReplBridgeHandle(h: ReplBridgeHandle | null): void {
+export function setReplBridgeHandle(
+  h: ReplBridgeHandle | null,
+  isOutboundOnly = false,
+): void {
   handle = h
+  outboundOnly = h ? isOutboundOnly : false
   // Publish (or clear) our bridge session ID in the session record so other
   // local peers can dedup us out of their bridge list — local is preferred.
   void updateSessionBridgeId(getSelfBridgeCompatId() ?? null).catch(() => {})
@@ -24,6 +29,10 @@ export function setReplBridgeHandle(h: ReplBridgeHandle | null): void {
 
 export function getReplBridgeHandle(): ReplBridgeHandle | null {
   return handle
+}
+
+export function isReplBridgeActive(): boolean {
+  return handle !== null && !outboundOnly
 }
 
 /**

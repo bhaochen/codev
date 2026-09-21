@@ -516,7 +516,7 @@ export function useReplBridge(messages: Message[], setMessages: (action: React.S
             return;
           }
           handleRef.current = handle_0;
-          setReplBridgeHandle(handle_0);
+          setReplBridgeHandle(handle_0, outboundOnly === true);
           consecutiveFailuresRef.current = 0;
           // Skip initial messages in the forwarding effect — they were
           // already loaded as session events during creation.
