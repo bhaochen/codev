@@ -1,5 +1,6 @@
 import { z } from 'zod/v4'
 import { buildTool, type ToolDef } from '../../Tool.js'
+import { execFileNoThrow } from '../../utils/execFileNoThrow.js'
 import { lazySchema } from '../../utils/lazySchema.js'
 import { logError } from '../../utils/log.js'
 import { LOCATION_TOOL_NAME, PROMPT } from './prompt.js'
@@ -110,16 +111,17 @@ type IpGeoInfo = {
 }
 
 /** Scan nearby WiFi access points via nmcli */
-async function scanWiFi(): Promise<{ macAddress: string; signalStrength: number }[]> {
+export async function scanWiFi(): Promise<{ macAddress: string; signalStrength: number }[]> {
   try {
-    const cmd = new Deno.Command('nmcli', {
-      args: ['-t', '-f', 'BSSID,SIGNAL', 'device', 'wifi', 'list'],
-      stdout: 'piped',
-      stderr: 'null',
-    })
-    const { stdout } = await cmd.output()
-    const text = new TextDecoder().decode(stdout)
-    return text.trim().split('\n')
+    const { stdout } = await execFileNoThrow('nmcli', [
+      '-t',
+      '-f',
+      'BSSID,SIGNAL',
+      'device',
+      'wifi',
+      'list',
+    ])
+    return stdout.trim().split('\n')
       .filter(Boolean)
       .map(line => {
         // nmcli -t escapes colons inside values as \:, split on unescaped :
