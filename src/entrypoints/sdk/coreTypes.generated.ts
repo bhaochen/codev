@@ -1,3 +1,11 @@
+import type { z } from 'zod/v4'
+import {
+  AsyncHookJSONOutputSchema,
+  HookJSONOutputSchema,
+  PermissionUpdateSchema,
+  SyncHookJSONOutputSchema,
+} from './coreSchemas.js'
+
 export type PermissionMode =
   | 'default'
   | 'acceptEdits'
@@ -141,19 +149,13 @@ export type HookInput = {
   [key: string]: unknown
 }
 
-export type HookJSONOutput = {
-  continue?: boolean
-  stopReason?: string
-  message?: string
-  decision?: 'allow' | 'deny' | 'ask'
-  [key: string]: unknown
-}
+export type PermissionUpdate = z.infer<ReturnType<typeof PermissionUpdateSchema>>
 
-export type SyncHookJSONOutput = HookJSONOutput
+export type HookJSONOutput = z.infer<ReturnType<typeof HookJSONOutputSchema>>
 
-export type AsyncHookJSONOutput = HookJSONOutput & {
-  waitMs?: number
-}
+export type SyncHookJSONOutput = z.infer<ReturnType<typeof SyncHookJSONOutputSchema>>
+
+export type AsyncHookJSONOutput = z.infer<ReturnType<typeof AsyncHookJSONOutputSchema>>
 
 export type SDKMessage =
   | SDKAssistantMessage

@@ -44,35 +44,70 @@ export type MessageOrigin =
  * Any-role canonical semantic message with codev `origin` attribution.
  * See ./agentMessage.ts for the canonical definition.
  */
-export type Message = AgentMessage & { origin?: MessageOrigin }
+export type UserMessageData = Omit<AgentUserMessage, 'uuid' | 'timestamp'> & {
+  id?: string
+  uuid?: string
+  timestamp?: string | number
+}
 
-export type UserMessage = AgentUserMessage & { origin?: MessageOrigin }
+export type AssistantMessageData<C extends AgentContentBlock = AgentContentBlock> = Omit<
+  AgentAssistantMessage,
+  'uuid' | 'timestamp' | 'content'
+> & {
+  content: C[]
+  id?: string
+  uuid?: string
+  timestamp?: string | number
+}
 
-export type AssistantMessage = AgentAssistantMessage & {
+export type UserMessage = {
+  type: 'user'
+  message: UserMessageData
+  uuid: string
+  timestamp: string | number
+  isMeta?: boolean
+  isVisibleInTranscriptOnly?: boolean
+  isVirtual?: boolean
+  isCompactSummary?: boolean
+  summarizeMetadata?: unknown
+  toolUseResult?: { stdout?: string; stderr?: string }
+  mcpMeta?: unknown
+  imagePasteIds?: string[]
+  sourceToolAssistantUUID?: string
+  permissionMode?: string
   origin?: MessageOrigin
 }
+
+export type AssistantMessage<C extends AgentContentBlock = AgentContentBlock> = {
+  type: 'assistant'
+  message: AssistantMessageData<C>
+  uuid: string
+  timestamp: string | number
+  model?: string
+  requestId?: string
+  origin?: MessageOrigin
+}
+
+export type NormalizedUserMessage = UserMessage
+
+export type NormalizedAssistantMessage<
+  C extends AgentContentBlock = AgentContentBlock,
+> = AssistantMessage<C>
 
 export type NormalizedMessage =
   | NormalizedUserMessage
   | NormalizedAssistantMessage
 
-export type NormalizedUserMessage = {
-  type: 'user'
-  message: UserMessage
-  uuid: string
-  timestamp: number
-  origin?: MessageOrigin
-  toolUseResult?: { stdout?: string; stderr?: string }
-}
-
-export type NormalizedAssistantMessage = {
-  type: 'assistant'
-  message: AssistantMessage
-  uuid: string
-  timestamp: number
-  origin?: MessageOrigin
-  model?: string
-}
+export type Message =
+  | NormalizedUserMessage
+  | NormalizedAssistantMessage
+  | SystemMessage
+  | AttachmentMessage
+  | ProgressMessage
+  | HookResultMessage
+  | ToolUseSummaryMessage
+  | GroupedToolUseMessage
+  | TombstoneMessage
 
 export type SystemMessage = {
   type: 'system'
@@ -151,18 +186,20 @@ export type SystemTurnDurationMessage = SystemMessage & {
   subtype: 'turn_duration'
 }
 
-export type ProgressMessage = {
+export type ProgressMessage<P extends { type: string } = {
+  type: string
+  phase?: string
+  toolName?: string
+  toolInput?: unknown
+  elapsedTimeSeconds?: number
+  totalLines?: number
+}> = {
   type: 'progress'
   uuid: string
-  timestamp: number
-  data?: {
-    type: string
-    phase?: string
-    toolName?: string
-    toolInput?: unknown
-    elapsedTimeSeconds?: number
-    totalLines?: number
-  }
+  timestamp: string | number
+  toolUseID?: string
+  parentToolUseID?: string
+  data?: P
 }
 
 export type HookResultMessage = {
@@ -177,9 +214,9 @@ export type Attachment = {
   memories?: { path: string; content: string; mtimeMs: number }[]
 }
 
-export type AttachmentMessage = {
+export type AttachmentMessage<T extends Attachment = Attachment> = {
   type: 'attachment'
-  attachment: Attachment
+  attachment: T
   uuid: string
   timestamp: number
 }

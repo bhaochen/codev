@@ -1,6 +1,7 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
 import { z } from 'zod/v4'
 import { lazySchema } from '../utils/lazySchema.js'
+import { HookJSONOutputSchema } from '../entrypoints/sdk/coreSchemas.js'
 import {
   type HookEvent,
   HOOK_EVENTS,
@@ -165,15 +166,7 @@ export const syncHookResponseSchema = lazySchema(() =>
   }),
 )
 
-// Zod schema for hook JSON output validation
-export const hookJSONOutputSchema = lazySchema(() => {
-  // Async hook response schema
-  const asyncHookResponseSchema = z.object({
-    async: z.literal(true),
-    asyncTimeout: z.number().optional(),
-  })
-  return z.union([asyncHookResponseSchema, syncHookResponseSchema()])
-})
+export const hookJSONOutputSchema = HookJSONOutputSchema
 
 // Infer the TypeScript type from the schema
 type SchemaHookJSONOutput = z.infer<ReturnType<typeof hookJSONOutputSchema>>
