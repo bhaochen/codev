@@ -80,6 +80,7 @@ type HookAttachmentWithName = Exclude<
 >
 
 import type { APIError } from '@anthropic-ai/sdk'
+import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
 import { anthropicBlockToAgent } from '../types/anthropicAdapter.js'
 import type {
   AgentContentBlock,
@@ -302,6 +303,10 @@ export function isSyntheticMessage(message: Message): boolean {
     message.type !== 'progress' &&
     message.type !== 'attachment' &&
     message.type !== 'system' &&
+    message.type !== 'hook_result' &&
+    message.type !== 'tool_use_summary' &&
+    message.type !== 'grouped_tool_use' &&
+    message.type !== 'tombstone' &&
     Array.isArray(message.message.content) &&
     message.message.content[0]?.type === 'text' &&
     SYNTHETIC_MESSAGES.has(message.message.content[0].text)
@@ -464,10 +469,10 @@ export function createUserMessage({
   origin,
 }: {
   content: string | AgentContentBlock[]
-  isMeta?: true
-  isVisibleInTranscriptOnly?: true
-  isVirtual?: true
-  isCompactSummary?: true
+  isMeta?: boolean
+  isVisibleInTranscriptOnly?: boolean
+  isVirtual?: boolean
+  isCompactSummary?: boolean
   toolUseResult?: unknown // Matches tool's `Output` type
   /** MCP protocol metadata to pass through to SDK consumers (never sent to model) */
   mcpMeta?: {
@@ -475,7 +480,7 @@ export function createUserMessage({
     structuredContent?: Record<string, unknown>
   }
   uuid?: UUID | string
-  timestamp?: string
+  timestamp?: string | number
   imagePasteIds?: number[]
   // For tool_result messages: the UUID of the assistant message containing the matching tool_use
   sourceToolAssistantUUID?: UUID
@@ -493,7 +498,7 @@ export function createUserMessage({
     type: 'user',
     message: {
       role: 'user',
-      content: content || NO_CONTENT_MESSAGE, // Make sure we don't send empty messages
+      content: content || NO_CONTENT_MESSAGE,
     },
     isMeta,
     isVisibleInTranscriptOnly,
@@ -677,42 +682,44 @@ export function extractTag(html: string, tagName: string): string | null {
 }
 
 export function isNotEmptyMessage(message: Message): boolean {
-  if (
-    message.type === 'progress' ||
-    message.type === 'attachment' ||
-    message.type === 'system'
-  ) {
+  if (message.type !== 'user' && message.type !== 'assistant') {
     return true
   }
 
-  if (typeof message.message.content === 'string') {
-    return message.message.content.trim().length > 0
+  const content = message.message.content as unknown as
+    | string
+    | AgentContentBlock[]
+
+  if (typeof content === 'string') {
+    return content.trim().length > 0
   }
 
-  if (message.message.content.length === 0) {
+  const blocks = content as AgentContentBlock[]
+
+  if (blocks.length === 0) {
     return false
   }
 
   // Skip multi-block messages for now
-  if (message.message.content.length > 1) {
+  if (blocks.length > 1) {
     return true
   }
 
-  if (message.message.content[0]!.type !== 'text') {
+  if (blocks[0]!.type !== 'text') {
     return true
   }
 
   return (
-    message.message.content[0]!.text.trim().length > 0 &&
-    message.message.content[0]!.text !== NO_CONTENT_MESSAGE &&
-    message.message.content[0]!.text !== INTERRUPT_MESSAGE_FOR_TOOL_USE
+    (blocks[0] as AgentTextBlock).text.trim().length > 0 &&
+    (blocks[0] as AgentTextBlock).text !== NO_CONTENT_MESSAGE &&
+    (blocks[0] as AgentTextBlock).text !== INTERRUPT_MESSAGE_FOR_TOOL_USE
   )
 }
 
 // Deterministic UUID derivation. Produces a stable UUID-shaped string from a
 // parent UUID + content block index so that the same input always produces the
 // same key across calls. Used by normalizeMessages and synthetic message creation.
-export function deriveUUID(parentUUID: UUID, index: number): UUID {
+export function deriveUUID(parentUUID: string, index: number): UUID {
   const hex = index.toString(16).padStart(12, '0')
   return `${parentUUID.slice(0, 24)}${hex}` as UUID
 }
@@ -1214,7 +1221,7 @@ export function buildMessageLookups(
 
       // Count in-progress hooks
       if (msg.data.type === 'hook_progress') {
-        const hookEvent = msg.data.hookEvent
+        const hookEvent = msg.data.hookEvent as HookEvent
         let byHookEvent = inProgressHookCounts.get(toolUseID)
         if (!byHookEvent) {
           byHookEvent = new Map()
@@ -2258,7 +2265,7 @@ export function normalizeMessagesForAPI(
         }
         case 'attachment': {
           const rawAttachmentMessage = normalizeAttachmentForAPI(
-            message.attachment,
+            message.attachment as unknown as Attachment,
           )
           const attachmentMessage = checkStatsigFeatureGate_CACHED_MAY_BE_STALE(
             'tengu_chair_sermon',
@@ -2549,8 +2556,8 @@ function smooshIntoToolResult(
   // results) and matches the legacy smoosh output shape.
   if (allText && (existing === undefined || typeof existing === 'string')) {
     const joined = [
-      (existing ?? '').trim(),
-      ...blocks.map(b => (b as AgentTextBlock).text.trim()),
+      typeof existing === 'string' ? existing.trim() : '',
+      ...blocks.map((b): string => (b as AgentTextBlock).text.trim()),
     ]
       .filter(Boolean)
       .join('\n\n')
@@ -2570,7 +2577,7 @@ function smooshIntoToolResult(
   const merged: ToolResultContentItem[] = []
   for (const b of [...base, ...blocks]) {
     if (b.type === 'text') {
-      const t = b.text.trim()
+      const t = (b as { type: 'text'; text: string }).text.trim()
       if (!t) continue
       const prev = merged.at(-1)
       if (prev?.type === 'text') {
@@ -2651,7 +2658,12 @@ export function normalizeContentFromAPI(
   // shapes the switch below reads match between providers — OpenAI/other
   // clients pass their own chunks through the same Anthropic-compatible shape)
   // and then convert each block through the adapter into an AgentContentBlock.
-  return contentBlocks
+  return (contentBlocks as unknown as (
+    | ContentBlockParam
+    | { type: 'mcp_tool_use'; input?: unknown; name?: string }
+    | { type: 'mcp_tool_result' }
+    | { type: 'code_execution_tool_result' }
+  )[])
     .map(contentBlock => {
     switch (contentBlock.type) {
       case 'tool_use': {
@@ -2744,7 +2756,9 @@ export function normalizeContentFromAPI(
         return contentBlock
     }
     })
-    .map(block => anthropicBlockToAgent(block))
+    .map(block =>
+      anthropicBlockToAgent(block as unknown as ContentBlockParam),
+    )
 }
 
 export function isEmptyMessageText(text: string): boolean {
@@ -2927,10 +2941,10 @@ export type StreamingThinking = {
 export function handleMessageFromStream(
   message:
     | Message
-    | TombstoneMessage
+    | { type: 'stream_event'; event: StreamEvent; ttftMs?: number }
+    | { type: 'stream_request_start' }
     | StreamEvent
-    | RequestStartEvent
-    | ToolUseSummaryMessage,
+    | RequestStartEvent,
   onMessage: (message: Message) => void,
   onUpdateLength: (newContent: string) => void,
   onSetStreamMode: (mode: SpinnerMode) => void,
@@ -2946,7 +2960,14 @@ export function handleMessageFromStream(
 ): void {
   if (
     message.type !== 'stream_event' &&
-    message.type !== 'stream_request_start'
+    message.type !== 'stream_request_start' &&
+    message.type !== 'message_start' &&
+    message.type !== 'content_block_start' &&
+    message.type !== 'content_block_delta' &&
+    message.type !== 'content_block_stop' &&
+    message.type !== 'message_delta' &&
+    message.type !== 'message_stop' &&
+    message.type !== 'request_start'
   ) {
     // Handle tombstone messages - remove the targeted message instead of adding
     if (message.type === 'tombstone') {
@@ -2976,36 +2997,38 @@ export function handleMessageFromStream(
     onStreamingText?.(() => null)
     onMessage(message)
     return
-  }
-
-  if (message.type === 'stream_request_start') {
+  } else {
+    const msg = message as unknown as
+      | { type: 'stream_event'; event: StreamEvent; ttftMs?: number }
+      | { type: 'stream_request_start' }
+    if (msg.type === 'stream_request_start') {
     onSetStreamMode('requesting')
     return
   }
 
-  if (message.event.type === 'message_start') {
-    if (message.ttftMs != null) {
-      onApiMetrics?.({ ttftMs: message.ttftMs })
+  if (msg.event.type === 'message_start') {
+    if (msg.ttftMs != null) {
+      onApiMetrics?.({ ttftMs: msg.ttftMs })
     }
   }
 
-  if (message.event.type === 'message_stop') {
+  if (msg.event.type === 'message_stop') {
     onSetStreamMode('tool-use')
     onStreamingToolUses(() => [])
     return
   }
 
-  switch (message.event.type) {
+  switch (msg.event.type) {
     case 'content_block_start':
       onStreamingText?.(() => null)
       if (
         feature('CONNECTOR_TEXT') &&
-        isConnectorTextBlock(message.event.content_block)
+        isConnectorTextBlock(msg.event.content_block)
       ) {
         onSetStreamMode('responding')
         return
       }
-      switch (message.event.content_block.type) {
+      switch (msg.event.content_block.type) {
         case 'thinking':
         case 'redacted_thinking':
           onSetStreamMode('thinking')
@@ -3015,8 +3038,8 @@ export function handleMessageFromStream(
           return
         case 'tool_use': {
           onSetStreamMode('tool-input')
-          const contentBlock = message.event.content_block
-          const index = message.event.index
+          const contentBlock = msg.event.content_block as AgentToolUseBlock
+          const index = msg.event.index
           onStreamingToolUses(_ => [
             ..._,
             {
@@ -3042,18 +3065,25 @@ export function handleMessageFromStream(
           return
       }
       return
-    case 'content_block_delta':
-      switch (message.event.delta.type) {
+    case 'content_block_delta': {
+      const delta = msg.event.delta as {
+        type: string
+        text?: string
+        partial_json?: string
+        thinking?: string
+        signature?: string
+      }
+      switch (delta.type) {
         case 'text_delta': {
-          const deltaText = message.event.delta.text
+          const deltaText = delta.text
           onUpdateLength(deltaText)
           onStreamingText?.(text => (text ?? '') + deltaText)
           return
         }
         case 'input_json_delta': {
-          const delta = message.event.delta.partial_json
-          const index = message.event.index
-          onUpdateLength(delta)
+          const partialJson = delta.partial_json
+          const index = msg.event.index
+          onUpdateLength(partialJson)
           onStreamingToolUses(_ => {
             const element = _.find(_ => _.index === index)
             if (!element) {
@@ -3063,14 +3093,14 @@ export function handleMessageFromStream(
               ..._.filter(_ => _ !== element),
               {
                 ...element,
-                unparsedToolInput: element.unparsedToolInput + delta,
+                unparsedToolInput: element.unparsedToolInput + partialJson,
               },
             ]
           })
           return
         }
         case 'thinking_delta':
-          onUpdateLength(message.event.delta.thinking)
+          onUpdateLength(delta.thinking)
           return
         case 'signature_delta':
           // Signatures are cryptographic authentication strings, not model
@@ -3080,6 +3110,7 @@ export function handleMessageFromStream(
         default:
           return
       }
+      }
     case 'content_block_stop':
       return
     case 'message_delta':
@@ -3088,6 +3119,7 @@ export function handleMessageFromStream(
     default:
       onSetStreamMode('responding')
       return
+    }
   }
 }
 

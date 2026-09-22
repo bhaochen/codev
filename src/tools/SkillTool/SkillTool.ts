@@ -243,9 +243,11 @@ async function executeForkedSkill(
       ) {
         const normalizedNew = normalizeMessages([message])
         for (const m of normalizedNew) {
-          const hasToolContent = m.message.content.some(
-            c => c.type === 'tool_use' || c.type === 'tool_result',
-          )
+          const hasToolContent =
+            typeof m.message.content !== 'string' &&
+            m.message.content.some(
+              c => c.type === 'tool_use' || c.type === 'tool_result',
+            )
           if (hasToolContent) {
             onProgress({
               toolUseID: `skill_${parentMessage.message.id}`,

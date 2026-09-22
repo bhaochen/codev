@@ -161,7 +161,9 @@ export function applyGrouping(
 
     // Skip user messages whose tool_results are all grouped
     if (msg.type === 'user') {
-      const toolResults = msg.message.content.filter(
+      const blocks =
+        typeof msg.message.content === 'string' ? [] : msg.message.content
+      const toolResults = blocks.filter(
         (c): c is AgentToolResultBlock => c.type === 'tool_result',
       )
       if (toolResults.length > 0) {

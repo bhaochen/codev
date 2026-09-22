@@ -56,7 +56,7 @@ export function SystemAPIErrorMessage(t0) {
   let t6;
   let truncated;
   if ($[4] !== error || $[5] !== verbose) {
-    const formatted = formatAPIError(error);
+    const formatted = formatAPIError(error as import('@anthropic-ai/sdk').APIError);
     truncated = !verbose && formatted.length > MAX_API_ERROR_CHARS;
     T2 = MessageResponse;
     T1 = Box;

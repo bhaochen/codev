@@ -235,6 +235,7 @@ export type AgentMessageStartEvent = AgentStreamEventBase & {
  */
 export type AgentContentBlockStartEvent = AgentStreamEventBase & {
   type: 'content_block_start'
+  index: number
   content_block: AgentContentBlock
 }
 
@@ -243,6 +244,7 @@ export type AgentContentBlockStartEvent = AgentStreamEventBase & {
  */
 export type AgentContentBlockDeltaEvent = AgentStreamEventBase & {
   type: 'content_block_delta'
+  index: number
   delta: unknown
 }
 

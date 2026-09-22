@@ -44,7 +44,8 @@ export type MessageOrigin =
  * Any-role canonical semantic message with codev `origin` attribution.
  * See ./agentMessage.ts for the canonical definition.
  */
-export type UserMessageData = Omit<AgentUserMessage, 'uuid' | 'timestamp'> & {
+export type UserMessageData = Omit<AgentUserMessage, 'uuid' | 'timestamp' | 'content'> & {
+  content: AgentContentBlock[] | string
   id?: string
   uuid?: string
   timestamp?: string | number
@@ -58,6 +59,10 @@ export type AssistantMessageData<C extends AgentContentBlock = AgentContentBlock
   id?: string
   uuid?: string
   timestamp?: string | number
+  context_management?: unknown
+  container?: unknown
+  stop_sequence?: string
+  type?: string
 }
 
 export type UserMessage = {
@@ -72,7 +77,8 @@ export type UserMessage = {
   summarizeMetadata?: unknown
   toolUseResult?: { stdout?: string; stderr?: string }
   mcpMeta?: unknown
-  imagePasteIds?: string[]
+  imagePasteIds?: number[]
+  sourceToolUseID?: string
   sourceToolAssistantUUID?: string
   permissionMode?: string
   origin?: MessageOrigin
@@ -85,6 +91,14 @@ export type AssistantMessage<C extends AgentContentBlock = AgentContentBlock> = 
   timestamp: string | number
   model?: string
   requestId?: string
+  apiError?: unknown
+  error?: unknown
+  errorDetails?: string
+  isMeta?: boolean
+  isVirtual?: boolean
+  isApiErrorMessage?: boolean
+  advisorModel?: string
+  container?: unknown
   origin?: MessageOrigin
 }
 
@@ -94,38 +108,46 @@ export type NormalizedAssistantMessage<
   C extends AgentContentBlock = AgentContentBlock,
 > = AssistantMessage<C>
 
-export type NormalizedMessage =
-  | NormalizedUserMessage
-  | NormalizedAssistantMessage
+export type NormalizedMessage = Message
 
 export type Message =
   | NormalizedUserMessage
   | NormalizedAssistantMessage
   | SystemMessage
+  | TombstoneMessage
   | AttachmentMessage
   | ProgressMessage
   | HookResultMessage
   | ToolUseSummaryMessage
   | GroupedToolUseMessage
-  | TombstoneMessage
 
 export type SystemMessage = {
   type: 'system'
   subtype: string
   uuid: string
-  timestamp: number
+  timestamp: string | number
   level?: string
+  toolUseID?: string
+  isMeta?: boolean
   text?: string
+  content?: string
 }
+
+export type SystemMessageLevel = 'info' | 'warn' | 'error' | 'debug'
 
 export type SystemInformationalMessage = SystemMessage & {
   subtype: 'informational'
-  text: string
+  text?: string
+  preventContinuation?: boolean
 }
 
 export type SystemAPIErrorMessage = SystemMessage & {
   subtype: 'api_error'
-  error: string
+  error: unknown
+  cause?: unknown
+  retryInMs?: number
+  retryAttempt?: number
+  maxRetries?: number
 }
 
 export type StopHookInfo = {
@@ -140,6 +162,10 @@ export type SystemStopHookSummaryMessage = SystemMessage & {
   hookCount: number
   totalDurationMs?: number
   hookInfos: StopHookInfo[]
+  hookErrors: string[]
+  preventedContinuation: boolean
+  stopReason?: string
+  hasOutput: boolean
 }
 
 export type SystemAgentsKilledMessage = SystemMessage & {
@@ -148,6 +174,17 @@ export type SystemAgentsKilledMessage = SystemMessage & {
 
 export type SystemApiMetricsMessage = SystemMessage & {
   subtype: 'api_metrics'
+  ttftMs: number
+  otps: number
+  isP50?: boolean
+  hookDurationMs?: number
+  turnDurationMs?: number
+  toolDurationMs?: number
+  classifierDurationMs?: number
+  toolCount?: number
+  hookCount?: number
+  classifierCount?: number
+  configWriteCount?: number
 }
 
 export type SystemAwaySummaryMessage = SystemMessage & {
@@ -156,26 +193,45 @@ export type SystemAwaySummaryMessage = SystemMessage & {
 
 export type SystemBridgeStatusMessage = SystemMessage & {
   subtype: 'bridge_status'
+  url: string
+  upgradeNudge?: string
 }
 
 export type SystemCompactBoundaryMessage = SystemMessage & {
   subtype: 'compact_boundary'
+  compactMetadata?: {
+    trigger: string
+    preTokens: number
+    userContext?: string | undefined
+    messagesSummarized?: number
+  }
+  logicalParentUuid?: string
 }
 
 export type SystemLocalCommandMessage = SystemMessage & {
   subtype: 'local_command'
+  content?: string
 }
 
 export type SystemMemorySavedMessage = SystemMessage & {
   subtype: 'memory_saved'
+  writtenPaths: string[]
 }
 
 export type SystemMicrocompactBoundaryMessage = SystemMessage & {
   subtype: 'microcompact_boundary'
+  microcompactMetadata?: {
+    trigger: string
+    preTokens: number
+    tokensSaved: number
+    compactedToolIds: string[]
+    clearedAttachmentUUIDs: string[]
+  }
 }
 
 export type SystemPermissionRetryMessage = SystemMessage & {
   subtype: 'permission_retry'
+  commands: string[]
 }
 
 export type SystemScheduledTaskFireMessage = SystemMessage & {
@@ -184,6 +240,11 @@ export type SystemScheduledTaskFireMessage = SystemMessage & {
 
 export type SystemTurnDurationMessage = SystemMessage & {
   subtype: 'turn_duration'
+  durationMs: number
+  budgetTokens?: number
+  budgetLimit?: number
+  budgetNudges?: number
+  messageCount?: number
 }
 
 export type ProgressMessage<P extends { type: string } = {
@@ -193,6 +254,8 @@ export type ProgressMessage<P extends { type: string } = {
   toolInput?: unknown
   elapsedTimeSeconds?: number
   totalLines?: number
+  hookEvent?: string
+  hookName?: string
 }> = {
   type: 'progress'
   uuid: string
@@ -207,6 +270,7 @@ export type HookResultMessage = {
   uuid: string
   timestamp: number
   hookName: string
+  message?: unknown
 }
 
 export type Attachment = {
@@ -228,6 +292,7 @@ export type GroupedToolUseMessage = {
   uuid: string
   timestamp: number
   displayMessage: NormalizedAssistantMessage
+  message?: unknown
 }
 
 export type CollapsibleMessage =
@@ -243,14 +308,20 @@ export type RenderableMessage =
   | GroupedToolUseMessage
   | ProgressMessage
 
-export type TombstoneMessage = SystemMessage & {
-  subtype: 'tombstone'
+export type TombstoneMessage = {
+  type: 'tombstone'
+  message: Message
+  uuid?: string
+  timestamp?: string | number
 }
 
 export type ToolUseSummaryMessage = {
   type: 'tool_use_summary'
   uuid: string
-  timestamp: number
+  timestamp: string | number
+  summary: string
+  precedingToolUseIds: string[]
+  message?: unknown
 }
 
 export type CollapsedReadSearchGroup = {

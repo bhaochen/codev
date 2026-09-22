@@ -433,7 +433,11 @@ function isCollapsibleToolResult(
   collapsibleToolUseIds: Set<string>,
 ): msg is CollapsibleMessage {
   if (msg.type === 'user') {
-    const toolResults = msg.message.content.filter(
+    const blocks =
+      typeof msg.message.content === 'string'
+        ? []
+        : msg.message.content
+    const toolResults = blocks.filter(
       (c): c is { type: 'tool_result'; tool_use_id: string } =>
         c.type === 'tool_result',
     )
