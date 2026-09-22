@@ -34,3 +34,6 @@ export const checkProtectedNamespace = stub
 export const getCoordinatorUserContext = stub
 
 export type SSHSession<T = any> = any
+export const createSSHSession = stub
+export const createLocalSSHSession = stub
+export const SSHSessionError = stub

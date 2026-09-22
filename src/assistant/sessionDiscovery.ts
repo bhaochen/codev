@@ -34,3 +34,4 @@ export const checkProtectedNamespace = stub
 export const getCoordinatorUserContext = stub
 
 export type AssistantSession<T = any> = any
+export const discoverAssistantSessions = stub

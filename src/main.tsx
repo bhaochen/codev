@@ -1533,7 +1533,7 @@ async function run(): Promise<CommanderCommand> {
         }
         dynamicMcpConfig = {
           ...dynamicMcpConfig,
-          ...allowed
+          ...(allowed as Record<string, ScopedMcpServerConfig>)
         };
       }
     }
@@ -2316,7 +2316,7 @@ async function run(): Promise<CommanderCommand> {
       // in managed settings). Runs after onboarding so managed settings and
       // login state are fully loaded.
       const orgValidation = await validateForceLoginOrg();
-      if (!orgValidation.valid) {
+      if (orgValidation.valid === false) {
         await exitWithError(root, orgValidation.message);
       }
     }
@@ -2628,7 +2628,7 @@ async function run(): Promise<CommanderCommand> {
       profileCheckpoint('before_validateForceLoginOrg');
       // Validate org restriction for non-interactive sessions
       const orgValidation = await validateForceLoginOrg();
-      if (!orgValidation.valid) {
+      if (orgValidation.valid === false) {
         process.stderr.write(orgValidation.message + '\n');
         process.exit(1);
       }
@@ -4073,8 +4073,8 @@ async function run(): Promise<CommanderCommand> {
   // which redirects to the main command with full TUI support.
   if (feature('DIRECT_CONNECT')) {
     program.command('open <cc-url>').description('Connect to a Claude Code server (internal — use cc:// URLs)').option('-p, --print [prompt]', 'Print mode (headless)').option('--output-format <format>', 'Output format: text, json, stream-json', 'text').action(async (ccUrl: string, opts: {
-      print?: string | boolean;
-      outputFormat: string;
+      print?: string | true;
+      outputFormat?: string;
     }) => {
       const {
         parseConnectUrl

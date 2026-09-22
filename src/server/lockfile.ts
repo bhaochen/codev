@@ -32,3 +32,6 @@ export const markToolsSentToAPI = stub
 export const resetCachedMCState = stub
 export const checkProtectedNamespace = stub
 export const getCoordinatorUserContext = stub
+export const writeServerLock = stub
+export const removeServerLock = stub
+export const probeRunningServer = stub

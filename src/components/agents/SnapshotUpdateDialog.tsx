@@ -15,3 +15,8 @@ export function SnapshotUpdateDialog({ onCancel }: Props) {
 
   return null
 }
+
+export function buildMergePrompt(agentType: string, memory: unknown): string {
+  const serialized = JSON.stringify(memory, null, 2)
+  return `# Merge pending memory snapshot (${agentType})\n\nA pending memory snapshot is available. Merge it into the agent memory.\n\n<memory_snapshot>\n${serialized}\n</memory_snapshot>`
+}

@@ -446,6 +446,16 @@ export async function runHeadless(
     replayUserMessages?: boolean
     includePartialMessages?: boolean
     enableAuthStatus?: boolean
+    continue?: boolean
+    resume?: string | boolean
+    permissionPromptToolName?: string
+    teleport?: string | boolean
+    forkSession?: boolean
+    resumeSessionAt?: string
+    rewindFiles?: string | boolean
+    workload?: string
+    setupTrigger?: 'init' | 'maintenance' | null
+    sessionStartHooksPromise?: Promise<unknown>
     agent?: unknown
   },
 ): Promise<void> {
