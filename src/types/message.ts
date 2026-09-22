@@ -133,7 +133,7 @@ export type SystemMessage = {
   content?: string
 }
 
-export type SystemMessageLevel = 'info' | 'warn' | 'error' | 'debug'
+export type SystemMessageLevel = 'info' | 'warning' | 'error' | 'debug'
 
 export type SystemInformationalMessage = SystemMessage & {
   subtype: 'informational'
@@ -359,7 +359,7 @@ export type CollapsedReadSearchGroup = {
   webFetchURLs?: string[]
 }
 
-export type PartialCompactDirection = 'forward' | 'backward'
+export type PartialCompactDirection = 'from' | 'up_to'
 
 export type RequestStartEvent = {
   type: 'request_start'

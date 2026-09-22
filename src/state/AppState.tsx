@@ -139,7 +139,7 @@ function useAppStore(): AppStateStore {
  * const { text, promptId } = useAppState(s => s.promptSuggestion) // good
  * ```
  */
-export function useAppState(selector) {
+export function useAppState<T>(selector: (state: AppState) => T): T {
   const $ = _c(3);
   const store = useAppStore();
   let t0;

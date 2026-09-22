@@ -139,6 +139,9 @@ import {
   type ToolUseConfirm,
 } from '../components/permissions/PermissionRequest.js'
 import { ElicitationDialog } from '../components/mcp/ElicitationDialog.js'
+import { UltraplanChoiceDialog } from '../components/UltraplanChoiceDialog.js'
+import { UltraplanLaunchDialog } from '../components/UltraplanLaunchDialog.js'
+import { launchUltraplan } from '../commands/ultraplan.js'
 import { PromptDialog } from '../components/hooks/PromptDialog.js'
 import type { PromptRequest, PromptResponse } from '../types/hooks.js'
 import PromptInput from '../components/PromptInput/PromptInput.js'
@@ -302,6 +305,7 @@ import type {
   HookResultMessage,
   PartialCompactDirection,
 } from '../types/message.js'
+import type { AgentContentBlock } from '../types/agentMessage.js'
 import { query } from '../query.js'
 import { mergeClients, useMergedClients } from '../hooks/useMergedClients.js'
 import { getQuerySourceForREPL } from '../utils/promptCategory.js'
@@ -543,8 +547,11 @@ import type { HookProgress } from '../types/hooks.js'
 import { TungstenLiveMonitor } from '../tools/TungstenTool/TungstenLiveMonitor.js'
 /* eslint-disable @typescript-eslint/no-require-imports */
 const WebBrowserPanelModule = feature('WEB_BROWSER_TOOL')
-  ? (require('../tools/WebBrowserTool/WebBrowserPanel.js') as typeof import('../tools/WebBrowserTool/WebBrowserPanel.js'))
+  ? (require('../tools/WebBrowserTool/WebBrowserPanel.js') as typeof import('../tools/WebBrowserTool/WebBrowserPanel.js') & { WebBrowserPanel?: React.ComponentType })
   : null
+const fireCompanionObserver = feature('BUDDY')
+  ? (require('../buddy/companionReact.js').triggerCompanionReaction as typeof import('../buddy/companionReact.js').triggerCompanionReaction)
+  : (() => {}) as typeof import('../buddy/companionReact.js').triggerCompanionReaction
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { IssueFlagBanner } from '../components/PromptInput/IssueFlagBanner.js'
 import { useIssueFlagBanner } from '../hooks/useIssueFlagBanner.js'
@@ -3480,20 +3487,29 @@ export function REPL({
       // don't pass uuid), so it would always be undefined.
       const existingPrompts = new Set<string>()
       for (const m of messagesRef.current) {
+        if (m.type !== 'attachment') continue
+        const att = m.attachment as {
+          type?: string
+          commandMode?: string
+          prompt?: string
+        }
         if (
-          m.type === 'attachment' &&
-          m.attachment.type === 'queued_command' &&
-          m.attachment.commandMode === 'task-notification' &&
-          typeof m.attachment.prompt === 'string'
+          att.type === 'queued_command' &&
+          att.commandMode === 'task-notification' &&
+          typeof att.prompt === 'string'
         ) {
-          existingPrompts.add(m.attachment.prompt)
+          existingPrompts.add(att.prompt)
         }
       }
       const uniqueNotifications = notificationMessages.filter(
-        m =>
-          m.attachment.type === 'queued_command' &&
-          (typeof m.attachment.prompt !== 'string' ||
-            !existingPrompts.has(m.attachment.prompt)),
+        m => {
+          const att = m.attachment as { type?: string; prompt?: string }
+          return (
+            att.type === 'queued_command' &&
+            (typeof att.prompt !== 'string' ||
+              !existingPrompts.has(att.prompt))
+          )
+        },
       )
 
       startBackgroundSession({
@@ -3618,7 +3634,7 @@ export function REPL({
           setMessages(oldMessages =>
             oldMessages.filter(m => m !== tombstonedMessage),
           )
-          void removeTranscriptMessage(tombstonedMessage.uuid)
+          void removeTranscriptMessage(tombstonedMessage.uuid as UUID)
         },
         setStreamingThinking,
         metrics => {
@@ -4750,7 +4766,7 @@ export function REPL({
         // Create and add user message to UI
         // Note: empty input already handled by early return above
         const userMessage = createUserMessage({
-          content: messageContent,
+          content: messageContent as string | AgentContentBlock[],
           imagePasteIds,
         })
         setMessages(prev => [...prev, userMessage])
@@ -5141,7 +5157,7 @@ export function REPL({
       if (!raw || !selectableUserMessagesFilter(raw)) return
       const noFileChanges = !(await fileHistoryHasAnyChanges(
         fileHistory,
-        raw.uuid,
+        raw.uuid as UUID,
       ))
       const onlySynthetic = messagesAfterAreOnlySynthetic(messages, rawIdx)
       if (noFileChanges && onlySynthetic) {
@@ -6775,7 +6791,9 @@ export function REPL({
                         setMessages={setMessages}
                         readFileState={readFileState.current}
                         getAppState={() => store.getState()}
-                        setConversationId={setConversationId}
+                        setConversationId={(id: string) =>
+                          setConversationId(id as UUID)
+                        }
                       />
                     )
                   : null}
@@ -7001,7 +7019,7 @@ export function REPL({
                             fileHistory: updater(prev.fileHistory),
                           }))
                         },
-                        message.uuid,
+                        message.uuid as UUID,
                       )
                     }}
                     onSummarize={async (

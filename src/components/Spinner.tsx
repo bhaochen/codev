@@ -39,6 +39,15 @@ import { getGlobalConfig } from '../utils/config.js';
 export type { SpinnerMode } from './Spinner/index.js';
 const DEFAULT_CHARACTERS = getDefaultCharacters();
 const SPINNER_FRAMES = [...DEFAULT_CHARACTERS, ...[...DEFAULT_CHARACTERS].reverse()];
+function computeTtftText(entries: Array<{ ttftMs: number }>): string {
+  const ttfts = entries.map(e => e.ttftMs).sort((a, b) => a - b)
+  const mid = Math.floor(ttfts.length / 2)
+  const median =
+    ttfts.length % 2 === 1
+      ? ttfts[mid]!
+      : (ttfts[mid - 1]! + ttfts[mid]!) / 2
+  return `ttft ${Math.round(median)}ms`
+}
 type Props = {
   mode: SpinnerMode;
   loadingStartTimeRef: React.RefObject<number>;
@@ -54,6 +63,7 @@ type Props = {
   hasActiveTools?: boolean;
   /** Leader's turn has completed (no active query). Used to suppress stall-red spinner when only teammates are running. */
   leaderIsIdle?: boolean;
+  apiMetricsRef?: { current: Array<{ ttftMs: number }> };
 };
 
 // Thin wrapper: branches on isBriefOnly so the two variants have independent
@@ -92,7 +102,8 @@ function SpinnerWithVerbInner({
   spinnerSuffix,
   verbose,
   hasActiveTools = false,
-  leaderIsIdle = false
+  leaderIsIdle = false,
+  apiMetricsRef,
 }: Props): React.ReactNode {
   const settings = useSettings();
   const reducedMotion = settings.prefersReducedMotion ?? false;
