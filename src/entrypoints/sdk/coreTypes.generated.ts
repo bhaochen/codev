@@ -146,6 +146,18 @@ export type PermissionResult =
 export type HookInput = {
   session_id?: string
   event?: HookEvent
+  hook_event_name?: string
+  tool_name?: string
+  tool_input?: unknown
+  source?: string
+  trigger?: string
+  notification_type?: string
+  reason?: string
+  error?: string
+  agent_type?: string
+  mcp_server_name?: string
+  load_reason?: string
+  file_path?: string
   [key: string]: unknown
 }
 
@@ -183,6 +195,7 @@ export type SessionStartHookInput = any
 export type SessionEndHookInput = any
 export type SetupHookInput = any
 export type StopFailureHookInput = any
+export type StopHookInput = any
 export type SubagentStartHookInput = any
 export type SubagentStopHookInput = any
 export type TeammateIdleHookInput = any

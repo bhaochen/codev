@@ -110,7 +110,11 @@ import type {
 import type { StatusLineCommandInput } from '../types/statusLine.js'
 import type { ElicitResult } from '@modelcontextprotocol/sdk/types.js'
 import type { FileSuggestionCommandInput } from '../types/fileSuggestion.js'
-import type { HookResultMessage } from 'src/types/message.js'
+import type {
+  AttachmentMessage,
+  HookResultMessage,
+  ProgressMessage,
+} from 'src/types/message.js'
 import chalk from 'chalk'
 import type {
   HookMatcher,
@@ -336,7 +340,7 @@ export interface HookBlockingError {
 export type ElicitationResponse = ElicitResult
 
 export interface HookResult {
-  message?: HookResultMessage
+  message?: HookResultMessage | AttachmentMessage
   systemMessage?: string
   blockingError?: HookBlockingError
   outcome: 'success' | 'blocking' | 'non_blocking_error' | 'cancelled'
@@ -356,8 +360,17 @@ export interface HookResult {
   hook: HookCommand | HookCallback | FunctionHook
 }
 
+export type HookProgressData = {
+  type: 'hook_progress'
+  hookEvent: string
+  hookName: string
+  command: string
+  promptText?: string
+  statusMessage?: string
+}
+
 export type AggregatedHookResult = {
-  message?: HookResultMessage
+  message?: HookResultMessage | AttachmentMessage | ProgressMessage
   blockingError?: HookBlockingError
   preventContinuation?: boolean
   stopReason?: string
@@ -1983,7 +1996,7 @@ async function* executeHooks({
     return
   }
 
-  const hookEvent = hookInput.hook_event_name
+  const hookEvent = hookInput.hook_event_name as HookEvent
   const hookName = matchQuery ? `${hookEvent}:${matchQuery}` : hookEvent
 
   // Bind the prompt callback to this hook's name and tool input summary so the UI can display context
@@ -2111,7 +2124,7 @@ async function* executeHooks({
         toolUseID,
         timestamp: new Date().toISOString(),
         uuid: randomUUID(),
-      },
+      } as ProgressMessage<HookProgressData>,
     }
   }
 
@@ -2209,7 +2222,9 @@ async function* executeHooks({
             hookName,
             toolUseID,
             hookEvent,
-            content: `Failed to prepare hook input: ${errorMessage(jsonInputRes.error)}`,
+            content: `Failed to prepare hook input: ${errorMessage(
+              'error' in jsonInputRes ? jsonInputRes.error : undefined,
+            )}`,
             command: hookCommand,
             durationMs: Date.now() - hookStartMs,
           }),
@@ -2244,8 +2259,9 @@ async function* executeHooks({
             att.type === 'hook_success' ||
             att.type === 'hook_non_blocking_error'
           ) {
-            att.command = hookCommand
-            att.durationMs = Date.now() - hookStartMs
+            const timed = att as { command?: string; durationMs?: number }
+            timed.command = hookCommand
+            timed.durationMs = Date.now() - hookStartMs
           }
         }
         yield promptResult
@@ -2284,8 +2300,9 @@ async function* executeHooks({
             att.type === 'hook_success' ||
             att.type === 'hook_non_blocking_error'
           ) {
-            att.command = hookCommand
-            att.durationMs = Date.now() - hookStartMs
+            const timed = att as { command?: string; durationMs?: number }
+            timed.command = hookCommand
+            timed.durationMs = Date.now() - hookStartMs
           }
         }
         yield agentResult
@@ -2412,7 +2429,7 @@ async function* executeHooks({
 
         if (httpJson) {
           const processed = processHookJSONOutput({
-            json: httpJson,
+            json: httpJson as SyncHookJSONOutput,
             command: hook.url,
             hookName,
             toolUseID,
@@ -3017,7 +3034,7 @@ async function executeHooksOutsideREPL({
     return []
   }
 
-  const hookEvent = hookInput.hook_event_name
+  const hookEvent = hookInput.hook_event_name as string
   const hookName = matchQuery ? `${hookEvent}:${matchQuery}` : hookEvent
   if (shouldDisableAllHooksIncludingManaged()) {
     logForDebugging(
@@ -3041,7 +3058,7 @@ async function executeHooksOutsideREPL({
   const matchingHooks = await getMatchingHooks(
     appState,
     sessionId,
-    hookEvent,
+    hookEvent as HookEvent,
     hookInput,
   )
   if (matchingHooks.length === 0) {
@@ -3192,7 +3209,7 @@ async function executeHooksOutsideREPL({
         try {
           const httpResult = await execHttpHook(
             hook,
-            hookEvent,
+            hookEvent as HookEvent,
             jsonInput,
             signal,
           )
@@ -3285,7 +3302,7 @@ async function executeHooksOutsideREPL({
       try {
         const result = await execCommandHook(
           hook,
-          hookEvent,
+          hookEvent as HookEvent,
           hookName,
           jsonInput,
           abortSignal,
@@ -3609,7 +3626,7 @@ export async function executeStopFailureHooks(
   // Some createAssistantAPIErrorMessage call sites omit `error` (e.g.
   // image-size at errors.ts:431). Default to 'unknown' so matcher filtering
   // at getMatchingHooks:1525 always applies.
-  const error = lastMessage.error ?? 'unknown'
+  const error = (lastMessage.error ?? 'unknown') as string
   const hookInput: StopFailureHookInput = {
     ...createBaseHookInput(undefined, undefined, toolUseContext),
     hook_event_name: 'StopFailure',
