@@ -360,9 +360,9 @@ export function annotateBoundaryWithPreservedSegment(
     compactMetadata: {
       ...boundary.compactMetadata,
       preservedSegment: {
-        headUuid: keep[0]!.uuid,
+        headUuid: keep[0]!.uuid as UUID,
         anchorUuid,
-        tailUuid: keep.at(-1)!.uuid,
+        tailUuid: keep.at(-1)!.uuid as UUID,
       },
     },
   }

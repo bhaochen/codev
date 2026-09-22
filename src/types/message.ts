@@ -22,6 +22,7 @@
  * Provider wire formats (Anthropic/OpenAI/...) never appear here.
  */
 
+import type { UUID } from 'crypto'
 import type {
   AgentAssistantMessage,
   AgentMessage,
@@ -204,6 +205,11 @@ export type SystemCompactBoundaryMessage = SystemMessage & {
     preTokens: number
     userContext?: string | undefined
     messagesSummarized?: number
+    preservedSegment?: {
+      headUuid: UUID
+      anchorUuid?: UUID
+      tailUuid: UUID
+    }
   }
   logicalParentUuid?: string
 }
