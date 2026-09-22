@@ -8,7 +8,6 @@ import type {
   BetaStopReason,
 } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
 import { AFK_MODE_BETA_HEADER } from 'src/constants/betas.js'
-import type { SDKAssistantMessageError } from 'src/entrypoints/agentSdkTypes.js'
 import type {
   AssistantMessage,
   Message,
@@ -1179,7 +1178,7 @@ export function classifyAPIError(error: unknown): string {
 
 export function categorizeRetryableAPIError(
   error: APIError,
-): SDKAssistantMessageError {
+): string {
   if (
     error.status === 529 ||
     error.message?.includes('"type":"overloaded_error"')

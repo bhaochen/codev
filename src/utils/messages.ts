@@ -92,7 +92,6 @@ import type {
 } from '../types/agentMessage.js'
 import type {
   HookEvent,
-  SDKAssistantMessageError,
 } from 'src/entrypoints/agentSdkTypes.js'
 import { EXPLORE_AGENT } from 'src/tools/AgentTool/built-in/exploreAgent.js'
 import { PLAN_AGENT } from 'src/tools/AgentTool/built-in/planAgent.js'
@@ -373,7 +372,7 @@ function baseCreateAssistantMessage({
   content: AgentContentBlock[]
   isApiErrorMessage?: boolean
   apiError?: AssistantMessage['apiError']
-  error?: SDKAssistantMessageError
+  error?: string
   errorDetails?: string
   isVirtual?: true
   usage?: Usage
@@ -435,7 +434,7 @@ export function createAssistantAPIErrorMessage({
 }: {
   content: string
   apiError?: AssistantMessage['apiError']
-  error?: SDKAssistantMessageError
+  error?: string
   errorDetails?: string
 }): AssistantMessage {
   return baseCreateAssistantMessage({
