@@ -9,17 +9,17 @@
  */
 
 import type {
-  ContentBlockParam,
-  TextBlockParam,
-  ImageBlockParam,
-  DocumentBlockParam,
-  ToolUseBlockParam,
-  ToolResultBlockParam,
-  RedactedThinkingBlockParam,
-  MessageParam,
-  ThinkingBlockParam,
-  CacheControlEphemeral,
-} from '@anthropic-ai/sdk/resources/messages.mjs'
+  BetaContentBlockParam as ContentBlockParam,
+  BetaTextBlockParam as TextBlockParam,
+  BetaImageBlockParam as ImageBlockParam,
+  BetaRequestDocumentBlock as DocumentBlockParam,
+  BetaToolUseBlockParam as ToolUseBlockParam,
+  BetaToolResultBlockParam as ToolResultBlockParam,
+  BetaRedactedThinkingBlockParam as RedactedThinkingBlockParam,
+  BetaMessageParam as MessageParam,
+  BetaThinkingBlockParam as ThinkingBlockParam,
+  BetaCacheControlEphemeral as CacheControlEphemeral,
+} from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
 
 import type {
   AgentContentBlock,
@@ -74,7 +74,7 @@ export function anthropicBlockToAgent(block: ContentBlockParam): AgentContentBlo
       // Unmodeled wire-format block (server tool use, MCP blocks, container
       // uploads, ...): pass through verbatim via the escape hatch so nothing
       // is dropped when the conversation is replayed to a provider.
-      return { ...(block as Record<string, unknown>), type: block.type } as unknown as AgentProviderContentBlock
+      return { ...(block as unknown as Record<string, unknown>), type: block.type } as unknown as AgentProviderContentBlock
   }
 }
 
@@ -93,16 +93,16 @@ function anthropicTextBlockToAgent(block: TextBlockParam): AgentTextBlock {
 
 function anthropicImageBlockToAgent(block: ImageBlockParam): AgentImageBlock {
   // Both base64 and URL sources are preserved losslessly.
-  return {
+return {
     type: 'image',
-    source: block.source,
+    source: block.source as unknown as AgentImageBlock['source'],
   }
 }
 
 function anthropicDocumentBlockToAgent(block: DocumentBlockParam): AgentDocumentBlock {
   return {
     type: 'document',
-    source: block.source,
+    source: block.source as unknown as AgentDocumentBlock['source'],
     ...(block.title !== undefined && { title: block.title }),
     ...(block.context !== undefined && { context: block.context }),
     ...(block.cache_control && {
@@ -132,7 +132,7 @@ function anthropicToolResultBlockToAgent(block: ToolResultBlockParam): AgentTool
   if (typeof block.content === 'string') {
     content = block.content
   } else if (Array.isArray(block.content)) {
-    content = block.content.map(anthropicBlockToAgent)
+    content = block.content.map((b) => anthropicBlockToAgent(b as unknown as ContentBlockParam))
   }
 
   return {
@@ -174,19 +174,19 @@ function anthropicRedactedThinkingBlockToAgent(
 export function agentBlockToAnthropic(block: AgentContentBlock): ContentBlockParam {
   switch (block.type) {
     case 'text':
-      return agentTextBlockToAnthropic(block)
+      return agentTextBlockToAnthropic(block as AgentTextBlock)
     case 'image':
-      return agentImageBlockToAnthropic(block)
+      return agentImageBlockToAnthropic(block as AgentImageBlock)
     case 'document':
-      return agentDocumentBlockToAnthropic(block)
+      return agentDocumentBlockToAnthropic(block as AgentDocumentBlock)
     case 'tool_use':
-      return agentToolUseBlockToAnthropic(block)
+      return agentToolUseBlockToAnthropic(block as AgentToolUseBlock)
     case 'tool_result':
-      return agentToolResultBlockToAnthropic(block)
+      return agentToolResultBlockToAnthropic(block as AgentToolResultBlock)
     case 'thinking':
-      return agentThinkingBlockToAnthropic(block)
+      return agentThinkingBlockToAnthropic(block as AgentThinkingBlock)
     case 'redacted_thinking':
-      return agentRedactedThinkingBlockToAnthropic(block)
+      return agentRedactedThinkingBlockToAnthropic(block as AgentRedactedThinkingBlock)
     default:
       // Escape-hatch block: pass through verbatim. The Agent Core never
       // modified it, so it is still a valid wire-format block.
@@ -208,7 +208,7 @@ function agentImageBlockToAnthropic(block: AgentImageBlock): ImageBlockParam {
   const providerOpts = block.providerOptions
   return {
     type: 'image',
-    source: block.source,
+    source: block.source as unknown as ImageBlockParam['source'],
     ...(providerOpts?.cache_control && { cache_control: providerOpts.cache_control as CacheControlEphemeral }),
   }
 }
@@ -217,7 +217,7 @@ function agentDocumentBlockToAnthropic(block: AgentDocumentBlock): DocumentBlock
   const providerOpts = block.providerOptions
   return {
     type: 'document',
-    source: block.source,
+    source: block.source as unknown as DocumentBlockParam['source'],
     ...(block.title !== undefined && { title: block.title }),
     ...(block.context !== undefined && { context: block.context }),
     ...(providerOpts?.cache_control && { cache_control: providerOpts.cache_control as CacheControlEphemeral }),
@@ -232,7 +232,7 @@ function agentToolUseBlockToAnthropic(block: AgentToolUseBlock): ToolUseBlockPar
     name: block.name,
     input: block.input,
     ...(providerOpts?.cache_control && { cache_control: providerOpts.cache_control as CacheControlEphemeral }),
-    ...(providerOpts?.caller && { caller: providerOpts.caller }),
+    ...(providerOpts?.caller && { caller: providerOpts.caller as ToolUseBlockParam['caller'] }),
   }
 }
 
@@ -243,7 +243,7 @@ function agentToolResultBlockToAnthropic(block: AgentToolResultBlock): ToolResul
   if (typeof block.content === 'string') {
     content = block.content
   } else if (Array.isArray(block.content)) {
-    content = block.content.map(agentBlockToAnthropic)
+    content = block.content.map(agentBlockToAnthropic) as unknown as ToolResultBlockParam['content']
   }
 
   return {
