@@ -529,7 +529,7 @@ export class StreamingToolExecutor {
     while (this.hasUnfinishedTools()) {
       await this.processQueue()
 
-      for (const result of this.getCompletedResults()) {
+      for await (const result of this.getCompletedResults()) {
         yield result
       }
 
@@ -555,7 +555,7 @@ export class StreamingToolExecutor {
       }
     }
 
-    for (const result of this.getCompletedResults()) {
+    for await (const result of this.getCompletedResults()) {
       yield result
     }
   }

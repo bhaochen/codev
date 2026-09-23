@@ -133,7 +133,7 @@ export function getBarePromptPressureRatio(): number {
     userContext: 0.1,
     systemContext: 0.05,
     customPrompt: 0.05,
-  } as const
+  }
 
   const levelRatios: Record<Exclude<BareModeLevel, 'low'>, typeof sourceWeights> = {
     medium: {

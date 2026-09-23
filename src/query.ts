@@ -1,4 +1,5 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
+import type { UUID } from 'crypto'
 import type {
   AgentToolResultBlock,
   AgentToolUseBlock,
@@ -144,7 +145,7 @@ function* yieldMissingToolResultBlocks(
           },
         ],
         toolUseResult: errorMessage,
-        sourceToolAssistantUUID: assistantMessage.uuid,
+        sourceToolAssistantUUID: assistantMessage.uuid as UUID,
       })
     }
   }
@@ -871,7 +872,7 @@ async function* queryLoop(
               streamingToolExecutor &&
               !toolUseContext.abortController.signal.aborted
             ) {
-              for (const result of streamingToolExecutor.getCompletedResults()) {
+              for await (const result of streamingToolExecutor.getCompletedResults()) {
                 if (result.message) {
                   yield result.message
                   toolResults.push(

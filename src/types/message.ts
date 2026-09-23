@@ -205,6 +205,7 @@ export type SystemCompactBoundaryMessage = SystemMessage & {
     preTokens: number
     userContext?: string | undefined
     messagesSummarized?: number
+    preCompactDiscoveredTools?: string[]
     preservedSegment?: {
       headUuid: UUID
       anchorUuid?: UUID

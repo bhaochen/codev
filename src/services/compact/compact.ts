@@ -27,6 +27,8 @@ import type {
   HookResultMessage,
   Message,
   PartialCompactDirection,
+  StreamEvent,
+  SystemAPIErrorMessage,
   SystemCompactBoundaryMessage,
   SystemMessage,
   UserMessage,
@@ -603,7 +605,7 @@ export async function compactConversation(
     const boundaryMarker = createCompactBoundaryMessage(
       isAutoCompact ? 'auto' : 'manual',
       preCompactTokenCount ?? 0,
-      messages.at(-1)?.uuid,
+      messages.at(-1)?.uuid as UUID | undefined,
     )
     // Carry loaded-tool state — the summary doesn't preserve tool_reference
     // blocks, so the post-compact schema filter needs this to keep sending
@@ -1019,7 +1021,7 @@ export async function partialCompactConversation(
     const boundaryMarker = createCompactBoundaryMessage(
       'manual',
       preCompactTokenCount ?? 0,
-      lastPreCompactUuid,
+      lastPreCompactUuid as UUID | undefined,
       userFeedback,
       messagesToSummarize.length,
     )
@@ -1087,7 +1089,7 @@ export async function partialCompactConversation(
     return {
       boundaryMarker: annotateBoundaryWithPreservedSegment(
         boundaryMarker,
-        anchorUuid,
+        anchorUuid as UUID,
         messagesToKeep,
       ),
       summaryMessages,
@@ -1338,7 +1340,11 @@ async function streamCompactSummary({
       let next = await streamIter.next()
 
       while (!next.done) {
-        const event = next.value
+        const event = next.value as
+          | { type: 'stream_event'; event: StreamEvent }
+          | AssistantMessage
+          | SystemAPIErrorMessage
+          | undefined
 
         if (
           !hasStartedStreaming &&
@@ -1353,9 +1359,12 @@ async function streamCompactSummary({
         if (
           event.type === 'stream_event' &&
           event.event.type === 'content_block_delta' &&
-          event.event.delta.type === 'text_delta'
+          (event.event.delta as { type?: string; text?: string }).type ===
+            'text_delta'
         ) {
-          const charactersStreamed = event.event.delta.text.length
+          const charactersStreamed =
+            (event.event.delta as { type?: string; text?: string }).text
+              ?.length ?? 0
           context.setResponseLength?.(length => length + charactersStreamed)
         }
 
@@ -1580,7 +1589,8 @@ export async function createAsyncAgentAttachmentsIfNeeded(
 ): Promise<AttachmentMessage[]> {
   const appState = context.getAppState()
   const asyncAgents = Object.values(appState.tasks).filter(
-    (task): task is LocalAgentTaskState => task.type === 'local_agent',
+    (task): task is LocalAgentTaskState =>
+      (task as LocalAgentTaskState | undefined)?.type === 'local_agent',
   )
 
   return asyncAgents.flatMap(agent => {

@@ -14,7 +14,7 @@ export function getTokenUsage(message: Message): Usage | undefined {
     ) &&
     message.message.model !== SYNTHETIC_MODEL
   ) {
-    return message.message.usage
+    return message.message.usage as unknown as Usage
   }
   return undefined
 }
