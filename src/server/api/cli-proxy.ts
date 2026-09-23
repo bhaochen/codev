@@ -20,7 +20,7 @@ type ProviderClientConfig = {
 
 // Map authProvider to API config
 async function getCliProviderConfig(): Promise<ProviderClientConfig | null> {
-  const config = await readCliAuthProvider()
+  const config = (await readCliAuthProvider()) as { [key: string]: string | undefined } | null
   const authProvider = config?.authProvider
 
   switch (authProvider) {

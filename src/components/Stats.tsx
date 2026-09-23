@@ -124,8 +124,8 @@ function StatsContent(t0) {
     allTimePromise,
     onClose
   } = t0;
-  const allTimeResult = use(allTimePromise);
-  const [dateRange, setDateRange] = useState("all");
+  const allTimeResult = use(allTimePromise) as StatsResult;
+  const [dateRange, setDateRange] = useState<StatsDateRange>("all");
   let t1;
   if ($[0] === Symbol.for("react.memo_cache_sentinel")) {
     t1 = {};
@@ -216,7 +216,7 @@ function StatsContent(t0) {
         setDateRange(getNextDateRange(dateRange));
       }
       if (key.ctrl && input === "s" && displayStats) {
-        handleScreenshot(displayStats, activeTab, setCopyStatus);
+        handleScreenshot(displayStats, activeTab as 'Overview' | 'Models', setCopyStatus);
       }
     };
     $[8] = activeTab;
