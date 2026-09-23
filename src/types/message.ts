@@ -134,7 +134,7 @@ export type SystemMessage = {
   content?: string
 }
 
-export type SystemMessageLevel = 'info' | 'warning' | 'error' | 'debug'
+export type SystemMessageLevel = 'info' | 'warning' | 'error' | 'debug' | 'suggestion'
 
 export type SystemInformationalMessage = SystemMessage & {
   subtype: 'informational'

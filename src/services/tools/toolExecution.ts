@@ -1,4 +1,5 @@
 import { feature } from 'bun:bundle'
+import type { UUID } from 'crypto'
 import type {
   AgentContentBlock,
   AgentToolResultBlock,
@@ -405,7 +406,7 @@ export async function* runToolUse(
           },
         ],
         toolUseResult: `Error: No such tool available: ${toolName}`,
-        sourceToolAssistantUUID: assistantMessage.uuid,
+        sourceToolAssistantUUID: assistantMessage.uuid as UUID,
       }),
     }
     return
@@ -447,7 +448,7 @@ export async function* runToolUse(
         message: createUserMessage({
           content: [content],
           toolUseResult: CANCEL_MESSAGE,
-          sourceToolAssistantUUID: assistantMessage.uuid,
+          sourceToolAssistantUUID: assistantMessage.uuid as UUID,
         }),
       }
       return
@@ -484,7 +485,7 @@ export async function* runToolUse(
           },
         ],
         toolUseResult: detailedError,
-        sourceToolAssistantUUID: assistantMessage.uuid,
+        sourceToolAssistantUUID: assistantMessage.uuid as UUID,
       }),
     }
   }
@@ -697,7 +698,7 @@ async function checkPermissionsAndCallTool(
             },
           ],
           toolUseResult: `InputValidationError: ${guard.issuesMessage}`,
-          sourceToolAssistantUUID: assistantMessage.uuid,
+          sourceToolAssistantUUID: assistantMessage.uuid as UUID,
         }),
       },
     ]
@@ -751,7 +752,7 @@ async function checkPermissionsAndCallTool(
             },
           ],
           toolUseResult: `Error: ${isValidCall.message}`,
-          sourceToolAssistantUUID: assistantMessage.uuid,
+          sourceToolAssistantUUID: assistantMessage.uuid as UUID,
         }),
       },
     ]
@@ -847,8 +848,8 @@ async function checkPermissionsAndCallTool(
             att.durationMs !== undefined
           ) {
             preToolHookInfos.push({
-              command: att.command,
-              durationMs: att.durationMs,
+              command: att.command as string,
+              durationMs: att.durationMs as number,
             })
           }
         }
@@ -879,7 +880,7 @@ async function checkPermissionsAndCallTool(
           message: createUserMessage({
             content: [createToolResultStopMessage(toolUseID)],
             toolUseResult: `Error: ${stopReason}`,
-            sourceToolAssistantUUID: assistantMessage.uuid,
+            sourceToolAssistantUUID: assistantMessage.uuid as UUID,
           }),
         })
         return resultingMessages
@@ -1091,7 +1092,7 @@ async function checkPermissionsAndCallTool(
         content: messageContent,
         imagePasteIds: rejectImageIds,
         toolUseResult: `Error: ${errorMessage}`,
-        sourceToolAssistantUUID: assistantMessage.uuid,
+        sourceToolAssistantUUID: assistantMessage.uuid as UUID,
       }),
     })
 
@@ -1433,14 +1434,18 @@ async function checkPermissionsAndCallTool(
       // don't modify the output), otherwise map from scratch.
       const toolResultBlock = preMappedBlock
         ? await processPreMappedToolResultBlock(
-            preMappedBlock,
+            preMappedBlock as unknown as Parameters<
+              typeof processPreMappedToolResultBlock
+            >[0],
             tool.name,
             tool.maxResultSizeChars,
           )
         : await processToolResultBlock(tool, toolUseResult, toolUseID)
 
       // Build content blocks - tool result first, then optional feedback
-      const contentBlocks: AgentContentBlock[] = [toolResultBlock]
+      const contentBlocks: AgentContentBlock[] = [
+        toolResultBlock as unknown as AgentContentBlock,
+      ]
       // Add accept feedback if user provided feedback when approving
       // (acceptFeedback only exists on PermissionAllowDecision, which is guaranteed here)
       if (
@@ -1487,7 +1492,7 @@ async function checkPermissionsAndCallTool(
               ? undefined
               : toolUseResult,
           mcpMeta: toolUseContext.agentId ? undefined : mcpMeta,
-          sourceToolAssistantUUID: assistantMessage.uuid,
+          sourceToolAssistantUUID: assistantMessage.uuid as UUID,
         }),
         contextModifier: toolContextModifier
           ? {
@@ -1500,7 +1505,10 @@ async function checkPermissionsAndCallTool(
 
     // TOOD(hackyon): refactor so we don't have different experiences for MCP tools
     if (!isMcpTool(tool)) {
-      await addToolResult(toolOutput, mappedToolResultBlock)
+      await addToolResult(
+      toolOutput,
+      mappedToolResultBlock as unknown as AgentToolResultBlock,
+    )
     }
 
     const postToolHookInfos: StopHookInfo[] = []
@@ -1531,8 +1539,8 @@ async function checkPermissionsAndCallTool(
             att.durationMs !== undefined
           ) {
             postToolHookInfos.push({
-              command: att.command,
-              durationMs: att.durationMs,
+              command: att.command as string,
+              durationMs: att.durationMs as number,
             })
           }
         }
@@ -1547,8 +1555,8 @@ async function checkPermissionsAndCallTool(
             att.durationMs !== undefined
           ) {
             postToolHookInfos.push({
-              command: att.command,
-              durationMs: att.durationMs,
+              command: att.command as string,
+              durationMs: att.durationMs as number,
             })
           }
         }
@@ -1755,7 +1763,7 @@ async function checkPermissionsAndCallTool(
                 McpToolCallError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
               ? error.mcpMeta
               : undefined,
-          sourceToolAssistantUUID: assistantMessage.uuid,
+          sourceToolAssistantUUID: assistantMessage.uuid as UUID,
         }),
       },
       ...hookMessages,
