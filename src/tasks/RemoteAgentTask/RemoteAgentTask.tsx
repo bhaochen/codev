@@ -56,6 +56,7 @@ export type RemoteAgentTaskState = TaskStateBase & {
    * and detail dialog status line.
    */
   ultraplanPhase?: Exclude<UltraplanPhase, 'running'>;
+  notified?: boolean;
 };
 const REMOTE_TASK_TYPES = ['remote-agent', 'ultraplan', 'ultrareview', 'autofix-pr', 'background-pr'] as const;
 export type RemoteTaskType = (typeof REMOTE_TASK_TYPES)[number];
@@ -188,7 +189,7 @@ function enqueueRemoteNotification(taskId: string, title: string, status: 'compl
  */
 function markTaskNotified(taskId: string, setAppState: SetAppState): boolean {
   let shouldEnqueue = false;
-  updateTaskState(taskId, setAppState, task => {
+  updateTaskState<RemoteAgentTaskState>(taskId, setAppState, task => {
     if (task.notified) {
       return task;
     }
@@ -210,7 +211,7 @@ export function extractPlanFromLog(log: SDKMessage[]): string | null {
   for (let i = log.length - 1; i >= 0; i--) {
     const msg = log[i];
     if (msg?.type !== 'assistant') continue;
-    const fullText = extractTextContent(msg.message.content, '\n');
+    const fullText = extractTextContent(msg.message.content as { type: string }[], '\n');
     const plan = extractTag(fullText, ULTRAPLAN_TAG);
     if (plan?.trim()) return plan.trim();
   }
@@ -258,14 +259,14 @@ function extractReviewFromLog(log: SDKMessage[]): string | null {
     // hook_progress or the terminal hook_response depending on buffering;
     // both have flat stdout.
     if (msg?.type === 'system' && (msg.subtype === 'hook_progress' || msg.subtype === 'hook_response')) {
-      const tagged = extractTag(msg.stdout, REMOTE_REVIEW_TAG);
+      const tagged = extractTag(msg.stdout as string, REMOTE_REVIEW_TAG);
       if (tagged?.trim()) return tagged.trim();
     }
   }
   for (let i = log.length - 1; i >= 0; i--) {
     const msg = log[i];
     if (msg?.type !== 'assistant') continue;
-    const fullText = extractTextContent(msg.message.content, '\n');
+    const fullText = extractTextContent(msg.message.content as { type: string }[], '\n');
     const tagged = extractTag(fullText, REMOTE_REVIEW_TAG);
     if (tagged?.trim()) return tagged.trim();
   }
@@ -278,7 +279,7 @@ function extractReviewFromLog(log: SDKMessage[]): string | null {
   if (hookTagged?.trim()) return hookTagged.trim();
 
   // Fallback: concatenate all assistant text in chronological order.
-  const allText = log.filter((msg): msg is SDKAssistantMessage => msg.type === 'assistant').map(msg => extractTextContent(msg.message.content, '\n')).join('\n').trim();
+  const allText = log.filter((msg): msg is SDKAssistantMessage => msg.type === 'assistant').map(msg => extractTextContent(msg.message.content as { type: string }[], '\n')).join('\n').trim();
   return allText || null;
 }
 
@@ -297,7 +298,7 @@ function extractReviewTagFromLog(log: SDKMessage[]): string | null {
   for (let i = log.length - 1; i >= 0; i--) {
     const msg = log[i];
     if (msg?.type === 'system' && (msg.subtype === 'hook_progress' || msg.subtype === 'hook_response')) {
-      const tagged = extractTag(msg.stdout, REMOTE_REVIEW_TAG);
+      const tagged = extractTag(msg.stdout as string, REMOTE_REVIEW_TAG);
       if (tagged?.trim()) return tagged.trim();
     }
   }
@@ -306,7 +307,7 @@ function extractReviewTagFromLog(log: SDKMessage[]): string | null {
   for (let i = log.length - 1; i >= 0; i--) {
     const msg = log[i];
     if (msg?.type !== 'assistant') continue;
-    const fullText = extractTextContent(msg.message.content, '\n');
+    const fullText = extractTextContent(msg.message.content as { type: string }[], '\n');
     const tagged = extractTag(fullText, REMOTE_REVIEW_TAG);
     if (tagged?.trim()) return tagged.trim();
   }
@@ -363,11 +364,11 @@ Remote review did not produce output (${reason}). Tell the user to retry /ultrar
  * Extract todo list from SDK messages (finds last TodoWrite tool use).
  */
 function extractTodoListFromLog(log: SDKMessage[]): TodoList {
-  const todoListMessage = log.findLast((msg): msg is SDKAssistantMessage => msg.type === 'assistant' && msg.message.content.some(block => block.type === 'tool_use' && block.name === TodoWriteTool.name));
+  const todoListMessage = log.findLast((msg): msg is SDKAssistantMessage => msg.type === 'assistant' && (msg.message.content as { type: string; name?: string }[]).some(block => block.type === 'tool_use' && block.name === TodoWriteTool.name));
   if (!todoListMessage) {
     return [];
   }
-  const input = todoListMessage.message.content.find((block): block is ToolUseBlock => block.type === 'tool_use' && block.name === TodoWriteTool.name)?.input;
+  const input = (todoListMessage.message.content as ToolUseBlock[]).find((block): block is ToolUseBlock => block.type === 'tool_use' && block.name === TodoWriteTool.name)?.input;
   if (!input) {
     return [];
   }
@@ -568,7 +569,7 @@ function startRemoteSessionPolling(taskId: string, context: TaskContext): () => 
         accumulatedLog = [...accumulatedLog, ...response.newEvents];
         const deltaText = response.newEvents.map(msg => {
           if (msg.type === 'assistant') {
-            return msg.message.content.filter(block => block.type === 'text').map(block => 'text' in block ? block.text : '').join('\n');
+            return (msg.message.content as { type: string; text?: string }[]).filter(block => block.type === 'text').map(block => 'text' in block ? block.text : '').join('\n');
           }
           return jsonStringify(msg);
         }).join('\n');
@@ -630,7 +631,7 @@ function startRemoteSessionPolling(taskId: string, context: TaskContext): () => 
         const close = `</${REMOTE_REVIEW_PROGRESS_TAG}>`;
         for (const ev of response.newEvents) {
           if (ev.type === 'system' && (ev.subtype === 'hook_progress' || ev.subtype === 'hook_response')) {
-            const s = ev.stdout;
+            const s = ev.stdout as string;
             const closeAt = s.lastIndexOf(close);
             const openAt = closeAt === -1 ? -1 : s.lastIndexOf(open, closeAt);
             if (openAt !== -1 && closeAt > openAt) {
@@ -742,10 +743,10 @@ function startRemoteSessionPolling(taskId: string, context: TaskContext): () => 
           }
 
           // No output or remote error — mark failed with a review-specific message.
-          updateTaskState(taskId, context.setAppState, t => ({
-            ...t,
-            status: 'failed'
-          }));
+updateTaskState<RemoteAgentTaskState>(taskId, context.setAppState, t => ({
+  ...t,
+  status: 'failed'
+}));
           const reason = result && result.subtype !== 'success' ? 'remote session returned an error' : reviewTimedOut && !sessionDone ? 'remote session exceeded 30 minutes' : 'no review output — orchestrator may have exited early';
           enqueueRemoteReviewFailureNotification(taskId, reason, context.setAppState);
           void evictTaskOutput(taskId);
@@ -768,11 +769,11 @@ function startRemoteSessionPolling(taskId: string, context: TaskContext): () => 
         const appState = context.getAppState();
         const task = appState.tasks?.[taskId] as RemoteAgentTaskState | undefined;
         if (task?.isRemoteReview && task.status === 'running' && Date.now() - task.pollStartedAt > REMOTE_REVIEW_TIMEOUT_MS) {
-          updateTaskState(taskId, context.setAppState, t => ({
-            ...t,
-            status: 'failed',
-            endTime: Date.now()
-          }));
+updateTaskState<RemoteAgentTaskState>(taskId, context.setAppState, t => ({
+  ...t,
+  status: 'failed',
+  endTime: Date.now()
+}));
           enqueueRemoteReviewFailureNotification(taskId, 'remote session exceeded 30 minutes', context.setAppState);
           void evictTaskOutput(taskId);
           void removeRemoteAgentMetadata(taskId);
