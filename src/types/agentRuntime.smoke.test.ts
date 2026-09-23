@@ -1,9 +1,10 @@
 process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "test-key-for-wire-tests"
 import { describe, test, expect } from 'bun:test'
+import type { UUID } from 'crypto'
 import type {
-  ContentBlockParam,
-  MessageParam,
-} from '@anthropic-ai/sdk/resources/messages.mjs'
+  BetaMessageParam as MessageParam,
+  BetaContentBlockParam as ContentBlockParam,
+} from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
 import {
   createAssistantMessage,
   createThinkingBlock,
@@ -59,7 +60,7 @@ const UUID = 'runtime-smoke-uuid'
 const TS = 1700000000000
 
 function wireContent(param: MessageParam): ContentBlockParam[] {
-  return Array.isArray(param.content) ? param.content : [param.content]
+  return Array.isArray(param.content) ? param.content : [param.content as unknown as ContentBlockParam]
 }
 
 function expectNoProviderOptions(blocks: ContentBlockParam[]): void {
@@ -174,7 +175,7 @@ async function buildRuntimeLifecycle() {
   //        the result back to the assistant message that made the tool_use).
   const toolResultUser = createStoreUserMessage({
     content: [processedToolResult as unknown as AgentContentBlock],
-    sourceToolAssistantUUID: assistant1.message.uuid,
+    sourceToolAssistantUUID: assistant1.message.uuid as UUID,
   })
   expect(toolResultUser.message.content[0]).toEqual({
     type: 'tool_result',
@@ -255,7 +256,7 @@ describe('runtime lifecycle: user → assistant → tool_use → tool_result →
       type: 'text',
       text: 'I will list the repo root for you.',
       citations: CITATIONS,
-    })
+    } as never)
     expect(a1[1]).toEqual({
       type: 'thinking',
       thinking: 'Determine the repo layout first',
@@ -319,7 +320,7 @@ describe('runtime lifecycle: user → assistant → tool_use → tool_result →
       tool_use_id: 'tu_1',
       content: 'Structured output provided successfully',
       cache_reference: 'tu_1',
-    })
+    } as never)
     expectNoProviderOptions(a2)
     // Marker still lands on the last assistant's text block.
     expect(wireContent(params[3]!)[0]).toEqual({
@@ -360,7 +361,7 @@ describe('runtime lifecycle: wire conversion without caching', () => {
         name: 'StructuredOutput',
         input: { format: 'summary', count: 3 },
       },
-    ])
+    ] as never)
     expectNoProviderOptions(content)
     expect(content[0]).not.toHaveProperty('cache_control')
     expect(content[1]).not.toHaveProperty('cache_control')
@@ -425,7 +426,7 @@ describe('runtime lifecycle: escape-hatch blocks', () => {
     expect(wireContent(param)).toEqual([
       { type: 'server_tool_use', id: 'srv_1', name: 'mcp_tool', input: { a: 1 } },
       { type: 'advisor_tool_result', tool_use_id: 'srv_1', content: 'mcp ok' },
-    ])
+    ] as never)
     expectNoProviderOptions(wireContent(param))
   })
 })

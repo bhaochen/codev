@@ -22,9 +22,9 @@ import {
   userMessageToMessageParam,
 } from '../services/llm/clients/anthropicMessages.js'
 import type {
-  ContentBlockParam,
-  MessageParam,
-} from '@anthropic-ai/sdk/resources/messages.mjs'
+  BetaMessageParam as MessageParam,
+  BetaContentBlockParam as ContentBlockParam,
+} from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
 
 // ============================================================================
 // Path test: Agent Core → AgentMessage → Anthropic Adapter → Anthropic API
@@ -63,7 +63,7 @@ function assistantMsg(content: AgentContentBlock[]) {
 }
 
 function wireContent(param: MessageParam): ContentBlockParam[] {
-  return Array.isArray(param.content) ? param.content : [param.content]
+  return Array.isArray(param.content) ? param.content : [param.content as unknown as ContentBlockParam]
 }
 
 function expectNoProviderOptions(blocks: ContentBlockParam[]): void {
@@ -406,7 +406,7 @@ describe('store → wire roundtrip (normalized content re-encodes losslessly)', 
         citations,
         cache_control: { type: 'ephemeral' },
       },
-    ])
+    ] as never)
   })
 
   test('escape-hatch block survives store → wire verbatim', () => {
@@ -417,7 +417,7 @@ describe('store → wire roundtrip (normalized content re-encodes losslessly)', 
     const wire = stored.map(agentBlockToAnthropic)
     expect(wire).toEqual([
       { type: 'server_tool_use', id: 's1', name: 'mcp', input: { a: 1 } },
-    ])
+    ] as never)
   })
 
   test('normalizeContentFromAPI is the inverse of wire conversion for modelable blocks', () => {
