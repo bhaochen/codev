@@ -1022,7 +1022,7 @@ export const LocationTool = buildTool({
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
-      logError('LocationTool error', error)
+      logError(new Error('LocationTool error', { cause: error }))
 
       return {
         data: {

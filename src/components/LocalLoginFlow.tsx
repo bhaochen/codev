@@ -36,7 +36,7 @@ export function LocalLoginFlow({ onDone, startingMessage }: Props) {
   const [existingModelName, setExistingModelName] = useState<string | null>(null)
   const fetchAbortRef = useRef<AbortController | null>(null)
   const fetchPromiseRef = useRef<Promise<void> | null>(null)
-  const fetchResolveRef = useRef<() => void>()
+  const fetchResolveRef = useRef<(() => void) | undefined>(undefined)
 
   useEffect(() => {
     const baseUrl = getLocalBaseUrl()

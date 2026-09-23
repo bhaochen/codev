@@ -99,7 +99,7 @@ async function searchSearXNG(
         image: r.img_src || r.thumbnail || undefined,
       }))
   } catch (error) {
-    logError('SearXNG search failed', error)
+    logError(new Error('SearXNG search failed', { cause: error }))
     throw new Error(
       `SearXNG search failed: ${error instanceof Error ? error.message : String(error)}`
     )
@@ -132,7 +132,7 @@ async function searchTavily(
       image: r.img || r.image || undefined,
     }))
   } catch (error) {
-    logError('Tavily search failed', error)
+    logError(new Error('Tavily search failed', { cause: error }))
     throw new Error(
       `Tavily search failed: ${error instanceof Error ? error.message : String(error)}`
     )

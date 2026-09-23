@@ -562,7 +562,7 @@ export async function getURLMarkdownContent(
     return entry
   } catch (error) {
     console.error('[WebFetch] Local fetch failed:', error)
-    logError('Local fetch failed', error)
+    logError(new Error('Local fetch failed', { cause: error }))
 
     throw new Error(`Failed to fetch URL: ${error instanceof Error ? error.message : String(error)}`)
   }

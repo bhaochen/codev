@@ -15,6 +15,7 @@ import type { SDKControlResponse } from '../entrypoints/sdk/controlTypes.js';
 import { Text } from '../ink.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js';
 import { useAppState, useAppStateStore, useSetAppState } from '../state/AppState.js';
+import type { AgentContentBlock } from '../types/agentMessage.js';
 import type { Message } from '../types/message.js';
 import { getCwd } from '../utils/cwd.js';
 import { logForDebugging } from '../utils/debug.js';
@@ -198,7 +199,10 @@ export function useReplBridge(messages: Message[], setMessages: (action: React.S
                 /* eslint-enable @typescript-eslint/no-require-imports */
                 sanitized = sanitizeInboundWebhookContent(fields.content);
               }
-              const content = await resolveAndPrepend(msg, sanitized);
+              const content = (await resolveAndPrepend(
+                msg,
+                sanitized,
+              )) as string | AgentContentBlock[];
               const preview = typeof content === 'string' ? content.slice(0, 80) : `[${content.length} content blocks]`;
               logForDebugging(`[bridge:repl] Injecting inbound user message: ${preview}${uuid ? ` uuid=${uuid}` : ''}`);
               enqueue({

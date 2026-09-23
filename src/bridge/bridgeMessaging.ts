@@ -338,7 +338,7 @@ export function handleServerControlRequest(
         error:
           'set_permission_mode is not supported in this context (onSetPermissionMode callback not registered)',
       }
-      if (verdict.ok) {
+      if (verdict.ok === true) {
         response = {
           type: 'control_response',
           response: {
