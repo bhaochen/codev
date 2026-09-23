@@ -220,7 +220,9 @@ async function initializeAgentMcpServers(
 
 type QueryMessage =
   | StreamEvent
+  | { type: 'stream_event'; event: StreamEvent; ttftMs?: number }
   | RequestStartEvent
+  | { type: 'stream_request_start' }
   | Message
   | ToolUseSummaryMessage
   | TombstoneMessage

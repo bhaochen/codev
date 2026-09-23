@@ -1,6 +1,6 @@
 import { feature } from 'bun:bundle'
 import type { AgentContentBlock } from './types/agentMessage.js'
-import { randomUUID } from 'crypto'
+import { randomUUID, type UUID } from 'crypto'
 import last from 'lodash-es/last.js'
 import {
   getSessionId,
@@ -10,7 +10,6 @@ import type {
   PermissionMode,
   SDKCompactBoundaryMessage,
   SDKMessage,
-  SDKPermissionDenial,
   SDKStatus,
   SDKUserMessageReplay,
 } from 'src/entrypoints/agentSdkTypes.js'
@@ -39,10 +38,15 @@ import type { AppState } from './state/AppState.js'
 import { type Tools, type ToolUseContext, toolMatchesName } from './Tool.js'
 import type { AgentDefinition } from './tools/AgentTool/loadAgentsDir.js'
 import { SYNTHETIC_OUTPUT_TOOL_NAME } from './tools/SyntheticOutputTool/SyntheticOutputTool.js'
-import type { Message } from './types/message.js'
+import type {
+  Message,
+  SystemAPIErrorMessage,
+  SystemCompactBoundaryMessage,
+} from './types/message.js'
 import type { OrphanedPermission } from './types/textInputTypes.js'
 import { createAbortController } from './utils/abortController.js'
 import type { AttributionState } from './utils/commitAttribution.js'
+import type { Attachment } from './utils/attachments.js'
 import { getGlobalConfig } from './utils/config.js'
 import { getCwd } from './utils/cwd.js'
 import {
@@ -189,7 +193,11 @@ export class QueryEngine {
   private config: QueryEngineConfig
   private mutableMessages: Message[]
   private abortController: AbortController
-  private permissionDenials: SDKPermissionDenial[]
+  private permissionDenials: Array<{
+    tool_name: string
+    tool_use_id: string
+    tool_input: Record<string, unknown>
+  }>
   private totalUsage: NonNullableUsage
   private hasHandledOrphanedPermission = false
   private readFileState: FileStateCache
@@ -598,7 +606,10 @@ export class QueryEngine {
           (msg.content.includes(`<${LOCAL_COMMAND_STDOUT_TAG}>`) ||
             msg.content.includes(`<${LOCAL_COMMAND_STDERR_TAG}>`))
         ) {
-          yield localCommandOutputToSDKAssistantMessage(msg.content, msg.uuid)
+          yield localCommandOutputToSDKAssistantMessage(
+            msg.content,
+            msg.uuid as UUID,
+          )
         }
 
         if (msg.type === 'system' && msg.subtype === 'compact_boundary') {
@@ -607,7 +618,9 @@ export class QueryEngine {
             subtype: 'compact_boundary' as const,
             session_id: getSessionId(),
             uuid: msg.uuid,
-            compact_metadata: toSDKCompactMetadata(msg.compactMetadata),
+            compact_metadata: toSDKCompactMetadata(
+              (msg as SystemCompactBoundaryMessage).compactMetadata,
+            ),
           } as SDKCompactBoundaryMessage
         }
       }
@@ -656,7 +669,7 @@ export class QueryEngine {
                 fileHistory: updater(prev.fileHistory),
               }))
             },
-            message.uuid,
+            message.uuid as UUID,
           )
         })
     }
@@ -710,7 +723,8 @@ export class QueryEngine {
           message.type === 'system' &&
           message.subtype === 'compact_boundary'
         ) {
-          const tailUuid = message.compactMetadata?.preservedSegment?.tailUuid
+          const tailUuid = (message as SystemCompactBoundaryMessage).compactMetadata
+            ?.preservedSegment?.tailUuid
           if (tailUuid) {
             const tailIdx = this.mutableMessages.findLastIndex(
               m => m.uuid === tailUuid,
@@ -798,20 +812,26 @@ export class QueryEngine {
             currentMessageUsage = EMPTY_USAGE
             currentMessageUsage = updateUsage(
               currentMessageUsage,
-              message.event.message.usage,
+              message.event.message
+                .usage as unknown as Parameters<typeof updateUsage>[1],
             )
           }
           if (message.event.type === 'message_delta') {
             currentMessageUsage = updateUsage(
               currentMessageUsage,
-              message.event.usage,
+              message.event.usage as unknown as Parameters<typeof updateUsage>[1],
             )
             // Capture stop_reason from message_delta. The assistant message
             // is yielded at content_block_stop with stop_reason=null; the
             // real value only arrives here (see claude.ts message_delta
             // handler). Without this, result.stop_reason is always null.
-            if (message.event.delta.stop_reason != null) {
-              lastStopReason = message.event.delta.stop_reason
+            const delta = (
+              message.event as unknown as {
+                delta?: { stop_reason?: string | null }
+              }
+            ).delta
+            if (delta?.stop_reason != null) {
+              lastStopReason = delta.stop_reason
             }
           }
           if (message.event.type === 'message_stop') {
@@ -841,12 +861,14 @@ export class QueryEngine {
             void recordTranscript(messages)
           }
 
+          const attachment = message.attachment as unknown as Attachment
+
           // Extract structured output from StructuredOutput tool calls
-          if (message.attachment.type === 'structured_output') {
-            structuredOutputFromTool = message.attachment.data
+          if (attachment.type === 'structured_output') {
+            structuredOutputFromTool = attachment.data
           }
           // Handle max turns reached signal from query.ts
-          else if (message.attachment.type === 'max_turns_reached') {
+          else if (attachment.type === 'max_turns_reached') {
             if (persistSession) {
               if (
                 isEnvTruthy(process.env.CLAUDE_CODE_EAGER_FLUSH) ||
@@ -861,7 +883,7 @@ export class QueryEngine {
               duration_ms: Date.now() - startTime,
               duration_api_ms: getTotalAPIDuration(),
               is_error: true,
-              num_turns: message.attachment.turnCount,
+              num_turns: attachment.turnCount,
               stop_reason: lastStopReason,
               session_id: getSessionId(),
               total_cost_usd: getTotalCost(),
@@ -874,7 +896,7 @@ export class QueryEngine {
               ),
               uuid: randomUUID(),
               errors: [
-                `Reached maximum number of turns (${message.attachment.maxTurns})`,
+                `Reached maximum number of turns (${attachment.maxTurns})`,
               ],
             }
             return
@@ -882,17 +904,17 @@ export class QueryEngine {
           // Yield queued_command attachments as SDK user message replays
           else if (
             replayUserMessages &&
-            message.attachment.type === 'queued_command'
+            attachment.type === 'queued_command'
           ) {
             yield {
               type: 'user',
               message: {
                 role: 'user' as const,
-                content: message.attachment.prompt,
+                content: attachment.prompt,
               },
               session_id: getSessionId(),
               parent_tool_use_id: null,
-              uuid: message.attachment.source_uuid || message.uuid,
+              uuid: attachment.source_uuid || message.uuid,
               timestamp: message.timestamp,
               isReplay: true,
             } as SDKUserMessageReplay
@@ -924,7 +946,7 @@ export class QueryEngine {
           // Yield compact boundary messages to SDK
           if (
             message.subtype === 'compact_boundary' &&
-            message.compactMetadata
+            (message as SystemCompactBoundaryMessage).compactMetadata
           ) {
             // Release pre-compaction messages for GC. The boundary was just
             // pushed so it's the last element. query.ts already uses
@@ -944,18 +966,28 @@ export class QueryEngine {
               subtype: 'compact_boundary' as const,
               session_id: getSessionId(),
               uuid: message.uuid,
-              compact_metadata: toSDKCompactMetadata(message.compactMetadata),
+              compact_metadata: toSDKCompactMetadata(
+                (message as SystemCompactBoundaryMessage).compactMetadata,
+              ),
             }
           }
           if (message.subtype === 'api_error') {
+            const apiError = message as SystemAPIErrorMessage
+            const errorStatus =
+              (apiError.error as { status?: string | null } | undefined)
+                ?.status ?? null
             yield {
               type: 'system',
               subtype: 'api_retry' as const,
-              attempt: message.retryAttempt,
-              max_retries: message.maxRetries,
-              retry_delay_ms: message.retryInMs,
-              error_status: message.error.status ?? null,
-              error: categorizeRetryableAPIError(message.error),
+              attempt: apiError.retryAttempt,
+              max_retries: apiError.maxRetries,
+              retry_delay_ms: apiError.retryInMs,
+              error_status: errorStatus,
+              error: categorizeRetryableAPIError(
+                apiError.error as Parameters<
+                  typeof categorizeRetryableAPIError
+                >[0],
+              ),
               session_id: getSessionId(),
               uuid: message.uuid,
             }

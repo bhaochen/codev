@@ -5,6 +5,7 @@ import {
   PermissionUpdateSchema,
   SyncHookJSONOutputSchema,
 } from './coreSchemas.js'
+import type { StreamEvent } from '../../types/message.js'
 
 export type PermissionMode =
   | 'default'
@@ -79,8 +80,16 @@ export type SDKAssistantMessageError = SDKBaseMessage & {
 }
 
 export type SDKPartialAssistantMessage = SDKBaseMessage & {
-  type: 'assistant_partial'
-  delta?: string
+  type: 'stream_event'
+  event: StreamEvent
+  parent_tool_use_id: string | null
+  session_id: string
+}
+
+export type SDKToolUseSummaryMessage = SDKBaseMessage & {
+  type: 'tool_use_summary'
+  summary: string
+  preceding_tool_use_ids: string[]
 }
 
 export type SDKResultMessage = SDKBaseMessage & {
@@ -179,6 +188,7 @@ export type SDKMessage =
   | SDKStatusMessage
   | SDKSystemMessage
   | SDKToolProgressMessage
+  | SDKToolUseSummaryMessage
   | SDKUserMessage
   | SDKUserMessageReplay
 

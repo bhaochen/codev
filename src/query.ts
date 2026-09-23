@@ -222,7 +222,9 @@ export async function* query(
   params: QueryParams,
 ): AsyncGenerator<
   | StreamEvent
+  | { type: 'stream_event'; event: StreamEvent; ttftMs?: number }
   | RequestStartEvent
+  | { type: 'stream_request_start' }
   | Message
   | TombstoneMessage
   | ToolUseSummaryMessage,
@@ -245,7 +247,9 @@ async function* queryLoop(
   consumedCommandUuids: string[],
 ): AsyncGenerator<
   | StreamEvent
+  | { type: 'stream_event'; event: StreamEvent; ttftMs?: number }
   | RequestStartEvent
+  | { type: 'stream_request_start' }
   | Message
   | TombstoneMessage
   | ToolUseSummaryMessage,
