@@ -53,6 +53,7 @@ import {
   type ConnectorTextDelta,
   isConnectorTextBlock,
 } from '../../../types/connectorText.js'
+import type { AgentContentBlock } from '../../../types/agentMessage.js'
 import type {
   AssistantMessage,
   Message,
@@ -1093,7 +1094,7 @@ export function stripExcessMediaItems(
       if (isMedia(block)) toRemove++
       if (isToolResult(block) && Array.isArray(block.content)) {
         for (const nested of block.content) {
-          if (isMedia(nested)) toRemove++
+          if (isMedia(nested as unknown as BetaContentBlockParam)) toRemove++
         }
       }
     }
@@ -1116,7 +1117,7 @@ export function stripExcessMediaItems(
         )
           return block
         const filtered = block.content.filter(n => {
-          if (toRemove > 0 && isMedia(n)) {
+          if (toRemove > 0 && isMedia(n as unknown as BetaContentBlockParam)) {
             toRemove--
             return false
           }
@@ -2440,7 +2441,8 @@ export async function* queryAnthropicMessages(
                     feature('CONNECTOR_TEXT') &&
                     contentBlock.type === 'connector_text'
                   ) {
-                    contentBlock.signature = delta.signature
+(contentBlock as unknown as { signature: string }).signature =
+                      delta.signature
                     break
                   }
                   if (contentBlock.type !== 'thinking') {
@@ -2506,7 +2508,7 @@ export async function* queryAnthropicMessages(
               message: {
                 ...partialMessage,
                 content: normalizeContentFromAPI(
-                  [contentBlock] as BetaContentBlock[],
+                  [contentBlock] as unknown as AgentContentBlock[],
                   tools,
                   options.agentId,
                 ),
@@ -2535,7 +2537,7 @@ export async function* queryAnthropicMessages(
             ) {
               research = (part as unknown as Record<string, unknown>).research
               for (const msg of newMessages) {
-                msg.research = research
+                (msg as { research?: unknown }).research = research
               }
             }
 
@@ -2613,7 +2615,7 @@ export async function* queryAnthropicMessages(
           type: 'stream_event',
           event: part,
           ...(part.type === 'message_start' ? { ttftMs } : undefined),
-        }
+        } as unknown as StreamEvent
       }
       // Clear the idle timeout watchdog now that the stream loop has exited
       clearStreamIdleTimers()
@@ -2885,7 +2887,7 @@ export async function* queryAnthropicMessages(
         message: {
           ...result,
           content: normalizeContentFromAPI(
-            result.content,
+            result.content as unknown as AgentContentBlock[],
             tools,
             options.agentId,
           ),
@@ -2982,7 +2984,7 @@ export async function* queryAnthropicMessages(
           message: {
             ...result,
             content: normalizeContentFromAPI(
-              result.content,
+              result.content as unknown as AgentContentBlock[],
               tools,
               options.agentId,
             ),
@@ -3132,12 +3134,18 @@ export async function* queryAnthropicMessages(
     // then yields, so tracking must be here to survive .return() at the yield.
     if (fallbackMessage) {
       const fallbackUsage = fallbackMessage.message.usage
-      usage = updateUsage(EMPTY_USAGE, fallbackUsage)
-      stopReason = fallbackMessage.message.stop_reason
-      const fallbackCost = calculateUSDCost(resolvedModel, fallbackUsage)
+      usage = updateUsage(
+        EMPTY_USAGE,
+        fallbackUsage as unknown as BetaMessageDeltaUsage,
+      )
+      stopReason = fallbackMessage.message.stop_reason as BetaStopReason
+      const fallbackCost = calculateUSDCost(
+        resolvedModel,
+        fallbackUsage as unknown as BetaUsage,
+      )
       costUSD += addToTotalSessionCost(
         fallbackCost,
-        fallbackUsage,
+        fallbackUsage as unknown as BetaUsage,
         route.model,
       )
     }
