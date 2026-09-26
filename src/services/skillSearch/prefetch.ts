@@ -34,3 +34,4 @@ export const checkProtectedNamespace = stub
 export const getCoordinatorUserContext = stub
 export const startSkillDiscoveryPrefetch = stub
 export const collectSkillDiscoveryPrefetch = stub
+export const getTurnZeroSkillDiscovery = stub

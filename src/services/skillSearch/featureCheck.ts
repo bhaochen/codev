@@ -31,4 +31,4 @@ export const getCachedMCConfig = stub
 export const markToolsSentToAPI = stub
 export const resetCachedMCState = stub
 export const checkProtectedNamespace = stub
-export const getCoordinatorUserContext = stub
+export const isSkillSearchEnabled = stub

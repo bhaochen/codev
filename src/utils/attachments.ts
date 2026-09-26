@@ -999,7 +999,7 @@ export async function getAttachments(
     ...userAttachmentResults.flat(),
     ...threadAttachmentResults.flat(),
     ...mainThreadAttachmentResults.flat(),
-  ].filter(a => a !== undefined && a !== null)
+  ].filter((a): a is Attachment => a !== undefined && a !== null)
 }
 
 async function maybe<A>(label: string, f: () => Promise<A[]>): Promise<A[]> {
@@ -1525,8 +1525,13 @@ export function getAgentListingDeltaAttachment(
   for (const msg of messages ?? []) {
     if (msg.type !== 'attachment') continue
     if (msg.attachment.type !== 'agent_listing_delta') continue
-    for (const t of msg.attachment.addedTypes) announced.add(t)
-    for (const t of msg.attachment.removedTypes) announced.delete(t)
+    const attachment = msg.attachment as {
+      type: 'agent_listing_delta'
+      addedTypes: string[]
+      removedTypes: string[]
+    }
+    for (const t of attachment.addedTypes) announced.add(t)
+    for (const t of attachment.removedTypes) announced.delete(t)
   }
 
   const currentTypes = new Set(filtered.map(a => a.agentType))
@@ -2775,7 +2780,7 @@ export function extractAtMentionedFiles(content: string): string[] {
   }
 
   // Extract regular mentions
-  const regularMatchArray = content.match(regularAtMentionRegex) || []
+  const regularMatchArray: string[] = content.match(regularAtMentionRegex) || []
   regularMatchArray.forEach(match => {
     const filename = match.slice(match.indexOf('@') + 1)
     // Don't include if it starts with a quote (already handled as quoted)
@@ -3204,7 +3209,7 @@ export function createAttachmentMessage(
     attachment,
     type: 'attachment',
     uuid: randomUUID(),
-    timestamp: new Date().toISOString(),
+    timestamp: Date.now(),
   }
 }
 
@@ -3709,7 +3714,7 @@ async function getTeammateMailboxAttachments(
         // Find the teammate ID by name
         const teammateId = appState.teamContext?.teammates
           ? Object.entries(appState.teamContext.teammates).find(
-              ([, t]) => t.name === teammateToRemove,
+              ([, t]) => (t as { name?: string }).name === teammateToRemove,
             )?.[0]
           : undefined
 

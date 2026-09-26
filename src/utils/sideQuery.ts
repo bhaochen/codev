@@ -17,6 +17,7 @@ import { computeFingerprint } from './fingerprint.js'
 import { normalizeModelStringForAPI } from './model/model.js'
 import { modelRuntime } from '../services/llm/runtime/index.js'
 import type { LLMRequest, LLMRequestConfig, LLMRuntimeContext, LLMResponseFormat, LLMToolChoice } from '../services/llm/runtime/types.js'
+import type { AgentContentBlock } from '../types/agentMessage.js'
 import type { Message, StreamEvent, AssistantMessage, SystemAPIErrorMessage } from '../types/message.js'
 import type { SystemPrompt } from '../utils/systemPromptType.js'
 import { asSystemPrompt } from '../utils/systemPromptType.js'
@@ -101,7 +102,7 @@ function extractFirstUserMessageText(messages: MessageParam[]): string {
 function convertMessageParam(msg: MessageParam): Message {
   if (msg.role === 'user') {
     const content = msg.content
-    let blocks: Message['content'] = []
+    let blocks: AgentContentBlock[] = []
     if (typeof content === 'string') {
       blocks = [{ type: 'text', text: content }]
     } else {
@@ -138,10 +139,15 @@ function convertMessageParam(msg: MessageParam): Message {
         return block as any
       })
     }
-    return { role: 'user', content: blocks, uuid: crypto.randomUUID(), timestamp: Date.now() }
+    return {
+      type: 'user',
+      message: { role: 'user', content: blocks },
+      uuid: crypto.randomUUID() as string,
+      timestamp: Date.now(),
+    }
   } else {
     const content = msg.content
-    let blocks: Message['content'] = []
+    let blocks: AgentContentBlock[] = []
     if (typeof content === 'string') {
       blocks = [{ type: 'text', text: content }]
     } else {
@@ -161,7 +167,12 @@ function convertMessageParam(msg: MessageParam): Message {
         return block as any
       })
     }
-    return { role: 'assistant', content: blocks, uuid: crypto.randomUUID(), timestamp: Date.now() }
+    return {
+      type: 'assistant',
+      message: { role: 'assistant', content: blocks },
+      uuid: crypto.randomUUID() as string,
+      timestamp: Date.now(),
+    }
   }
 }
 
@@ -386,8 +397,12 @@ export async function sideQuery(opts: SideQueryOptions): Promise<BetaMessage> {
   // Use the new LLM runtime
   for await (const event of modelRuntime.generate(request)) {
     // modelRuntime.generate yields LLMStreamEvent | AssistantMessage | SystemAPIErrorMessage
-    // AssistantMessage has role: 'assistant' and content array
-    if (event && typeof event === 'object' && 'role' in event && (event as any).role === 'assistant') {
+    // AssistantMessage has type: 'assistant' and message.content array
+    if (
+      event &&
+      typeof event === 'object' &&
+      (event as { type?: string }).type === 'assistant'
+    ) {
       assistantMessage = event as AssistantMessage
     }
   }
@@ -405,7 +420,7 @@ export async function sideQuery(opts: SideQueryOptions): Promise<BetaMessage> {
     id: assistantMessage.uuid ?? crypto.randomUUID(),
     type: 'message',
     role: 'assistant',
-    content: assistantMessage.content.map(block => {
+    content: assistantMessage.message.content.map(block => {
       if (block.type === 'text') return { type: 'text', text: block.text }
       if (block.type === 'tool_use') return { type: 'tool_use', id: block.id, name: block.name, input: block.input }
       if (block.type === 'thinking') return { type: 'thinking', thinking: block.thinking, signature: block.signature }
@@ -413,14 +428,14 @@ export async function sideQuery(opts: SideQueryOptions): Promise<BetaMessage> {
       return block as any
     }),
     model: normalizedModel,
-    stop_reason: (assistantMessage.stop_reason ?? 'end_turn') as BetaStopReason,
+    stop_reason: (assistantMessage.message.stop_reason ?? 'end_turn') as BetaStopReason,
     stop_sequence: null,
     container: null,
     usage: {
-      input_tokens: assistantMessage.usage?.input_tokens ?? 0,
-      output_tokens: assistantMessage.usage?.output_tokens ?? 0,
-      cache_creation_input_tokens: assistantMessage.usage?.cache_creation_input_tokens ?? 0,
-      cache_read_input_tokens: assistantMessage.usage?.cache_read_input_tokens ?? 0,
+      input_tokens: assistantMessage.message.usage?.input_tokens ?? 0,
+      output_tokens: assistantMessage.message.usage?.output_tokens ?? 0,
+      cache_creation_input_tokens: assistantMessage.message.usage?.cache_creation_input_tokens ?? 0,
+      cache_read_input_tokens: assistantMessage.message.usage?.cache_read_input_tokens ?? 0,
       cache_creation: null,
       inference_geo: null,
     } as any,

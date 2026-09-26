@@ -33,3 +33,4 @@ export const resetCachedMCState = stub
 export const checkProtectedNamespace = stub
 export const getCoordinatorUserContext = stub
 export const writeSessionTranscriptSegment = stub
+export const flushOnDateChange = stub

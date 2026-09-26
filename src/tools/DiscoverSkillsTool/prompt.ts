@@ -32,3 +32,4 @@ export const markToolsSentToAPI = stub
 export const resetCachedMCState = stub
 export const checkProtectedNamespace = stub
 export const getCoordinatorUserContext = stub
+export const DISCOVER_SKILLS_TOOL_NAME = stub

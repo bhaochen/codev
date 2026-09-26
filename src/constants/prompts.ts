@@ -3,6 +3,7 @@ import { type as osType, version as osVersion, release as osRelease } from 'os'
 import { env } from '../utils/env.js'
 import { getIsGit } from '../utils/git.js'
 import { getCwd } from '../utils/cwd.js'
+import { getAntModelOverrideConfig } from '../utils/model/antModels.js'
 import { getIsNonInteractiveSession } from '../bootstrap/state.js'
 import { getCurrentWorktreeSession } from '../utils/worktree.js'
 import { getSessionStartDate } from './common.js'
@@ -517,6 +518,19 @@ ${CYBER_RISK_INSTRUCTION}`,
           : getMcpInstructionsSection(mcpClients),
       'MCP servers connect/disconnect between turns',
     ),
+    DANGEROUS_uncachedSystemPromptSection(
+      'rlm_mode',
+      async () => {
+        try {
+          const { rlmController, rlmSystemPromptAddendum } = await import('../tools/RLMTool/controller.js')
+          if (!rlmController.isEnabled()) return null
+          return rlmSystemPromptAddendum()
+        } catch {
+          return null
+        }
+      },
+      'RLM mode can toggle mid-session',
+    ),
     systemPromptSection('scratchpad', () => getScratchpadInstructions()),
     systemPromptSection('frc', () => getFunctionResultClearingSection(model)),
     systemPromptSection(
@@ -572,20 +586,6 @@ ${CYBER_RISK_INSTRUCTION}`,
     ...(shouldUseGlobalCacheScope() ? [SYSTEM_PROMPT_DYNAMIC_BOUNDARY] : []),
     // --- Dynamic content (registry-managed) ---
     ...resolvedDynamicSections,
-    // RLM mode guidance (active when /rlm is on)
-    DANGEROUS_uncachedSystemPromptSection(
-      'rlm_mode',
-      async () => {
-        try {
-          const { rlmController, rlmSystemPromptAddendum } = await import('../tools/RLMTool/controller.js')
-          if (!rlmController.isEnabled()) return null
-          return rlmSystemPromptAddendum()
-        } catch {
-          return null
-        }
-      },
-      'RLM mode can toggle mid-session',
-    ),
   ].filter(s => s !== null)
 }
 
