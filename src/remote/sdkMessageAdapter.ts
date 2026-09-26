@@ -12,6 +12,7 @@ import type {
   AssistantMessage,
   Message,
   StreamEvent,
+  SystemCompactBoundaryMessage,
   SystemMessage,
 } from '../types/message.js'
 import { logForDebugging } from '../utils/debug.js'
@@ -31,8 +32,8 @@ import { createUserMessage } from '../utils/messages.js'
 function convertAssistantMessage(msg: SDKAssistantMessage): AssistantMessage {
   return {
     type: 'assistant',
-    message: msg.message,
-    uuid: msg.uuid,
+    message: msg.message as unknown as AssistantMessage['message'],
+    uuid: msg.uuid as string,
     requestId: undefined,
     timestamp: new Date().toISOString(),
     error: msg.error,
@@ -43,10 +44,7 @@ function convertAssistantMessage(msg: SDKAssistantMessage): AssistantMessage {
  * Convert an SDKPartialAssistantMessage (streaming) to a StreamEvent
  */
 function convertStreamEvent(msg: SDKPartialAssistantMessage): StreamEvent {
-  return {
-    type: 'stream_event',
-    event: msg.event,
-  }
+  return msg.event
 }
 
 /**
@@ -55,7 +53,7 @@ function convertStreamEvent(msg: SDKPartialAssistantMessage): StreamEvent {
 function convertResultMessage(msg: SDKResultMessage): SystemMessage {
   const isError = msg.subtype !== 'success'
   const content = isError
-    ? msg.errors?.join(', ') || 'Unknown error'
+    ? (msg.errors as string[] | undefined)?.join(', ') || 'Unknown error'
     : 'Session completed successfully'
 
   return {
@@ -118,7 +116,7 @@ function convertToolProgressMessage(
     level: 'info',
     uuid: msg.uuid,
     timestamp: new Date().toISOString(),
-    toolUseID: msg.tool_use_id,
+    toolUseID: msg.tool_use_id as string,
   }
 }
 
@@ -127,15 +125,17 @@ function convertToolProgressMessage(
  */
 function convertCompactBoundaryMessage(
   msg: SDKCompactBoundaryMessage,
-): SystemMessage {
+): SystemCompactBoundaryMessage {
   return {
     type: 'system',
     subtype: 'compact_boundary',
     content: 'Conversation compacted',
     level: 'info',
-    uuid: msg.uuid,
+    uuid: msg.uuid as string,
     timestamp: new Date().toISOString(),
-    compactMetadata: fromSDKCompactMetadata(msg.compact_metadata),
+    compactMetadata: fromSDKCompactMetadata(
+      msg.compact_metadata as Parameters<typeof fromSDKCompactMetadata>[0],
+    ),
   }
 }
 
@@ -189,7 +189,7 @@ export function convertSDKMessage(
             content,
             toolUseResult: msg.tool_use_result,
             uuid: msg.uuid,
-            timestamp: msg.timestamp,
+            timestamp: msg.timestamp as string | number,
           }),
         }
       }
@@ -204,7 +204,7 @@ export function convertSDKMessage(
               content,
               toolUseResult: msg.tool_use_result,
               uuid: msg.uuid,
-              timestamp: msg.timestamp,
+              timestamp: msg.timestamp as string | number,
             }),
           }
         }
@@ -230,7 +230,7 @@ export function convertSDKMessage(
         return { type: 'message', message: convertInitMessage(msg) }
       }
       if (msg.subtype === 'status') {
-        const statusMsg = convertStatusMessage(msg)
+        const statusMsg = convertStatusMessage(msg as unknown as SDKStatusMessage)
         return statusMsg
           ? { type: 'message', message: statusMsg }
           : { type: 'ignored' }
@@ -238,7 +238,7 @@ export function convertSDKMessage(
       if (msg.subtype === 'compact_boundary') {
         return {
           type: 'message',
-          message: convertCompactBoundaryMessage(msg),
+          message: convertCompactBoundaryMessage(msg as SDKCompactBoundaryMessage),
         }
       }
       // hook_response and other subtypes

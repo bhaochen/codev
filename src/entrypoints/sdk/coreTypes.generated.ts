@@ -92,6 +92,18 @@ export type SDKToolUseSummaryMessage = SDKBaseMessage & {
   preceding_tool_use_ids: string[]
 }
 
+export type SDKAuthStatusMessage = SDKBaseMessage & {
+  type: 'auth_status'
+  isAuthenticating: boolean
+  output: string[]
+  error?: string
+}
+
+export type SDKRateLimitEventMessage = SDKBaseMessage & {
+  type: 'rate_limit_event'
+  rate_limit_info?: SDKRateLimitInfo
+}
+
 export type SDKResultMessage = SDKBaseMessage & {
   type: 'result'
   is_error?: boolean
@@ -181,9 +193,11 @@ export type AsyncHookJSONOutput = z.infer<ReturnType<typeof AsyncHookJSONOutputS
 export type SDKMessage =
   | SDKAssistantMessage
   | SDKAssistantMessageError
+  | SDKAuthStatusMessage
   | SDKCompactBoundaryMessage
   | SDKPartialAssistantMessage
   | SDKPermissionDenial
+  | SDKRateLimitEventMessage
   | SDKResultMessage
   | SDKStatusMessage
   | SDKSystemMessage
