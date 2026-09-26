@@ -1,14 +1,18 @@
 import { test, expect, describe, beforeEach, afterEach, mock } from 'bun:test'
 import { WebSearchTool } from '../WebSearchTool'
+import type { ToolUseContext } from '../../../Tool.js'
 
 describe('WebSearchTool', () => {
+  const context = {} as ToolUseContext
+  const canUseTool = (() => {}) as never
+
   describe('Tool Properties', () => {
     test('should have correct tool name', () => {
       expect(WebSearchTool.name).toBe('WebSearch')
     })
 
     test('should have correct description', () => {
-      expect(WebSearchTool.description).toContain('SearXNG')
+      expect(String(WebSearchTool.description)).toContain('SearXNG')
     })
 
     test('should be enabled', () => {
@@ -28,7 +32,7 @@ describe('WebSearchTool', () => {
     test('should accept valid query', async () => {
       const result = await WebSearchTool.validateInput(
         { query: 'typescript' },
-        {}
+        context
       )
 
       expect(result.result).toBe(true)
@@ -37,7 +41,7 @@ describe('WebSearchTool', () => {
     test('should reject empty query', async () => {
       const result = await WebSearchTool.validateInput(
         { query: '' },
-        {}
+        context
       )
 
       expect(result.result).toBe(false)
@@ -46,7 +50,7 @@ describe('WebSearchTool', () => {
     test('should reject missing input', async () => {
       const result = await WebSearchTool.validateInput(
         {} as any,
-        {}
+        context
       )
 
       expect(result.result).toBe(false)
@@ -57,7 +61,7 @@ describe('WebSearchTool', () => {
     test('should allow all web search requests', async () => {
       const result = await WebSearchTool.checkPermissions(
         { query: 'typescript' },
-        {}
+        context
       )
 
       expect(result.behavior).toBe('allow')
@@ -68,8 +72,8 @@ describe('WebSearchTool', () => {
     test('should perform web search', async () => {
       const result = await WebSearchTool.call(
         { query: 'typescript programming' },
-        {},
-        () => {},
+        context,
+        canUseTool,
         null
       )
 
@@ -82,8 +86,8 @@ describe('WebSearchTool', () => {
     test('should return structured results', async () => {
       const result = await WebSearchTool.call(
         { query: 'javascript' },
-        {},
-        () => {},
+        context,
+        canUseTool,
         null
       )
 
@@ -101,8 +105,8 @@ describe('WebSearchTool', () => {
     test('should handle missing query', async () => {
       const result = await WebSearchTool.call(
         { query: '' } as any,
-        {},
-        () => {},
+        context,
+        canUseTool,
         null
       )
 
@@ -112,8 +116,8 @@ describe('WebSearchTool', () => {
     test('should not crash on failure', async () => {
       const result = await WebSearchTool.call(
         { query: 'test' },
-        {},
-        () => {},
+        context,
+        canUseTool,
         null
       )
 
@@ -191,8 +195,8 @@ describe('WebSearchTool', () => {
 
       expect(result.type).toBe('tool_result')
       expect(Array.isArray(result.content)).toBe(true)
-      expect(result.content[0].type).toBe('text')
-      expect(typeof result.content[0].text).toBe('string')
+      expect((result.content as Array<{ type: string; text: string }>)[0].type).toBe('text')
+      expect(typeof (result.content as Array<{ type: string; text: string }>)[0].text).toBe('string')
     })
 
     test('should handle empty results', () => {
@@ -207,7 +211,7 @@ describe('WebSearchTool', () => {
         'id'
       )
 
-      expect(result.content[0].text).toContain('Results')
+      expect((result.content as Array<{ type: string; text: string }>)[0].text).toContain('Results')
     })
   })
 
@@ -215,8 +219,8 @@ describe('WebSearchTool', () => {
     test('should search using SearXNG', async () => {
       const result = await WebSearchTool.call(
         { query: 'milet 的最新动态' },
-        {},
-        () => {},
+        context,
+        canUseTool,
         null
       )
 
@@ -229,8 +233,8 @@ describe('WebSearchTool', () => {
     test('should return image URLs with search_images: true', async () => {
       const result = await WebSearchTool.call(
         { query: 'milet 写真', search_images: true },
-        {},
-        () => {},
+        context,
+        canUseTool,
         null
       )
 
@@ -276,8 +280,8 @@ describe('WebSearchTool', () => {
 
       const result = await WebSearchTool.call(
         { query: 'test query' },
-        {},
-        () => {},
+        context,
+        canUseTool,
         null
       )
 
@@ -291,8 +295,8 @@ describe('WebSearchTool', () => {
 
       const result = await WebSearchTool.call(
         { query: 'typescript' },
-        {},
-        () => {},
+        context,
+        canUseTool,
         null
       )
 
@@ -307,8 +311,8 @@ describe('WebSearchTool', () => {
     }, 60000)
 
     test('should mention Tavily and SearXNG in description', () => {
-      expect(WebSearchTool.description).toContain('Tavily')
-      expect(WebSearchTool.description).toContain('SearXNG')
+      expect(String(WebSearchTool.description)).toContain('Tavily')
+      expect(String(WebSearchTool.description)).toContain('SearXNG')
     })
   })
 })
