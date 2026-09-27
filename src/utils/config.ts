@@ -195,6 +195,9 @@ export type GlobalConfig = {
   // OpenAI API configuration
   openAiApiKey?: string
   openAiAccessToken?: string
+  openAiRefreshToken?: string
+  openAiTokenExpiresAt?: number
+  openAiWorkspaceId?: string
   
   // Local model configuration
   localBaseUrl?: string

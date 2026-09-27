@@ -649,7 +649,8 @@ async function getSessionInspection(sessionId: string, url: URL): Promise<Respon
       if (transcriptUsage) {
         response.usage = transcriptUsage
       } else {
-        errors.usage = usageResult.reason instanceof Error ? usageResult.reason.message : String(usageResult.reason)
+        const usageReason = (usageResult as PromiseRejectedResult).reason
+        errors.usage = usageReason instanceof Error ? usageReason.message : String(usageReason)
       }
     }
 
@@ -659,7 +660,8 @@ async function getSessionInspection(sessionId: string, url: URL): Promise<Respon
     } else if (contextResult.status === 'fulfilled' && contextResult.value) {
       response.context = contextResult.value
     } else {
-      errors.context = contextResult.reason instanceof Error ? contextResult.reason.message : String(contextResult.reason)
+      const contextReason = (contextResult as PromiseRejectedResult).reason
+      errors.context = contextReason instanceof Error ? contextReason.message : String(contextReason)
     }
 
     if (mcpResult.status === 'fulfilled' && response.status && typeof response.status === 'object') {
@@ -682,7 +684,7 @@ function usageTokenTotal(usage: unknown): number {
     record.totalOutputTokens,
     record.totalCacheReadInputTokens,
     record.totalCacheCreationInputTokens,
-  ].reduce((sum, value) => sum + (typeof value === 'number' ? value : 0), 0)
+  ].reduce<number>((sum, value) => sum + (typeof value === 'number' ? value : 0), 0)
 }
 
 function chooseRicherUsage(
@@ -818,12 +820,17 @@ async function branchSession(req: Request, sessionId: string): Promise<Response>
     throw ApiError.badRequest('Invalid JSON body')
   }
 
-  if (typeof body.targetMessageId !== 'string' || body.targetMessageId.trim().length === 0) {
-    throw ApiError.badRequest('targetMessageId (string) is required in request body')
+  const rawTargetMessageId = body.targetMessageId
+  const targetMessageId =
+    typeof rawTargetMessageId === 'string' ? rawTargetMessageId.trim() : ''
+
+  if (typeof body.title !== 'undefined' && typeof body.title !== 'string') {
+    throw ApiError.badRequest('title must be a string')
   }
 
-  if (body.title !== undefined && typeof body.title !== 'string') {
-    throw ApiError.badRequest('title must be a string')
+  const title = typeof body.title === 'string' ? body.title.trim() : undefined
+  if (targetMessageId === '') {
+    throw ApiError.badRequest('targetMessageId (string) is required in request body')
   }
 
   const launchInfo = await sessionService.getSessionLaunchInfo(sessionId)
@@ -835,8 +842,8 @@ async function branchSession(req: Request, sessionId: string): Promise<Response>
     const result = await createSessionBranch({
       sourceSessionId: sessionId,
       sourceTranscriptPath: launchInfo.filePath,
-      targetMessageId: body.targetMessageId.trim(),
-      title: body.title?.trim() || undefined,
+      targetMessageId,
+      title,
       sourceWorkDir: launchInfo.workDir,
       sourceRepository: launchInfo.repository,
       sourceWorktreeSession: launchInfo.worktreeSession,
@@ -847,7 +854,7 @@ async function branchSession(req: Request, sessionId: string): Promise<Response>
       title: result.title,
       workDir: result.workDir ?? launchInfo.workDir,
       sourceSessionId: sessionId,
-      targetMessageId: body.targetMessageId.trim(),
+      targetMessageId,
     }, { status: 201 })
   } catch (error) {
     if (error instanceof SessionBranchingError) {

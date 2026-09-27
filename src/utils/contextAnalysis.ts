@@ -1,4 +1,9 @@
-import type { AgentContentBlock } from '../types/agentMessage.js'
+import type {
+  AgentContentBlock,
+  AgentTextBlock,
+  AgentToolResultBlock,
+  AgentToolUseBlock,
+} from '../types/agentMessage.js'
 import { roughTokenCountEstimation as countTokens } from '../services/tokenEstimation.js'
 import type {
   AssistantMessage,
@@ -104,12 +109,13 @@ function processBlock(
   stats.total += tokens
 
   switch (block.type) {
-    case 'text':
+    case 'text': {
       // Check if this is a local command output
+      const textBlock = block as AgentTextBlock
       if (
         message.type === 'user' &&
         'text' in block &&
-        block.text.includes('local-command-stdout')
+        textBlock.text.includes('local-command-stdout')
       ) {
         stats.localCommandOutputs += tokens
       } else {
@@ -118,25 +124,27 @@ function processBlock(
         ] += tokens
       }
       break
+    }
 
     case 'tool_use': {
       if ('name' in block && 'id' in block) {
-        const toolName = block.name || 'unknown'
+        const useBlock = block as AgentToolUseBlock
+        const toolName = useBlock.name || 'unknown'
         increment(stats.toolRequests, toolName, tokens)
-        toolIds.set(block.id, toolName)
+        toolIds.set(useBlock.id, toolName)
 
         // Track Read tool file paths
         if (
           toolName === 'Read' &&
-          'input' in block &&
-          block.input &&
-          typeof block.input === 'object' &&
-          'file_path' in block.input
+          'input' in useBlock &&
+          useBlock.input &&
+          typeof useBlock.input === 'object' &&
+          'file_path' in useBlock.input
         ) {
           const path = String(
-            (block.input as Record<string, unknown>).file_path,
+            (useBlock.input as Record<string, unknown>).file_path,
           )
-          readToolPaths.set(block.id, path)
+          readToolPaths.set(useBlock.id, path)
         }
       }
       break
@@ -144,12 +152,13 @@ function processBlock(
 
     case 'tool_result': {
       if ('tool_use_id' in block) {
-        const toolName = toolIds.get(block.tool_use_id) || 'unknown'
+        const resultBlock = block as AgentToolResultBlock
+        const toolName = toolIds.get(resultBlock.tool_use_id) || 'unknown'
         increment(stats.toolResults, toolName, tokens)
 
         // Track file read tokens
         if (toolName === 'Read') {
-          const path = readToolPaths.get(block.tool_use_id)
+          const path = readToolPaths.get(resultBlock.tool_use_id)
           if (path) {
             const current = fileReads.get(path) || { count: 0, totalTokens: 0 }
             fileReads.set(path, {

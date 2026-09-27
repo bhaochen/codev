@@ -602,7 +602,9 @@ export function useTypeahead({
       const members: SuggestionItem[] = [];
       const seen = new Set<string>();
       if (isAgentSwarmsEnabled() && state.teamContext) {
-        for (const t of Object.values(state.teamContext.teammates ?? {})) {
+        for (const t of Object.values(
+          state.teamContext.teammates ?? {},
+        ) as { name: string }[]) {
           if (t.name === TEAM_LEAD_NAME) continue;
           if (!t.name.toLowerCase().startsWith(partialName)) continue;
           seen.add(t.name);

@@ -21,6 +21,7 @@ import {
   type LocalAgentTaskState,
 } from '../../tasks/LocalAgentTask/LocalAgentTask.js'
 import { isLocalShellTask } from '../../tasks/LocalShellTask/guards.js'
+import type { TaskState } from '../../tasks/types.js'
 import { asAgentId } from '../../types/ids.js'
 import type { Message } from '../../types/message.js'
 import { createEmptyAttributionState } from '../../utils/commitAttribution.js'
@@ -137,7 +138,9 @@ export async function clearConversation({
       // Partition tasks using the same predicate computed above:
       // kill+remove foreground tasks, preserve everything else.
       const nextTasks: AppState['tasks'] = {}
-      for (const [taskId, task] of Object.entries(prev.tasks)) {
+      for (const [taskId, task] of Object.entries(
+        prev.tasks as Record<string, TaskState>,
+      )) {
         if (!shouldKillTask(task)) {
           nextTasks[taskId] = task
           continue

@@ -240,8 +240,8 @@ export function LogoV2(): React.ReactNode {
             )}
           </Box>
         )}
-        {("external" as string) === 'ant' && <GateOverridesWarning />}
-        {("external" as string) === 'ant' && <ExperimentEnrollmentNotice />}
+
+
       </>
     )
   }
@@ -315,8 +315,8 @@ export function LogoV2(): React.ReactNode {
             </Text>
           </Box>
         )}
-        {("external" as string) === 'ant' && <GateOverridesWarning />}
-        {("external" as string) === 'ant' && <ExperimentEnrollmentNotice />}
+
+
       </>
     )
   }
@@ -493,8 +493,8 @@ export function LogoV2(): React.ReactNode {
           )}
         </Box>
       )}
-      {("external" as string) === 'ant' && <GateOverridesWarning />}
-      {("external" as string) === 'ant' && <ExperimentEnrollmentNotice />}
+
+
     </>
   )
 }

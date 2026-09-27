@@ -18,7 +18,8 @@ import { AbortError } from '../utils/errors.js';
 import { logError } from '../utils/log.js';
 import type { PermissionDecision } from '../utils/permissions/PermissionResult.js';
 import { hasPermissionsToUseTool } from '../utils/permissions/permissions.js';
-import { jsonStringify } from '../utils/slowOperations.js';
+import { jsonStringify } from '../utils/slowOperations.js'
+import type { ClassifierResult } from '../types/permissions.js';
 import { handleCoordinatorPermission } from './toolPermission/handlers/coordinatorHandler.js';
 import { handleInteractivePermission } from './toolPermission/handlers/interactiveHandler.js';
 import { handleSwarmWorkerPermission } from './toolPermission/handlers/swarmWorkerHandler.js';
@@ -194,7 +195,7 @@ function _temp2(res) {
     type: "timeout" as const
   });
 }
-function _temp(r) {
+function _temp(r: ClassifierResult) {
   return {
     type: "result" as const,
     result: r

@@ -230,7 +230,7 @@ export async function createAndUploadGitBundle(
       opts?.signal,
     )
 
-    if (!bundle.ok) {
+    if (bundle.ok === false) {
       logForDebugging(`[gitBundle] ${bundle.error}`)
       logEvent('tengu_ccr_bundle_upload', {
         outcome:
@@ -249,7 +249,7 @@ export async function createAndUploadGitBundle(
       signal: opts?.signal,
     })
 
-    if (!upload.success) {
+    if (upload.success === false) {
       logEvent('tengu_ccr_bundle_upload', {
         outcome:
           'failed' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,

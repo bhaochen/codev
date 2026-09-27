@@ -519,7 +519,7 @@ export function PermissionRuleList(t0) {
     t4 = $[3];
   }
   const handleDenialStateChange = t4;
-  const [selectedRule, setSelectedRule] = useState();
+  const [selectedRule, setSelectedRule] = useState<PermissionRule | undefined>(undefined);
   const [lastFocusedRuleKey, setLastFocusedRuleKey] = useState();
   const [addingRuleToTab, setAddingRuleToTab] = useState(null);
   const [validatedRule, setValidatedRule] = useState(null);
@@ -795,7 +795,7 @@ export function PermissionRuleList(t0) {
   if ($[30] !== changes || $[31] !== onExit || $[32] !== onRetryDenials) {
     t18 = () => {
       const s_1 = denialStateRef.current;
-      const denialsFor = set => Array.from(set).map(idx => s_1.denials[idx]).filter(_temp2);
+      const denialsFor = (set: Set<number>) => Array.from(set).map(idx => (s_1.denials as Array<AutoModeDenial | undefined>)[idx]).filter(_temp2);
       const retryDenials = denialsFor(s_1.retry);
       if (retryDenials.length > 0) {
         const commands = retryDenials.map(_temp3);
@@ -951,10 +951,10 @@ export function PermissionRuleList(t0) {
     let t22;
     if ($[56] !== setAppState || $[57] !== toolPermissionContext) {
       t22 = (path_0, remember) => {
-        const destination = remember ? "localSettings" : "session";
+        const destination: PermissionUpdateDestination = remember ? "localSettings" : "session";
         const permissionUpdate = {
           type: "addDirectories" as const,
-          directories: [path_0],
+          directories: [path_0] as string[],
           destination
         };
         const updatedContext = applyPermissionUpdate(toolPermissionContext, permissionUpdate);

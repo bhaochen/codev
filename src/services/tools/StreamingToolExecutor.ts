@@ -1,3 +1,4 @@
+import type { UUID } from 'crypto'
 import type { AgentToolUseBlock } from '../../types/agentMessage.js'
 import {
   createUserMessage,
@@ -109,7 +110,7 @@ export class StreamingToolExecutor {
               },
             ],
             toolUseResult: `Error: No such tool available: ${block.name}`,
-            sourceToolAssistantUUID: assistantMessage.uuid,
+            sourceToolAssistantUUID: assistantMessage.uuid as UUID,
           }),
         ],
       })
@@ -206,7 +207,7 @@ export class StreamingToolExecutor {
           },
         ],
         toolUseResult: 'User rejected tool use',
-        sourceToolAssistantUUID: assistantMessage.uuid,
+        sourceToolAssistantUUID: assistantMessage.uuid as UUID,
       })
     }
     if (reason === 'streaming_fallback') {
@@ -221,7 +222,7 @@ export class StreamingToolExecutor {
           },
         ],
         toolUseResult: 'Streaming fallback - tool execution discarded',
-        sourceToolAssistantUUID: assistantMessage.uuid,
+        sourceToolAssistantUUID: assistantMessage.uuid as UUID,
       })
     }
     const desc = this.erroredToolDescription
@@ -238,7 +239,7 @@ export class StreamingToolExecutor {
         },
       ],
       toolUseResult: msg,
-      sourceToolAssistantUUID: assistantMessage.uuid,
+      sourceToolAssistantUUID: assistantMessage.uuid as UUID,
     })
   }
 
@@ -489,7 +490,7 @@ export class StreamingToolExecutor {
         const msg = createUserMessage({
           content: [{ type: 'tool_result', content: text, tool_use_id: tool.id }],
           toolUseResult: text,
-          sourceToolAssistantUUID: tool.assistantMessage.uuid,
+          sourceToolAssistantUUID: tool.assistantMessage.uuid as UUID,
         })
         yield { message: msg, newContext: this.toolUseContext }
         markToolUseAsComplete(this.toolUseContext, tool.id)

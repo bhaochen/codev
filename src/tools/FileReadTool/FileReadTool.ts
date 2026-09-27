@@ -1,3 +1,4 @@
+import { getImageProcessor } from './imageProcessor.js'
 import type { Base64ImageSource } from '@anthropic-ai/sdk/resources/index.mjs'
 import { readdir, readFile as readFileAsync } from 'fs/promises'
 import * as path from 'path'
@@ -901,7 +902,7 @@ async function callInner(
         resolvedFilePath,
         parsedRange ?? undefined,
       )
-      if (!extractResult.success) {
+      if (extractResult.success === false) {
         throw new Error(extractResult.error.message)
       }
       logEvent('tengu_pdf_page_extraction', {
@@ -964,7 +965,7 @@ async function callInner(
 
     if (shouldExtractPages) {
       const extractResult = await extractPDFPages(resolvedFilePath)
-      if (extractResult.success) {
+      if (extractResult.success === true) {
         logEvent('tengu_pdf_page_extraction', {
           success: true,
           pageCount: extractResult.data.file.count,
@@ -988,7 +989,7 @@ async function callInner(
     }
 
     const readResult = await readPDF(resolvedFilePath)
-    if (!readResult.success) {
+    if (readResult.success === false) {
       throw new Error(readResult.error.message)
     }
     const pdfData = readResult.data
@@ -1150,7 +1151,7 @@ export async function readImageWithTokenBudget(
         type: 'image',
         file: {
           base64: compressed.base64,
-          type: compressed.mediaType,
+          type: compressed.mediaType as Base64ImageSource['media_type'],
           originalSize,
         },
       }
@@ -1158,13 +1159,7 @@ export async function readImageWithTokenBudget(
       logError(e)
       // Fallback: heavily compressed version from the SAME buffer
       try {
-        const sharpModule = await import('sharp')
-        const sharp =
-          (
-            sharpModule as {
-              default?: typeof sharpModule
-            } & typeof sharpModule
-          ).default || sharpModule
+        const sharp = await getImageProcessor()
 
         const fallbackBuffer = await sharp(imageBuffer)
           .resize(400, 400, {

@@ -1535,10 +1535,6 @@ export const getApiKeyFromConfigOrMacOSKeychain = memoize(
   },
 )
 
-function isValidApiKey(apiKey: string): boolean {
-  // Only allow alphanumeric characters, dashes, and underscores
-  return /^[a-zA-Z0-9-_]+$/.test(apiKey)
-}
 
 export async function saveApiKey(apiKey: string): Promise<void> {
   if (!isValidApiKey(apiKey)) {
