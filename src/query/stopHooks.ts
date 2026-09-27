@@ -16,7 +16,10 @@ import type {
   TombstoneMessage,
   ToolUseSummaryMessage,
 } from '../types/message.js'
-import { createAttachmentMessage } from '../utils/attachments.js'
+import {
+  createAttachmentMessage,
+  type Attachment,
+} from '../utils/attachments.js'
 import { logForDebugging } from '../utils/debug.js'
 import { errorMessage } from '../utils/errors.js'
 import type { REPLHookContext } from '../utils/hooks/postSamplingHooks.js'
@@ -215,7 +218,7 @@ export async function* handleStopHooks(
         }
         // Track errors and output from attachments
         if (result.message.type === 'attachment') {
-          const attachment = result.message.attachment
+          const attachment = result.message.attachment as Attachment
           if (
             'hookEvent' in attachment &&
             (attachment.hookEvent === 'Stop' ||

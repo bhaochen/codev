@@ -148,7 +148,9 @@ export function evictTerminalTask(
  */
 export function getRunningTasks(state: AppState): TaskState[] {
   const tasks = state.tasks ?? {}
-  return Object.values(tasks).filter(task => task.status === 'running')
+  return (Object.values(tasks) as TaskState[]).filter(
+    task => task.status === 'running',
+  )
 }
 
 /**
@@ -168,7 +170,7 @@ export async function generateTaskAttachments(state: AppState): Promise<{
   const evictedTaskIds: string[] = []
   const tasks = state.tasks ?? {}
 
-  for (const taskState of Object.values(tasks)) {
+  for (const taskState of Object.values(tasks) as TaskState[]) {
     if (taskState.notified) {
       switch (taskState.status) {
         case 'completed':

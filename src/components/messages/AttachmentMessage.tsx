@@ -4,6 +4,7 @@ import React, { useMemo } from 'react';
 import { Ansi, Box, Text } from '../../ink.js';
 import type { Attachment } from 'src/utils/attachments.js';
 import type { NullRenderingAttachmentType } from './nullRenderingAttachments.js';
+import type { TaskState } from '../../tasks/types.js';
 import { useAppState } from '../../state/AppState.js';
 import { getDisplayPath } from 'src/utils/file.js';
 import { formatFileSize } from 'src/utils/format.js';
@@ -351,7 +352,7 @@ export function AttachmentMessage({
       // skill_discovery and teammate_mailbox are handled BEFORE the switch in
       // runtime-gated blocks (feature() / isAgentSwarmsEnabled()) that TS can't
       // narrow through — excluded here via type union (compile-time only, no emit).
-      attachment.type satisfies NullRenderingAttachmentType | 'skill_discovery' | 'teammate_mailbox';
+      attachment.type as NullRenderingAttachmentType | 'skill_discovery' | 'teammate_mailbox';
       return null;
   }
 }
@@ -443,7 +444,7 @@ function TeammateTaskStatus(t0) {
   } else {
     t1 = $[1];
   }
-  const task = useAppState(t1);
+  const task = useAppState<TaskState | undefined>(t1);
   if (task?.type !== "in_process_teammate") {
     let t2;
     if ($[2] !== attachment) {

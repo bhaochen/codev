@@ -23,6 +23,7 @@ export {
 } from './teammateContext.js'
 
 import type { AppState } from '../state/AppState.js'
+import type { TaskState } from '../tasks/types.js'
 import { isEnvTruthy } from './envUtils.js'
 import { getTeammateContext } from './teammateContext.js'
 
@@ -204,7 +205,7 @@ export function isTeamLead(
  */
 export function hasActiveInProcessTeammates(appState: AppState): boolean {
   // Check for running in-process teammate tasks
-  for (const task of Object.values(appState.tasks)) {
+  for (const task of Object.values(appState.tasks) as TaskState[]) {
     if (task.type === 'in_process_teammate' && task.status === 'running') {
       return true
     }
@@ -218,7 +219,7 @@ export function hasActiveInProcessTeammates(appState: AppState): boolean {
  * Used to determine if we should wait before sending shutdown prompts.
  */
 export function hasWorkingInProcessTeammates(appState: AppState): boolean {
-  for (const task of Object.values(appState.tasks)) {
+  for (const task of Object.values(appState.tasks) as TaskState[]) {
     if (
       task.type === 'in_process_teammate' &&
       task.status === 'running' &&
@@ -241,7 +242,10 @@ export function waitForTeammatesToBecomeIdle(
 ): Promise<void> {
   const workingTaskIds: string[] = []
 
-  for (const [taskId, task] of Object.entries(appState.tasks)) {
+  for (const [taskId, task] of Object.entries(appState.tasks) as [
+      string,
+      TaskState,
+    ][]) {
     if (
       task.type === 'in_process_teammate' &&
       task.status === 'running' &&

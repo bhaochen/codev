@@ -15,7 +15,7 @@ import { isVimModeEnabled } from './utils.js';
 import { useShortcutDisplay } from '../../keybindings/useShortcutDisplay.js';
 import { isDefaultMode, permissionModeSymbol, permissionModeTitle, getModeColor } from '../../utils/permissions/PermissionMode.js';
 import { BackgroundTaskStatus } from '../tasks/BackgroundTaskStatus.js';
-import { isBackgroundTask } from '../../tasks/types.js';
+import { isBackgroundTask, type TaskState } from '../../tasks/types.js';
 import { isPanelAgentTask } from '../../tasks/LocalAgentTask/LocalAgentTask.js';
 import { getVisibleAgentTasks } from '../CoordinatorAgentStatus.js';
 import { count } from '../../utils/array.js';
@@ -28,6 +28,7 @@ import { getIsRemoteMode } from '../../bootstrap/state.js';
 import HistorySearchInput from './HistorySearchInput.js';
 import { goalStatusColor } from './GoalIndicator.js';
 import { getFocusedGoal, isGoalInactive } from '../../utils/goal.js';
+import type { Goal } from '../../state/AppStateStore.js';
 import { usePrStatus } from '../../hooks/usePrStatus.js';
 import { KeyboardShortcutHint } from '../design-system/KeyboardShortcutHint.js';
 import { Byline } from '../design-system/Byline.js';
@@ -236,6 +237,7 @@ type ModeIndicatorProps = {
   teammateFooterIndex?: number;
   onOpenTasksDialog?: (taskId?: string) => void;
 };
+const TungstenPill = (_props: { selected: boolean }): React.ReactNode => null;
 function ModeIndicator({
   mode,
   toolPermissionContext,
@@ -318,7 +320,7 @@ function ModeIndicator({
   // Derive team info from teamContext (no filesystem I/O needed)
   // Match the same logic as TeamStatus to avoid trailing separator
   // In-process mode uses Shift+Down/Up navigation, not footer teams menu
-  const hasTeams = isAgentSwarmsEnabled() && !isInProcessEnabled() && teamContext !== undefined && count(Object.values(teamContext.teammates), t_0 => t_0.name !== 'team-lead') > 0;
+  const hasTeams = isAgentSwarmsEnabled() && !isInProcessEnabled() && teamContext !== undefined && count(Object.values(teamContext.teammates) as { name: string }[], t_0 => t_0.name !== 'team-lead') > 0;
   if (mode === 'bash') {
     return <Text color="bashBorder">! for bash mode</Text>;
   }
@@ -343,7 +345,7 @@ function ModeIndicator({
 
   // Check if we have in-process teammates (showing pills)
   // In spinner-tree mode, pills are disabled - teammates appear in the spinner tree instead
-  const hasInProcessTeammates = !showSpinnerTree && hasBackgroundTasks && Object.values(tasks).some(t_1 => t_1.type === 'in_process_teammate');
+  const hasInProcessTeammates = !showSpinnerTree && hasBackgroundTasks && (Object.values(tasks) as TaskState[]).some(t_1 => t_1.type === 'in_process_teammate');
   const hasTeammatePills = hasInProcessTeammates || !showSpinnerTree && isViewingTeammate;
 
   // In remote mode (`claude assistant`, --teleport) the agent runs elsewhere;
@@ -369,7 +371,7 @@ function ModeIndicator({
   const goalLabel = goalPlanSuppressed ? 'paused: plan mode' : goal?.status;
   const goalDotColor = goalPlanSuppressed ? 'yellow' : goal ? goalStatusColor(goal.status) : undefined;
   const goalOtherOpen = goal
-    ? Object.values(goals ?? {}).filter(
+    ? (Object.values(goals ?? {}) as Goal[]).filter(
         g => g.id !== goal.id && !isGoalInactive(g.status),
       ).length
     : 0
@@ -394,8 +396,8 @@ function ModeIndicator({
   ]
 
   // Check if any in-process teammates exist (for hint text cycling)
-  const hasAnyInProcessTeammates = Object.values(tasks).some(t => t.type === 'in_process_teammate' && t.status === 'running');
-  const hasRunningAgentTasks = Object.values(tasks).some(t => t.type === 'local_agent' && t.status === 'running');
+  const hasAnyInProcessTeammates = (Object.values(tasks) as TaskState[]).some(t => t.type === 'in_process_teammate' && t.status === 'running');
+  const hasRunningAgentTasks = (Object.values(tasks) as TaskState[]).some(t => t.type === 'local_agent' && t.status === 'running');
 
   // Get hint parts separately for potential second-line rendering
   const hintParts = showHint ? getSpinnerHintParts(isLoading, escShortcut, todosShortcut, killAgentsShortcut, hasTaskItems, expandedView, hasAnyInProcessTeammates, hasRunningAgentTasks, isKillAgentsConfirmShowing) : [];

@@ -407,7 +407,7 @@ export async function installResolvedPlugin({
     getEnabledPluginIdsForScope(settingSource),
     allowedCrossMarketplaces,
   )
-  if (!resolution.ok) {
+  if (resolution.ok === false) {
     return { ok: false, reason: 'resolution-failed', resolution }
   }
 
@@ -524,7 +524,7 @@ export async function installPluginFromMarketplace({
       marketplaceInstallLocation,
     })
 
-    if (!result.ok) {
+    if (result.ok === false) {
       switch (result.reason) {
         case 'local-source-no-location':
           return {

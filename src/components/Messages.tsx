@@ -19,12 +19,13 @@ import type { Screen } from '../screens/REPL.js';
 import type { Tools } from '../Tool.js';
 import { findToolByName } from '../Tool.js';
 import type { AgentDefinitionsResult } from '../tools/AgentTool/loadAgentsDir.js';
-import type { Message as MessageType, NormalizedMessage, ProgressMessage as ProgressMessageType, RenderableMessage } from '../types/message.js';
+import type { AttachmentMessage, Message as MessageType, NormalizedAssistantMessage, NormalizedMessage, NormalizedUserMessage, ProgressMessage as ProgressMessageType, RenderableMessage, SystemMessage } from '../types/message.js';
 import { type AdvisorBlock, isAdvisorBlock } from '../utils/advisor.js';
 import { collapseBackgroundBashNotifications } from '../utils/collapseBackgroundBashNotifications.js';
 import { collapseHookSummaries } from '../utils/collapseHookSummaries.js';
 import { collapseReadSearchGroups } from '../utils/collapseReadSearch.js';
 import { collapseTeammateShutdowns } from '../utils/collapseTeammateShutdowns.js';
+type MessageRows = (NormalizedUserMessage | NormalizedAssistantMessage | SystemMessage | AttachmentMessage)[]
 import { getGlobalConfig } from '../utils/config.js';
 import { isEnvTruthy } from '../utils/envUtils.js';
 import { isFullscreenEnvEnabled } from '../utils/fullscreen.js';
@@ -53,7 +54,7 @@ import type { JumpHandle } from './VirtualMessageList.js';
 // and pegs CPU at 100%. Memo on agentDefinitions so a new messages array
 // doesn't invalidate the logo subtree. LogoV2/StatusNotices internally
 // subscribe to useAppState/useSettings for their own updates.
-const LogoHeader = React.memo(function LogoHeader(t0) {
+const LogoHeader = React.memo(function LogoHeader(t0: { agentDefinitions?: AgentDefinitionsResult }) {
   const $ = _c(3);
   const {
     agentDefinitions
@@ -101,7 +102,7 @@ export function filterForBriefTool<T extends {
       type: string;
       name?: string;
       tool_use_id?: string;
-    }>;
+    }> | string;
   };
   attachment?: {
     type: string;
@@ -121,7 +122,8 @@ export function filterForBriefTool<T extends {
     // hook timing) that defeats the point of brief mode. Still visible in
     // transcript mode (ctrl+o) which bypasses this filter.
     if (msg.type === 'system') return msg.subtype !== 'api_metrics';
-    const block = msg.message?.content[0];
+    const content = msg.message?.content;
+    const block = Array.isArray(content) ? content[0] : undefined;
     if (msg.type === 'assistant') {
       // API error messages (auth failures, rate limits, etc.) must stay visible
       if (msg.isApiErrorMessage) return true;
@@ -174,7 +176,7 @@ export function dropTextInBriefTurns<T extends {
     content: Array<{
       type: string;
       name?: string;
-    }>;
+    }> | string;
   };
 }>(messages: T[], briefToolNames: string[]): T[] {
   const nameSet = new Set(briefToolNames);
@@ -185,7 +187,8 @@ export function dropTextInBriefTurns<T extends {
   let turn = 0;
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i]!;
-    const block = msg.message?.content[0];
+    const content = msg.message?.content;
+    const block = Array.isArray(content) ? content[0] : undefined;
     if (msg.type === 'user' && block?.type !== 'tool_result' && !msg.isMeta) {
       turn++;
       continue;
@@ -377,7 +380,7 @@ const MessagesImpl = ({
     columns
   } = useTerminalSize();
   const toggleShowAllShortcut = useShortcutDisplay('transcript:toggleShowAll', 'Transcript', 'Ctrl+E');
-  const normalizedMessages = useMemo(() => normalizeMessages(messages).filter(isNotEmptyMessage), [messages]);
+  const normalizedMessages = useMemo(() => normalizeMessages(messages).filter(isNotEmptyMessage) as MessageRows, [messages]);
 
   // Check if streaming thinking should be visible (streaming or within 30s timeout)
   const isStreamingThinkingVisible = useMemo(() => {
@@ -499,7 +502,7 @@ const MessagesImpl = ({
     const compactAwareMessages = verbose || isFullscreenEnvEnabled() ? normalizedMessages : getMessagesAfterCompactBoundary(normalizedMessages, {
       includeSnipped: true
     });
-    const messagesToShowNotTruncated = reorderMessagesInUI(compactAwareMessages.filter((msg_2): msg_2 is Exclude<NormalizedMessage, ProgressMessageType> => msg_2.type !== 'progress')
+    const messagesToShowNotTruncated = reorderMessagesInUI(compactAwareMessages
     // CC-724: drop attachment messages that AttachmentMessage renders as
     // null (hook_success, hook_additional_context, hook_cancelled, etc.)
     // BEFORE counting/slicing so they don't inflate the "N messages"

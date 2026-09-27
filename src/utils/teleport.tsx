@@ -843,7 +843,7 @@ export async function teleportToRemote(options: {
         }, {
           signal
         });
-        if (!bundle.success) {
+        if (bundle.success === false) {
           logError(new Error(`Bundle upload failed: ${bundle.error}`));
           return null;
         }
@@ -1007,7 +1007,7 @@ export async function teleportToRemote(options: {
       }, {
         signal
       });
-      if (!bundle.success) {
+      if (bundle.success === false) {
         logError(new Error(`Bundle upload failed: ${bundle.error}`));
         // Only steer users to GitHub setup when there's a remote to clone from.
         const setup = repoInfo ? '. Please setup GitHub on https://claude.ai/code' : '';

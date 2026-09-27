@@ -54,7 +54,7 @@ type VersionLockInfo = {
   locksDir: string;
   staleLocksCleaned: number;
 };
-function DistTagsDisplay(t0) {
+function DistTagsDisplay(t0: { promise: Promise<NpmDistTags> }) {
   const $ = _c(8);
   const {
     promise

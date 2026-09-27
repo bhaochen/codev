@@ -16,7 +16,9 @@ type Props = {
   dim?: boolean;
 };
 const DEFAULT_WIDTH = 80;
-export const HighlightedCode = memo(function HighlightedCode(t0) {
+export const HighlightedCode = memo(function HighlightedCode(
+  t0: Props,
+) {
   const $ = _c(21);
   const {
     code,

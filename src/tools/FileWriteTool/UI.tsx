@@ -278,7 +278,7 @@ function WriteRejectionBody(t0) {
     style,
     verbose
   } = t0;
-  const data = use(promise);
+  const data = use<RejectionDiffData>(promise);
   if (data.type === "create") {
     return createFallback;
   }

@@ -15,7 +15,7 @@ type Props = {
  * moved neutral or positive status to src/components/Status.tsx instead, which
  * users can access through /status.
  */
-export function StatusNotices(t0) {
+export function StatusNotices(t0: Props | undefined) {
   const $ = _c(4);
   const {
     agentDefinitions

@@ -8,11 +8,14 @@
     "jsx": "react-jsx",
     "allowJs": true,
     "types": ["bun"],
-    "baseUrl": ".",
     "paths": {
-      "src/*": ["src/*"],
-      "ink-picture": ["src/ink-picture"],
-      "ink-picture/*": ["src/ink-picture/*"]
+      "src/*": ["./src/*"],
+      "ink-picture": ["./src/ink-picture"],
+      "ink-picture/*": ["./src/ink-picture/*"],
+      "@ant/computer-use-mcp": ["./src/vendor/computer-use-mcp/index"],
+      "@ant/computer-use-mcp/*": ["./src/vendor/computer-use-mcp/*"],
+      "@ant/computer-use-input": ["./src/vendor/computer-use-mcp/input"],
+      "@ant/computer-use-swift": ["./src/vendor/computer-use-mcp/swift"]
     },
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,

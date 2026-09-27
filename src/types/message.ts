@@ -155,6 +155,7 @@ export type StopHookInfo = {
   command: string
   durationMs?: number
   hookName?: string
+  promptText?: string
 }
 
 export type SystemStopHookSummaryMessage = SystemMessage & {
@@ -314,6 +315,7 @@ export type RenderableMessage =
   | AttachmentMessage
   | GroupedToolUseMessage
   | ProgressMessage
+  | CollapsedReadSearchGroup
 
 export type TombstoneMessage = {
   type: 'tombstone'

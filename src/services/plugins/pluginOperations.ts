@@ -378,7 +378,7 @@ export async function installPluginOp(
     marketplaceInstallLocation,
   })
 
-  if (!result.ok) {
+  if (result.ok === false) {
     switch (result.reason) {
       case 'local-source-no-location':
         return {

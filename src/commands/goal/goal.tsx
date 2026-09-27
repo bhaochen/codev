@@ -299,7 +299,7 @@ export async function call(
     : ''
 
   const appState = getAppState()
-  const goals = appState.goals
+  const goals = appState.goals as Record<string, Goal> | undefined
   const focusedGoalId = appState.focusedGoalId
   const focused = getFocusedGoal(appState)
   const inPlanMode = appState.toolPermissionContext.mode === 'plan'
