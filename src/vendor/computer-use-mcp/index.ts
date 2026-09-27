@@ -65,6 +65,7 @@ export type ComputerUseMcpServerLike = {
     handler: (request: unknown) => unknown,
   ): void
   connect(transport: unknown): Promise<void>
+  close(): Promise<void>
 }
 export const createComputerUseMcpServer: (
   adapter: ComputerUseHostAdapter,

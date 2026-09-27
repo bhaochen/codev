@@ -1,5 +1,6 @@
 import { feature } from 'bun:bundle'
 import type { AgentContentBlock, AgentImageBlock } from '../../types/agentMessage.js'
+import { isImageBlock, isTextBlock } from '../../types/agentMessage.js'
 import { randomUUID } from 'crypto'
 import type { QuerySource } from 'src/constants/querySource.js'
 import { logEvent } from 'src/services/analytics/index.js'
@@ -16,6 +17,7 @@ import type { SetToolJSXFn, ToolUseContext } from '../../Tool.js'
 import type {
   AssistantMessage,
   AttachmentMessage,
+  HookResultMessage,
   Message,
   ProgressMessage,
   SystemMessage,
@@ -237,22 +239,29 @@ export async function processUserInput({
 
     // TODO: Clean this up
     if (hookResult.message) {
-      switch (hookResult.message.attachment.type) {
+      const message = hookResult.message as HookResultMessage & {
+        attachment?: { type: string; content?: string }
+      }
+      if (!message.attachment) {
+        result.messages.push(message as unknown as AttachmentMessage)
+        break
+      }
+      switch (message.attachment.type) {
         case 'hook_success':
-          if (!hookResult.message.attachment.content) {
+          if (!message.attachment.content) {
             // Skip if there is no content
             break
           }
           result.messages.push({
-            ...hookResult.message,
+            ...message,
             attachment: {
-              ...hookResult.message.attachment,
-              content: applyTruncation(hookResult.message.attachment.content),
+              ...message.attachment,
+              content: applyTruncation(message.attachment.content),
             },
-          })
+          } as unknown as AttachmentMessage)
           break
         default:
-          result.messages.push(hookResult.message)
+          result.messages.push(message as unknown as AttachmentMessage)
           break
       }
     }
@@ -313,7 +322,7 @@ async function processUserInputBase(
     queryCheckpoint('query_image_processing_start')
     const processedBlocks: AgentContentBlock[] = []
     for (const block of input) {
-      if (block.type === 'image') {
+      if (isImageBlock(block)) {
         const resized = await maybeResizeAndDownsampleImageBlock(block)
         // Collect image metadata for isMeta message
         if (resized.dimensions) {
@@ -332,7 +341,7 @@ async function processUserInputBase(
     // Extract the input string from the last content block if it is text,
     // and keep track of the preceding content blocks
     const lastBlock = processedBlocks[processedBlocks.length - 1]
-    if (lastBlock?.type === 'text') {
+    if (lastBlock && isTextBlock(lastBlock)) {
       inputString = lastBlock.text
       precedingInputBlocks = processedBlocks.slice(0, -1)
     } else {

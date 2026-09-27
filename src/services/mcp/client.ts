@@ -121,6 +121,7 @@ const fetchMcpSkillsForClient = feature('MCP_SKILLS')
   : null
 
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js'
+import type { AgentContentBlock } from 'src/types/agentMessage.js'
 import type { AssistantMessage } from 'src/types/message.js'
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { classifyMcpToolForCollapse } from '../../tools/MCPTool/classifyForCollapse.js'
@@ -615,8 +616,11 @@ export const connectToServer = memoize(
       // If we have the session ingress JWT, we will connect via the session ingress rather than
       // to remote MCP's directly.
       const sessionIngressToken = getSessionIngressAuthToken()
+      // Discriminant hoisted so the exhaustive else-if chain can reference it
+      // without narrowing a near-exhausted union to `never` mid-test (TS6).
+      const serverType = serverRef.type
 
-      if (serverRef.type === 'sse') {
+      if (serverType === 'sse') {
         // Create an auth provider for this server
         const authProvider = new ClaudeAuthProvider(name, serverRef)
 
@@ -675,7 +679,7 @@ export const connectToServer = memoize(
           transportOptions,
         )
         logMCPDebug(name, `SSE transport initialized, awaiting connection`)
-      } else if (serverRef.type === 'sse-ide') {
+      } else if (serverType === 'sse-ide') {
         logMCPDebug(name, `Setting up SSE-IDE transport to ${serverRef.url}`)
         // IDE servers don't need authentication
         // TODO: Use the auth token provided in the lockfile
@@ -705,7 +709,7 @@ export const connectToServer = memoize(
             ? transportOptions
             : undefined,
         )
-      } else if (serverRef.type === 'ws-ide') {
+      } else if (serverType === 'ws-ide') {
         const tlsOptions = getWebSocketTLSOptions()
         const wsHeaders = {
           'User-Agent': getMCPUserAgent(),
@@ -732,7 +736,7 @@ export const connectToServer = memoize(
           })
         }
         transport = new WebSocketTransport(wsClient)
-      } else if (serverRef.type === 'ws') {
+      } else if (serverType === 'ws') {
         logMCPDebug(
           name,
           `Initializing WebSocket transport to ${serverRef.url}`,
@@ -781,7 +785,7 @@ export const connectToServer = memoize(
           })
         }
         transport = new WebSocketTransport(wsClient)
-      } else if (serverRef.type === 'http') {
+      } else if (serverType === 'http') {
         logMCPDebug(name, `Initializing HTTP transport to ${serverRef.url}`)
         logMCPDebug(
           name,
@@ -863,9 +867,9 @@ export const connectToServer = memoize(
           transportOptions,
         )
         logMCPDebug(name, `HTTP transport created successfully`)
-      } else if (serverRef.type === 'sdk') {
+      } else if (serverType === 'sdk') {
         throw new Error('SDK servers should be handled in print.ts')
-      } else if (serverRef.type === 'claudeai-proxy') {
+      } else if (serverType === 'claudeai-proxy') {
         logMCPDebug(
           name,
           `Initializing claude.ai proxy transport for server ${serverRef.id}`,
@@ -903,7 +907,7 @@ export const connectToServer = memoize(
         )
         logMCPDebug(name, `claude.ai proxy transport created successfully`)
       } else if (
-        (serverRef.type === 'stdio' || !serverRef.type) &&
+        (serverType === 'stdio' || serverType == null) &&
         isClaudeInChromeMCPServer(name)
       ) {
         // Run the Chrome MCP server in-process to avoid spawning a ~325 MB subprocess
@@ -926,7 +930,7 @@ export const connectToServer = memoize(
         logMCPDebug(name, `In-process Chrome MCP server started`)
       } else if (
         feature('CHICAGO_MCP') &&
-        (serverRef.type === 'stdio' || !serverRef.type) &&
+        (serverType === 'stdio' || serverType == null) &&
         isComputerUseMCPServer!(name)
       ) {
         // Run the Computer Use MCP server in-process — same rationale as
@@ -943,7 +947,7 @@ export const connectToServer = memoize(
         await inProcessServer.connect(serverTransport)
         transport = clientTransport
         logMCPDebug(name, `In-process Computer Use MCP server started`)
-      } else if (serverRef.type === 'stdio' || !serverRef.type) {
+      } else if (serverType === 'stdio' || serverType == null) {
         const finalCommand =
           process.env.CLAUDE_CODE_SHELL_PREFIX || serverRef.command
         const finalArgs = process.env.CLAUDE_CODE_SHELL_PREFIX
@@ -959,7 +963,7 @@ export const connectToServer = memoize(
           stderr: 'pipe', // prevents error output from the MCP server from printing to the UI
         })
       } else {
-        throw new Error(`Unsupported server type: ${serverRef.type}`)
+        throw new Error(`Unsupported server type: ${serverType}`)
       }
 
       // Set up stderr logging for stdio transport before connecting in case there are any stderr
@@ -2072,7 +2076,7 @@ export const fetchCommandsForClient = memoizeWithLRU(
           },
           argNames,
           source: 'mcp',
-          async getPromptForCommand(args: string) {
+          async getPromptForCommand(args: string): Promise<AgentContentBlock[]> {
             const argsArray = args.split(' ')
             try {
               const connectedClient = await ensureConnectedClient(client)
@@ -2085,7 +2089,7 @@ export const fetchCommandsForClient = memoizeWithLRU(
                   transformResultContent(message.content, connectedClient.name),
                 ),
               )
-              return transformed.flat()
+              return transformed.flat() as unknown as AgentContentBlock[]
             } catch (error) {
               logMCPError(
                 client.name,

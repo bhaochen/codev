@@ -7,7 +7,6 @@ import {
 } from 'src/constants/xml.js'
 import type {
   SDKAssistantMessage,
-  SDKCompactBoundaryMessage,
   SDKMessage,
   SDKRateLimitInfo,
 } from 'src/entrypoints/agentSdkTypes.js'
@@ -17,6 +16,7 @@ import type {
   AssistantMessage,
   CompactMetadata,
   Message,
+  SystemCompactBoundaryMessage,
 } from 'src/types/message.js'
 import type { DeepImmutable } from 'src/types/utils.js'
 import stripAnsi from 'strip-ansi'
@@ -73,7 +73,15 @@ export function toInternalMessages(
   })
 }
 
-type SDKCompactMetadata = SDKCompactBoundaryMessage['compact_metadata']
+type SDKCompactMetadata = {
+  trigger?: string
+  pre_tokens?: number
+  preserved_segment?: {
+    head_uuid?: string
+    anchor_uuid?: string
+    tail_uuid?: string
+  }
+}
 
 export function toSDKCompactMetadata(
   meta: CompactMetadata,
@@ -146,14 +154,21 @@ export function toSDKMessages(messages: Message[]): SDKMessage[] {
           },
         ]
       case 'system':
-        if (message.subtype === 'compact_boundary' && message.compactMetadata) {
+        if (
+          message.subtype === 'compact_boundary' &&
+          (message as SystemCompactBoundaryMessage).compactMetadata
+        ) {
+          const compactMetadata = (
+            message as SystemCompactBoundaryMessage
+          ).compactMetadata
+          if (!compactMetadata) return []
           return [
             {
               type: 'system',
               subtype: 'compact_boundary' as const,
               session_id: getSessionId(),
               uuid: message.uuid,
-              compact_metadata: toSDKCompactMetadata(message.compactMetadata),
+              compact_metadata: toSDKCompactMetadata(compactMetadata),
             },
           ]
         }
@@ -169,7 +184,7 @@ export function toSDKMessages(messages: Message[]): SDKMessage[] {
           return [
             localCommandOutputToSDKAssistantMessage(
               message.content,
-              message.uuid,
+              message.uuid as UUID,
             ),
           ]
         }
@@ -225,7 +240,6 @@ export function toSDKRateLimitInfo(
     return undefined
   }
   return {
-    status: limits.status,
     ...(limits.resetsAt !== undefined && { resetsAt: limits.resetsAt }),
     ...(limits.rateLimitType !== undefined && {
       rateLimitType: limits.rateLimitType,
@@ -248,7 +262,7 @@ export function toSDKRateLimitInfo(
     ...(limits.surpassedThreshold !== undefined && {
       surpassedThreshold: limits.surpassedThreshold,
     }),
-  }
+  } as SDKRateLimitInfo
 }
 
 /**

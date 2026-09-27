@@ -12,6 +12,7 @@ import {
   useAppStateStore,
   useSetAppState,
 } from 'src/state/AppState.js'
+import type { TaskState } from '../tasks/types.js'
 import { isVimModeEnabled } from '../components/PromptInput/utils.js'
 import type { ToolUseConfirm } from '../components/permissions/PermissionRequest.js'
 import type { SpinnerMode } from '../components/Spinner/types.js'
@@ -170,7 +171,7 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
   // emit SDK events, enqueue a single aggregate model-facing notification.
   // Returns true if anything was killed.
   const killAllAgentsAndNotify = useCallback((): boolean => {
-    const tasks = store.getState().tasks
+    const tasks = store.getState().tasks as Record<string, TaskState>
     const running = Object.entries(tasks).filter(
       ([, t]) => t.type === 'local_agent' && t.status === 'running',
     )
@@ -223,7 +224,7 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
   // confirmation hint, second press within the window actually kills all
   // agents. Reads tasks from the store directly to avoid stale closures.
   const handleKillAgents = useCallback(() => {
-    const tasks = store.getState().tasks
+    const tasks = store.getState().tasks as Record<string, TaskState>
     const hasRunningAgents = Object.values(tasks).some(
       t => t.type === 'local_agent' && t.status === 'running',
     )
