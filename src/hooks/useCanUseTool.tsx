@@ -129,7 +129,7 @@ function useCanUseTool(setToolUseConfirmQueue, setToolPermissionContext) {
                   command: string;
                 }).command);
                 if (speculativePromise) {
-                  const raceResult = await Promise.race([speculativePromise.then(_temp), new Promise(_temp2)]);
+                  const raceResult = await Promise.race([speculativePromise.then(_temp), new Promise<{ type: "timeout" }>(_temp2)]);
                   if (ctx.resolveIfAborted(resolve)) {
                     return;
                   }

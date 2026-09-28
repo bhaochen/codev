@@ -5,6 +5,7 @@ import * as path from 'path'
 import * as mcpClient from '../../services/mcp/client.js'
 import * as mcpConfig from '../../services/mcp/config.js'
 import * as mcpHostPreflight from '../services/mcpHostPreflight.js'
+import type { ScopedMcpServerConfig } from '../../services/mcp/config.js'
 import { handleMcpApi } from '../api/mcp.js'
 
 let tmpDir: string
@@ -290,7 +291,7 @@ describe('MCP API', () => {
 
   it('reconnects plugin-scoped MCP servers exposed via the merged server list', async () => {
     const pluginServerName = 'plugin:telegram:telegram'
-    const pluginServerConfig = {
+    const pluginServerConfig: ScopedMcpServerConfig = {
       scope: 'dynamic',
       type: 'stdio',
       command: 'bun',
@@ -299,7 +300,7 @@ describe('MCP API', () => {
         CLAUDE_PLUGIN_ROOT: '/tmp/telegram-plugin',
       },
       pluginSource: 'telegram@claude-plugins-official',
-    } as const
+    }
 
     getClaudeCodeMcpConfigsSpy = spyOn(mcpConfig, 'getClaudeCodeMcpConfigs').mockResolvedValue({
       servers: {
@@ -311,7 +312,6 @@ describe('MCP API', () => {
     reconnectSpy = spyOn(mcpClient, 'reconnectMcpServerImpl').mockResolvedValue({
       name: pluginServerName,
       client: {
-        name: pluginServerName,
         type: 'connected',
         client: {} as never,
         capabilities: {},
@@ -335,14 +335,14 @@ describe('MCP API', () => {
 
   it('returns a failed server state when reconnect preflight fails on the host machine', async () => {
     const pluginServerName = 'plugin:telegram:telegram'
-    const pluginServerConfig = {
+    const pluginServerConfig: ScopedMcpServerConfig = {
       scope: 'dynamic',
       type: 'stdio',
       command: 'npx',
       args: ['telegram-mcp'],
       env: {},
       pluginSource: 'telegram@claude-plugins-official',
-    } as const
+    }
 
     getClaudeCodeMcpConfigsSpy = spyOn(mcpConfig, 'getClaudeCodeMcpConfigs').mockResolvedValue({
       servers: {
@@ -359,7 +359,6 @@ describe('MCP API', () => {
     reconnectSpy = spyOn(mcpClient, 'reconnectMcpServerImpl').mockResolvedValue({
       name: pluginServerName,
       client: {
-        name: pluginServerName,
         type: 'connected',
         client: {} as never,
         capabilities: {},

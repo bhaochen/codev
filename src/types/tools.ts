@@ -10,6 +10,9 @@ export interface BashProgress {
   fullOutput: string
   elapsedTimeSeconds?: number
   totalLines?: number
+  totalBytes?: number
+  timeoutMs?: number
+  taskId?: string
 }
 
 export interface MCPProgress {

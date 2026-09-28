@@ -319,13 +319,16 @@ export class PluginService {
     )
 
     const marketplaces = Object.entries(marketplaceConfig.marketplaces ?? {})
-      .map(([name, entry]) => ({
-        name,
-        source: getMarketplaceSourceDisplay(entry.source),
-        lastUpdated: entry.lastUpdated,
-        autoUpdate: entry.autoUpdate !== false,
-        installedCount: plugins.filter((plugin) => plugin.marketplace === name).length,
-      }))
+      .map(([name, entry]) => {
+        const entryInfo = entry as { source?: string; lastUpdated?: string; autoUpdate?: boolean }
+        return {
+          name,
+          source: getMarketplaceSourceDisplay(entryInfo.source as unknown as Parameters<typeof getMarketplaceSourceDisplay>[0]),
+          lastUpdated: entryInfo.lastUpdated,
+          autoUpdate: entryInfo.autoUpdate !== false,
+          installedCount: plugins.filter((plugin) => plugin.marketplace === name).length,
+        }
+      })
       .sort((a, b) => a.name.localeCompare(b.name))
 
     return { plugins, detailById, marketplaces }
@@ -692,7 +695,7 @@ export class PluginService {
       case 'http':
         return hook.url
       default:
-        return hook.type
+        return (hook as { type: string }).type
     }
   }
 

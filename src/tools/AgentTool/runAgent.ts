@@ -507,7 +507,7 @@ export async function* runAgent({
 
   const additionalWorkingDirectories = Array.from(
     appState.toolPermissionContext.additionalWorkingDirectories.keys(),
-  )
+  ) as string[]
 
   const agentSystemPrompt = override?.systemPrompt
     ? override.systemPrompt
@@ -746,7 +746,7 @@ export async function* runAgent({
   }).catch(_err => logForDebugging(`Failed to write agent metadata: ${_err}`))
 
   // Track the last recorded message UUID for parent chain continuity
-  let lastRecordedUuid: UUID | null = initialMessages.at(-1)?.uuid ?? null
+  let lastRecordedUuid: UUID | null = (initialMessages.at(-1)?.uuid as UUID) ?? null
 
   try {
     for await (const message of query({
@@ -803,7 +803,7 @@ export async function* runAgent({
           logForDebugging(`Failed to record sidechain transcript: ${err}`),
         )
         if (message.type !== 'progress') {
-          lastRecordedUuid = message.uuid
+          lastRecordedUuid = message.uuid as UUID
         }
         yield message
       }
@@ -853,7 +853,13 @@ export async function* runAgent({
     if (feature('MONITOR_TOOL')) {
       const mcpMod =
         require('../../tasks/MonitorMcpTask/MonitorMcpTask.js') as typeof import('../../tasks/MonitorMcpTask/MonitorMcpTask.js')
-      mcpMod.killMonitorMcpTasksForAgent(
+      ;(mcpMod as unknown as {
+        killMonitorMcpTasksForAgent(
+          agentId: string,
+          getAppState: typeof toolUseContext.getAppState,
+          setAppState: typeof toolUseContext.setAppState,
+        ): void
+      }).killMonitorMcpTasksForAgent(
         agentId,
         toolUseContext.getAppState,
         rootSetAppState,

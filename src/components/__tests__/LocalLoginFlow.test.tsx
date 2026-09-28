@@ -9,7 +9,7 @@ const modelsResponse = {
 const originalFetch = globalThis.fetch
 
 beforeEach(() => {
-  vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: RequestInfo | URL, init?: RequestInit) => {
+  vi.spyOn(globalThis, 'fetch').mockImplementation((async (url: RequestInfo | URL, init?: RequestInit) => {
     if (String(url).endsWith('/v1/models')) {
       return new Response(JSON.stringify(modelsResponse), {
         status: 200,
@@ -17,7 +17,7 @@ beforeEach(() => {
       })
     }
     throw new Error('unexpected fetch')
-  })
+  }) as unknown as typeof fetch)
 })
 
 afterEach(() => {
@@ -51,10 +51,10 @@ describe('LocalLoginFlow — current behavior (buggy)', () => {
 describe('LocalLoginFlow — expected behavior (after fix)', () => {
   test('should fetch /v1/models to detect model', async () => {
     const fetchCalls: string[] = []
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (u: RequestInfo | URL) => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((async (u: RequestInfo | URL) => {
       fetchCalls.push(String(u))
       return new Response(JSON.stringify(modelsResponse), { status: 200 })
-    })
+    }) as unknown as typeof fetch)
 
     const baseUrl = 'https://example.com'
     await fetch(`${baseUrl}/v1/models`)
@@ -62,9 +62,9 @@ describe('LocalLoginFlow — expected behavior (after fix)', () => {
   })
 
   test('should handle fetch failure gracefully', async () => {
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => 
+    vi.spyOn(globalThis, 'fetch').mockImplementation((async () => 
       new Response('Not Found', { status: 404 })
-    )
+    ) as unknown as typeof fetch)
 
     const baseUrl = 'https://example.com'
     const response = await fetch(`${baseUrl}/v1/models`)
@@ -75,12 +75,12 @@ describe('LocalLoginFlow — expected behavior (after fix)', () => {
     let resolveFirst: (v: Response) => void
     const firstFetch = new Promise<Response>(r => { resolveFirst = r })
     
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: RequestInfo | URL) => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((async (url: RequestInfo | URL) => {
       if (String(url).endsWith('/v1/models')) {
         return firstFetch
       }
       throw new Error('unexpected')
-    })
+    }) as unknown as typeof fetch)
 
     const firstUrl = 'https://first.example.com'
     const secondUrl = 'https://second.example.com'

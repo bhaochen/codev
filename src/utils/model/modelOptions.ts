@@ -426,6 +426,9 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
 
   if (process.env.USER_TYPE === 'ant') {
     // Build options from antModels config
+    // ant-internal; compiled out in external builds.
+    const getAntModels = () =>
+      [] as Array<{ alias: string; label: string; description?: string; model: string }>
     const antModelOptions: ModelOption[] = getAntModels().map(m => ({
       value: m.alias,
       label: m.label,

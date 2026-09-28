@@ -18,7 +18,7 @@ import {
   type FinalizeSource,
   type VoiceStreamConnection,
 } from '../services/voice/groqSTT.js'
-import { connectGroqStream } from '../services/voice/groqSTT.js'
+import { connectGroqStream, type VoiceStreamCallbacks } from '../services/voice/groqSTT.js'
 import { logForDebugging } from '../utils/debug.js'
 import { toError } from '../utils/errors.js'
 import { getSystemLocaleLanguage } from '../utils/intl.js'

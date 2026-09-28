@@ -116,9 +116,9 @@ export function isPathInSandboxWriteAllowlist(resolvedPath: string): boolean {
   const resolvedDeny = denyWithinAllow.flatMap(getResolvedSandboxConfigPath)
   return pathsToCheck.every(p => {
     for (const denyPath of resolvedDeny) {
-      if (pathInWorkingPath(p, denyPath)) return false
+      if (pathInWorkingPath(p, denyPath as string)) return false
     }
-    return resolvedAllow.some(allowPath => pathInWorkingPath(p, allowPath))
+    return resolvedAllow.some(allowPath => pathInWorkingPath(p, allowPath as string))
   })
 }
 
@@ -183,7 +183,7 @@ export function isPathAllowed(
       resolvedPath,
       precomputedPathsToCheck,
     )
-    if (!safetyCheck.safe) {
+    if (safetyCheck.safe === false) {
       return {
         allowed: false,
         decisionReason: {

@@ -38,6 +38,14 @@ export function Settings({
   // focused). Settings must cede Esc so search can clear/exit first.
   const [configOwnsEsc, setConfigOwnsEsc] = useState(false)
   const [gatesOwnsEsc, setGatesOwnsEsc] = useState(false)
+
+  // ant-internal Gates settings tab; compiled out in external builds.
+  function Gates(_props: {
+    onOwnsEscChange: (owns: boolean) => void
+    contentHeight: number
+  }): React.ReactNode {
+    return null
+  }
   // Fixed content height so switching tabs doesn't shift the pane height.
   // Outside modals cap at min(80% viewport, 30). Inside a Modal the modal's
   // innerSize.rows IS the ScrollBox viewport — the 0.8 multiplier over-

@@ -1,4 +1,5 @@
 import type { RenderableMessage } from '../types/message.js'
+import type { AgentContentBlock } from '../types/agentMessage.js'
 import {
   INTERRUPT_MESSAGE,
   INTERRUPT_MESSAGE_FOR_TOOL_USE,
@@ -85,15 +86,21 @@ function computeSearchText(msg: RenderableMessage): string {
       // unsearchable without this — [ dump finds it, / doesn't.
       if (msg.attachment.type === 'relevant_memories') {
         raw = msg.attachment.memories.map(m => m.content).join('\n')
-      } else if (
+      }
+      const queuedAttachment = msg.attachment as {
+        commandMode?: string
+        isMeta?: boolean
+        prompt?: string | AgentContentBlock[]
+      }
+      if (
         // Mid-turn prompts — queued while an agent is running. Render via
         // UserTextMessage (AttachmentMessage.tsx:~348). stickyPromptText
         // (VirtualMessageList.tsx:~103) has the same guards — mirror here.
         msg.attachment.type === 'queued_command' &&
-        msg.attachment.commandMode !== 'task-notification' &&
-        !msg.attachment.isMeta
+        queuedAttachment.commandMode !== 'task-notification' &&
+        !queuedAttachment.isMeta
       ) {
-        const p = msg.attachment.prompt
+        const p = queuedAttachment.prompt
         raw =
           typeof p === 'string'
             ? p

@@ -13,6 +13,7 @@ import {
 import { commandHasAnyCd } from '../../tools/BashTool/bashPermissions.js'
 import { checkReadOnlyConstraints } from '../../tools/BashTool/readOnlyValidation.js'
 import type { SpeculationAcceptMessage } from '../../types/logs.js'
+import type { AgentContentBlock } from '../../types/agentMessage.js'
 import type { Message } from '../../types/message.js'
 import { createChildAbortController } from '../../utils/abortController.js'
 import { count } from '../../utils/array.js'
@@ -254,9 +255,11 @@ export function prepareMessagesForInjection(messages: Message[]): Message[] {
 
   return messages
     .map(msg => {
-      if (!('message' in msg) || !Array.isArray(msg.message.content)) return msg
-      const content = msg.message.content.filter(keep)
-      if (content.length === msg.message.content.length) return msg
+      const m = ('message' in msg) ? msg.message : undefined
+      const contentUnion = (m as { content?: string | AgentContentBlock[] } | undefined)?.content
+      if (!('message' in msg) || !Array.isArray(contentUnion)) return msg
+      const content = contentUnion.filter(keep)
+      if (content.length === contentUnion.length) return msg
       if (content.length === 0) return null
       // Drop messages where all remaining blocks are whitespace-only text
       // (API rejects these with 400: "text content blocks must contain non-whitespace text")
@@ -265,7 +268,7 @@ export function prepareMessagesForInjection(messages: Message[]): Message[] {
           b.type !== 'text' || (b.text !== undefined && b.text.trim() !== ''),
       )
       if (!hasNonWhitespaceContent) return null
-      return { ...msg, message: { ...msg.message, content } } as typeof msg
+      return { ...msg, message: { ...(msg.message as object), content } } as typeof msg
     })
     .filter((m): m is Message => m !== null)
 }

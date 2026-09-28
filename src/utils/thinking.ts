@@ -93,6 +93,8 @@ export function modelSupportsThinking(model: string): boolean {
     return supported3P
   }
   if (process.env.USER_TYPE === 'ant') {
+    // ant-internal; compiled out in external builds.
+    const resolveAntModel = (_model: string): boolean => false
     if (resolveAntModel(model.toLowerCase())) {
       return true
     }

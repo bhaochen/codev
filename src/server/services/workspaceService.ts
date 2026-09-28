@@ -436,7 +436,7 @@ export class WorkspaceService {
         state: 'error',
         path: resolvedPath.relativePath,
         language,
-        size: stat.stat.size,
+        size: stat.stat.size as number,
         error: this.formatFsError(
           'Failed to read workspace file',
           resolvedPath.absolutePath,
@@ -452,7 +452,7 @@ export class WorkspaceService {
         dataUrl: `data:${imageMimeType};base64,${content.toString('base64')}`,
         mimeType: imageMimeType,
         language: 'image',
-        size: stat.stat.size,
+        size: stat.stat.size as number,
       }
     }
 
@@ -461,7 +461,7 @@ export class WorkspaceService {
         state: 'binary',
         path: resolvedPath.relativePath,
         language: 'binary',
-        size: stat.stat.size,
+        size: stat.stat.size as number,
       }
     }
 
@@ -471,7 +471,7 @@ export class WorkspaceService {
       previewType: 'text',
       content: content.toString('utf8'),
       language,
-      size: stat.stat.size,
+      size: stat.stat.size as number,
       truncated: content.length < stat.stat.size,
       readBytes: content.length,
     }

@@ -16,7 +16,8 @@ const HEADROOM = 3;
 import { logForDebugging } from '../utils/debug.js';
 import { sleep } from '../utils/sleep.js';
 import { renderableSearchText } from '../utils/transcriptSearch.js';
-import { isNavigableMessage, type MessageActionsNav, type MessageActionsState, type NavigableMessage, stripSystemReminders, toolCallOf } from './messageActions.js';
+import type { AgentContentBlock } from '../types/agentMessage.js';
+import { isNavigableMessage, type MessageActionsNav, type MessageActionsState, type NavigableMessage, type NavigableType, stripSystemReminders, toolCallOf } from './messageActions.js';
 
 // Fallback extractor: lower + cache here for callers without the
 // Messages.tsx tool-lookup path (tests, static contexts). Messages.tsx
@@ -149,9 +150,12 @@ function computeStickyPromptText(msg: RenderableMessage): string | null {
     const block = msg.message.content[0];
     if (block?.type !== 'text') return null;
     raw = block.text;
-  } else if (msg.type === 'attachment' && msg.attachment.type === 'queued_command' && msg.attachment.commandMode !== 'task-notification' && !msg.attachment.isMeta) {
-    const p = msg.attachment.prompt;
-    raw = typeof p === 'string' ? p : p.flatMap(b => b.type === 'text' ? [b.text] : []).join('\n');
+  } else if (msg.type === 'attachment' && msg.attachment.type === 'queued_command') {
+    const queuedAttachment = msg.attachment as { commandMode?: string; isMeta?: boolean; prompt?: string | AgentContentBlock[] }
+    if (queuedAttachment.commandMode !== 'task-notification' && !queuedAttachment.isMeta) {
+      const p = queuedAttachment.prompt
+      raw = typeof p === 'string' ? p : p.flatMap(b => b.type === 'text' ? [b.text] : []).join('\n');
+    }
   }
   if (raw === null) return null;
   const t = stripSystemReminders(raw);
@@ -343,7 +347,7 @@ export function VirtualMessageList({
   useImperativeHandle(cursorNavRef, (): MessageActionsNav => {
     const select = (m: NavigableMessage) => setCursor?.({
       uuid: m.uuid,
-      msgType: m.type,
+      msgType: m.type as NavigableType,
       expanded: false,
       toolName: toolCallOf(m)?.name
     });

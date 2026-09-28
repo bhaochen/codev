@@ -341,7 +341,7 @@ export function resetCommandQueue(): void {
 // ============================================================================
 
 const NON_EDITABLE_MODES = new Set<PromptInputMode>([
-  'task-notification',
+  'task-notification' as PromptInputMode,
 ] satisfies Permutations<Exclude<PromptInputMode, EditablePromptInputMode>>)
 
 export function isPromptInputModeEditable(
@@ -394,10 +394,11 @@ function extractImagesFromValue(
   if (typeof value === 'string') {
     return []
   }
+  const valueArr = Array.isArray(value) ? (value as AgentContentBlock[]) : []
 
   const images: PastedContent[] = []
   let imageIndex = 0
-  for (const block of value) {
+  for (const block of valueArr) {
     if (block.type === 'image' && block.source.type === 'base64') {
       images.push({
         id: startId + imageIndex,

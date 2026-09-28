@@ -195,10 +195,11 @@ export function useRemoteSession({
           sdkMessage.subtype === 'init' &&
           onInit
         ) {
+          const slashCommands = sdkMessage.slash_commands as string[]
           logForDebugging(
-            `[useRemoteSession] Init received with ${sdkMessage.slash_commands.length} slash commands`,
+            `[useRemoteSession] Init received with ${slashCommands.length} slash commands`,
           )
-          onInit(sdkMessage.slash_commands)
+          onInit(slashCommands)
         }
 
         // Track remote subagent lifecycle for the "N in background" counter.
@@ -207,12 +208,12 @@ export function useRemoteSession({
         // Return early — these are status signals, not renderable messages.
         if (sdkMessage.type === 'system') {
           if (sdkMessage.subtype === 'task_started') {
-            runningTaskIdsRef.current.add(sdkMessage.task_id)
+            runningTaskIdsRef.current.add(sdkMessage.task_id as string)
             writeTaskCount()
             return
           }
           if (sdkMessage.subtype === 'task_notification') {
-            runningTaskIdsRef.current.delete(sdkMessage.task_id)
+            runningTaskIdsRef.current.delete(sdkMessage.task_id as string)
             writeTaskCount()
             return
           }

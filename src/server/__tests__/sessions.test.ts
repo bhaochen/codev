@@ -44,35 +44,6 @@ async function cleanupTmpDir(): Promise<void> {
   delete process.env.CLAUDE_CONFIG_DIR
 }
 
-function git(cwd: string, ...args: string[]): string {
-  return execFileSync('git', args, {
-    cwd,
-    encoding: 'utf8',
-  })
-}
-
-async function createCleanGitRepo(baseDir: string): Promise<string> {
-  const workDir = path.join(
-    baseDir,
-    `repo-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-  )
-
-  await fs.mkdir(workDir, { recursive: true })
-  git(workDir, 'init')
-  git(workDir, 'config', 'user.email', 'sessions-api@example.com')
-  git(workDir, 'config', 'user.name', 'Sessions API')
-  git(workDir, 'checkout', '-b', 'main')
-  await fs.writeFile(path.join(workDir, 'README.md'), 'main\n')
-  git(workDir, 'add', 'README.md')
-  git(workDir, 'commit', '-m', 'initial')
-  git(workDir, 'checkout', '-b', 'feature/rail')
-  await fs.writeFile(path.join(workDir, 'feature.txt'), 'feature\n')
-  git(workDir, 'add', 'feature.txt')
-  git(workDir, 'commit', '-m', 'feature')
-  git(workDir, 'checkout', 'main')
-
-  return workDir
-}
 
 /** Write a JSONL session file with given entries. */
 async function writeSessionFile(

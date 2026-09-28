@@ -715,6 +715,12 @@ export type Attachment =
       warningCount: number
       sample: string
     }
+  | {
+      type: 'pen_mode_enter'
+    }
+  | {
+      type: 'pen_mode_exit'
+    }
 
 export type TeammateMailboxAttachment = {
   type: 'teammate_mailbox'

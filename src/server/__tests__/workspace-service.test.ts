@@ -464,8 +464,14 @@ describe('WorkspaceService', () => {
 
   it('returns explicit error state when git status fails instead of ok-empty', async () => {
     const repoDir = await createGitWorkspace()
-    const service = new WorkspaceService(async () => repoDir) as WorkspaceService & {
-      runGit: (workDir: string, args: string[]) => Promise<{
+    const service = new WorkspaceService(async () => repoDir) as unknown as {
+      getStatus(sessionId: string): Promise<{
+        state: string
+        isGitRepo?: boolean
+        changedFiles?: unknown[]
+        error?: string
+      }>
+      runGit(workDir: string, args: string[]): Promise<{
         stdout: string
         stderr: string
         code: number
@@ -502,8 +508,14 @@ describe('WorkspaceService', () => {
     await fs.writeFile(path.join(repoDir, 'a.txt'), 'a\n')
     await fs.writeFile(path.join(repoDir, 'b.txt'), 'b\n')
     const diffStatCalls: string[][] = []
-    const service = new WorkspaceService(async () => repoDir) as WorkspaceService & {
-      runGit: (workDir: string, args: string[]) => Promise<{
+    const service = new WorkspaceService(async () => repoDir) as unknown as {
+      getStatus(sessionId: string): Promise<{
+        state: string
+        isGitRepo?: boolean
+        changedFiles?: unknown[]
+        error?: string
+      }>
+      runGit(workDir: string, args: string[]): Promise<{
         stdout: string
         stderr: string
         code: number

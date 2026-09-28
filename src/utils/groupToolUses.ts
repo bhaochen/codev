@@ -58,7 +58,7 @@ export function applyGrouping(
   // In verbose mode, don't group - each message renders at its original position
   if (verbose) {
     return {
-      messages: messages,
+      messages: messages as RenderableMessage[],
     }
   }
   const toolsWithGrouping = getToolsWithGrouping(tools)
@@ -74,7 +74,7 @@ export function applyGrouping(
     if (info && toolsWithGrouping.has(info.toolName)) {
       const key = `${info.messageId}:${info.toolName}`
       const group = groups.get(key) ?? []
-      group.push(msg as NormalizedAssistantMessage<BetaToolUseBlock>)
+      group.push(msg as NormalizedAssistantMessage<AgentToolUseBlock>)
       groups.set(key, group)
     }
   }
@@ -150,7 +150,7 @@ export function applyGrouping(
             results,
             displayMessage: firstMsg,
             uuid: `grouped-${firstMsg.uuid}`,
-            timestamp: firstMsg.timestamp,
+            timestamp: firstMsg.timestamp as number,
             messageId: info.messageId,
           }
           result.push(groupedMessage)
@@ -176,7 +176,7 @@ export function applyGrouping(
       }
     }
 
-    result.push(msg)
+    result.push(msg as RenderableMessage)
   }
 
   return { messages: result }

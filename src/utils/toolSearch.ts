@@ -24,7 +24,7 @@ import {
   isDeferredTool,
   TOOL_SEARCH_TOOL_NAME,
 } from '../tools/ToolSearchTool/prompt.js'
-import type { Message } from '../types/message.js'
+import type { Message, SystemCompactBoundaryMessage } from '../types/message.js'
 import type { AgentToolResultBlock } from '../types/agentMessage.js'
 import {
   countToolDefinitionTokens,
@@ -527,7 +527,8 @@ export function extractDiscoveredToolNames(messages: Message[]): Set<string> {
     // check rather than isCompactBoundaryMessage — utils/messages.ts imports
     // from this file, so importing back would be circular.
     if (msg.type === 'system' && msg.subtype === 'compact_boundary') {
-      const carried = msg.compactMetadata?.preCompactDiscoveredTools
+      const compactMetadata = msg.compactMetadata as SystemCompactBoundaryMessage['compactMetadata']
+      const carried = compactMetadata?.preCompactDiscoveredTools
       if (carried) {
         for (const name of carried) discoveredTools.add(name)
         carriedFromBoundary += carried.length
@@ -631,11 +632,13 @@ export function getDeferredToolsDelta(
   for (const msg of messages) {
     if (msg.type !== 'attachment') continue
     attachmentCount++
-    attachmentTypesSeen.add(msg.attachment.type)
-    if (msg.attachment.type !== 'deferred_tools_delta') continue
-    dtdCount++
-    for (const n of msg.attachment.addedNames) announced.add(n)
-    for (const n of msg.attachment.removedNames) announced.delete(n)
+    const attachment = msg.attachment
+    attachmentTypesSeen.add(attachment.type)
+    if (attachment.type === 'deferred_tools_delta') {
+      dtdCount++
+      for (const n of attachment.addedNames) announced.add(n)
+      for (const n of attachment.removedNames) announced.delete(n)
+    }
   }
 
   const deferred: Tool[] = tools.filter(isDeferredTool)
