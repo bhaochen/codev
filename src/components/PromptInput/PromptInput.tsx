@@ -2317,7 +2317,7 @@ function getInitialPasteId(messages: Message[]): number {
       if (Array.isArray(message.message.content)) {
         for (const block of message.message.content) {
           if (block.type === 'text') {
-            const refs = parseReferences(block.text);
+            const refs = parseReferences(block.text as string);
             for (const ref of refs) {
               if (ref.id > maxId) maxId = ref.id;
             }

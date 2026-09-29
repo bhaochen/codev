@@ -3,6 +3,7 @@ import { constants as fsConstants } from 'fs'
 import { mkdir, open } from 'fs/promises'
 import { dirname, isAbsolute, join, normalize, sep as pathSep } from 'path'
 import type { ToolUseContext } from '../Tool.js'
+import type { PromptCommand } from '../types/command.js'
 import type { Command } from '../types/command.js'
 import { logForDebugging } from '../utils/debug.js'
 import { getBundledSkillsRoot } from '../utils/permissions/filesystem.js'
@@ -94,7 +95,7 @@ export function registerBundledSkill(definition: BundledSkillDefinition): void {
     isEnabled: definition.isEnabled,
     isHidden: !(definition.userInvocable ?? true),
     progressMessage: 'running',
-    getPromptForCommand,
+    getPromptForCommand: getPromptForCommand as PromptCommand['getPromptForCommand'],
   }
   bundledSkills.push(command)
 }

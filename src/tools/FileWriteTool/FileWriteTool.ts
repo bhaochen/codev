@@ -1,3 +1,4 @@
+import type { UUID } from 'crypto'
 import { dirname, sep } from 'path'
 import { logEvent } from 'src/services/analytics/index.js'
 import { z } from 'zod/v4'
@@ -259,7 +260,7 @@ export const FileWriteTool = buildTool({
       await fileHistoryTrackEdit(
         updateFileHistoryState,
         fullFilePath,
-        parentMessage.uuid,
+        parentMessage.uuid as UUID,
       )
     }
 

@@ -24,7 +24,7 @@ function isSlashCommand(cmd: QueuedCommand): boolean {
   // For ContentBlockParam[], check the first text block
   for (const block of cmd.value) {
     if (block.type === 'text') {
-      return block.text.trim().startsWith('/')
+      return (block as { text: string }).text.trim().startsWith('/')
     }
   }
   return false

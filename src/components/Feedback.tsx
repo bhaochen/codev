@@ -459,7 +459,7 @@ async function generateTitle(description: string, abortSignal: AbortSignal): Pro
         mcpTools: []
       }
     });
-    const title = response.message.content[0]?.type === 'text' ? response.message.content[0].text : 'Bug Report';
+    const title = response.message.content[0]?.type === 'text' ? (response.message.content[0].text as string) : 'Bug Report';
 
     // Check if the title contains an API error message
     if (startsWithApiErrorPrefix(title)) {

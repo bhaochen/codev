@@ -141,7 +141,7 @@ async function generateTitleAndBranch(description: string, signal: AbortSignal):
         branchName: fallbackBranch
       };
     }
-    const parsed = safeParseJSON(firstBlock.text.trim());
+    const parsed = safeParseJSON((firstBlock as { text: string }).text.trim());
     const parseResult = z.object({
       title: z.string(),
       branch: z.string()

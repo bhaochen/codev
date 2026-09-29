@@ -287,8 +287,8 @@ async function countSystemTokens(
       )
       .map(content => ({ name: extractSectionName(content), content })),
     ...Object.entries(systemContext)
-      .filter(([, content]) => content.length > 0)
-      .map(([name, content]) => ({ name, content })),
+      .filter(([, content]) => (content as string).length > 0)
+      .map(([name, content]) => ({ name, content: content as string })),
   ]
 
   if (namedEntries.length < 1) {
@@ -905,7 +905,8 @@ function processAssistantMessage(
 
     if ('type' in block && block.type === 'tool_use') {
       breakdown.toolCallTokens += blockTokens
-      const toolName = ('name' in block ? block.name : undefined) || 'unknown'
+      const toolName =
+        (('name' in block ? block.name : undefined) as string) || 'unknown'
       breakdown.toolCallsByType.set(
         toolName,
         (breakdown.toolCallsByType.get(toolName) || 0) + blockTokens,
@@ -937,7 +938,9 @@ function processUserMessage(
 
     if ('type' in block && block.type === 'tool_result') {
       breakdown.toolResultTokens += blockTokens
-      const toolUseId = 'tool_use_id' in block ? block.tool_use_id : undefined
+      const toolUseId = ('tool_use_id' in block
+        ? block.tool_use_id
+        : undefined) as string
       const toolName =
         (toolUseId ? toolUseIdToName.get(toolUseId) : undefined) || 'unknown'
       breakdown.toolResultsByType.set(
@@ -989,9 +992,9 @@ async function approximateMessageTokens(
     if (msg.type === 'assistant') {
       for (const block of msg.message.content) {
         if ('type' in block && block.type === 'tool_use') {
-          const toolUseId = 'id' in block ? block.id : undefined
+          const toolUseId = ('id' in block ? block.id : undefined) as string
           const toolName =
-            ('name' in block ? block.name : undefined) || 'unknown'
+            (('name' in block ? block.name : undefined) as string) || 'unknown'
           if (toolUseId) {
             toolUseIdToName.set(toolUseId, toolName)
           }
@@ -1022,7 +1025,7 @@ async function approximateMessageTokens(
         }
       }
       return _.message
-    }),
+    }) as unknown as Anthropic.Beta.Messages.BetaMessageParam[],
     [],
   )
 

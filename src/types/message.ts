@@ -25,6 +25,7 @@
 import type { UUID } from 'crypto'
 import type {
   AgentAssistantMessage,
+  AgentContentBlock,
   AgentMessage,
   AgentStreamEvent,
   AgentUserMessage,

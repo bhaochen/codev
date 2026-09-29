@@ -903,12 +903,17 @@ function isPathAllowed(
       precomputedPathsToCheck,
     )
     if (!safetyCheck.safe) {
+      const failed = safetyCheck as {
+        safe: false
+        message: string
+        classifierApprovable: boolean
+      }
       return {
         allowed: false,
         decisionReason: {
           type: 'safetyCheck',
-          reason: safetyCheck.message,
-          classifierApprovable: safetyCheck.classifierApprovable,
+          reason: failed.message,
+          classifierApprovable: failed.classifierApprovable,
         },
       }
     }

@@ -34,7 +34,10 @@ function generateActionsTable(): string {
   // Build a lookup: action -> { keys, context }
   const actionInfo: Record<string, { keys: string[]; context: string }> = {}
   for (const block of DEFAULT_BINDINGS) {
-    for (const [key, action] of Object.entries(block.bindings)) {
+    for (const [key, action] of Object.entries(block.bindings) as [
+      string,
+      string,
+    ][]) {
       if (action) {
         if (!actionInfo[action]) {
           actionInfo[action] = { keys: [], context: block.context }

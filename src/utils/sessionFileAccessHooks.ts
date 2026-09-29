@@ -36,7 +36,7 @@ const teamMemWatcher = feature('TEAMMEM')
   ? (require('../services/teamMemorySync/watcher.js') as typeof import('../services/teamMemorySync/watcher.js'))
   : null
 const memoryShapeTelemetry = feature('MEMORY_SHAPE_TELEMETRY')
-  ? (require('../memdir/memoryShapeTelemetry.js') as typeof import('../memdir/memoryShapeTelemetry.js'))
+  ? (require('../memdir/memoryShapeTelemetry.js') as unknown as { logMemoryWriteShape: (toolName: string, toolInput: unknown, filePath: string, scope: unknown) => void })
   : null
 
 /* eslint-enable @typescript-eslint/no-require-imports */

@@ -16,6 +16,7 @@ import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growt
 import { logEvent } from '../services/analytics/index.js'
 import { sanitizeToolNameForAnalytics } from '../services/analytics/metadata.js'
 import type { Message } from '../types/message.js'
+import type { AgentToolResultBlock } from '../types/agentMessage.js'
 import { logForDebugging } from './debug.js'
 import { getErrnoCode, toError } from './errors.js'
 import { formatFileSize } from './format.js'
@@ -541,7 +542,7 @@ function buildToolNameMap(messages: Message[]): Map<string, string> {
     if (!Array.isArray(content)) continue
     for (const block of content) {
       if (block.type === 'tool_use') {
-        map.set(block.id, block.name)
+        map.set(block.id as string, block.name as string)
       }
     }
   }
@@ -558,15 +559,19 @@ function collectCandidatesFromMessage(message: Message): ToolResultCandidate[] {
   if (message.type !== 'user' || !Array.isArray(message.message.content)) {
     return []
   }
-  return message.message.content.flatMap(block => {
-    if (block.type !== 'tool_result' || !block.content) return []
-    if (isContentAlreadyCompacted(block.content)) return []
-    if (hasImageBlock(block.content)) return []
+  return message.message.content.flatMap(rawBlock => {
+    if (rawBlock.type !== 'tool_result' || !rawBlock.content) return []
+    const block = rawBlock as AgentToolResultBlock
+    const content = block.content as NonNullable<
+      ToolResultBlockParam['content']
+    >
+    if (isContentAlreadyCompacted(content)) return []
+    if (hasImageBlock(content)) return []
     return [
       {
         toolUseId: block.tool_use_id,
-        content: block.content,
-        size: contentSize(block.content),
+        content,
+        size: contentSize(content),
       },
     ]
   })
@@ -706,7 +711,8 @@ function replaceToolResultContents(
     }
     const content = message.message.content
     const needsReplace = content.some(
-      b => b.type === 'tool_result' && replacementMap.has(b.tool_use_id),
+      b =>
+        b.type === 'tool_result' && replacementMap.has(b.tool_use_id as string),
     )
     if (!needsReplace) return message
     return {
@@ -715,7 +721,7 @@ function replaceToolResultContents(
         ...message.message,
         content: content.map(block => {
           if (block.type !== 'tool_result') return block
-          const replacement = replacementMap.get(block.tool_use_id)
+          const replacement = replacementMap.get(block.tool_use_id as string)
           return replacement === undefined
             ? block
             : { ...block, content: replacement }

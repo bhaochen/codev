@@ -1,4 +1,8 @@
-import { type Options as ExecaOptions, execaSync } from 'execa'
+import {
+  type Options as ExecaOptions,
+  execaSync,
+  type SyncOptions,
+} from 'execa'
 import { getCwd } from '../utils/cwd.js'
 import { slowLogging } from './slowOperations.js'
 
@@ -78,11 +82,11 @@ export function execSyncWithDefaults_DEPRECATED(
       shell: true, // execSync typically runs shell commands
       reject: false, // Don't throw on non-zero exit codes
       input,
-    })
+    } as unknown as SyncOptions)
     if (!result.stdout) {
       return null
     }
-    return result.stdout.trim() || null
+    return (result.stdout as string).trim() || null
   } catch {
     return null
   }

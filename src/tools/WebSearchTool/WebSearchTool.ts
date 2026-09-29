@@ -167,9 +167,9 @@ function cleanSearchResult(result: any) {
   }
 }
 
-export const WebSearchTool = buildTool({
+export const WebSearchTool = buildTool(({
   name: WEB_SEARCH_TOOL_NAME,
-  description: 'Search the web — Tavily (when TAVILY_API_KEY is set) for general search, SearXNG for image search',
+  description: 'Search the web — Tavily (when TAVILY_API_KEY is set) for general search, SearXNG for image search' as unknown as ToolDef['description'],
   // 不 defer: 让 LLM 始终能看到 search_images 参数和图片搜索规则
   shouldDefer: false,
 
@@ -325,4 +325,5 @@ export const WebSearchTool = buildTool({
       content: [{ type: 'text', text }],
     }
   },
-}) satisfies ToolDef<any, Output, WebSearchProgress>
+} as unknown as Parameters<typeof buildTool>[0]) satisfies ToolDef<any, Output, WebSearchProgress>
+)

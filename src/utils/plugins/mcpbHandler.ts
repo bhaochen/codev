@@ -1,4 +1,4 @@
-import type { McpbManifest } from '@anthropic-ai/mcpb'
+import type { McpbManifestAny as McpbManifest } from '@anthropic-ai/mcpb'
 
 export type McpbUserConfigurationOption = Record<string, unknown>
 import axios from 'axios'
@@ -390,12 +390,12 @@ export function validateUserConfig(
 
     // Number range validation
     if (fieldSchema.type === 'number' && typeof value === 'number') {
-      if (fieldSchema.min !== undefined && value < fieldSchema.min) {
+      if (fieldSchema.min !== undefined && value < (fieldSchema.min as number)) {
         errors.push(
           `${fieldSchema.title || key} must be at least ${fieldSchema.min}`,
         )
       }
-      if (fieldSchema.max !== undefined && value > fieldSchema.max) {
+      if (fieldSchema.max !== undefined && value > (fieldSchema.max as number)) {
         errors.push(
           `${fieldSchema.title || key} must be at most ${fieldSchema.max}`,
         )

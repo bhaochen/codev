@@ -119,7 +119,7 @@ export function AssistantToolUseMessage(t0) {
     t3 = $[10];
   }
   const isQueued = t3;
-  const isWaitingForPermission = pendingWorkerRequest?.toolUseId === param.id;
+  const isWaitingForPermission = (pendingWorkerRequest as { toolUseId?: string } | undefined)?.toolUseId === param.id;
   if (isTransparentWrapper) {
     if (isQueued || isResolved) {
       return null;

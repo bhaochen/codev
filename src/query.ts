@@ -780,7 +780,7 @@ async function* queryLoop(
                 ) {
                   const tool = findToolByName(
                     toolUseContext.options.tools,
-                    block.name,
+                    block.name as string,
                   )
                   if (tool?.backfillObservableInput) {
                     const originalInput = block.input as Record<string, unknown>
@@ -1452,7 +1452,7 @@ async function* queryLoop(
         if (textBlocks.length > 0) {
           const lastTextBlock = textBlocks.at(-1)
           if (lastTextBlock && 'text' in lastTextBlock) {
-            lastAssistantText = lastTextBlock.text
+            lastAssistantText = lastTextBlock.text as string
           }
         }
       }

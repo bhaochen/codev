@@ -20,6 +20,7 @@ import type {
   Message,
   NormalizedUserMessage,
   ProgressMessage,
+  SystemMessage,
   UserMessage,
 } from 'src/types/message.js'
 import { addInvokedSkill, getSessionId } from '../../bootstrap/state.js'
@@ -912,7 +913,7 @@ async function getMessagesForSlashCommand(
             return {
               messages: buildPostCompactMessages(
                 compactionResultWithSlashMessages,
-              ),
+              ) as (UserMessage | SystemMessage | AssistantMessage | AttachmentMessage | ProgressMessage)[],
               shouldQuery: false,
               command,
             }

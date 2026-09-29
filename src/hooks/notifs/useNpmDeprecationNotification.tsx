@@ -2,9 +2,10 @@ import { isInBundledMode } from 'src/utils/bundledMode.js';
 import { getCurrentInstallationType } from 'src/utils/doctorDiagnostic.js';
 import { isEnvTruthy } from 'src/utils/envUtils.js';
 import { useStartupNotification } from './useStartupNotification.js';
+import type { Notification } from '../../context/notifications.js';
 const NPM_DEPRECATION_MESSAGE = 'Claude Code has switched from npm to native installer. Run `claude install` or see https://docs.anthropic.com/en/docs/claude-code/getting-started for more options.';
 export function useNpmDeprecationNotification() {
-  useStartupNotification(_temp);
+  useStartupNotification(_temp as unknown as () => Promise<Notification | null>);
 }
 async function _temp() {
   if (isInBundledMode() || isEnvTruthy(process.env.DISABLE_INSTALLATION_CHECKS)) {

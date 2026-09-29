@@ -1,5 +1,5 @@
 import { feature } from 'bun:bundle'
-import type { AgentContentBlock } from '../types/agentMessage.js'
+import type { AgentContentBlock, AgentImageBlock } from '../types/agentMessage.js'
 import type { Permutations } from 'src/types/utils.js'
 import { getSessionId } from '../bootstrap/state.js'
 import type { AppState } from '../state/AppState.js'
@@ -398,7 +398,7 @@ function extractImagesFromValue(
 
   const images: PastedContent[] = []
   let imageIndex = 0
-  for (const block of valueArr) {
+  for (const block of valueArr as AgentImageBlock[]) {
     if (block.type === 'image' && block.source.type === 'base64') {
       images.push({
         id: startId + imageIndex,

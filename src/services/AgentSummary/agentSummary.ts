@@ -131,8 +131,10 @@ export function startAgentSummarization(
           continue
         }
         const textBlock = msg.message.content.find(b => b.type === 'text')
-        if (textBlock?.type === 'text' && textBlock.text.trim()) {
-          const summaryText = textBlock.text.trim()
+        if (
+          (textBlock as { text?: string }).text?.trim()
+        ) {
+          const summaryText = (textBlock as { text: string }).text.trim()
           logForDebugging(
             `[AgentSummary] Summary result for ${taskId}: ${summaryText}`,
           )

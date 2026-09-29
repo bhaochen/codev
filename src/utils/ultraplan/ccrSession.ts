@@ -102,7 +102,7 @@ export class ExitPlanModeScanner {
     for (const m of newEvents) {
       if (m.type === 'assistant') {
         for (const block of m.message.content) {
-          if (block.type !== 'tool_use') continue
+          if ((block as { type?: string }).type !== 'tool_use') continue
           const tu = block as ToolUseBlock
           if (tu.name === EXIT_PLAN_MODE_V2_TOOL_NAME) {
             this.exitPlanCalls.push(tu.id)

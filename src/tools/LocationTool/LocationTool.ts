@@ -811,7 +811,7 @@ type LocationToolProgress = {
   location?: string
 }
 
-export const LocationTool = buildTool({
+export const LocationTool = buildTool(({
   name: LOCATION_TOOL_NAME,
   searchHint: 'geographic search, POI, maps, directions, travel planning',
   shouldDefer: true,
@@ -911,8 +911,8 @@ export const LocationTool = buildTool({
       })
     }
 
+    let ipGeo: IpGeoInfo | undefined
     try {
-      let ipGeo: IpGeoInfo | undefined
       let geocoding: LocationResult | undefined
       let places: PlaceResult[] | undefined
       let directions: DirectionsResult | undefined
@@ -1122,4 +1122,5 @@ export const LocationTool = buildTool({
       ],
     }
   },
-}) satisfies ToolDef<ReturnType<typeof inputSchema>, Output, LocationToolProgress>
+} as unknown as Parameters<typeof buildTool>[0]) satisfies ToolDef<ReturnType<typeof inputSchema>, Output, LocationToolProgress>
+)

@@ -80,7 +80,7 @@ async function appendSessionLogImpl(
       })
 
       if (response.status === 200 || response.status === 201) {
-        lastUuidMap.set(sessionId, entry.uuid)
+        lastUuidMap.set(sessionId, entry.uuid as UUID)
         logForDebugging(
           `Successfully persisted session log entry for session ${sessionId}`,
         )
@@ -94,7 +94,7 @@ async function appendSessionLogImpl(
         const serverLastUuid = response.headers['x-last-uuid']
         if (serverLastUuid === entry.uuid) {
           // Our entry IS the last entry on server - it was stored successfully previously
-          lastUuidMap.set(sessionId, entry.uuid)
+          lastUuidMap.set(sessionId, entry.uuid as UUID)
           logForDebugging(
             `Session entry ${entry.uuid} already present on server, recovering from stale state`,
           )

@@ -191,7 +191,7 @@ export function getDefaultMainLoopModelSetting(): ModelName | ModelAlias {
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { readFileSync } = require('fs') as typeof import('fs')
-      const { getGlobalClaudeFile } = require('./env.js') as typeof import('./env.js')
+      const { getGlobalClaudeFile } = require('./env.js') as unknown as { getGlobalClaudeFile: () => string }
       const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
       const config = JSON.parse(raw) as {
         authProvider?: string
@@ -231,7 +231,7 @@ export function getDefaultMainLoopModelSetting(): ModelName | ModelAlias {
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { readFileSync } = require('fs') as typeof import('fs')
-      const { getGlobalClaudeFile } = require('./env.js') as typeof import('./env.js')
+      const { getGlobalClaudeFile } = require('./env.js') as unknown as { getGlobalClaudeFile: () => string }
       const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
       const config = JSON.parse(raw) as {
         authProvider?: string
@@ -259,7 +259,7 @@ export function getDefaultMainLoopModelSetting(): ModelName | ModelAlias {
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { readFileSync } = require('fs') as typeof import('fs')
-      const { getGlobalClaudeFile } = require('./env.js') as typeof import('./env.js')
+      const { getGlobalClaudeFile } = require('./env.js') as unknown as { getGlobalClaudeFile: () => string }
       const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
       const config = JSON.parse(raw) as {
         authProvider?: string

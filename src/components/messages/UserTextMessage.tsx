@@ -101,7 +101,7 @@ export function UserTextMessage(t0) {
       }
       const {
         UserGitHubWebhookMessage
-      } = t1 as typeof import('./UserGitHubWebhookMessage.js');
+      } = t1 as unknown as { UserGitHubWebhookMessage: React.ComponentType<{ addMargin?: boolean; param: any }> };
       let t2;
       if ($[10] !== addMargin || $[11] !== param) {
         t2 = <UserGitHubWebhookMessage addMargin={addMargin} param={param} />;
@@ -198,7 +198,7 @@ export function UserTextMessage(t0) {
       }
       const {
         UserForkBoilerplateMessage
-      } = t1 as typeof import('./UserForkBoilerplateMessage.js');
+      } = t1 as unknown as { UserForkBoilerplateMessage: React.ComponentType<{ addMargin?: boolean; param: any }> };
       let t2;
       if ($[33] !== addMargin || $[34] !== param) {
         t2 = <UserForkBoilerplateMessage addMargin={addMargin} param={param} />;
@@ -222,7 +222,7 @@ export function UserTextMessage(t0) {
       }
       const {
         UserCrossSessionMessage
-      } = t1 as typeof import('./UserCrossSessionMessage.js');
+      } = t1 as unknown as { UserCrossSessionMessage: React.ComponentType<{ addMargin?: boolean; param: any }> };
       let t2;
       if ($[37] !== addMargin || $[38] !== param) {
         t2 = <UserCrossSessionMessage addMargin={addMargin} param={param} />;

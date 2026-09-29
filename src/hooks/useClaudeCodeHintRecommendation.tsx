@@ -15,7 +15,7 @@ import { type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS, type A
 import { clearPendingHint, getPendingHintSnapshot, markShownThisSession, subscribeToPendingHint } from '../utils/claudeCodeHints.js';
 import { logForDebugging } from '../utils/debug.js';
 import { disableHintRecommendations, markHintPluginShown, type PluginHintRecommendation, resolvePluginHint } from '../utils/plugins/hintRecommendation.js';
-import { installPluginFromMarketplace } from '../utils/plugins/pluginInstallationHelpers.js';
+import { installPluginFromMarketplace, type InstallPluginResult } from '../utils/plugins/pluginInstallationHelpers.js';
 import { installPluginAndNotify, usePluginRecommendationBase } from './usePluginRecommendationBase.js';
 type UseClaudeCodeHintRecommendationResult = {
   recommendation: PluginHintRecommendation | null;
@@ -90,7 +90,7 @@ export function useClaudeCodeHintRecommendation() {
                 trigger: "hint"
               });
               if (!result.success) {
-                throw new Error(result.error);
+                throw new Error((result as Extract<InstallPluginResult, { success: false }>).error);
               }
             });
             break bb15;

@@ -10,6 +10,7 @@
  */
 
 import { feature } from 'bun:bundle'
+import type { ToolUseConfirm } from '../../components/permissions/PermissionRequest.js'
 import type { AgentContentBlock } from '../../types/agentMessage.js'
 import { getSystemPrompt } from '../../constants/prompts.js'
 import { TEAMMATE_MESSAGE_TAG } from '../../constants/xml.js'
@@ -328,7 +329,7 @@ function createInProcessCanUseTool(
                 })
               }
             },
-          },
+          } as unknown as ToolUseConfirm,
         ])
       })
     }
@@ -1239,7 +1240,7 @@ export async function runInProcessTeammate(
                     if (block.type === 'tool_use') {
                       inProgressToolUseIDs = new Set([
                         ...(inProgressToolUseIDs ?? []),
-                        block.id,
+                        block.id as string,
                       ])
                     }
                   }
@@ -1254,7 +1255,9 @@ export async function runInProcessTeammate(
                       ) {
                         if (inProgressToolUseIDs) {
                           inProgressToolUseIDs = new Set(inProgressToolUseIDs)
-                          inProgressToolUseIDs.delete(block.tool_use_id)
+                          inProgressToolUseIDs.delete(
+                            block.tool_use_id as string,
+                          )
                         }
                       }
                     }

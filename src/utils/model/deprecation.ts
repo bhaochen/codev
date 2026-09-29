@@ -38,7 +38,7 @@ const DEPRECATED_MODELS: Record<string, DeprecationEntry> = {
       bedrock: 'January 15, 2026',
       vertex: 'January 5, 2026',
       foundry: 'January 5, 2026',
-    },
+    } as Record<APIProvider, string | null>,
   },
   'claude-3-7-sonnet': {
     modelName: 'Claude 3.7 Sonnet',
@@ -47,7 +47,7 @@ const DEPRECATED_MODELS: Record<string, DeprecationEntry> = {
       bedrock: 'April 28, 2026',
       vertex: 'May 11, 2026',
       foundry: 'February 19, 2026',
-    },
+    } as Record<APIProvider, string | null>,
   },
   'claude-3-5-haiku': {
     modelName: 'Claude 3.5 Haiku',
@@ -56,7 +56,7 @@ const DEPRECATED_MODELS: Record<string, DeprecationEntry> = {
       bedrock: null,
       vertex: null,
       foundry: null,
-    },
+    } as Record<APIProvider, string | null>,
   },
 }
 

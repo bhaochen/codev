@@ -121,11 +121,11 @@ export async function adapterComplete(
     } else {
       // assistant — synthesize as a normal assistant message
       apiMessages.push({
-        role: 'assistant',
+        role: 'assistant' as const,
         content: [{ type: 'text' as const, text: m.content }],
         uuid: `rlm-assistant-${Math.random().toString(36).slice(2)}`,
         timestamp: Date.now(),
-      })
+      } as unknown as Message)
     }
   }
 

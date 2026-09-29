@@ -14,7 +14,9 @@
  */
 
 import type { Command } from '../commands.js'
+import type { ToolUseContext } from '../Tool.js'
 import type { BundledSkillDefinition } from '../skills/bundledSkills.js'
+import type { AgentContentBlock } from '../types/agentMessage.js'
 import type { BuiltinPluginDefinition, LoadedPlugin } from '../types/plugin.js'
 import { getSettings_DEPRECATED } from '../utils/settings/settings.js'
 
@@ -154,6 +156,9 @@ function skillDefinitionToCommand(definition: BundledSkillDefinition): Command {
     isEnabled: definition.isEnabled ?? (() => true),
     isHidden: !(definition.userInvocable ?? true),
     progressMessage: 'running',
-    getPromptForCommand: definition.getPromptForCommand,
+    getPromptForCommand: definition.getPromptForCommand as unknown as (
+      args: string,
+      context: ToolUseContext,
+    ) => Promise<AgentContentBlock[]>,
   }
 }

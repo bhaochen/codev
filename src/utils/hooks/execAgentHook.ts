@@ -213,7 +213,9 @@ When done, return your result using the ${SYNTHETIC_OUTPUT_TOOL_NAME} tool with:
           message.type === 'attachment' &&
           message.attachment.type === 'structured_output'
         ) {
-          const parsed = hookResponseSchema().safeParse(message.attachment.data)
+          const parsed = hookResponseSchema().safeParse(
+            (message.attachment as { data?: unknown }).data,
+          )
           if (parsed.success) {
             structuredOutputResult = parsed.data
             logForDebugging(

@@ -79,11 +79,11 @@ export function updateProgressFromMessage(tracker: ProgressTracker, message: Mes
       // Omit StructuredOutput from preview - it's an internal tool
       if (content.name !== SYNTHETIC_OUTPUT_TOOL_NAME) {
         const input = content.input as Record<string, unknown>;
-        const classification = tools ? getToolSearchOrReadInfo(content.name, input, tools) : undefined;
+        const classification = tools ? getToolSearchOrReadInfo(content.name as string, input, tools) : undefined;
         tracker.recentActivities.push({
-          toolName: content.name,
+          toolName: content.name as string,
           input,
-          activityDescription: resolveActivityDescription?.(content.name, input),
+          activityDescription: resolveActivityDescription?.(content.name as string, input),
           isSearch: classification?.isSearch,
           isRead: classification?.isRead
         });

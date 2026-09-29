@@ -48,7 +48,7 @@ export async function handleOpenTargetsApi(
       }
 
       const icon = await openTargetService.getTargetIcon(targetId)
-      return new Response(icon.data, {
+      return new Response(icon.data as unknown as BodyInit, {
         headers: {
           'Cache-Control': 'private, max-age=86400',
           'Content-Type': icon.contentType,

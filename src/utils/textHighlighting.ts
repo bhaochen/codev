@@ -1,6 +1,7 @@
 import {
   type AnsiCode,
   ansiCodesToString,
+  type Char,
   reduceAnsiCodes,
   type Token,
   tokenize,
@@ -128,14 +129,15 @@ class HighlightSegmenter {
         this.tokenIdx++
       } else {
         const charsNeeded = targetVisiblePos - this.visiblePos
-        const charsAvailable = token.value.length - this.charIdx
+        const charsAvailable =
+          (token as Char).value.length - this.charIdx
         const charsToTake = Math.min(charsNeeded, charsAvailable)
 
         this.stringPos += charsToTake
         this.visiblePos += charsToTake
         this.charIdx += charsToTake
 
-        if (this.charIdx >= token.value.length) {
+        if (this.charIdx >= (token as Char).value.length) {
           this.tokenIdx++
           this.charIdx = 0
         }

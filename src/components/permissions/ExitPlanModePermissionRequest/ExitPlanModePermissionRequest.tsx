@@ -488,7 +488,7 @@ export function ExitPlanModePermissionRequest({
       // Convert pasted images to ImageBlockParam[] with resizing
       let imageBlocks: ImageBlockParam[] | undefined;
       if (hasImages) {
-        imageBlocks = await Promise.all(imageAttachments.map(async img => {
+        imageBlocks = (await Promise.all(imageAttachments.map(async img => {
           const block: ImageBlockParam = {
             type: 'image',
             source: {
@@ -499,7 +499,7 @@ export function ExitPlanModePermissionRequest({
           };
           const resized = await maybeResizeAndDownsampleImageBlock(block);
           return resized.block;
-        }));
+        }))) as unknown as ImageBlockParam[];
       }
       onDone();
       onReject();

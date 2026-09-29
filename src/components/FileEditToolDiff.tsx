@@ -60,7 +60,7 @@ function DiffBody(t0) {
     patch,
     firstLine,
     fileContent
-  } = use(promise);
+  } = use(promise) as DiffData;
   const {
     columns
   } = useTerminalSize();

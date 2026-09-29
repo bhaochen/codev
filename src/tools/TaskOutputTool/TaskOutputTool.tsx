@@ -221,7 +221,7 @@ export const TaskOutputTool: Tool<InputSchema, TaskOutputToolOutput> = buildTool
       if (task.status !== 'running' && task.status !== 'pending') {
         // Mark as notified
         updateTaskState(task_id, toolUseContext.setAppState, t => ({
-          ...t,
+          ...(t as object),
           notified: true
         }));
         return {
@@ -270,7 +270,7 @@ export const TaskOutputTool: Tool<InputSchema, TaskOutputToolOutput> = buildTool
 
     // Mark as notified
     updateTaskState(task_id, toolUseContext.setAppState, t => ({
-      ...t,
+      ...(t as object),
       notified: true
     }));
     return {

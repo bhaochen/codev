@@ -658,18 +658,20 @@ export function logAPISuccessAndDuration({
     for (const msg of newMessages) {
       for (const block of msg.message.content) {
         if (block.type === 'text') {
-          textLen += block.text.length
+          textLen += (block.text as string).length
         } else if (feature('CONNECTOR_TEXT') && isConnectorTextBlock(block)) {
           connectorCount++
         } else if (block.type === 'thinking') {
-          thinkingLen += block.thinking.length
+          thinkingLen += (block.thinking as string).length
         } else if (
           block.type === 'tool_use' ||
           block.type === 'server_tool_use' ||
           block.type === 'mcp_tool_use'
         ) {
-          const inputLen = jsonStringify(block.input).length
-          const sanitizedName = sanitizeToolNameForAnalytics(block.name)
+          const inputLen = (jsonStringify(block.input) as string).length
+          const sanitizedName = sanitizeToolNameForAnalytics(
+            block.name as string,
+          )
           toolLengths[sanitizedName] =
             (toolLengths[sanitizedName] ?? 0) + inputLen
           hasToolUse = true

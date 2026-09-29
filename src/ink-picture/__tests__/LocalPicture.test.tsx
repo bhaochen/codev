@@ -78,7 +78,9 @@ function App() {
   useEffect(() => {
     const handleSigint = () => exit();
     process.on("SIGINT", handleSigint);
-    return () => process.off("SIGINT", handleSigint);
+    return () => {
+      process.off("SIGINT", handleSigint);
+    };
   }, [exit]);
 
   useEffect(() => {

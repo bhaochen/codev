@@ -9,7 +9,7 @@ function isLabeledHookSummary(
   return (
     msg.type === 'system' &&
     msg.subtype === 'stop_hook_summary' &&
-    msg.hookLabel !== undefined
+    (msg as { hookLabel?: unknown }).hookLabel !== undefined
   )
 }
 
@@ -47,7 +47,7 @@ export function collapseHookSummaries(
           hasOutput: group.some(m => m.hasOutput),
           // Parallel tool calls' hooks overlap; max is closest to wall-clock.
           totalDurationMs: Math.max(...group.map(m => m.totalDurationMs ?? 0)),
-        })
+        } as SystemStopHookSummaryMessage)
       }
     } else {
       result.push(msg)

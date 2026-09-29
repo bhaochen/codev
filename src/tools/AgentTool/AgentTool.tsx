@@ -2,6 +2,7 @@ import { feature } from 'bun:bundle';
 import * as React from 'react';
 import { buildTool, type ToolDef, toolMatchesName } from 'src/Tool.js';
 import type { Message as MessageType, NormalizedUserMessage } from 'src/types/message.js';
+import type { AgentContentBlock } from 'src/types/agentMessage.js';
 import { getQuerySourceForAgent } from 'src/utils/promptCategory.js';
 import { z } from 'zod/v4';
 import { clearInvokedSkillsForAgent, getSdkAgentProgressSummariesEnabled } from '../../bootstrap/state.js';
@@ -1105,7 +1106,8 @@ export const AgentTool = buildTool({
             const normalizedNew = normalizeMessages([message]);
             for (const m of normalizedNew) {
               for (const content of m.message.content) {
-                if (content.type !== 'tool_use' && content.type !== 'tool_result') {
+                const block = content as AgentContentBlock;
+                if (block.type !== 'tool_use' && block.type !== 'tool_result') {
                   continue;
                 }
 

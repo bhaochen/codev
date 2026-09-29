@@ -46,6 +46,13 @@ import {
 import { sleep } from './sleep.js'
 import { isInITerm2 } from './swarm/backends/detection.js'
 
+type PostCommitAttributionModule = {
+  installPrepareCommitMsgHook: (
+    worktreePath: string,
+    worktreeHooksDir?: string,
+  ) => Promise<unknown>
+}
+
 const VALID_WORKTREE_SLUG_SEGMENT = /^[a-zA-Z0-9._-]+$/
 const MAX_WORKTREE_SLUG_LENGTH = 64
 
@@ -635,7 +642,7 @@ export async function performPostCreationSetup(
       hooksPath === huskyPath ? join(worktreePath, '.husky') : undefined
     void import('./postCommitAttribution.js')
       .then(m =>
-        m
+        (m as unknown as PostCommitAttributionModule)
           .installPrepareCommitMsgHook(worktreePath, worktreeHooksDir)
           .catch(error => {
             logForDebugging(
@@ -1323,7 +1330,7 @@ export async function execIntoTmuxWorktree(args: string[]): Promise<{
       if (!result.existed) {
         // biome-ignore lint/suspicious/noConsole: intentional console output
         console.log(
-          `Created worktree: ${worktreeDir} (based on ${result.baseBranch})`,
+          `Created worktree: ${worktreeDir} (based on ${(result as { baseBranch: string }).baseBranch})`,
         )
         await performPostCreationSetup(repoRoot, worktreeDir)
       }

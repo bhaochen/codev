@@ -175,14 +175,21 @@ export async function getAnthropicClient({
         ? process.env.ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION
         : getAWSRegion()
 
-    const bedrockArgs: ConstructorParameters<typeof AnthropicBedrock>[0] = {
-      ...ARGS,
-      awsRegion,
-      ...(isEnvTruthy(process.env.CLAUDE_CODE_SKIP_BEDROCK_AUTH) && {
-        skipAuth: true,
-      }),
-      ...(isDebugToStdErr() && { logger: createStderrLogger() }),
-    }
+const bedrockArgs = {
+  ...ARGS,
+  awsRegion,
+  ...(isEnvTruthy(process.env.CLAUDE_CODE_SKIP_BEDROCK_AUTH) && {
+    skipAuth: true,
+  }),
+  ...(isDebugToStdErr() && { logger: createStderrLogger() }),
+} as unknown as {
+  [key: string]: unknown
+  skipAuth?: boolean
+  awsSecretKey?: string
+  awsAccessKey?: string
+  awsSessionToken?: string
+  defaultHeaders?: Record<string, string>
+}
 
     // Add API key authentication if available
     if (process.env.AWS_BEARER_TOKEN_BEDROCK) {
@@ -202,7 +209,7 @@ export async function getAnthropicClient({
       }
     }
     // we have always been lying about the return type - this doesn't support batching or models
-    return new AnthropicBedrock(bedrockArgs) as unknown as Anthropic
+    return new AnthropicBedrock(bedrockArgs as unknown as ConstructorParameters<typeof AnthropicBedrock>[0]) as unknown as Anthropic
   }
   if (isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY)) {
     const { AnthropicFoundry } = await import('@anthropic-ai/foundry-sdk')
@@ -306,7 +313,7 @@ export async function getAnthropicClient({
     const vertexArgs: ConstructorParameters<typeof AnthropicVertex>[0] = {
       ...ARGS,
       region: getVertexRegionForModel(model),
-      googleAuth,
+      googleAuth: googleAuth as unknown as ConstructorParameters<typeof AnthropicVertex>[0]['googleAuth'],
       ...(isDebugToStdErr() && { logger: createStderrLogger() }),
     }
     // we have always been lying about the return type - this doesn't support batching or models

@@ -69,9 +69,9 @@ export function runPostCompactCleanup(querySource?: QuerySource): void {
   // cacheUtils resets. See compactConversation() for full rationale.
   clearBetaTracingState()
   if (feature('COMMIT_ATTRIBUTION')) {
-    void import('../../utils/attributionHooks.js').then(m =>
-      m.sweepFileContentCache(),
-    )
+    void (import('../../utils/attributionHooks.js') as unknown as Promise<{
+      sweepFileContentCache: () => void
+    }>).then(m => m.sweepFileContentCache())
   }
   clearSessionMessagesCache()
 }

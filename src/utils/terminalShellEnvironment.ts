@@ -125,8 +125,8 @@ async function captureTerminalShellEnvironment(
     PS1: '',
     PROMPT: '',
   }
-  delete captureEnv.BASH_ENV
-  delete captureEnv.ENV
+  delete (captureEnv as Record<string, unknown>).BASH_ENV
+  delete (captureEnv as Record<string, unknown>).ENV
 
   return await new Promise(resolve => {
     execFile(

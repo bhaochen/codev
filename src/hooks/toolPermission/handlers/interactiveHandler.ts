@@ -340,7 +340,7 @@ function handleInteractivePermission(
 
       for (const client of channelClients) {
         if (client.type !== 'connected') continue // refine for TS
-        void client.client
+        void (client as unknown as { client: { notification: (n: unknown) => Promise<unknown> } }).client
           .notification({
             method: CHANNEL_PERMISSION_REQUEST_METHOD,
             params,

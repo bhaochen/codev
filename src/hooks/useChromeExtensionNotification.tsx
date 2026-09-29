@@ -4,6 +4,7 @@ import { isClaudeAISubscriber } from '../utils/auth.js';
 import { isChromeExtensionInstalled, shouldEnableClaudeInChrome } from '../utils/claudeInChrome/setup.js';
 import { isRunningOnHomespace } from '../utils/envUtils.js';
 import { useStartupNotification } from './notifs/useStartupNotification.js';
+import type { Notification } from '../context/notifications.js';
 function getChromeFlag(): boolean | undefined {
   if (process.argv.includes('--chrome')) {
     return true;
@@ -14,7 +15,7 @@ function getChromeFlag(): boolean | undefined {
   return undefined;
 }
 export function useChromeExtensionNotification() {
-  useStartupNotification(_temp);
+  useStartupNotification(_temp as unknown as () => Promise<Notification | null>);
 }
 async function _temp() {
   const chromeFlag = getChromeFlag();

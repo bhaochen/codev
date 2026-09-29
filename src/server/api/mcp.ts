@@ -203,7 +203,7 @@ async function getHostPreflightStatus(
   return {
     status: 'failed',
     statusLabel: getStatusLabel('failed'),
-    statusDetail: result.message,
+    statusDetail: (result as { message?: string }).message ?? '',
   }
 }
 

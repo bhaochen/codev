@@ -179,7 +179,7 @@ export function clearAllOutputStylesCache(): void {
 }
 
 export async function getOutputStyleConfig(): Promise<OutputStyleConfig | null> {
-  const allStyles = await getAllOutputStyles(getCwd())
+  const allStyles = await getAllOutputStyles(getCwd()) as Record<string, OutputStyleConfig | null>
 
   // Check for forced plugin output styles
   const forcedStyles = Object.values(allStyles).filter(

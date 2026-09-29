@@ -263,7 +263,7 @@ function MessageImpl(t0) {
             }
             const {
               SnipBoundaryMessage
-            } = t2 as typeof import('./messages/SnipBoundaryMessage.js');
+            } = t2 as unknown as { SnipBoundaryMessage: React.ComponentType<{ message: unknown }> };
             let t3;
             if ($[66] !== message) {
               t3 = <SnipBoundaryMessage message={message} />;
@@ -606,7 +606,7 @@ export function areMessagePropsEqual(prev: Props, next: Props): boolean {
   // Only re-render on lastThinkingBlockId change if this message actually
   // has thinking content — otherwise every message in scrollback re-renders
   // whenever streaming thinking starts/stops (CC-941).
-  if (prev.lastThinkingBlockId !== next.lastThinkingBlockId && hasThinkingContent(next.message)) {
+  if (prev.lastThinkingBlockId !== next.lastThinkingBlockId && hasThinkingContent(next.message as Parameters<typeof hasThinkingContent>[0])) {
     return false;
   }
   // Verbose toggle changes thinking block visibility/expansion

@@ -28,7 +28,7 @@ export function extractFirstPrompt(messages: Message[]): string {
   } else if (Array.isArray(content)) {
     const textContent = content.find(item => item.type === 'text');
     if (textContent && 'text' in textContent) {
-      result = textContent.text.trim();
+      result = (textContent.text as string).trim();
     }
   }
 

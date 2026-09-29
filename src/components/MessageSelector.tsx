@@ -782,7 +782,7 @@ export function selectableUserMessagesFilter(message: Message): message is UserM
   }
   const content = message.message.content;
   const lastBlock = typeof content === 'string' ? null : content[content.length - 1];
-  const messageText = typeof content === 'string' ? content.trim() : lastBlock && isTextBlock(lastBlock) ? lastBlock.text.trim() : '';
+  const messageText = typeof content === 'string' ? content.trim() : lastBlock && isTextBlock(lastBlock as unknown as ContentBlockParam) ? (lastBlock as { text: string }).text.trim() : '';
 
   // Filter out non-user-authored messages (command outputs, task notifications, ticks).
   if (messageText.indexOf(`<${LOCAL_COMMAND_STDOUT_TAG}>`) !== -1 || messageText.indexOf(`<${LOCAL_COMMAND_STDERR_TAG}>`) !== -1 || messageText.indexOf(`<${BASH_STDOUT_TAG}>`) !== -1 || messageText.indexOf(`<${BASH_STDERR_TAG}>`) !== -1 || messageText.indexOf(`<${TASK_NOTIFICATION_TAG}>`) !== -1 || messageText.indexOf(`<${TICK_TAG}>`) !== -1 || messageText.indexOf(`<${TEAMMATE_MESSAGE_TAG}`) !== -1) {
@@ -813,7 +813,7 @@ export function messagesAfterAreOnlySynthetic(messages: Message[], fromIndex: nu
     if (msg.type === 'assistant') {
       const content = msg.message.content;
       if (Array.isArray(content)) {
-        const hasMeaningfulContent = content.some(block => block.type === 'text' && block.text.trim() || block.type === 'tool_use');
+        const hasMeaningfulContent = content.some(block => block.type === 'text' && (block as { text: string }).text.trim() || block.type === 'tool_use');
         if (hasMeaningfulContent) return false;
       }
       continue;

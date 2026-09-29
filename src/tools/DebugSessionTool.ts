@@ -165,7 +165,7 @@ async function readLogTail(logFile: string, tailLines: number): Promise<string> 
   }
 }
 
-export const DebugSessionTool = buildTool({
+export const DebugSessionTool = buildTool(({
   name: DEBUG_SESSION_TOOL_NAME,
   searchHint: 'manage runtime debug log sessions',
   maxResultSizeChars: 200_000,
@@ -312,4 +312,5 @@ Actions:
       content: jsonStringify(output),
     }
   },
-} satisfies ToolDef<InputSchema, OutputSchema>)
+} as unknown as Parameters<typeof buildTool>[0])
+)

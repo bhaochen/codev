@@ -28,9 +28,14 @@ import { getChicagoCoordinateMode } from './gates.js';
 import { getComputerUseHostAdapter } from './hostAdapter.js';
 import { getComputerUseMCPRenderingOverrides } from './toolRendering.js';
 type CallOverride = Pick<Tool, 'call'>['call'];
+type CuDispatchResult = {
+  telemetry?: { error_kind?: string }
+  content?: any
+  [k: string]: any
+};
 type Binding = {
   ctx: ComputerUseSessionContext;
-  dispatch: (name: string, args: unknown) => Promise<CuCallToolResult>;
+  dispatch: (name: string, args: unknown) => Promise<CuDispatchResult>;
 };
 
 /**
@@ -232,7 +237,7 @@ function getOrBind(): Binding {
   const ctx = buildSessionContext();
   binding = {
     ctx,
-    dispatch: bindSessionContext(getComputerUseHostAdapter(), getChicagoCoordinateMode(), ctx)
+    dispatch: bindSessionContext(getComputerUseHostAdapter(), getChicagoCoordinateMode(), ctx) as unknown as (name: string, args: unknown) => Promise<CuDispatchResult>
   };
   return binding;
 }

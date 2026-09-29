@@ -66,11 +66,18 @@ export function ThemeProvider({
       if (activeSetting !== 'auto' || !internal_querier) return;
       let cleanup: (() => void) | undefined;
       let cancelled = false;
-      void import('../../utils/systemThemeWatcher.js').then(({
-        watchSystemTheme
-      }) => {
+      void import('../../utils/systemThemeWatcher.js').then((mod) => {
         if (cancelled) return;
-        cleanup = watchSystemTheme(internal_querier, setSystemTheme);
+        const { watchSystemTheme } = mod as unknown as {
+          watchSystemTheme: (
+            querier: unknown,
+            setTheme: (theme: string) => void,
+          ) => () => void
+        }
+        cleanup = watchSystemTheme(
+          internal_querier,
+          setSystemTheme as unknown as (theme: string) => void,
+        );
       });
       return () => {
         cancelled = true;

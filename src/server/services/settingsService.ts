@@ -105,7 +105,7 @@ export class SettingsService {
       .catch(() => {})
       .then(task)
 
-    SettingsService.writeLocks.set(filePath, nextWrite)
+    SettingsService.writeLocks.set(filePath, nextWrite as unknown as Promise<void>)
 
     try {
       return await nextWrite

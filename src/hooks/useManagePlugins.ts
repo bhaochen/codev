@@ -21,6 +21,7 @@ import { loadPluginMcpServers } from '../utils/plugins/mcpPluginIntegration.js'
 import { detectAndUninstallDelistedPlugins } from '../utils/plugins/pluginBlocklist.js'
 import { getFlaggedPlugins } from '../utils/plugins/pluginFlagging.js'
 import { loadAllPlugins } from '../utils/plugins/pluginLoader.js'
+import type { PluginLoadResult } from '../types/plugin.js'
 
 /**
  * Hook to manage plugin state and synchronize with AppState.
@@ -51,7 +52,7 @@ export function useManagePlugins({
   const initialPluginLoad = useCallback(async () => {
     try {
       // Load all plugins - capture errors array
-      const { enabled, disabled, errors } = await loadAllPlugins()
+      const { enabled, disabled, errors } = (await loadAllPlugins()) as PluginLoadResult
 
       // Detect delisted plugins, auto-uninstall them, and record as flagged.
       await detectAndUninstallDelistedPlugins()

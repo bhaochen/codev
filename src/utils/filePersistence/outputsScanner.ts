@@ -8,6 +8,7 @@
  */
 
 import * as fs from 'fs/promises'
+import type { Dirent } from 'fs'
 import * as path from 'path'
 import { logForDebugging } from '../debug.js'
 import type { EnvironmentKind } from '../teleport/environments.js'
@@ -64,7 +65,7 @@ export async function findModifiedFiles(
   outputsDir: string,
 ): Promise<string[]> {
   // Use recursive flag to get all entries in one call
-  let entries: Awaited<ReturnType<typeof fs.readdir>>
+  let entries: Dirent[]
   try {
     entries = await fs.readdir(outputsDir, {
       withFileTypes: true,

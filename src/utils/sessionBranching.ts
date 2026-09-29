@@ -288,7 +288,7 @@ function buildPreservedMetadataEntries(
   copiedMessageIds: Set<string>,
   forkSessionId: UUID,
 ): RawEntry[] {
-  return sourceEntries.flatMap((entry) => {
+  return sourceEntries.flatMap<RawEntry>(entry => {
     if (isSessionMetaEntry(entry)) {
       return [entry]
     }
@@ -475,7 +475,7 @@ export async function createSessionBranch(
       isSidechain: false,
       forkedFrom: {
         sessionId: sourceSessionId,
-        messageUuid: entry.uuid,
+        messageUuid: entry.uuid as UUID,
       },
     }
 
@@ -484,7 +484,7 @@ export async function createSessionBranch(
       sessionId: forkSessionId,
     })
     messageLines.push(jsonStringify(forkedEntry))
-    parentUuid = entry.uuid
+    parentUuid = entry.uuid as UUID
   }
 
   const firstPrompt = deriveFirstPrompt(

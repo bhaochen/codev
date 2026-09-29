@@ -65,9 +65,19 @@ export async function handlePluginsApi(
 
       switch (sub) {
         case 'enable':
-          return Response.json(await pluginService.enablePlugin(pluginId, scope))
+          return Response.json(
+            await pluginService.enablePlugin(
+              pluginId,
+              scope as 'user' | 'project' | 'local',
+            ),
+          )
         case 'disable':
-          return Response.json(await pluginService.disablePlugin(pluginId, scope))
+          return Response.json(
+            await pluginService.disablePlugin(
+              pluginId,
+              scope as 'user' | 'project' | 'local',
+            ),
+          )
         case 'update':
           return Response.json(
             await pluginService.updatePlugin(pluginId, scope as PluginScope | undefined),
@@ -76,7 +86,7 @@ export async function handlePluginsApi(
           return Response.json(
             await pluginService.uninstallPlugin(
               pluginId,
-              scope,
+              scope as 'user' | 'project' | 'local',
               body.keepData === true,
             ),
           )

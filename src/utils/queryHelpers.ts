@@ -393,7 +393,7 @@ export function extractReadFilesFromMessages(
           ) {
             // Normalize to absolute path for consistent cache lookups
             const absolutePath = expandPath(input.file_path, cwd)
-            fileReadToolUseIds.set(content.id, absolutePath)
+            fileReadToolUseIds.set(content.id as string, absolutePath)
           }
         } else if (
           content.type === 'tool_use' &&
@@ -406,7 +406,7 @@ export function extractReadFilesFromMessages(
           if (input?.file_path && input?.content) {
             // Normalize to absolute path for consistent cache lookups
             const absolutePath = expandPath(input.file_path, cwd)
-            fileWriteToolUseIds.set(content.id, {
+            fileWriteToolUseIds.set(content.id as string, {
               filePath: absolutePath,
               content: input.content,
             })
@@ -420,7 +420,7 @@ export function extractReadFilesFromMessages(
           const input = content.input as { file_path?: string } | undefined
           if (input?.file_path) {
             const absolutePath = expandPath(input.file_path, cwd)
-            fileEditToolUseIds.set(content.id, absolutePath)
+            fileEditToolUseIds.set(content.id as string, absolutePath)
           }
         }
       }
@@ -433,7 +433,9 @@ export function extractReadFilesFromMessages(
       for (const content of message.message.content) {
         if (content.type === 'tool_result' && content.tool_use_id) {
           // Handle Read tool results
-          const readFilePath = fileReadToolUseIds.get(content.tool_use_id)
+          const readFilePath = fileReadToolUseIds.get(
+            content.tool_use_id as string,
+          )
           if (
             readFilePath &&
             typeof content.content === 'string' &&
@@ -469,7 +471,9 @@ export function extractReadFilesFromMessages(
           }
 
           // Handle Write tool results - use content from the tool input
-          const writeToolData = fileWriteToolUseIds.get(content.tool_use_id)
+          const writeToolData = fileWriteToolUseIds.get(
+            content.tool_use_id as string,
+          )
           if (writeToolData && message.timestamp) {
             const timestamp = new Date(message.timestamp).getTime()
             cache.set(writeToolData.filePath, {
@@ -489,7 +493,9 @@ export function extractReadFilesFromMessages(
           // Cowork cold-restart per turn), so disk content at extraction time
           // IS the post-edit state. No dedup: processing every Edit preserves
           // last-wins semantics when Read/Write interleave (Edit→Read→Edit).
-          const editFilePath = fileEditToolUseIds.get(content.tool_use_id)
+          const editFilePath = fileEditToolUseIds.get(
+            content.tool_use_id as string,
+          )
           if (editFilePath && content.is_error !== true) {
             try {
               const { content: diskContent } =

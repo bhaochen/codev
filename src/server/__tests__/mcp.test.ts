@@ -5,7 +5,7 @@ import * as path from 'path'
 import * as mcpClient from '../../services/mcp/client.js'
 import * as mcpConfig from '../../services/mcp/config.js'
 import * as mcpHostPreflight from '../services/mcpHostPreflight.js'
-import type { ScopedMcpServerConfig } from '../../services/mcp/config.js'
+import type { ScopedMcpServerConfig } from '../../services/mcp/types.js'
 import { handleMcpApi } from '../api/mcp.js'
 
 let tmpDir: string
@@ -310,14 +310,16 @@ describe('MCP API', () => {
     })
 
     reconnectSpy = spyOn(mcpClient, 'reconnectMcpServerImpl').mockResolvedValue({
-      name: pluginServerName,
       client: {
-        type: 'connected',
+        name: pluginServerName,
+        type: 'connected' as const,
         client: {} as never,
         capabilities: {},
         config: pluginServerConfig,
         cleanup: mock(async () => {}),
       },
+      tools: [],
+      commands: [],
     })
 
     const reconnect = makeRequest('POST', `/api/mcp/${encodeURIComponent(pluginServerName)}/reconnect`, {
@@ -357,14 +359,16 @@ describe('MCP API', () => {
     })
 
     reconnectSpy = spyOn(mcpClient, 'reconnectMcpServerImpl').mockResolvedValue({
-      name: pluginServerName,
       client: {
-        type: 'connected',
+        name: pluginServerName,
+        type: 'connected' as const,
         client: {} as never,
         capabilities: {},
         config: pluginServerConfig,
         cleanup: mock(async () => {}),
       },
+      tools: [],
+      commands: [],
     })
 
     const reconnect = makeRequest('POST', `/api/mcp/${encodeURIComponent(pluginServerName)}/reconnect`, {

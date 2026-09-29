@@ -884,7 +884,7 @@ export function filterIncompleteToolCalls(messages: Message[]): Message[] {
       if (Array.isArray(content)) {
         for (const block of content) {
           if (block.type === 'tool_result' && block.tool_use_id) {
-            toolUseIdsWithResults.add(block.tool_use_id)
+            toolUseIdsWithResults.add(block.tool_use_id as string)
           }
         }
       }
@@ -902,7 +902,7 @@ export function filterIncompleteToolCalls(messages: Message[]): Message[] {
           block =>
             block.type === 'tool_use' &&
             block.id &&
-            !toolUseIdsWithResults.has(block.id),
+            !toolUseIdsWithResults.has(block.id as string),
         )
         // Exclude messages with incomplete tool calls
         return !hasIncompleteToolCall

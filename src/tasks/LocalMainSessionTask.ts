@@ -421,11 +421,11 @@ export function startBackgroundSession({
         if (event.type === 'assistant') {
           for (const block of event.message.content) {
             if (block.type === 'text') {
-              tokenCount += roughTokenCountEstimation(block.text)
+              tokenCount += roughTokenCountEstimation(block.text as string)
             } else if (block.type === 'tool_use') {
               toolCount++
               const activity: ToolActivity = {
-                toolName: block.name,
+                toolName: block.name as string,
                 input: block.input as Record<string, unknown>,
               }
               recentActivities.push(activity)

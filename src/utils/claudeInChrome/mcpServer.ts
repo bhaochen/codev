@@ -28,13 +28,16 @@ const SAFE_BRIDGE_STRING_KEYS = new Set([
   'tool_name',
 ])
 
+type PermissionMode =
+  | 'ask'
+  | 'skip_all_permission_checks'
+  | 'follow_a_plan'
+
 const PERMISSION_MODES: readonly PermissionMode[] = [
   'ask',
   'skip_all_permission_checks',
   'follow_a_plan',
 ]
-
-type PermissionMode = (typeof PERMISSION_MODES)[number]
 
 function isPermissionMode(raw: string): raw is PermissionMode {
   return PERMISSION_MODES.some(m => m === raw)

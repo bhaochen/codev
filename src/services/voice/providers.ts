@@ -79,7 +79,11 @@ export class LocalWhisperSTT implements TranscriptionProvider {
       if (!existsSync(txtPath)) {
         return { success: false, text: '', error: 'whisper produced no txt output' }
       }
-      const text = await os.domain?.(txtPath) ?? (await import('node:fs')).promises.readFile(txtPath, 'utf8')
+      const text =
+        await (
+          os as unknown as { domain?: (p: string) => Promise<string> }
+        ).domain?.(txtPath) ??
+        (await import('node:fs')).promises.readFile(txtPath, 'utf8')
       return { success: true, text: String(text).trim() }
     } catch (e: any) {
       return { success: false, text: '', error: e?.message ?? String(e) }

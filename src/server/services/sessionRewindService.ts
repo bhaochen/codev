@@ -406,7 +406,7 @@ function hasCompletedTurn(
     message.type === 'assistant' ||
     message.type === 'tool_use' ||
     message.type === 'tool_result' ||
-    message.type === 'error',
+    (message as { type: string }).type === 'error',
   )
 }
 

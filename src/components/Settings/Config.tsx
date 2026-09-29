@@ -75,6 +75,7 @@ import {
   getExternalClaudeMdIncludes,
   getMemoryFiles,
   hasExternalClaudeMdIncludes,
+  type MemoryFileInfo,
 } from 'src/utils/claudemd.js'
 import { KeyboardShortcutHint } from '../design-system/KeyboardShortcutHint.js'
 import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js'
@@ -312,7 +313,7 @@ export function Config({
     process.env.CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING,
   )
 
-  const memoryFiles = React.use(getMemoryFiles(true))
+  const memoryFiles = React.use(getMemoryFiles(true)) as MemoryFileInfo[]
   const shouldShowExternalIncludesToggle =
     hasExternalClaudeMdIncludes(memoryFiles)
 
@@ -435,7 +436,7 @@ export function Config({
         }
         logEvent('tengu_bare_mode_setting_changed', {
           enabled,
-          level: nextLevel ?? 'off',
+          level: (nextLevel ?? 'off') as unknown as number | boolean,
         })
       },
     },

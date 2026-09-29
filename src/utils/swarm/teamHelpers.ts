@@ -222,7 +222,7 @@ export async function mutateTeamFileAsync(
 
     const next = mutator(current) ?? current
     await writeFile(teamFilePath, jsonStringify(next, null, 2))
-    return next
+    return next as TeamFile
   } finally {
     await release()
   }

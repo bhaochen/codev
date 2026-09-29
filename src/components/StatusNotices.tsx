@@ -31,7 +31,7 @@ export function StatusNotices(t0: Props | undefined) {
   const context = {
     config: t1,
     agentDefinitions,
-    memoryFiles: use(t2)
+    memoryFiles: use(t2) as StatusNoticeContext['memoryFiles']
   };
   const activeNotices = getActiveNotices(context);
   if (activeNotices.length === 0) {

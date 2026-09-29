@@ -42,7 +42,7 @@ export function GoalIndicator(): React.ReactNode {
   const otherOpen =
     goals && focusedGoalId
       ? Object.values(goals).filter(
-          g => g.id !== focusedGoalId && !isGoalInactive(g.status),
+          (g: { id: string; status: unknown }) => g.id !== focusedGoalId && !isGoalInactive(g.status as GoalStatus),
         ).length
       : 0
 

@@ -5,7 +5,7 @@ import { BashModeProgress } from 'src/components/BashModeProgress.js';
 import type { SetToolJSXFn } from 'src/Tool.js';
 import { BashTool } from 'src/tools/BashTool/BashTool.js';
 import type { AttachmentMessage, SystemMessage, UserMessage } from 'src/types/message.js';
-import type { ShellProgress } from 'src/types/tools.js';
+import type { BashProgress as ShellProgress } from '../../types/tools.js';
 import { logEvent } from '../../services/analytics/index.js';
 import { errorMessage, ShellError } from '../errors.js';
 import { createSyntheticUserCaveatMessage, createUserInterruptionMessage, createUserMessage, prepareUserContent } from '../messages.js';

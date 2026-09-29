@@ -947,7 +947,7 @@ function extractShotCountFromMessages(
     for (const block of content) {
       if (
         block.type !== 'tool_use' ||
-        !SHELL_TOOL_NAMES.includes(block.name) ||
+        !SHELL_TOOL_NAMES.includes((block as { name: string }).name) ||
         typeof block.input !== 'object' ||
         block.input === null ||
         !('command' in block.input) ||

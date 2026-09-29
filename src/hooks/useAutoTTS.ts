@@ -86,7 +86,7 @@ export function useAutoTTS(messages: RenderableMessage[], isLoading?: boolean): 
       // Search all content blocks for text — tool calls (e.g. WebSearch)
       // may appear as the first block with text following
       const textBlock = Array.isArray(msg.message.content)
-        ? msg.message.content.find((b: any) => b?.type === 'text')
+        ? (msg.message.content.find((b: any) => b?.type === 'text') as { text?: string } | undefined)
         : null
       if (!textBlock?.text?.trim()) continue
 

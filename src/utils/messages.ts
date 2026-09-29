@@ -308,7 +308,7 @@ export function isSyntheticMessage(message: Message): boolean {
     message.type !== 'tombstone' &&
     Array.isArray(message.message.content) &&
     message.message.content[0]?.type === 'text' &&
-    SYNTHETIC_MESSAGES.has(message.message.content[0].text)
+    SYNTHETIC_MESSAGES.has(message.message.content[0].text as string)
   )
 }
 
@@ -913,9 +913,10 @@ export function reorderMessagesInUI(
     // Handle tool results
     if (
       message.type === 'user' &&
-      message.message.content[0]?.type === 'tool_result'
+      (message.message.content[0] as AgentContentBlock)?.type === 'tool_result'
     ) {
-      const toolUseID = message.message.content[0].tool_use_id
+      const toolUseID = (message.message.content[0] as AgentToolResultBlock)
+        .tool_use_id
       if (!toolUseGroups.has(toolUseID)) {
         toolUseGroups.set(toolUseID, {
           toolUse: null,
@@ -988,7 +989,7 @@ export function reorderMessagesInUI(
 
     if (
       message.type === 'user' &&
-      message.message.content[0]?.type === 'tool_result'
+      (message.message.content[0] as AgentContentBlock)?.type === 'tool_result'
     ) {
       // Skip - already handled in tool use groups
       continue
@@ -1096,11 +1097,12 @@ export function getToolResultIDs(normalizedMessages: NormalizedMessage[]): {
 } {
   return Object.fromEntries(
     normalizedMessages.flatMap(_ =>
-      _.type === 'user' && _.message.content[0]?.type === 'tool_result'
+      _.type === 'user' &&
+      (_.message.content[0] as AgentContentBlock)?.type === 'tool_result'
         ? [
             [
-              _.message.content[0].tool_use_id,
-              _.message.content[0].is_error ?? false,
+              (_.message.content[0] as AgentToolResultBlock).tool_use_id,
+              (_.message.content[0] as AgentToolResultBlock).is_error ?? false,
             ],
           ]
         : ([] as [string, boolean][]),
@@ -1133,8 +1135,10 @@ export function getSiblingToolUseIDs(
   )
 
   return new Set(
-    siblingMessages.flatMap(_ =>
-      _.message.content.filter(_ => _.type === 'tool_use').map(_ => _.id),
+    siblingMessages.flatMap(m =>
+      (m.message.content as AgentContentBlock[])
+        .filter(_ => _.type === 'tool_use')
+        .map(_ => ((_ as AgentToolUseBlock).id as string)),
     ),
   )
 }
@@ -1179,11 +1183,14 @@ export function buildMessageLookups(
         toolUseIDs = new Set()
         toolUseIDsByMessageID.set(id, toolUseIDs)
       }
-      for (const content of msg.message.content) {
+      for (const content of msg.message.content as AgentContentBlock[]) {
         if (content.type === 'tool_use') {
-          toolUseIDs.add(content.id)
-          toolUseIDToMessageID.set(content.id, id)
-          toolUseByToolUseID.set(content.id, content)
+          toolUseIDs.add(content.id as string)
+          toolUseIDToMessageID.set(content.id as string, id)
+          toolUseByToolUseID.set(
+            content.id as string,
+            content as AgentToolUseBlock,
+          )
         }
       }
     }
@@ -1232,12 +1239,13 @@ export function buildMessageLookups(
 
     // Build tool result lookup and resolved/errored sets
     if (msg.type === 'user') {
-      for (const content of msg.message.content) {
+      for (const content of msg.message.content as AgentContentBlock[]) {
         if (content.type === 'tool_result') {
-          toolResultByToolUseID.set(content.tool_use_id, msg)
-          resolvedToolUseIDs.add(content.tool_use_id)
+          const toolUseID = content.tool_use_id as string
+          toolResultByToolUseID.set(toolUseID, msg)
+          resolvedToolUseIDs.add(toolUseID)
           if (content.is_error) {
-            erroredToolUseIDs.add(content.tool_use_id)
+            erroredToolUseIDs.add(toolUseID)
           }
         }
       }
@@ -1256,7 +1264,7 @@ export function buildMessageLookups(
           )
         }
         if ((content.type as string) === 'advisor_tool_result') {
-          const result = content as {
+          const result = content as unknown as {
             tool_use_id: string
             content: { type: string }
           }
@@ -1313,9 +1321,9 @@ export function buildMessageLookups(
       if (
         (content.type === 'server_tool_use' ||
           content.type === 'mcp_tool_use') &&
-        !resolvedToolUseIDs.has((content as { id: string }).id)
+        !resolvedToolUseIDs.has((content as unknown as { id: string }).id)
       ) {
-        const id = (content as { id: string }).id
+        const id = (content as unknown as { id: string }).id
         resolvedToolUseIDs.add(id)
         erroredToolUseIDs.add(id)
       }
@@ -1378,16 +1386,20 @@ export function buildSubagentLookups(
 
   for (const { message: msg } of messages) {
     if (msg.type === 'assistant') {
-      for (const content of msg.message.content) {
+      for (const content of msg.message.content as AgentContentBlock[]) {
         if (content.type === 'tool_use') {
-          toolUseByToolUseID.set(content.id, content as AgentToolUseBlock)
+          toolUseByToolUseID.set(
+            content.id as string,
+            content as AgentToolUseBlock,
+          )
         }
       }
     } else if (msg.type === 'user') {
-      for (const content of msg.message.content) {
+      for (const content of msg.message.content as AgentContentBlock[]) {
         if (content.type === 'tool_result') {
-          resolvedToolUseIDs.add(content.tool_use_id)
-          toolResultByToolUseID.set(content.tool_use_id, msg)
+          const toolUseID = content.tool_use_id as string
+          resolvedToolUseIDs.add(toolUseID)
+          toolResultByToolUseID.set(toolUseID, msg)
         }
       }
     }
@@ -1801,9 +1813,12 @@ function ensureSystemReminderWrap(msg: UserMessage): UserMessage {
   }
   let changed = false
   const newContent = content.map(b => {
-    if (b.type === 'text' && !b.text.startsWith('<system-reminder>')) {
+    if (
+      b.type === 'text' &&
+      !(b.text as string).startsWith('<system-reminder>')
+    ) {
       changed = true
-      return { ...b, text: wrapInSystemReminder(b.text) }
+      return { ...b, text: wrapInSystemReminder(b.text as string) }
     }
     return b
   })
@@ -1842,8 +1857,11 @@ function smooshSystemReminderSiblings(
     const srText: AgentTextBlock[] = []
     const kept: AgentContentBlock[] = []
     for (const b of content) {
-      if (b.type === 'text' && b.text.startsWith('<system-reminder>')) {
-        srText.push(b)
+      if (
+        b.type === 'text' &&
+        (b.text as string).startsWith('<system-reminder>')
+      ) {
+        srText.push(b as AgentTextBlock)
       } else {
         kept.push(b)
       }
@@ -2017,7 +2035,7 @@ export function normalizeMessagesForAPI(
     const errorText =
       Array.isArray(msg.message.content) &&
       msg.message.content[0]?.type === 'text'
-        ? msg.message.content[0].text
+        ? (msg.message.content[0].text as string)
         : undefined
     if (!errorText) {
       continue
@@ -2163,7 +2181,9 @@ export function normalizeMessagesForAPI(
               !contentAfterStrip.some(
                 b =>
                   b.type === 'text' &&
-                  b.text.startsWith(TOOL_REFERENCE_TURN_BOUNDARY),
+                  (b.text as string).startsWith(
+                    TOOL_REFERENCE_TURN_BOUNDARY,
+                  ),
               ) &&
               contentHasToolReference(contentAfterStrip)
             ) {
@@ -2206,7 +2226,9 @@ export function normalizeMessagesForAPI(
               ...message.message,
               content: message.message.content.map(block => {
                 if (block.type === 'tool_use') {
-                  const tool = tools.find(t => toolMatchesName(t, block.name))
+                  const tool = tools.find(t =>
+                    toolMatchesName(t, block.name as string),
+                  )
                   const normalizedInput = tool
                     ? normalizeToolInputForAPI(
                         tool,
@@ -2780,19 +2802,23 @@ export function getToolUseID(message: NormalizedMessage): string | null {
       }
       return null
     case 'assistant':
-      if (message.message.content[0]?.type !== 'tool_use') {
+      if (
+        (message.message.content[0] as AgentContentBlock)?.type !== 'tool_use'
+      ) {
         return null
       }
-      return message.message.content[0].id
+      return (message.message.content[0] as AgentToolUseBlock).id
     case 'user':
       if (message.sourceToolUseID) {
         return message.sourceToolUseID
       }
 
-      if (message.message.content[0]?.type !== 'tool_result') {
+      if (
+        (message.message.content[0] as AgentContentBlock)?.type !== 'tool_result'
+      ) {
         return null
       }
-      return message.message.content[0].tool_use_id
+      return (message.message.content[0] as AgentToolResultBlock).tool_use_id
     case 'progress':
       return message.toolUseID
     case 'system':
@@ -2817,10 +2843,10 @@ export function filterUnresolvedToolUses(messages: Message[]): Message[] {
     if (!Array.isArray(content)) continue
     for (const block of content) {
       if (block.type === 'tool_use') {
-        toolUseIds.add(block.id)
+        toolUseIds.add(block.id as string)
       }
       if (block.type === 'tool_result') {
-        toolResultIds.add(block.tool_use_id)
+        toolResultIds.add(block.tool_use_id as string)
       }
     }
   }
@@ -2841,7 +2867,7 @@ export function filterUnresolvedToolUses(messages: Message[]): Message[] {
     const toolUseBlockIds: string[] = []
     for (const b of content) {
       if (b.type === 'tool_use') {
-        toolUseBlockIds.push(b.id)
+        toolUseBlockIds.push(b.id as string)
       }
     }
     if (toolUseBlockIds.length === 0) return true
@@ -2984,7 +3010,7 @@ export function handleMessageFromStream(
       )
       if (thinkingBlock && thinkingBlock.type === 'thinking') {
         onStreamingThinking?.(() => ({
-          thinking: thinkingBlock.thinking,
+          thinking: thinkingBlock.thinking as string,
           isStreaming: false,
           streamingEndedAt: Date.now(),
         }))
@@ -3144,7 +3170,7 @@ export function wrapMessagesInSystemReminder(
         if (block.type === 'text') {
           return {
             ...block,
-            text: wrapInSystemReminder(block.text),
+            text: wrapInSystemReminder(block.text as string),
           }
         }
         return block
@@ -5245,16 +5271,16 @@ export function ensureToolResultPairing(
     const seenToolUseIds = new Set<string>()
     const finalContent = msg.message.content.filter(block => {
       if (block.type === 'tool_use') {
-        if (allSeenToolUseIds.has(block.id)) {
+        if (allSeenToolUseIds.has(block.id as string)) {
           repaired = true
           return false
         }
-        allSeenToolUseIds.add(block.id)
-        seenToolUseIds.add(block.id)
+        allSeenToolUseIds.add(block.id as string)
+        seenToolUseIds.add(block.id as string)
       }
       if (
         (block.type === 'server_tool_use' || block.type === 'mcp_tool_use') &&
-        !serverResultIds.has((block as { id: string }).id)
+        !serverResultIds.has((block as unknown as { id: string }).id)
       ) {
         repaired = true
         return false
@@ -5499,7 +5525,7 @@ export function stripAdvisorBlocks(
         b =>
           b.type === 'thinking' ||
           b.type === 'redacted_thinking' ||
-          (b.type === 'text' && (!b.text || !b.text.trim())),
+          (b.type === 'text' && (!b.text || !(b.text as string).trim())),
       )
     ) {
       filtered.push({

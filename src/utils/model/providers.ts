@@ -27,7 +27,13 @@ function getStoredProviderPreference(): APIProvider | null {
     const { readFileSync } = require('fs') as typeof import('fs')
     const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
     const config = JSON.parse(raw) as {
-      authProvider?: 'anthropic' | 'openrouter' | 'openai' | 'local' | 'opencode'
+      authProvider?:
+        | 'anthropic'
+        | 'openrouter'
+        | 'openai'
+        | 'local'
+        | 'opencode'
+        | 'nvidia'
       openRouterApiKey?: string
       openAiApiKey?: string
       openAiAccessToken?: string
@@ -35,6 +41,7 @@ function getStoredProviderPreference(): APIProvider | null {
       localModelName?: string
       openCodeApiKey?: string
       openCodeModelName?: string
+      nvidiaApiKey?: string
     }
 
     let result: APIProvider | null

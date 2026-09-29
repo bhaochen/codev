@@ -11,7 +11,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import supportsColor from "supports-color";
+const supportsColor = require("supports-color") as { stdout?: unknown };
 import { ImageCache } from "./utils/imageCache.js";
 import { queryTerminal } from "./utils/queryTerminal.js";
 

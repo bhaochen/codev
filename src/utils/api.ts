@@ -353,7 +353,7 @@ export function splitSysPromptPrefix(
         }
         return JSON.stringify(block)
       })
-      .filter(Boolean)
+      .filter(Boolean) as unknown as SystemPrompt
   }
 
   const useGlobalCacheFeature = shouldUseGlobalCacheScope()

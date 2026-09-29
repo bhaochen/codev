@@ -53,7 +53,10 @@ import {
   type ConnectorTextDelta,
   isConnectorTextBlock,
 } from '../../../types/connectorText.js'
-import type { AgentContentBlock } from '../../../types/agentMessage.js'
+import type {
+  AgentContentBlock,
+  AgentToolResultBlock,
+} from '../../../types/agentMessage.js'
 import type {
   AssistantMessage,
   Message,
@@ -1090,9 +1093,13 @@ export function stripExcessMediaItems(
   let toRemove = 0
   for (const msg of messages) {
     if (!Array.isArray(msg.message.content)) continue
-    for (const block of msg.message.content) {
-      if (isMedia(block)) toRemove++
-      if (isToolResult(block) && Array.isArray(block.content)) {
+    for (const contentBlock of msg.message.content) {
+      if (isMedia(contentBlock as unknown as BetaContentBlockParam)) toRemove++
+      const block = contentBlock as AgentToolResultBlock
+      if (
+        isToolResult(contentBlock as unknown as BetaContentBlockParam) &&
+        Array.isArray(block.content)
+      ) {
         for (const nested of block.content) {
           if (isMedia(nested as unknown as BetaContentBlockParam)) toRemove++
         }
@@ -1110,25 +1117,29 @@ export function stripExcessMediaItems(
     const before = toRemove
     const stripped = content
       .map(block => {
+        const toolResult = block as AgentToolResultBlock
         if (
           toRemove <= 0 ||
-          !isToolResult(block) ||
-          !Array.isArray(block.content)
+          !isToolResult(block as unknown as BetaContentBlockParam) ||
+          !Array.isArray(toolResult.content)
         )
           return block
-        const filtered = block.content.filter(n => {
+        const filtered = (toolResult.content as AgentContentBlock[]).filter(n => {
           if (toRemove > 0 && isMedia(n as unknown as BetaContentBlockParam)) {
             toRemove--
             return false
           }
           return true
         })
-        return filtered.length === block.content.length
+        return filtered.length === toolResult.content.length
           ? block
           : { ...block, content: filtered }
       })
       .filter(block => {
-        if (toRemove > 0 && isMedia(block)) {
+        if (
+          toRemove > 0 &&
+          isMedia(block as unknown as BetaContentBlockParam)
+        ) {
           toRemove--
           return false
         }

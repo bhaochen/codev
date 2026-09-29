@@ -369,7 +369,7 @@ export function finalizeAgentTool(
   return {
     agentId,
     agentType,
-    content,
+    content: content as AgentToolResult['content'],
     totalDurationMs: Date.now() - startTime,
     totalTokens,
     totalToolUseCount,
@@ -384,7 +384,7 @@ export function finalizeAgentTool(
 export function getLastToolUseName(message: MessageType): string | undefined {
   if (message.type !== 'assistant') return undefined
   const block = message.message.content.findLast(b => b.type === 'tool_use')
-  return block?.type === 'tool_use' ? block.name : undefined
+  return block?.type === 'tool_use' ? (block.name as string) : undefined
 }
 
 export function emitTaskProgress(

@@ -111,7 +111,7 @@ export function extractTitleText(m: Message): string | undefined {
   } else {
     for (const block of content) {
       if (block.type === 'text') {
-        raw = block.text
+        raw = block.text as string
         break
       }
     }

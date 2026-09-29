@@ -4,6 +4,7 @@ import {
   TASK_NOTIFICATION_TAG,
 } from '../constants/xml.js'
 import { BACKGROUND_BASH_SUMMARY_PREFIX } from '../tasks/LocalShellTask/LocalShellTask.js'
+import type { AgentTextBlock } from '../types/agentMessage.js'
 import type {
   NormalizedUserMessage,
   RenderableMessage,
@@ -15,7 +16,7 @@ function isCompletedBackgroundBash(
   msg: RenderableMessage,
 ): msg is NormalizedUserMessage {
   if (msg.type !== 'user') return false
-  const content = msg.message.content[0]
+  const content = msg.message.content[0] as AgentTextBlock
   if (content?.type !== 'text') return false
   if (!content.text.includes(`<${TASK_NOTIFICATION_TAG}`)) return false
   // Only collapse successful completions — failed/killed stay visible individually.

@@ -10,6 +10,7 @@
 
 import type { UUID } from 'crypto'
 import { randomUUID } from 'crypto'
+import type { BetaMessageDeltaUsage } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
 import type { PromptCommand } from '../commands.js'
 import type { QuerySource } from '../constants/querySource.js'
 import type { CanUseToolFn } from '../hooks/useCanUseTool.js'
@@ -536,7 +537,7 @@ export async function runForkedAgent({
     // Track the last recorded message UUID for parent chain continuity
     lastRecordedUuid =
       initialMessages.length > 0
-        ? initialMessages[initialMessages.length - 1]!.uuid
+        ? (initialMessages[initialMessages.length - 1]!.uuid as UUID)
         : null
   }
 
@@ -561,7 +562,10 @@ export async function runForkedAgent({
           message.event?.type === 'message_delta' &&
           message.event.usage
         ) {
-          const turnUsage = updateUsage({ ...EMPTY_USAGE }, message.event.usage)
+          const turnUsage = updateUsage(
+            { ...EMPTY_USAGE },
+            message.event.usage as unknown as BetaMessageDeltaUsage,
+          )
           totalUsage = accumulateUsage(totalUsage, turnUsage)
         }
         continue
@@ -592,7 +596,7 @@ export async function runForkedAgent({
             ),
         )
         if (msg.type !== 'progress') {
-          lastRecordedUuid = msg.uuid
+          lastRecordedUuid = msg.uuid as UUID
         }
       }
     }

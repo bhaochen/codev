@@ -283,8 +283,8 @@ export class ConversationService {
     this.sessions.set(sessionId, session)
 
     session.outputDrain = Promise.all([
-      this.readProcessOutputStream(sessionId, proc.stdout, 'stdout'),
-      this.readProcessOutputStream(sessionId, proc.stderr, 'stderr'),
+      this.readProcessOutputStream(sessionId, proc.stdout as ReadableStream, 'stdout'),
+      this.readProcessOutputStream(sessionId, proc.stderr as ReadableStream, 'stderr'),
     ]).then(() => undefined)
 
     proc.exited.then((code) => {

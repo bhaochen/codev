@@ -65,7 +65,11 @@ export async function createComputerUseMcpServerForCli(): Promise<
   const server = createComputerUseMcpServer(adapter, coordinateMode)
 
   const installedAppNames = await tryGetInstalledAppNames()
-  const tools = buildComputerUseTools(
+  const tools = (buildComputerUseTools as unknown as (
+    capabilities: unknown,
+    coordinateMode: unknown,
+    installedAppNames: string[] | undefined,
+  ) => readonly { name: string }[])(
     adapter.executor.capabilities,
     coordinateMode,
     installedAppNames,

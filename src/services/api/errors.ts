@@ -71,7 +71,7 @@ export function isPromptTooLongMessage(msg: AssistantMessage): boolean {
   return content.some(
     block =>
       block.type === 'text' &&
-      block.text.startsWith(PROMPT_TOO_LONG_ERROR_MESSAGE),
+      (block.text as string).startsWith(PROMPT_TOO_LONG_ERROR_MESSAGE),
   )
 }
 

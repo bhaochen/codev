@@ -120,7 +120,9 @@ export function connectGroqStream(
 
           // Convert raw PCM to WAV buffer
           const wavBuf = pcmToWav(audioBuf, 16000)
-          const wavFile = new File([wavBuf], 'audio.wav', { type: 'audio/wav' })
+          const wavFile = new File([wavBuf as unknown as BlobPart], 'audio.wav', {
+            type: 'audio/wav',
+          })
 
           // Try whisper-large-v3 first, fallback to -turbo on 429
           const preferredModel = options.model || MODELS[0]

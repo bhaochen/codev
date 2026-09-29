@@ -3254,7 +3254,7 @@ function extractToolUseId(message: AssistantMessage): string | undefined {
   if (message.message.content[0]?.type !== 'tool_use') {
     return undefined
   }
-  return message.message.content[0].id
+  return (message.message.content[0] as { id: string }).id
 }
 
 /**

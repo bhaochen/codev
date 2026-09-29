@@ -25,6 +25,7 @@ import {
   registerRemoteAgentTask,
 } from '../../tasks/RemoteAgentTask/RemoteAgentTask.js'
 import { isEnterpriseSubscriber, isTeamSubscriber } from '../../utils/auth.js'
+import type { BackgroundRemoteSessionPrecondition } from '../../utils/background/remote/remoteSession.js'
 import { detectCurrentRepositoryWithHost } from '../../utils/detectRepository.js'
 import { execFileNoThrow } from '../../utils/execFileNoThrow.js'
 import { getDefaultBranch, gitExe } from '../../utils/git.js'
@@ -136,7 +137,7 @@ export async function launchRemoteReview(
   // consume at session creation routes billing: first N zero-rate, then
   // anthropic:cccr org-service-key (overage-only).
   if (!eligibility.eligible) {
-    const blockers = eligibility.errors.filter(
+    const blockers = (eligibility as { eligible: false; errors: BackgroundRemoteSessionPrecondition[] }).errors.filter(
       e => e.type !== 'no_remote_environment',
     )
     if (blockers.length > 0) {

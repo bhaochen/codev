@@ -1,5 +1,6 @@
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.js'
 import type { Command } from '../commands.js'
+import type { AgentContentBlock } from '../types/agentMessage.js'
 import type { ToolUseContext } from '../Tool.js'
 
 type Options = {
@@ -40,7 +41,7 @@ export function createMovedToPluginCommand({
     async getPromptForCommand(
       args: string,
       context: ToolUseContext,
-    ): Promise<ContentBlockParam[]> {
+    ): Promise<AgentContentBlock[]> {
       if (process.env.USER_TYPE === 'ant') {
         return [
           {
@@ -59,7 +60,10 @@ Do not attempt to run the command. Simply inform the user about the plugin insta
         ]
       }
 
-      return getPromptWhileMarketplaceIsPrivate(args, context)
+      return getPromptWhileMarketplaceIsPrivate(
+        args,
+        context,
+      ) as unknown as Promise<AgentContentBlock[]>
     },
   }
 }

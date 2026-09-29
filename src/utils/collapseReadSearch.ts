@@ -14,6 +14,10 @@ import {
 import { TOOL_SEARCH_TOOL_NAME } from '../tools/ToolSearchTool/prompt.js'
 import { WEB_FETCH_TOOL_NAME } from '../tools/WebFetchTool/prompt.js'
 import type {
+  AgentContentBlock,
+  AgentToolUseBlock,
+} from '../types/agentMessage.js'
+import type {
   CollapsedReadSearchGroup,
   CollapsibleMessage,
   RenderableMessage,
@@ -35,7 +39,9 @@ const teamMemOps = feature('TEAMMEM')
   : null
 const SNIP_TOOL_NAME = feature('HISTORY_SNIP')
   ? (
-      require('../tools/SnipTool/prompt.js') as typeof import('../tools/SnipTool/prompt.js')
+      require('../tools/SnipTool/prompt.js') as typeof import('../tools/SnipTool/prompt.js') & {
+        SNIP_TOOL_NAME: string;
+      }
     ).SNIP_TOOL_NAME
   : null
 /* eslint-enable @typescript-eslint/no-require-imports */
@@ -306,7 +312,7 @@ function getCollapsibleToolInfo(
     const content = msg.message.content[0]
     const info = getSearchOrReadFromContent(content, tools)
     if (info && content?.type === 'tool_use') {
-      return { name: content.name, input: content.input, ...info }
+      return { name: content.name as string, input: content.input, ...info }
     }
   }
   if (msg.type === 'grouped_tool_use') {
@@ -314,7 +320,11 @@ function getCollapsibleToolInfo(
     const firstContent = msg.messages[0]?.message.content[0]
     const info = getSearchOrReadFromContent(
       firstContent
-        ? { type: 'tool_use', name: msg.toolName, input: firstContent.input }
+        ? {
+            type: 'tool_use',
+            name: msg.toolName,
+            input: (firstContent as AgentToolUseBlock).input,
+          }
         : undefined,
       tools,
     )
@@ -331,7 +341,7 @@ function getCollapsibleToolInfo(
 function isTextBreaker(msg: RenderableMessage): boolean {
   if (msg.type === 'assistant') {
     const content = msg.message.content[0]
-    if (content?.type === 'text' && content.text.trim().length > 0) {
+    if (content?.type === 'text' && (content.text as string).trim().length > 0) {
       return true
     }
   }
@@ -350,7 +360,7 @@ function isNonCollapsibleToolUse(
     const content = msg.message.content[0]
     if (
       content?.type === 'tool_use' &&
-      !isToolSearchOrRead(content.name, content.input, tools)
+      !isToolSearchOrRead(content.name as string, content.input, tools)
     ) {
       return true
     }
@@ -373,7 +383,7 @@ function isPreToolHookSummary(
   return (
     msg.type === 'system' &&
     msg.subtype === 'stop_hook_summary' &&
-    msg.hookLabel === 'PreToolUse'
+    (msg as SystemStopHookSummaryMessage).hookLabel === 'PreToolUse'
   )
 }
 
@@ -411,7 +421,7 @@ function isCollapsibleToolUse(
     const content = msg.message.content[0]
     return (
       content?.type === 'tool_use' &&
-      isToolSearchOrRead(content.name, content.input, tools)
+      isToolSearchOrRead(content.name as string, content.input, tools)
     )
   }
   if (msg.type === 'grouped_tool_use') {
@@ -457,14 +467,14 @@ function getToolUseIdsFromMessage(msg: RenderableMessage): string[] {
   if (msg.type === 'assistant') {
     const content = msg.message.content[0]
     if (content?.type === 'tool_use') {
-      return [content.id]
+      return [content.id as string]
     }
   }
   if (msg.type === 'grouped_tool_use') {
     return msg.messages
       .map(m => {
         const content = m.message.content[0]
-        return content.type === 'tool_use' ? content.id : ''
+        return content.type === 'tool_use' ? (content.id as string) : ''
       })
       .filter(Boolean)
   }
@@ -567,9 +577,9 @@ function scanBashResultForGitOps(
   if (!out?.stdout && !out?.stderr) return
   // git push writes the ref update to stderr — scan both streams.
   const combined = (out.stdout ?? '') + '\n' + (out.stderr ?? '')
-  for (const c of msg.message.content) {
+  for (const c of msg.message.content as AgentContentBlock[]) {
     if (c.type !== 'tool_result') continue
-    const command = group.bashCommands?.get(c.tool_use_id)
+    const command = group.bashCommands?.get(c.tool_use_id as string)
     if (!command) continue
     const { commit, push, branch, pr } = detectGitOperation(command, combined)
     if (commit) group.commits?.push(commit)
@@ -728,7 +738,7 @@ function createCollapsedGroup(
     messages: group.messages,
     displayMessage: firstMsg,
     uuid: `collapsed-${firstMsg.uuid}` as UUID,
-    timestamp: firstMsg.timestamp,
+    timestamp: firstMsg.timestamp as number,
   }
   if (feature('TEAMMEM')) {
     result.teamMemorySearchCount = teamMemSearchCount

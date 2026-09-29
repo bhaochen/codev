@@ -249,8 +249,9 @@ async function getCommandPrefixImpl(
       typeof response.message.content === 'string'
         ? response.message.content
         : Array.isArray(response.message.content)
-          ? (response.message.content.find(_ => _.type === 'text')?.text ??
-            'none')
+          ? ((response.message.content.find(_ => _.type === 'text') as
+              | { text: string }
+              | undefined)?.text ?? 'none')
           : 'none'
 
     if (startsWithApiErrorPrefix(prefix)) {

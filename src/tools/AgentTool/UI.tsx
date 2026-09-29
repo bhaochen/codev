@@ -406,7 +406,7 @@ export function renderToolResultMessage(data: Output, progressMessagesForMessage
       inference_geo: null,
       iterations: null,
       speed: null
-    }
+    } as Parameters<typeof createAssistantMessage>[0]['usage']
   });
   return <Box flexDirection="column">
       {("external" as string) === 'ant' && <MessageResponse>

@@ -83,7 +83,7 @@ export function isInForkChild(messages: MessageType[]): boolean {
     return content.some(
       block =>
         block.type === 'text' &&
-        block.text.includes(`<${FORK_BOILERPLATE_TAG}>`),
+        (block.text as string).includes(`<${FORK_BOILERPLATE_TAG}>`),
     )
   })
 }

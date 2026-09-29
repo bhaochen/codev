@@ -407,7 +407,7 @@ async function localFetch(
   const userAgent = 'Mozilla/5.0 (compatible; WebFetchTool/1.0)'
 
   // 1. Use getWithPermittedRedirects to handle redirects with custom headers
-  const response = await getWithPermittedRedirects(url, signal, redirectChecker, userAgent)
+  const response = await getWithPermittedRedirects(url, signal, redirectChecker, userAgent as unknown as number)
 
   if (isRedirectInfo(response)) {
     throw new Error('Cross-host redirect detected')
@@ -613,7 +613,7 @@ export async function applyPromptToMarkdown(
   if (content.length > 0) {
     const contentBlock = content[0]
     if ('text' in contentBlock!) {
-      return contentBlock.text
+      return contentBlock.text as string
     }
   }
   return 'No response from model'

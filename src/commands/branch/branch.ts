@@ -128,7 +128,7 @@ async function createFork(customTitle?: string): Promise<{
       isSidechain: false,
       forkedFrom: {
         sessionId: originalSessionId,
-        messageUuid: entry.uuid,
+        messageUuid: entry.uuid as UUID,
       },
     }
 
@@ -141,7 +141,7 @@ async function createFork(customTitle?: string): Promise<{
     serializedMessages.push(serialized)
     lines.push(jsonStringify(forkedEntry))
     if (entry.type !== 'progress') {
-      parentUuid = entry.uuid
+      parentUuid = entry.uuid as UUID
     }
   }
 

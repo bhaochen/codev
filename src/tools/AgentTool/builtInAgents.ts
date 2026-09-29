@@ -51,7 +51,9 @@ export function getBuiltInAgents(): AgentDefinition[] {
     if (isEnvTruthy(process.env.CLAUDE_CODE_COORDINATOR_MODE)) {
       /* eslint-disable @typescript-eslint/no-require-imports */
       const { getCoordinatorAgents } =
-        require('../../coordinator/workerAgent.js') as typeof import('../../coordinator/workerAgent.js')
+        require('../../coordinator/workerAgent.js') as unknown as {
+          getCoordinatorAgents: () => AgentDefinition[]
+        }
       /* eslint-enable @typescript-eslint/no-require-imports */
       return getCoordinatorAgents()
     }

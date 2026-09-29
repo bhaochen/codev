@@ -103,9 +103,12 @@ export function clearSessionCaches(
   // Clear attribution caches (file content cache, pending bash states)
   // Dynamic import to preserve dead code elimination for COMMIT_ATTRIBUTION feature flag
   if (feature('COMMIT_ATTRIBUTION')) {
-    void import('../../utils/attributionHooks.js').then(
-      ({ clearAttributionCaches }) => clearAttributionCaches(),
-    )
+    void import('../../utils/attributionHooks.js').then((mod) => {
+      const { clearAttributionCaches } = mod as unknown as {
+        clearAttributionCaches: () => void
+      }
+      clearAttributionCaches()
+    })
   }
   // Clear repository detection caches
   clearRepositoryCaches()

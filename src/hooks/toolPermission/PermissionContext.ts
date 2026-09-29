@@ -14,6 +14,7 @@ import type {
 import { awaitClassifierAutoApproval } from '../../tools/BashTool/bashPermissions.js'
 import { BASH_TOOL_NAME } from '../../tools/BashTool/toolName.js'
 import type { AssistantMessage } from '../../types/message.js'
+import type { AgentContentBlock } from '../../types/agentMessage.js'
 import type {
   PendingClassifierCheck,
   PermissionAllowDecision,
@@ -169,7 +170,7 @@ function createPermissionContext(
         )
         toolUseContext.abortController.abort()
       }
-      return { behavior: 'ask', message, contentBlocks }
+      return { behavior: 'ask', message, contentBlocks: contentBlocks as AgentContentBlock[] | undefined }
     },
     ...(feature('BASH_CLASSIFIER')
       ? {
@@ -278,7 +279,7 @@ function createPermissionContext(
         ...(opts?.acceptFeedback && { acceptFeedback: opts.acceptFeedback }),
         ...(opts?.contentBlocks &&
           opts.contentBlocks.length > 0 && {
-            contentBlocks: opts.contentBlocks,
+            contentBlocks: opts.contentBlocks as AgentContentBlock[],
           }),
       }
     },

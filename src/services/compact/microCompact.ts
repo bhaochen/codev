@@ -147,7 +147,7 @@ function calculateToolResultTokens(block: AgentToolResultBlock): number {
   // Array of TextBlockParam | ImageBlockParam | DocumentBlockParam
   return block.content.reduce((sum, item) => {
     if (item.type === 'text') {
-      return sum + roughTokenCountEstimation(item.text)
+      return sum + roughTokenCountEstimation(item.text as string)
     } else if (item.type === 'image' || item.type === 'document') {
       // Images/documents are approximately 2000 tokens regardless of format
       return sum + IMAGE_MAX_TOKEN_SIZE
@@ -175,18 +175,18 @@ export function estimateMessageTokens(messages: Message[]): number {
 
     for (const block of message.message.content) {
       if (block.type === 'text') {
-        totalTokens += roughTokenCountEstimation(block.text)
+        totalTokens += roughTokenCountEstimation(block.text as string)
       } else if (block.type === 'tool_result') {
-        totalTokens += calculateToolResultTokens(block)
+        totalTokens += calculateToolResultTokens(block as AgentToolResultBlock)
       } else if (block.type === 'image' || block.type === 'document') {
         totalTokens += IMAGE_MAX_TOKEN_SIZE
       } else if (block.type === 'thinking') {
         // Match roughTokenCountEstimationForBlock: count only the thinking
         // text, not the JSON wrapper or signature (signature is metadata,
         // not model-tokenized content).
-        totalTokens += roughTokenCountEstimation(block.thinking)
+        totalTokens += roughTokenCountEstimation(block.thinking as string)
       } else if (block.type === 'redacted_thinking') {
-        totalTokens += roughTokenCountEstimation(block.data)
+        totalTokens += roughTokenCountEstimation(block.data as string)
       } else if (block.type === 'tool_use') {
         // Match roughTokenCountEstimationForBlock: count name + input,
         // not the JSON wrapper or id field.
@@ -231,8 +231,11 @@ function collectCompactableToolIds(messages: Message[]): string[] {
       Array.isArray(message.message.content)
     ) {
       for (const block of message.message.content) {
-        if (block.type === 'tool_use' && COMPACTABLE_TOOLS.has(block.name)) {
-          ids.push(block.id)
+        if (
+          block.type === 'tool_use' &&
+          COMPACTABLE_TOOLS.has(block.name as string)
+        ) {
+          ids.push(block.id as string)
         }
       }
     }
@@ -318,11 +321,11 @@ async function cachedMicrocompactPath(
       for (const block of message.message.content) {
         if (
           block.type === 'tool_result' &&
-          compactableToolIds.has(block.tool_use_id) &&
-          !state.registeredTools.has(block.tool_use_id)
+          compactableToolIds.has(block.tool_use_id as string) &&
+          !state.registeredTools.has(block.tool_use_id as string)
         ) {
-          mod.registerToolResult(state, block.tool_use_id)
-          groupIds.push(block.tool_use_id)
+          mod.registerToolResult(state, block.tool_use_id as string)
+          groupIds.push(block.tool_use_id as string)
         }
       }
       mod.registerToolMessage(state, groupIds)
@@ -475,10 +478,10 @@ function maybeTimeBasedMicrocompact(
     const newContent = message.message.content.map(block => {
       if (
         block.type === 'tool_result' &&
-        clearSet.has(block.tool_use_id) &&
+        clearSet.has(block.tool_use_id as string) &&
         block.content !== TIME_BASED_MC_CLEARED_MESSAGE
       ) {
-        tokensSaved += calculateToolResultTokens(block)
+        tokensSaved += calculateToolResultTokens(block as AgentToolResultBlock)
         touched = true
         return { ...block, content: TIME_BASED_MC_CLEARED_MESSAGE }
       }

@@ -1,6 +1,7 @@
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/index.mjs';
 import type { Command } from '../commands.js';
 import { AGENT_TOOL_NAME } from '../tools/AgentTool/constants.js';
+import type { AgentContentBlock } from '../types/agentMessage.js';
 const statusline = {
   type: 'prompt',
   description: "Set up Claude Code's status line UI",
@@ -12,7 +13,7 @@ const statusline = {
   allowedTools: [AGENT_TOOL_NAME, 'Read(~/**)', 'Edit(~/.claude/settings.json)'],
   source: 'builtin',
   disableNonInteractive: true,
-  async getPromptForCommand(args): Promise<ContentBlockParam[]> {
+  async getPromptForCommand(args): Promise<AgentContentBlock[]> {
     const prompt = args.trim() || 'Configure my statusLine from my shell PS1 configuration';
     return [{
       type: 'text',

@@ -7,7 +7,7 @@ import { Ansi, Box, color, Text, useTheme } from '../../ink.js';
 import { useAppState } from '../../state/AppState.js';
 import type { PermissionMode } from '../../utils/permissions/PermissionMode.js';
 import { permissionModeTitle } from '../../utils/permissions/PermissionMode.js';
-import type { PermissionDecision, PermissionDecisionReason } from '../../utils/permissions/PermissionResult.js';
+import type { PermissionDecision, PermissionDecisionReason, PermissionResult } from '../../utils/permissions/PermissionResult.js';
 import { extractRules } from '../../utils/permissions/PermissionUpdate.js';
 import type { PermissionUpdate } from '../../utils/permissions/PermissionUpdateSchema.js';
 import { permissionRuleValueToString } from '../../utils/permissions/permissionRuleParser.js';
@@ -59,7 +59,7 @@ function PermissionDecisionInfoItem(t0) {
       switch (decisionReason.type) {
         case "subcommandResults":
           {
-            return <Box flexDirection="column">{Array.from(decisionReason.reasons.entries()).map(t2 => {
+            return <Box flexDirection="column">{Array.from((decisionReason as { reasons: Map<string, PermissionResult> }).reasons.entries()).map(t2 => {
                 const [subcommand, result] = t2;
                 const icon = result.behavior === "allow" ? color("success", theme)(figures.tick) : color("error", theme)(figures.cross);
                 return <Box flexDirection="column" key={subcommand}><Text>{icon} {subcommand}</Text>{result.decisionReason !== undefined && result.decisionReason.type !== "subcommandResults" && <Text><Text dimColor={true}>{"  "}⎿{"  "}</Text><Ansi>{decisionReasonDisplayString(result.decisionReason)}</Ansi></Text>}{result.behavior === "ask" && <SuggestedRules suggestions={result.suggestions} />}</Box>;

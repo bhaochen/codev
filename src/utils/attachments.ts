@@ -2484,7 +2484,7 @@ export function collectRecentSuccessfulTools(
     if (isHumanTurn(m) && m !== lastUserMessage) break
     if (m.type === 'assistant' && typeof m.message.content !== 'string') {
       for (const block of m.message.content) {
-        if (block.type === 'tool_use') useIdToName.set(block.id, block.name)
+        if (block.type === 'tool_use') useIdToName.set(block.id as string, block.name as string)
       }
     } else if (
       m.type === 'user' &&

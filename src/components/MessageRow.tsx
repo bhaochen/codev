@@ -4,6 +4,7 @@ import type { Command } from '../commands.js';
 import { Box } from '../ink.js';
 import type { Screen } from '../screens/REPL.js';
 import type { Tools } from '../Tool.js';
+import type { AgentContentBlock } from '../types/agentMessage.js';
 import type { RenderableMessage } from '../types/message.js';
 import { getDisplayMessageFromCollapsed, getToolSearchOrReadInfo, getToolUseIdsFromCollapsedGroup, hasAnyToolInProgress } from '../utils/collapseReadSearch.js';
 import { type buildMessageLookups, EMPTY_STRING_SET, getProgressMessagesFromLookup, getSiblingToolUseIDsFromLookup, getToolUseID } from '../utils/messages.js';
@@ -56,13 +57,13 @@ export function hasContentAfterIndex(messages: RenderableMessage[], index: numbe
         continue;
       }
       if (content?.type === 'tool_use') {
-        if (getToolSearchOrReadInfo(content.name, content.input, tools).isCollapsible) {
+        if (getToolSearchOrReadInfo(content.name as string, content.input, tools).isCollapsible) {
           continue;
         }
         // Non-collapsible tool uses appear in syntheticStreamingToolUseMessages
         // before their ID is added to inProgressToolUseIDs. Skip while streaming
         // to avoid briefly finalizing the read group.
-        if (streamingToolUseIDs.has(content.id)) {
+        if (streamingToolUseIDs.has(content.id as string)) {
           continue;
         }
       }
@@ -73,7 +74,7 @@ export function hasContentAfterIndex(messages: RenderableMessage[], index: numbe
     }
     // Tool results arrive while the collapsed group is still being built
     if (msg?.type === 'user') {
-      const content = msg.message.content[0];
+      const content = msg.message.content[0] as AgentContentBlock;
       if (content?.type === 'tool_result') {
         continue;
       }
@@ -81,7 +82,7 @@ export function hasContentAfterIndex(messages: RenderableMessage[], index: numbe
     // Collapsible grouped_tool_use messages arrive transiently before being
     // merged into the current collapsed group on the next render cycle
     if (msg?.type === 'grouped_tool_use') {
-      const firstInput = msg.messages[0]?.message.content[0]?.input;
+      const firstInput = (msg.messages[0]?.message.content[0] as { input?: unknown })?.input;
       if (getToolSearchOrReadInfo(msg.toolName, firstInput, tools).isCollapsible) {
         continue;
       }
@@ -297,7 +298,7 @@ export function isMessageStreaming(msg: RenderableMessage, streamingToolUseIDs: 
   if (msg.type === 'grouped_tool_use') {
     return msg.messages.some(m => {
       const content = m.message.content[0];
-      return content?.type === 'tool_use' && streamingToolUseIDs.has(content.id);
+      return content?.type === 'tool_use' && streamingToolUseIDs.has(content.id as string);
     });
   }
   if (msg.type === 'collapsed_read_search') {
@@ -316,7 +317,7 @@ export function allToolsResolved(msg: RenderableMessage, resolvedToolUseIDs: Set
   if (msg.type === 'grouped_tool_use') {
     return msg.messages.every(m => {
       const content = m.message.content[0];
-      return content?.type === 'tool_use' && resolvedToolUseIDs.has(content.id);
+      return content?.type === 'tool_use' && resolvedToolUseIDs.has(content.id as string);
     });
   }
   if (msg.type === 'collapsed_read_search') {
@@ -326,7 +327,7 @@ export function allToolsResolved(msg: RenderableMessage, resolvedToolUseIDs: Set
   if (msg.type === 'assistant') {
     const block = msg.message.content[0];
     if (block?.type === 'server_tool_use') {
-      return resolvedToolUseIDs.has(block.id);
+      return resolvedToolUseIDs.has(block.id as string);
     }
   }
   const toolUseID = getToolUseID(msg);
@@ -365,7 +366,7 @@ export function areMessageRowPropsEqual(prev: Props, next: Props): boolean {
   // lastThinkingBlockId affects thinking block visibility — but only for
   // messages that HAVE thinking content. Checking unconditionally busts the
   // memo for every scrollback message whenever thinking starts/stops (CC-941).
-  if (prev.lastThinkingBlockId !== next.lastThinkingBlockId && hasThinkingContent(next.message)) {
+  if (prev.lastThinkingBlockId !== next.lastThinkingBlockId && hasThinkingContent(next.message as never)) {
     return false;
   }
 

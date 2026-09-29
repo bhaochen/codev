@@ -98,7 +98,9 @@ const webCmd = feature('CCR_REMOTE_SETUP')
   : null
 const clearSkillIndexCache = feature('EXPERIMENTAL_SKILL_SEARCH')
   ? (
-      require('./services/skillSearch/localSearch.js') as typeof import('./services/skillSearch/localSearch.js')
+      (
+        require('./services/skillSearch/localSearch.js') as typeof import('./services/skillSearch/localSearch.js')
+      ) as unknown as { clearSkillIndexCache?: () => void }
     ).clearSkillIndexCache
   : null
 const subscribePr = feature('KAIROS_GITHUB_WEBHOOKS')
@@ -643,7 +645,7 @@ export const REMOTE_SAFE_COMMANDS: Set<Command> = new Set([
   statusline, // Status line toggle
   stickers, // Stickers
   mobile, // Mobile QR code
-])
+] as unknown as Command[])
 
 /**
  * Builtin commands of type 'local' that ARE safe to execute when received

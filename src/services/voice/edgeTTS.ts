@@ -22,7 +22,11 @@ export async function speakWithEdgeTTS(
   options?: TTSSpeakOptions,
 ): Promise<TTSResult> {
   try {
-    const { EdgeTTS } = await import('node-edge-tts')
+    const { EdgeTTS } = (await import('node-edge-tts' as string)) as {
+      EdgeTTS: new (opts: { voice: string }) => {
+        ttsPromise: (text: string, outPath: string) => Promise<void>
+      }
+    }
     const audioPath =
       options?.outputPath ??
       path.join(
@@ -40,7 +44,7 @@ export async function speakWithEdgeTTS(
 /** Check if `node-edge-tts` can be loaded. */
 export async function checkEdgeTTSAvailable(): Promise<boolean> {
   try {
-    await import('node-edge-tts')
+    await import('node-edge-tts' as string)
     return true
   } catch {
     return false

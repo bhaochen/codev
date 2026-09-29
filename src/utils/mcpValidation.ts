@@ -128,7 +128,7 @@ async function truncateContentBlocks(
               block,
               remainingBytes,
             )
-            result.push(compressedBlock)
+            result.push(compressedBlock as unknown as ContentBlockParam)
             // Update currentChars based on compressed image size
             if (compressedBlock.source.type === 'base64') {
               currentChars += compressedBlock.source.data.length

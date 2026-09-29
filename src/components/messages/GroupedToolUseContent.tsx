@@ -1,8 +1,12 @@
 import type { ToolResultBlockParam, ToolUseBlockParam } from '@anthropic-ai/sdk/resources/messages/messages.mjs';
 import * as React from 'react';
 import { filterToolProgressMessages, findToolByName, type Tools } from '../../Tool.js';
-import type { GroupedToolUseMessage } from '../../types/message.js';
+import type { AgentContentBlock } from '../../types/agentMessage.js';
+import type { GroupedToolUseMessage, NormalizedUserMessage } from '../../types/message.js';
 import type { buildMessageLookups } from '../../utils/messages.js';
+type GroupedToolUseWithResults = GroupedToolUseMessage & {
+  results: NormalizedUserMessage[];
+};
 type Props = {
   message: GroupedToolUseMessage;
   tools: Tools;
@@ -27,21 +31,21 @@ export function GroupedToolUseContent({
     param: ToolResultBlockParam;
     output: unknown;
   }>();
-  for (const resultMsg of message.results) {
-    for (const content of resultMsg.message.content) {
+  for (const resultMsg of (message as GroupedToolUseWithResults).results) {
+    for (const content of resultMsg.message.content as AgentContentBlock[]) {
       if (content.type === 'tool_result') {
-        resultsByToolUseId.set(content.tool_use_id, {
-          param: content,
+        resultsByToolUseId.set(content.tool_use_id as string, {
+          param: content as ToolResultBlockParam,
           output: resultMsg.toolUseResult
         });
       }
     }
   }
   const toolUsesData = message.messages.map(msg => {
-    const content = msg.message.content[0];
+    const content = msg.message.content[0] as ToolUseBlockParam;
     const result = resultsByToolUseId.get(content.id);
     return {
-      param: content as ToolUseBlockParam,
+      param: content,
       isResolved: lookups.resolvedToolUseIDs.has(content.id),
       isError: lookups.erroredToolUseIDs.has(content.id),
       isInProgress: inProgressToolUseIDs.has(content.id),

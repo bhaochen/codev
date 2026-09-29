@@ -718,7 +718,7 @@ export function useInboxPoller({
           // Find the teammate ID by name
           const teammateId = Object.entries(
             currentAppState.teamContext.teammates,
-          ).find(([, t]) => t.name === teammateToRemove)?.[0]
+          ).find(([, t]) => (t as { name?: string }).name === teammateToRemove)?.[0]
 
           if (teammateId) {
             // Remove from team file (leader owns team file mutations)

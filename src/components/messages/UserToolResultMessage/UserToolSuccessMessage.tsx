@@ -58,7 +58,7 @@ export function UserToolSuccessMessage({
     return null;
   }
   if (!tool) {
-    return <RawToolResultMessage result={message.toolUseResult} />;
+    return <RawToolResultMessage result={message.toolUseResult as never} />;
   }
   if (tool.isTransparentWrapper?.()) {
     return null;
@@ -70,7 +70,7 @@ export function UserToolSuccessMessage({
   // Validate against outputSchema before rendering — mirrors CollapsedReadSearchContent.
   const parsedOutput = tool.outputSchema?.safeParse(message.toolUseResult);
   if (parsedOutput && !parsedOutput.success) {
-    return <RawToolResultMessage result={message.toolUseResult} />;
+    return <RawToolResultMessage result={message.toolUseResult as never} />;
   }
   const toolResult = parsedOutput?.data ?? message.toolUseResult;
   const renderedMessage = tool.renderToolResultMessage?.(toolResult as never, filterToolProgressMessages(progressMessagesForMessage), {
@@ -86,7 +86,7 @@ export function UserToolSuccessMessage({
   // A custom renderer may intentionally omit a result, but the transcript
   // should still expose the tool's actual output (like Pi's generic fallback).
   if (renderedMessage === null) {
-    return <RawToolResultMessage result={message.toolUseResult} />;
+    return <RawToolResultMessage result={message.toolUseResult as never} />;
   }
 
   // Tools that return '' from userFacingName opt out of tool chrome and

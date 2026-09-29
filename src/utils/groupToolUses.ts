@@ -34,7 +34,7 @@ function getToolUseInfo(
   msg: MessageWithoutProgress,
 ): { messageId: string; toolUseId: string; toolName: string } | null {
   if (msg.type === 'assistant' && msg.message.content[0]?.type === 'tool_use') {
-    const content = msg.message.content[0]
+    const content = msg.message.content[0] as AgentToolUseBlock
     return {
       messageId: msg.message.id,
       toolUseId: content.id,
@@ -105,11 +105,12 @@ export function applyGrouping(
   for (const msg of messages) {
     if (msg.type === 'user') {
       for (const content of msg.message.content) {
+        const block = content as AgentToolResultBlock
         if (
-          content.type === 'tool_result' &&
-          groupedToolUseIds.has(content.tool_use_id)
+          block.type === 'tool_result' &&
+          groupedToolUseIds.has(block.tool_use_id)
         ) {
-          resultsByToolUseId.set(content.tool_use_id, msg)
+          resultsByToolUseId.set(block.tool_use_id, msg)
         }
       }
     }
@@ -143,7 +144,7 @@ export function applyGrouping(
             }
           }
 
-          const groupedMessage: GroupedToolUseMessage = {
+          const groupedMessage = {
             type: 'grouped_tool_use',
             toolName: info.toolName,
             messages: group,
@@ -152,7 +153,7 @@ export function applyGrouping(
             uuid: `grouped-${firstMsg.uuid}`,
             timestamp: firstMsg.timestamp as number,
             messageId: info.messageId,
-          }
+          } as unknown as GroupedToolUseMessage
           result.push(groupedMessage)
         }
         continue

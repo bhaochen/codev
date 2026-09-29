@@ -1,9 +1,7 @@
 import { describe, expect, test } from 'bun:test'
-import {
-  SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
-  type SystemPrompt,
-} from '../constants/prompts.js'
+import { SYSTEM_PROMPT_DYNAMIC_BOUNDARY } from '../constants/prompts.js'
 import { splitSysPromptPrefix } from './api.js'
+import type { SystemPrompt } from './systemPromptType.js'
 
 /**
  * Regression: the local llama.cpp provider previously reached

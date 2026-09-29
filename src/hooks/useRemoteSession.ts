@@ -293,7 +293,7 @@ export function useRemoteSession({
           ) {
             const toolUseIds = converted.message.message.content
               .filter(block => block.type === 'tool_use')
-              .map(block => block.id)
+              .map(block => (block as { id: string }).id)
             if (toolUseIds.length > 0) {
               setInProgressToolUseIDs(prev => {
                 const next = new Set(prev)

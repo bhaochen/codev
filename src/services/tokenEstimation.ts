@@ -419,7 +419,9 @@ export function roughTokenCountEstimationForMessage(
     )
     let total = 0
     for (const userMsg of userMessages) {
-      total += roughTokenCountEstimationForContent(userMsg.message.content)
+      total += roughTokenCountEstimationForContent(
+        userMsg.message.content as unknown as Anthropic.ContentBlockParam[],
+      )
     }
     return total
   }

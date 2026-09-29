@@ -48,7 +48,7 @@ export async function sendDirectMemberMessage(
 
   // Find team member by name
   const member = Object.values(teamContext.teammates ?? {}).find(
-    t => t.name === recipientName,
+    t => (t as { name?: string }).name === recipientName,
   )
 
   if (!member) {

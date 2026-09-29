@@ -517,7 +517,7 @@ export function stripDangerousPermissionsForAutoMode(
     if (!ruleStrings) {
       continue
     }
-    for (const ruleString of ruleStrings) {
+    for (const ruleString of ruleStrings as string[]) {
       const ruleValue = permissionRuleValueFromString(ruleString)
       rules.push({
         source: source as PermissionRuleSource,
@@ -567,10 +567,10 @@ export function restoreDangerousPermissions(
   }
   let result = context
   for (const [source, ruleStrings] of Object.entries(stash)) {
-    if (!ruleStrings || ruleStrings.length === 0) continue
+    if (!ruleStrings || (ruleStrings as string[]).length === 0) continue
     result = applyPermissionUpdate(result, {
       type: 'addRules',
-      rules: ruleStrings.map(permissionRuleValueFromString),
+      rules: (ruleStrings as string[]).map(permissionRuleValueFromString),
       behavior: 'allow',
       destination: source as PermissionUpdateDestination,
     })

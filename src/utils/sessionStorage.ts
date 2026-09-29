@@ -1785,7 +1785,7 @@ export function getFirstMeaningfulUserMessageTextContent<T extends Message>(
     } else if (Array.isArray(content)) {
       for (const block of content) {
         if (block.type === 'text' && block.text) {
-          texts.push(block.text)
+          texts.push((block as { text: string }).text)
         }
       }
     }

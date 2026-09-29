@@ -19,6 +19,7 @@ import type { Screen } from '../screens/REPL.js';
 import type { Tools } from '../Tool.js';
 import { findToolByName } from '../Tool.js';
 import type { AgentDefinitionsResult } from '../tools/AgentTool/loadAgentsDir.js';
+import type { AgentContentBlock } from '../types/agentMessage.js';
 import type { AttachmentMessage, Message as MessageType, NormalizedAssistantMessage, NormalizedMessage, NormalizedUserMessage, ProgressMessage as ProgressMessageType, RenderableMessage, SystemMessage } from '../types/message.js';
 import { type AdvisorBlock, isAdvisorBlock } from '../utils/advisor.js';
 import { collapseBackgroundBashNotifications } from '../utils/collapseBackgroundBashNotifications.js';
@@ -433,9 +434,9 @@ const MessagesImpl = ({
       if (msg_0?.type === 'user') {
         const content_0 = msg_0.message.content;
         // Check if any text content is bash output
-        for (const block_0 of content_0) {
+        for (const block_0 of content_0 as AgentContentBlock[]) {
           if (block_0.type === 'text') {
-            const text = block_0.text;
+            const text = block_0.text as string;
             if (text.startsWith('<bash-stdout') || text.startsWith('<bash-stderr')) {
               return msg_0.uuid;
             }
@@ -594,9 +595,9 @@ const MessagesImpl = ({
       return b != null && isAdvisorBlock(b) && b.type === 'advisor_tool_result' && b.content.type === 'advisor_result';
     }
     if (msg_6.type !== 'user') return false;
-    const b_0 = msg_6.message.content[0];
+    const b_0 = msg_6.message.content[0] as AgentContentBlock;
     if (b_0?.type !== 'tool_result' || b_0.is_error || !msg_6.toolUseResult) return false;
-    const name = lookupsRef.current.toolUseByToolUseID.get(b_0.tool_use_id)?.name;
+    const name = lookupsRef.current.toolUseByToolUseID.get(b_0.tool_use_id as string)?.name;
     const tool = name ? findToolByName(tools, name) : undefined;
     if (tool?.name === 'Write' || tool?.name === 'Edit') return true;
     return tool?.isResultTruncated?.(msg_6.toolUseResult as never) ?? false;
@@ -673,7 +674,7 @@ const MessagesImpl = ({
     if (msg_9.type === 'user' && msg_9.toolUseResult && Array.isArray(msg_9.message.content)) {
       const tr = msg_9.message.content.find(b_1 => b_1.type === 'tool_result');
       if (tr && 'tool_use_id' in tr) {
-        const tu = lookups_0.toolUseByToolUseID.get(tr.tool_use_id);
+        const tu = lookups_0.toolUseByToolUseID.get(tr.tool_use_id as string);
         const tool_0 = tu && findToolByName(tools, tu.name);
         const extracted = tool_0?.extractSearchText?.(msg_9.toolUseResult as never);
         // undefined = tool didn't implement → keep heuristic. Empty
@@ -804,7 +805,7 @@ export function shouldRenderStatically(message: RenderableMessage, streamingTool
         if (message.type === 'assistant') {
           const block = message.message.content[0];
           if (block?.type === 'server_tool_use') {
-            return lookups.resolvedToolUseIDs.has(block.id);
+            return lookups.resolvedToolUseIDs.has(block.id as string);
           }
         }
         const toolUseID = getToolUseID(message);
@@ -839,7 +840,7 @@ export function shouldRenderStatically(message: RenderableMessage, streamingTool
       {
         const allResolved = message.messages.every(msg => {
           const content = msg.message.content[0];
-          return content?.type === 'tool_use' && lookups.resolvedToolUseIDs.has(content.id);
+          return content?.type === 'tool_use' && lookups.resolvedToolUseIDs.has(content.id as string);
         });
         return allResolved;
       }

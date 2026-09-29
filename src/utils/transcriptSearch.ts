@@ -41,7 +41,8 @@ function computeSearchText(msg: RenderableMessage): string {
         const parts: string[] = []
         for (const b of c) {
           if (b.type === 'text') {
-            if (!RENDERED_AS_SENTINEL.has(b.text)) parts.push(b.text)
+            if (!RENDERED_AS_SENTINEL.has((b as { text: string }).text))
+              parts.push((b as { text: string }).text)
           } else if (b.type === 'tool_result') {
             // b.content is the MODEL-facing serialization (from each tool's
             // mapToolResultToToolResultBlockParam) — adds system-reminders,

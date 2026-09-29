@@ -2315,7 +2315,7 @@ export function REPL({
     const lastAssistant = messages.findLast(m => m.type === 'assistant')
     if (lastAssistant?.type !== 'assistant') return false
     const inProgressToolUses = lastAssistant.message.content.filter(
-      b => b.type === 'tool_use' && inProgressToolUseIDs.has(b.id),
+      b => b.type === 'tool_use' && inProgressToolUseIDs.has(b.id as string),
     )
     return (
       inProgressToolUses.length > 0 &&
@@ -5094,7 +5094,9 @@ export function REPL({
         message.message.content.some(block => block.type === 'image')
       ) {
         const imageBlocks: Array<ImageBlockParam> =
-          message.message.content.filter(block => block.type === 'image')
+          message.message.content.filter(block => block.type === 'image') as unknown as Array<
+            ImageBlockParam
+          >
         if (imageBlocks.length > 0) {
           const newPastedContents: Record<number, PastedContent> = {}
           imageBlocks.forEach((block, index) => {

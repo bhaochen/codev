@@ -1,4 +1,4 @@
-import type { McpbManifest } from '@anthropic-ai/mcpb'
+import type { McpbManifestAny as McpbManifest } from '@anthropic-ai/mcpb'
 import { errorMessage } from '../errors.js'
 import { jsonParse } from '../slowOperations.js'
 
@@ -13,11 +13,33 @@ import { jsonParse } from '../slowOperations.js'
 export async function validateManifest(
   manifestJson: unknown,
 ): Promise<McpbManifest> {
-  const { McpbManifestSchema } = await import('@anthropic-ai/mcpb')
+  const { McpbManifestSchema } = (await import('@anthropic-ai/mcpb')) as unknown as {
+    McpbManifestSchema: {
+      safeParse(
+        input: unknown,
+      ):
+        | { success: true; data: McpbManifest }
+        | {
+            success: false
+            error: {
+              flatten(): {
+                fieldErrors: Record<string, string[] | undefined>
+                formErrors?: string[]
+              }
+            }
+          }
+    }
+  }
   const parseResult = McpbManifestSchema.safeParse(manifestJson)
-
-  if (!parseResult.success) {
-    const errors = parseResult.error.flatten()
+  if ((parseResult as { success?: boolean }).success !== true) {
+    const errors = (parseResult as {
+      error: {
+        flatten(): {
+          fieldErrors: Record<string, string[] | undefined>
+          formErrors?: string[]
+        }
+      }
+    }).error.flatten()
     const errorMessages = [
       ...Object.entries(errors.fieldErrors).map(
         ([field, errs]) => `${field}: ${errs?.join(', ')}`,
@@ -30,7 +52,7 @@ export async function validateManifest(
     throw new Error(`Invalid manifest: ${errorMessages}`)
   }
 
-  return parseResult.data
+  return (parseResult as { data: McpbManifest }).data
 }
 
 /**

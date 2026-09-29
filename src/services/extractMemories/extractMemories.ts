@@ -38,6 +38,7 @@ import type {
   AssistantMessage,
   Message,
   SystemLocalCommandMessage,
+  SystemMemorySavedMessage,
   SystemMessage,
 } from '../../types/message.js'
 import { createAbortController } from '../../utils/abortController.js'
@@ -478,7 +479,8 @@ export function initExtractMemories(): void {
       if (memoryPaths.length > 0) {
         const msg = createMemorySavedMessage(memoryPaths)
         if (feature('TEAMMEM')) {
-          msg.teamCount = teamCount
+          ;(msg as SystemMemorySavedMessage & { teamCount?: number }).teamCount =
+            teamCount
         }
         appendSystemMessage?.(msg)
       }

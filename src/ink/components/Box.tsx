@@ -8,6 +8,19 @@ import type { FocusEvent } from '../events/focus-event.js';
 import type { KeyboardEvent } from '../events/keyboard-event.js';
 import type { Styles } from '../styles.js';
 import * as warn from '../warn.js';
+
+declare global {
+  namespace React {
+    namespace JSX {
+      interface IntrinsicElements {
+        'ink-box': any;
+        'ink-text': any;
+        'ink-link': any;
+        'ink-raw-ansi': any;
+      }
+    }
+  }
+}
 export type Props = Except<Styles, 'textWrap'> & {
   ref?: Ref<DOMElement>;
   /**
