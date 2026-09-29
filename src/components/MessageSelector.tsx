@@ -3,7 +3,7 @@ import type { ContentBlockParam, TextBlockParam } from '@anthropic-ai/sdk/resour
 import { randomUUID, type UUID } from 'crypto';
 import figures from 'figures';
 import * as React from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS, logEvent } from 'src/services/analytics/index.js';
 import { useAppState } from 'src/state/AppState.js';
 import { type DiffStats, fileHistoryCanRestore, fileHistoryEnabled, fileHistoryGetDiffStats } from 'src/utils/fileHistory.js';
@@ -21,10 +21,7 @@ function isTextBlock(block: ContentBlockParam): block is TextBlockParam {
 }
 import * as path from 'path';
 import { useTerminalSize } from 'src/hooks/useTerminalSize.js';
-import type { FileEditOutput } from 'src/tools/FileEditTool/types.js';
-import type { Output as FileWriteToolOutput } from 'src/tools/FileWriteTool/FileWriteTool.js';
 import { BASH_STDERR_TAG, BASH_STDOUT_TAG, COMMAND_MESSAGE_TAG, LOCAL_COMMAND_STDERR_TAG, LOCAL_COMMAND_STDOUT_TAG, TASK_NOTIFICATION_TAG, TEAMMATE_MESSAGE_TAG, TICK_TAG } from '../constants/xml.js';
-import { count } from '../utils/array.js';
 import { formatRelativeTimeAgo, truncate } from '../utils/format.js';
 import type { Theme } from '../utils/theme.js';
 import { Divider } from './design-system/Divider.js';
@@ -283,33 +280,49 @@ export function MessageSelector({
     isActive: !isRestoring && !error && !messageToRestore && hasMessagesToSelect
   });
   const [fileHistoryMetadata, setFileHistoryMetadata] = useState<Record<number, DiffStats>>({});
+  // List rows must reflect what "Restore code" will actually do, so they read
+  // the same checkpoint data as the confirm screen (fileHistoryGetDiffStats)
+  // rather than the structuredPatch recorded in the message log. The log can
+  // claim edits that were since reverted, or omit edits made outside the Edit
+  // tools, which made the list promise a restore that never happened.
+  //
+  // fileHistoryGetDiffStats is real file IO (reads every tracked file plus its
+  // backup), so only the visible window is resolved and results are memoized
+  // per messageId. The cache is dropped when a new snapshot lands (fileHistory
+  // identity changes), because a fresh snapshot can change what an
+  // already-resolved message resolves to.
+  const metadataCacheRef = useRef<{fileHistory: unknown; byMessageId: Map<string, DiffStats | undefined>} | null>(null);
   useEffect(() => {
-    async function loadFileHistoryMetadata() {
-      if (!isFileHistoryEnabled) {
+    if (!isFileHistoryEnabled) {
+      return;
+    }
+    let cancelled = false;
+    if (!metadataCacheRef.current || metadataCacheRef.current.fileHistory !== fileHistory) {
+      metadataCacheRef.current = { fileHistory, byMessageId: new Map() };
+    }
+    const cache = metadataCacheRef.current.byMessageId;
+    const visibleEnd = Math.min(firstVisibleIndex + MAX_VISIBLE_MESSAGES, messageOptions.length);
+    void Promise.all(messageOptions.slice(firstVisibleIndex, visibleEnd).map(async (userMessage, offset) => {
+      const itemIndex = firstVisibleIndex + offset;
+      if (userMessage.uuid === currentUUID) {
         return;
       }
-      // Load file snapshot metadata
-      void Promise.all(messageOptions.map(async (userMessage, itemIndex) => {
-        if (userMessage.uuid !== currentUUID) {
-          const canRestore = fileHistoryCanRestore(fileHistory, userMessage.uuid as UUID);
-          const nextUserMessage = messageOptions.at(itemIndex + 1);
-          const diffStats_0 = canRestore ? computeDiffStatsBetweenMessages(messages, userMessage.uuid as UUID, nextUserMessage?.uuid !== currentUUID ? nextUserMessage?.uuid as UUID : undefined) : undefined;
-          if (diffStats_0 !== undefined) {
-            setFileHistoryMetadata(prev_1 => ({
-              ...prev_1,
-              [itemIndex]: diffStats_0
-            }));
-          } else {
-            setFileHistoryMetadata(prev_2 => ({
-              ...prev_2,
-              [itemIndex]: undefined
-            }));
-          }
-        }
-      }));
-    }
-    void loadFileHistoryMetadata();
-  }, [messageOptions, messages, currentUUID, fileHistory, isFileHistoryEnabled]);
+      if (!cache.has(userMessage.uuid)) {
+        cache.set(userMessage.uuid, fileHistoryCanRestore(fileHistory, userMessage.uuid as UUID) ? await fileHistoryGetDiffStats(fileHistory, userMessage.uuid as UUID) : undefined);
+      }
+      const diffStats_0 = cache.get(userMessage.uuid);
+      if (cancelled) {
+        return;
+      }
+      setFileHistoryMetadata(prev => prev[itemIndex] === diffStats_0 ? prev : {
+        ...prev,
+        [itemIndex]: diffStats_0
+      });
+    }));
+    return () => {
+      cancelled = true;
+    };
+  }, [messageOptions, currentUUID, fileHistory, isFileHistoryEnabled, firstVisibleIndex]);
   const canRestoreCode_0 = isFileHistoryEnabled && diffStatsForRestore?.filesChanged && diffStatsForRestore.filesChanged.length > 0;
   const showPickList = !error && !messageToRestore && !preselectedMessage && hasMessagesToSelect;
   return <Box flexDirection="column" width="100%">
@@ -716,54 +729,6 @@ function UserMessageOption(t0) {
   return t8;
 }
 
-/**
- * Computes the diff stats for all the file edits in-between two messages.
- */
-function computeDiffStatsBetweenMessages(messages: Message[], fromMessageId: UUID, toMessageId: UUID | undefined): DiffStats | undefined {
-  const startIndex = messages.findIndex(msg => msg.uuid === fromMessageId);
-  if (startIndex === -1) {
-    return undefined;
-  }
-  let endIndex = toMessageId ? messages.findIndex(msg => msg.uuid === toMessageId) : messages.length;
-  if (endIndex === -1) {
-    endIndex = messages.length;
-  }
-  const filesChanged: string[] = [];
-  let insertions = 0;
-  let deletions = 0;
-  for (let i = startIndex + 1; i < endIndex; i++) {
-    const msg = messages[i];
-    if (!msg || !isToolUseResultMessage(msg)) {
-      continue;
-    }
-    const result = msg.toolUseResult as FileEditOutput | FileWriteToolOutput;
-    if (!result || !result.filePath || !result.structuredPatch) {
-      continue;
-    }
-    if (!filesChanged.includes(result.filePath)) {
-      filesChanged.push(result.filePath);
-    }
-    try {
-      if ('type' in result && result.type === 'create') {
-        insertions += result.content.split(/\r?\n/).length;
-      } else {
-        for (const hunk of result.structuredPatch) {
-          const additions = count(hunk.lines, line => line.startsWith('+'));
-          const removals = count(hunk.lines, line => line.startsWith('-'));
-          insertions += additions;
-          deletions += removals;
-        }
-      }
-    } catch {
-      continue;
-    }
-  }
-  return {
-    filesChanged,
-    insertions,
-    deletions
-  };
-}
 export function selectableUserMessagesFilter(message: Message): message is UserMessage {
   if (message.type !== 'user') {
     return false;
