@@ -279,7 +279,7 @@ export const FileEditTool = buildTool({
         result: false,
         behavior: 'ask',
         message:
-          'File has not been read yet. Read it first before writing to it.',
+          'File has not been read yet (or was evicted from the read cache after reading many files). Read it first before writing to it.',
         meta: {
           isFilePathAbsolute: String(isAbsolute(file_path)),
         },

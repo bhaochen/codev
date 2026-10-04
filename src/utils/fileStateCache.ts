@@ -15,11 +15,14 @@ export type FileState = {
 }
 
 // Default max entries for read file state caches
-export const READ_FILE_STATE_CACHE_SIZE = 100
+// Increased from 100 to 1000 to reduce "File must be read first" errors
+// due to LRU eviction during active coding sessions with many files.
+export const READ_FILE_STATE_CACHE_SIZE = 1000
 
-// Default size limit for file state caches (25MB)
+// Default size limit for file state caches (250MB)
 // This prevents unbounded memory growth from large file contents
-const DEFAULT_MAX_CACHE_SIZE_BYTES = 25 * 1024 * 1024
+// Increased from 25MB to accommodate larger cache (1000 entries)
+const DEFAULT_MAX_CACHE_SIZE_BYTES = 250 * 1024 * 1024
 
 /**
  * A file state cache that normalizes all path keys before access.

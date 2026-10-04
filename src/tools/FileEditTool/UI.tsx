@@ -138,7 +138,7 @@ export function renderToolUseErrorMessage(result: ToolResultBlockParam['content'
     // Show a less scary message for intended behavior
     if (errorMessage?.includes('File has not been read yet')) {
       return <MessageResponse>
-          <Text dimColor>File must be read first</Text>
+          <Text dimColor>File must be read first (or was evicted from cache)</Text>
         </MessageResponse>;
     }
     if (errorMessage?.includes(FILE_NOT_FOUND_CWD_NOTE)) {

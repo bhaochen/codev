@@ -29,9 +29,9 @@ const inputSchema = lazySchema(() =>
     reason: z
       .string()
       .min(1)
-      .max(500)
+      .max(2000)
       .describe(
-        'Required. One short sentence explaining what was accomplished or what blocked progress. The user reads this.',
+        'Required. A brief explanation of what was accomplished or what blocked progress (up to ~2000 chars). The user reads this.',
       ),
   }),
 )
