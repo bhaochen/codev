@@ -11,6 +11,7 @@
 
 ## 📢 News
 
+- **2026-10-04** 🧠 Judge-Driven Lossless Compaction — auto-compact no longer rewrites your conversation into a summary. Old tool calls are scored by a judge on whether their output is still worth its tokens; kept text stays verbatim and nothing anyone said is ever rewritten, so no path, error message or constraint is lost to a paraphrase. Judge tiers are configured like the rest of codev (`judge` in `settings.json`, `CODEV_JUDGE_*` in the environment) and run in cost order — a small local model absorbs the bulk while an expensive one is only paid for the grey zone. Rules and a lexical relevance match run first, so the judge never sees what is already settled, and any failure (down, slow, unsure, no key) falls back to the LLM summary for free. Replaces the previously hardcoded judge endpoint, which only worked on one machine.
 - **2026-08-26** ⚡ Speculative Tool Execution (spec-ptc) — Two-layer speculation engine inside `StreamingToolExecutor`: a `SpecStore`/`BudgetTracker` FIFO claim store that caches completed tool results and replays them on duplicate calls (`claim()` hit → zero re-execution), plus a streaming dispatcher that detects complete JSON inputs mid-token-stream via incremental brace-depth tracking and speculatively executes pure read-only tools before the model even finishes emitting `content_block_stop`. Bounded by max-inflight (5) / max-per-turn (20) budgets.
 - **2026-08-26** 📊 `/benchmark` Display-First Radar TUI — `/benchmark` now defaults to a bordered two-column Braille radar chart view (chart left / metrics right); `/benchmark eval` actually runs the test suite. Reports reuse the click-to-expand mechanism.
 - **2026-08-25** 🕸️ `/benchmark` Multi-Model Radar — Multi-model comparison radar with per-model stable coloring and deduplication, history run overlay, and `eval`/`clear`/`show` subcommands with headless support.
@@ -222,6 +223,7 @@ hf download Systran/faster-whisper-base \
 #### 🧠 Core Mechanisms of Cycle Long Run
 
 - Auto Compact — Automatically optimizes and compresses historical context to bypass sequence length bottlenecks.
+- Judge Compaction — Lossless variant of Auto Compact: scores each old tool call instead of summarizing it away.
 - Dream — Asynchronously distills operational data into long-term insights.
 
 #### 🗂️ SubAgent Swarm Topology
@@ -238,6 +240,60 @@ hf download Systran/faster-whisper-base \
     <td><img src="assets/ctx_auto_compose/compact_dream_subagent.png"></td>
   </tr>
 </table>
+
+#### ⚖️ Judge Compaction (lossless)
+
+Auto Compact normally ends in an LLM summary, which is lossy by construction: an
+exact error message, a file path, or a constraint stated once can come back
+paraphrased or missing. Judge Compaction replaces that final step with scoring.
+
+When the context fills up, every old tool call is turned into a small state and
+asked about: *what is this output?*, *is the full text still needed to finish the
+current goal?*, *does it still matter that the call was made at all?* Results that
+fail are dropped or truncated to their head, with a pointer to re-read them.
+Everything kept is byte-for-byte what the tool originally returned, and nothing
+the user or assistant said is ever rewritten.
+
+Three properties make it safe to leave on by default:
+
+- **Rules first.** Staleness ("this file was read again later") and a lexical
+  relevance match run before the judge. Settled questions cost nothing, and a
+  judge is never asked what can be determined exactly.
+- **Cheap first.** Judge tiers run in cost order and each one only sees what the
+  previous tier left uncertain, so an expensive model is paid for the grey zone alone.
+- **Fails open.** A judge that is down, slow, unconfigured or unsure costs nothing:
+  every one of those paths falls back to the LLM summary.
+
+Configure it like the rest of codev — under `judge` in `settings.json`:
+
+```jsonc
+{
+  "judge": {
+    // Tiers are tried in order; each later one only sees what the earlier ones
+    // left uncertain. Omit to use the default, or set CODEV_JUDGE=off to disable.
+    "tiers": ["mock"],                  // mock | local | clm | jev | <your own>
+    "judges": {
+      "luna": { "type": "http", "baseUrl": "http://127.0.0.1:8080" }
+    },
+    // off | shadow | active — shadow scores and records but keeps the summary,
+    // which is how you compare a judge's verdicts against real outcomes first.
+    "modes": { "default": "active" },
+    // Per-decision overrides, and the compaction knobs.
+    "routes": { "context.compact": ["luna"] },
+    "features": { "compaction": { "keepThreshold": 0.5, "minChars": 600 } }
+  }
+}
+```
+
+Environment overrides: `CODEV_JUDGE` (comma-separated tiers, or `off`),
+`CODEV_JUDGE_MODE` (`off` / `shadow` / `active`), and the credential variables a
+judge's tier names (`CODEV_JUDGE_OPENROUTER_API_KEY`, `CODEV_JUDGE_CLM_API_KEY`, …).
+
+Judge configuration is read from the settings sources a person controls — user,
+local, flag and policy — and **never** from a project's `.claude/settings.json`.
+A repository must not be able to point a judge, which reads your messages, at an
+endpoint of its own choosing. States are also stripped of this process's
+credential values before anything leaves the machine.
 
 ### WebSearch & WebFetch Tools
 

@@ -86,7 +86,7 @@ Token 使用量
      ▼
 ┌─────────────────────────────────────┐
 │  Layer 5:  自动压缩 (Auto-compact)  │  高成本
-│  LLM 语义摘要                        │  (一次 API 调用)
+│  Judge 打分 (无损) 或 LLM 语义摘要   │  (一次 API 调用)
 └─────────────────────────────────────┘
      │
      ▼
@@ -368,6 +368,99 @@ getAutoCompactThreshold(model) = effectiveWindow - buffer
 **熔断机制**（`MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES = 3`）：
 当上下文不可恢复地超限时（如 `prompt_too_long`），连续失败 3 次后
 自动压缩永久跳过当前会话——否则全局每天浪费约 25 万次无效 API 调用。
+
+#### 无损分支：Judge 决策压缩
+
+Layer 5 的最后一步默认是 LLM 语义摘要。**摘要天然有损**：一句精确的报错、
+一个文件路径、一条只说一次的约束，都可能回来时被改写或丢失。
+Judge 决策压缩换掉了这一步——改为给每个旧工具调用打分。
+
+**文件**: `src/services/compact/judge/`（`tryMuCompact()` → `tryCodevCompact()`）
+**成本**: 每次调用每个候选一次 judge 请求；层叠时只有灰区要付贵模型的钱。
+**位置**: 在 `partialCompactConversation()` 内、LLM 摘要之前尝试；
+成功则直接返回，`null` 则原样落回摘要路径。
+
+它**不是第六层**，而是 Layer 5 的另一种执行方式——触发时机、阈值、
+边界标记、遥测全部复用现有管道。
+
+##### 三个提问
+
+每个候选调用被压缩成一个很小的 state，只问三件事：
+
+| 提问 | 类型 | 能力要求 |
+|------|------|----------|
+| `What is \`result\`?` | choice | `classify` |
+| `Is the full text of \`result\` still needed to finish \`goal\`?` | boolean | `relate` |
+| `Does it still matter for \`goal\` that \`call\` was made?` | boolean | `relate` |
+
+state 里放 `result`（前 600 字符）、`call`、`goal`、`result_chars`、
+`failed`、`since`。**决定性内容排在最前**——judge 的窗口是有限的，
+被截掉的是尾巴。
+
+判定结果落到 `keep` / `prune`（只留前 300 字符 + 可重读提示）/ `drop`。
+
+##### 三条让它可以默认开启的性质
+
+1. **规则先行。** `analyze()` 先做过期检测（同文件后来又读过）和词法相关性，
+   只有剩下的候选才问 judge。能被精确判定的绝不浪费一次请求。
+2. **便宜的先行。** 层叠按成本排序，**每层只处理上一层没把握的题**
+   （`isUncertain()`：概率落在置信带内即升级）。小本地模型吃掉大头，
+   贵模型只付灰区的钱。
+3. **全程 fail-open。** 超时、宕机、认证失败、返回垃圾、弃权——每一种都退回
+   fallback 策略。`decide()` 永远不会因为 judge 而 reject。
+   `DecisionEngine` 的 catch 把所有异常压成 `reason: "error:<kind>"`，
+   调用方照常走摘要。
+
+##### 预算
+
+```
+targetChars = min(contextWindow × maxWindowShare,
+                  max(before × targetRatio, min(before, freeChars)))
+```
+
+阈值先砍（保留判定 < `keepThreshold` 的直接丢弃），预算再兜底
+（从最低分开始挤）。两者都不够时返回 `null`：
+用户说过的话永远不剪，所以塞不下的历史不是"更小的历史"，
+而是"同样的工作、更少的内容"——交给摘要用一句话交代更划算。
+
+##### 配置
+
+配置跟 codev 其余部分走同一套：`settings.json` 的 `judge` 键，
+`CODEV_JUDGE_*` 环境变量覆盖。
+
+```jsonc
+{
+  "judge": {
+    "tiers": ["local", "jev"],        // 按成本排序，逐层收敛
+    "judges": { "luna": { "type": "http", "baseUrl": "http://127.0.0.1:8080" } },
+    "modes": { "default": "active", "context.compact": "shadow" },
+    "routes": { "context.compact": ["luna"] },
+    "features": { "compaction": { "keepThreshold": 0.5, "minChars": 600 } }
+  }
+}
+```
+
+| 环境变量 | 作用 |
+|----------|------|
+| `CODEV_JUDGE` | 逗号分隔的层；`off` 关闭整个内核 |
+| `CODEV_JUDGE_MODE` | 所有决策的默认模式（`off` / `shadow` / `active`） |
+| `CODEV_JUDGE_OPENROUTER_API_KEY` | Jev over OpenRouter |
+| `CODEV_JUDGE_CLM_API_KEY` | CLM 服务器的 key（未设置时不发） |
+
+`shadow` 模式会调用并记账 judge，但仍然返回摘要——这是把 judge 判定
+和真实结果做对比的推荐起点。
+
+##### 安全边界
+
+**配置来源受限**：`loadConfig()` 只读 `userSettings` / `localSettings` /
+`flagSettings` / `policySettings`，**不含** `projectSettings`。
+仓库不能把一个会读用户消息的 judge 指到自己的地址上。
+
+**内容脱敏**：送进 judge 的 state 和 questions 都先过 `redactJson()`，
+抹掉本进程凭据变量的值和只有凭据才有的形状。主模型看得见的东西，
+judge 不该顺手把密钥带走。
+
+**状态默认不入库**：`recordState` 默认 `false`——state 里含用户内容。
 
 #### 算法/策略
 
@@ -847,6 +940,13 @@ Codev 的压缩实现相比于 Anthropic 官方 Claude Code 有以下主要差�
 | **上下文折叠** | `src/services/contextCollapse/index.ts` | `applyCollapsesIfNeeded()` (L43, 桩) |
 | **自动压缩编排** | `src/services/compact/autoCompact.ts` | `autoCompactIfNeeded()` (L241), `shouldAutoCompact()` (L160) |
 | **完整压缩执行** | `src/services/compact/compact.ts` | `compactConversation()` (L387), `partialCompactConversation()` (L772) |
+| **Judge 无损压缩** | `src/services/compact/judge/codevCompact.ts` | `tryCodevCompact()` |
+| **Judge 层叠** | `src/services/compact/judge/cascade.ts` | `CascadeJudge.evaluate()`, `isUncertain()` |
+| **Judge 决策引擎** | `src/services/compact/judge/decision.ts` | `DecisionEngine.decide()` (fail-open) |
+| **Judge 决策定义** | `src/services/compact/judge/decisions/context-compact.ts` | `contextCompact` |
+| **Judge 配置** | `src/services/compact/judge/config.ts` | `loadConfig()`, `parseConfig()`, `featureOptions()` |
+| **Judge 装配** | `src/services/compact/judge/registry.ts` | `buildJudge()`, `resolveJudgeConfig()` |
+| **Judge 凭据脱敏** | `src/services/compact/judge/redact.ts` | `redactJson()`, `environmentSecrets()` |
 | **摘要提示词** | `src/services/compact/prompt.ts` | `getCompactPrompt()` (L293), `getPartialCompactPrompt()` (L274), `formatCompactSummary()` (L311) |
 | **消息分组** | `src/services/compact/grouping.ts` | `groupMessagesByApiRound()` (L22) |
 | **后压缩清理** | `src/services/compact/postCompactCleanup.ts` | `runPostCompactCleanup()` (L31) |
@@ -878,6 +978,14 @@ Codev 的压缩实现相比于 Anthropic 官方 Claude Code 有以下主要差�
 | Cached MC `triggerThreshold` | 12 | `cachedMCConfig.ts:11` |
 | Cached MC `keepRecent` | 3 | `cachedMCConfig.ts:12` |
 | 时间触发 MC `gapThresholdMinutes` | 60 | `timeBasedMCConfig.ts:32` |
+| Judge 压缩 `keepThreshold` | 0.5 | `compact.ts` `featureOptions()` 默认 |
+| Judge 压缩 `minChars` | 600 | 同上（低于此长度不问 judge） |
+| Judge 压缩 `headChars` | 300 | 同上（prune 时保留的头部） |
+| Judge 压缩 `targetRatio` | 0.5 | 同上（预算占压缩前的比例） |
+| Judge 压缩 `maxWindowShare` | 0.25 | 同上（预算占上下文窗口的上限） |
+| Judge 压缩 `freeChars` | 24,000 | 同上（预算的免削减额度） |
+| Judge 压缩 `maxJudged` | 120 | 同上（单次最多问 judge 的候选数） |
+| Judge `MAX_BATCH_ANSWERS` | 8 | `decision.ts:22` |
 
 ---
 
