@@ -393,7 +393,7 @@ export function emitTaskProgress(
   toolUseId: string | undefined,
   description: string,
   startTime: number,
-  lastToolName: string,
+  lastToolName?: string, // Optional: undefined for text-only assistant messages
 ): void {
   const progress = getProgressUpdate(tracker)
   emitTaskProgressEvent({
@@ -601,14 +601,18 @@ export async function runAsyncAgentLifecycle({
         rootSetAppState,
       )
       const lastToolName = getLastToolUseName(message)
-      if (lastToolName) {
+      // Emit progress on every assistant message for real-time token updates
+      // (not just when a tool is used). For tool_use messages, include lastToolName.
+      // For text-only messages, use undefined to indicate text generation progress.
+      const shouldEmitProgress = message.type === 'assistant' || lastToolName;
+      if (shouldEmitProgress) {
         emitTaskProgress(
           tracker,
           taskId,
           toolUseContext.toolUseId,
           description,
           metadata.startTime,
-          lastToolName,
+          lastToolName, // undefined for text-only assistant messages
         )
       }
     }

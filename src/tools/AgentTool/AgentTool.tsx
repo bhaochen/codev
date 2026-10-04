@@ -249,6 +249,13 @@ export const AgentTool = buildTool({
     isolation,
     cwd
   }: AgentToolInput, toolUseContext, canUseTool, assistantMessage, onProgress?) {
+    // Validate required params early with clear error messages
+    if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
+      throw new Error('AgentTool requires a non-empty "prompt" parameter');
+    }
+    if (!description || typeof description !== 'string' || description.trim().length === 0) {
+      throw new Error('AgentTool requires a non-empty "description" parameter');
+    }
     const startTime = Date.now();
     const model = isCoordinatorMode() ? undefined : modelParam;
 
@@ -947,7 +954,11 @@ export const AgentTool = buildTool({
                       updateProgressFromMessage(tracker, msg, resolveActivity2, toolUseContext.options.tools);
                       updateAsyncAgentProgress(backgroundedTaskId, getProgressUpdate(tracker), rootSetAppState);
                       const lastToolName = getLastToolUseName(msg);
-                      if (lastToolName) {
+                      // Emit progress on every assistant message for real-time token updates
+                      // (not just when a tool is used). For tool_use messages, include lastToolName.
+                      // For text-only messages, use undefined to indicate text generation progress.
+                      const shouldEmitProgress = msg.type === 'assistant' || lastToolName;
+                      if (shouldEmitProgress) {
                         emitTaskProgress(tracker, backgroundedTaskId, toolUseContext.toolUseId, description, startTime, lastToolName);
                       }
                     }
@@ -1071,7 +1082,11 @@ export const AgentTool = buildTool({
             updateProgressFromMessage(syncTracker, message, syncResolveActivity, toolUseContext.options.tools);
             if (foregroundTaskId) {
               const lastToolName = getLastToolUseName(message);
-              if (lastToolName) {
+              // Emit progress on every assistant message for real-time token updates
+              // (not just when a tool is used). For tool_use messages, include lastToolName.
+              // For text-only messages, use undefined to indicate text generation progress.
+              const shouldEmitProgress = message.type === 'assistant' || lastToolName;
+              if (shouldEmitProgress) {
                 emitTaskProgress(syncTracker, foregroundTaskId, toolUseContext.toolUseId, description, agentStartTime, lastToolName);
                 // Keep AppState task.progress in sync when SDK summaries are
                 // enabled, so updateAgentSummary reads correct token/tool counts
