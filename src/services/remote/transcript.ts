@@ -11,6 +11,9 @@
 import {
   LOCAL_COMMAND_STDERR_TAG,
   LOCAL_COMMAND_STDOUT_TAG,
+  COMMAND_NAME_TAG,
+  COMMAND_MESSAGE_TAG,
+  COMMAND_ARGS_TAG,
 } from '../../constants/xml.js'
 import { internImage } from './images.js'
 import type { Message } from '../../types/message.js'
@@ -60,15 +63,24 @@ function imagesOf(content: unknown): RemoteItem[] {
   return out
 }
 
+/** Strips command XML tags from text content for cleaner phone display. */
+function stripCommandTags(text: string): string {
+  return text
+    .replace(new RegExp(`<${COMMAND_NAME_TAG}>([\\s\\S]*?)</${COMMAND_NAME_TAG}>`, 'g'), '$1')
+    .replace(new RegExp(`<${COMMAND_MESSAGE_TAG}>([\\s\\S]*?)</${COMMAND_MESSAGE_TAG}>`, 'g'), '$1')
+    .replace(new RegExp(`<${COMMAND_ARGS_TAG}>([\\s\\S]*?)</${COMMAND_ARGS_TAG}>`, 'g'), '$1')
+    .trim()
+}
+
 function textOf(content: unknown): string | null {
   if (!content) return null
-  if (typeof content === 'string') return content.trim() || null
+  if (typeof content === 'string') return stripCommandTags(content.trim()) || null
   const parts: string[] = []
   for (const block of blocks(content)) {
     if (block.type === 'text' && typeof block.text === 'string') parts.push(block.text)
   }
   const joined = parts.join('\n').trim()
-  return joined.length > 0 ? joined : null
+  return joined.length > 0 ? stripCommandTags(joined) : null
 }
 
 function thinkingOf(content: unknown): string | null {
@@ -120,13 +132,13 @@ export function toolDetail(name: string, input: unknown): string {
 }
 
 function resultText(content: unknown): string {
-  if (typeof content === 'string') return content
+  if (typeof content === 'string') return stripCommandTags(content)
   const parts: string[] = []
   for (const block of blocks(content)) {
     if (block.type === 'text' && typeof block.text === 'string') parts.push(block.text)
     // Images are surfaced as their own items; no placeholder needed here.
   }
-  return parts.join('\n')
+  return stripCommandTags(parts.join('\n'))
 }
 
 function tagContent(content: string, tagName: string): string | null {
