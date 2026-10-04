@@ -16,6 +16,16 @@ import {
   shortRequestId,
   truncateForPreview,
 } from '../../../services/mcp/channelPermissions.js'
+import { isRemoteActive as isRemoteOn } from '../../../services/remote/bus.js'
+import {
+  cancelRemoteAsk,
+  onRemoteReply,
+  type RemoteForm,
+  sendRemoteAsk,
+} from '../../../services/remote/interactive.js'
+import { toolDetail } from '../../../services/remote/transcript.js'
+import { ASK_USER_QUESTION_TOOL_NAME } from '../../../tools/AskUserQuestionTool/prompt.js'
+import { EXIT_PLAN_MODE_TOOL_NAME } from '../../../tools/ExitPlanModeTool/constants.js'
 import { executeAsyncClassifierCheck } from '../../../tools/BashTool/bashPermissions.js'
 import { BASH_TOOL_NAME } from '../../../tools/BashTool/toolName.js'
 import {
@@ -79,6 +89,17 @@ function handleInteractivePermission(
   // phone, and a stale "yes abc123" after local-resolve falls through
   // tryConsumeReply (entry gone) and gets enqueued as normal chat.
   let channelUnsubscribe: (() => void) | undefined
+  // Unlike the text relays above, /remote holds a live socket, so a prompt
+  // settled anywhere else can be actively withdrawn from the phone instead of
+  // sitting there as a stale card.
+  let remoteUnsubscribe: (() => void) | undefined
+  let remoteRequestId: string | undefined
+
+  function cleanupRemotePermissionRequests(): void {
+    channelUnsubscribe?.()
+    remoteUnsubscribe?.()
+    if (remoteRequestId) cancelRemoteAsk(remoteRequestId)
+  }
 
   const permissionPromptStartTimeMs = Date.now()
   const displayInput = result.updatedInput ?? ctx.input
@@ -143,7 +164,7 @@ function handleInteractivePermission(
         })
         bridgeCallbacks.cancelRequest(bridgeRequestId)
       }
-      channelUnsubscribe?.()
+      cleanupRemotePermissionRequests()
       ctx.logCancelled()
       ctx.logDecision(
         { decision: 'reject', source: { type: 'user_abort' } },
@@ -167,7 +188,7 @@ function handleInteractivePermission(
         })
         bridgeCallbacks.cancelRequest(bridgeRequestId)
       }
-      channelUnsubscribe?.()
+      cleanupRemotePermissionRequests()
 
       resolveOnce(
         await ctx.handleUserAllow(
@@ -190,7 +211,7 @@ function handleInteractivePermission(
         })
         bridgeCallbacks.cancelRequest(bridgeRequestId)
       }
-      channelUnsubscribe?.()
+      cleanupRemotePermissionRequests()
 
       ctx.logDecision(
         {
@@ -223,7 +244,7 @@ function handleInteractivePermission(
         if (bridgeCallbacks && bridgeRequestId) {
           bridgeCallbacks.cancelRequest(bridgeRequestId)
         }
-        channelUnsubscribe?.()
+        cleanupRemotePermissionRequests()
         ctx.removeFromQueue()
         ctx.logDecision({ decision: 'accept', source: 'config' })
         resolveOnce(ctx.buildAllow(freshResult.updatedInput ?? ctx.input))
@@ -261,7 +282,7 @@ function handleInteractivePermission(
         clearClassifierChecking(ctx.toolUseID)
         clearClassifierIndicator()
         ctx.removeFromQueue()
-        channelUnsubscribe?.()
+        cleanupRemotePermissionRequests()
 
         if (response.behavior === 'allow') {
           if (response.updatedPermissions?.length) {
@@ -295,6 +316,68 @@ function handleInteractivePermission(
     )
 
     signal.addEventListener('abort', unsubscribe, { once: true })
+  }
+
+  // /remote interactive relay. Mirrors whatever the agent needs a human for
+  // to every paired phone and races the answer against the local dialog,
+  // hooks and classifier. Unlike the text relays above this covers the
+  // `requiresUserInteraction()` tools too — AskUserQuestion becomes a real
+  // multiple-choice form and ExitPlanMode a readable plan with Approve /
+  // Keep planning. toolHooks.ts already treats a supplied `updatedInput` as
+  // satisfying that flag ("the hook IS the user interaction"); a phone answer
+  // is the same thing arriving over a socket.
+  const remoteForm = isRemoteOn()
+    ? remoteFormFor(ctx.tool, displayInput, description)
+    : null
+  if (remoteForm) {
+    remoteRequestId = ctx.toolUseID
+    const remoteSignal = ctx.toolUseContext.abortController.signal
+    const mapUnsub = onRemoteReply(remoteRequestId, reply => {
+      // An `answers` reply only means something for a questions form; anything
+      // else is a malformed client and must not resolve the prompt.
+      if (reply.action === 'answers' && remoteForm.kind !== 'questions') return
+      if (!claim()) return
+      cleanupRemotePermissionRequests()
+      clearClassifierChecking(ctx.toolUseID)
+      clearClassifierIndicator()
+      ctx.removeFromQueue()
+      if (bridgeCallbacks && bridgeRequestId) {
+        bridgeCallbacks.cancelRequest(bridgeRequestId)
+      }
+
+      if (reply.action === 'deny') {
+        ctx.logDecision(
+          {
+            decision: 'reject',
+            source: { type: 'user_reject', hasFeedback: !!reply.feedback },
+          },
+          { permissionPromptStartTimeMs },
+        )
+        resolveOnce(ctx.cancelAndAbort(reply.feedback ?? 'Denied from phone'))
+        return
+      }
+
+      ctx.logDecision(
+        { decision: 'accept', source: { type: 'user', permanent: false } },
+        { permissionPromptStartTimeMs },
+      )
+      // AskUserQuestion carries the human's choices back in the input, which
+      // is exactly how the local dialog submits them.
+      resolveOnce(
+        ctx.buildAllow(
+          reply.action === 'answers'
+            ? { ...displayInput, answers: reply.answers }
+            : displayInput,
+        ),
+      )
+    })
+    remoteUnsubscribe = () => {
+      mapUnsub()
+      remoteSignal.removeEventListener('abort', remoteUnsubscribe!)
+    }
+    remoteSignal.addEventListener('abort', remoteUnsubscribe, { once: true })
+
+    sendRemoteAsk(remoteRequestId, remoteForm)
   }
 
   // Channel permission relay — races alongside the bridge block above. Send a
@@ -364,7 +447,7 @@ function handleInteractivePermission(
         channelRequestId,
         response => {
           if (!claim()) return // Another racer won
-          channelUnsubscribe?.() // both: map delete + listener remove
+          cleanupRemotePermissionRequests() // both: map delete + listener remove
           clearClassifierChecking(ctx.toolUseID)
           clearClassifierIndicator()
           ctx.removeFromQueue()
@@ -424,7 +507,7 @@ function handleInteractivePermission(
       if (bridgeCallbacks && bridgeRequestId) {
         bridgeCallbacks.cancelRequest(bridgeRequestId)
       }
-      channelUnsubscribe?.()
+      cleanupRemotePermissionRequests()
       ctx.removeFromQueue()
       resolveOnce(hookDecision)
     })()
@@ -456,7 +539,7 @@ function handleInteractivePermission(
           if (bridgeCallbacks && bridgeRequestId) {
             bridgeCallbacks.cancelRequest(bridgeRequestId)
           }
-          channelUnsubscribe?.()
+          cleanupRemotePermissionRequests()
           clearClassifierChecking(ctx.toolUseID)
 
           const matchedRule =
@@ -531,6 +614,71 @@ function handleInteractivePermission(
 }
 
 // --
+
+/**
+ * What a paired phone should render for this call, or null when the request
+ * genuinely cannot leave the terminal.
+ *
+ * Input arrives from the model, so every field is validated before it becomes
+ * a form: a malformed AskUserQuestion (no options, no questions) would render
+ * as an unanswerable card that silently blocks the turn, which is worse than
+ * no remote prompt at all. Those degrade to null and stay terminal-only.
+ */
+function remoteFormFor(
+  tool: PermissionContext['tool'],
+  input: Record<string, unknown>,
+  description: string,
+): RemoteForm | null {
+  if (tool.name === ASK_USER_QUESTION_TOOL_NAME) {
+    const raw = Array.isArray(input.questions) ? input.questions : []
+    const questions = raw.flatMap(entry => {
+      if (!entry || typeof entry !== 'object') return []
+      const q = entry as Record<string, unknown>
+      if (typeof q.question !== 'string' || !q.question) return []
+      const options = (Array.isArray(q.options) ? q.options : []).flatMap(opt => {
+        if (!opt || typeof opt !== 'object') return []
+        const o = opt as Record<string, unknown>
+        if (typeof o.label !== 'string' || !o.label) return []
+        return [
+          {
+            label: o.label,
+            description: typeof o.description === 'string' ? o.description : undefined,
+          },
+        ]
+      })
+      if (options.length === 0) return []
+      return [
+        {
+          question: q.question,
+          header: typeof q.header === 'string' ? q.header : '',
+          multiSelect: q.multiSelect === true,
+          options,
+        },
+      ]
+    })
+    return questions.length > 0
+      ? { kind: 'questions', tool: tool.name, description, questions }
+      : null
+  }
+
+  if (tool.name === EXIT_PLAN_MODE_TOOL_NAME) {
+    // `plan` is injected by normalizeToolInput from disk; without it there is
+    // nothing to read on a phone, so leave the decision at the keyboard.
+    const plan = typeof input.plan === 'string' ? input.plan.trim() : ''
+    return plan ? { kind: 'plan', tool: tool.name, description, plan } : null
+  }
+
+  // Anything else still demanding real terminal interaction (Computer) has no
+  // remote equivalent — a button cannot stand in for driving a screen.
+  if (tool.requiresUserInteraction?.()) return null
+
+  return {
+    kind: 'permission',
+    tool: tool.name,
+    description,
+    detail: toolDetail(tool.name, input),
+  }
+}
 
 export { handleInteractivePermission }
 export type { InteractivePermissionParams }

@@ -1,6 +1,6 @@
 {
   "name": "codev",
-  "version": "2.9.9",
+  "version": "3.0.0",
   "private": true,
   "workspaces": [
     "packages/*"

@@ -30,6 +30,7 @@ import { goalStatusColor } from './GoalIndicator.js';
 import { getFocusedGoal, isGoalInactive } from '../../utils/goal.js';
 import type { Goal } from '../../state/AppStateStore.js';
 import { usePrStatus } from '../../hooks/usePrStatus.js';
+import { useRemoteDevices } from '../../hooks/useRemoteDevices.js';
 import { KeyboardShortcutHint } from '../design-system/KeyboardShortcutHint.js';
 import { Byline } from '../design-system/Byline.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
@@ -287,6 +288,9 @@ function ModeIndicator({
   const escShortcut = useShortcutDisplay('chat:cancel', 'Chat', 'esc').toLowerCase();
   const todosShortcut = useShortcutDisplay('app:toggleTodos', 'Global', 'ctrl+t');
   const killAgentsShortcut = useShortcutDisplay('chat:killAgents', 'Chat', 'ctrl+x ctrl+k');
+  // /remote paired-device pill — you are driving this session from a phone,
+  // so the terminal should say so even when you are not looking at it.
+  const remoteDevices = useRemoteDevices();
   const voiceKeyShortcut = feature('VOICE_MODE') ?
   // biome-ignore lint/correctness/useHookAtTopLevel: feature() is a compile-time constant
   useShortcutDisplay('voice:pushToTalk', 'Chat', 'Space') : '';
@@ -382,6 +386,11 @@ function ModeIndicator({
   // Build parts array - exclude BackgroundTaskStatus when we have teammate pills
   // (teammate pills get their own row)
   const parts = [
+  // /remote paired-device pill — you are driving this session from a phone,
+  // so the terminal should say so even when you are not looking at it.
+  ...(remoteDevices > 0 ? [<Text color="ide" key="remote-devices">
+            {figures.circleFilled} {remoteDevices} device{remoteDevices === 1 ? '' : 's'} connected
+          </Text>] : []),
   // Remote session indicator
   ...(remoteSessionUrl ? [<Link url={remoteSessionUrl} key="remote">
             <Text color="ide">{figures.circleDouble} remote</Text>

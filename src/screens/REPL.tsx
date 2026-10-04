@@ -80,6 +80,7 @@ import { asSessionId, asAgentId } from '../types/ids.js'
 import { logForDebugging } from '../utils/debug.js'
 import { QueryGuard } from '../utils/QueryGuard.js'
 import { useGoalAutoContinue } from '../hooks/useGoalAutoContinue.js'
+import { useRemoteMirror } from '../hooks/useRemoteMirror.js'
 import {
   isEnvTruthy,
   shouldSuppressBarePromptExtras,
@@ -1819,6 +1820,10 @@ export function REPL({
     // biome-ignore lint/correctness/useHookAtTopLevel: feature() is a compile-time constant
     useAwaySummary(messages, setMessages, isLoading)
   }
+  // Remote mirror: streams the session to phones paired over LAN via /remote,
+  // and lets them prompt and interrupt. No-op when /remote is off.
+  useRemoteMirror(messages, isLoading, abortControllerRef, mainLoopModel, commands)
+
   const [cursor, setCursor] = useState<MessageActionsState | null>(null)
   const cursorNavRef = useRef<MessageActionsNav | null>(null)
   // Memoized so Messages' React.memo holds.
