@@ -4582,7 +4582,7 @@ export function createCommandInputMessage(
 }
 
 export function createCompactBoundaryMessage(
-  trigger: 'manual' | 'auto',
+  trigger: 'manual' | 'auto' | 'judge',
   preTokens: number,
   lastPreCompactMessageUuid?: UUID,
   userContext?: string,

@@ -4050,7 +4050,7 @@ export async function executePreCompactHooks(
  */
 export async function executePostCompactHooks(
   compactData: {
-    trigger: 'manual' | 'auto'
+    trigger: 'manual' | 'auto' | 'judge'
     compactSummary: string
   },
   signal?: AbortSignal,

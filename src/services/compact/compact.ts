@@ -122,6 +122,12 @@ import {
   getCompactUserSummaryMessage,
   getPartialCompactPrompt,
 } from './prompt.js'
+import { tryCodevCompact } from './judge/codevCompact.js'
+import { DecisionEngine, type DecisionMode } from './judge/decision.js'
+import { contextCompact } from './judge/decisions/context-compact.ts'
+import { featureOptions, loadConfig } from './judge/config.ts'
+import { buildJudge } from './judge/registry.ts'
+import { MemoryLedger } from './judge/ledger.ts'
 
 export const POST_COMPACT_MAX_FILES_TO_RESTORE = 5
 export const POST_COMPACT_TOKEN_BUDGET = 50_000
@@ -431,6 +437,32 @@ export async function compactConversation(
     context.setStreamMode?.('requesting')
     context.setResponseLength?.(() => 0)
     context.onCompactProgress?.({ type: 'compact_start' })
+
+    // 尝试 context.compact 决策（无损压缩），失败或删得不够则 fallback 到 LLM summary
+    const judgeResult = await tryMuCompact(messages, context)
+    if (judgeResult) {
+      logEvent('tengu_compact', {
+        preCompactTokenCount: judgeResult.preCompactTokenCount ?? 0,
+        postCompactTokenCount: judgeResult.postCompactTokenCount ?? 0,
+        truePostCompactTokenCount: judgeResult.truePostCompactTokenCount ?? 0,
+        autoCompactThreshold: recompactionInfo?.autoCompactThreshold ?? -1,
+        willRetriggerNextTurn: false,
+        isAutoCompact,
+        querySource: recompactionInfo?.querySource ?? context.options.querySource ?? 'unknown',
+        queryChainId: (context.queryTracking?.chainId ?? '') as any,
+        queryDepth: context.queryTracking?.depth ?? -1,
+        isRecompactionInChain: recompactionInfo?.isRecompactionInChain ?? false,
+        turnsSincePreviousCompact: recompactionInfo?.turnsSincePreviousCompact ?? -1,
+        previousCompactTurnId: (recompactionInfo?.previousCompactTurnId ?? '') as any,
+        compactionInputTokens: 0,
+        compactionOutputTokens: 0,
+        compactionCacheReadTokens: 0,
+        compactionCacheCreationTokens: 0,
+        compactionTotalTokens: 0,
+        promptCacheSharingEnabled: false,
+      })
+      return judgeResult
+    }
 
     // 3P default: true — forked-agent path reuses main conversation's prompt cache.
     // Experiment (Jan 2026) confirmed: false path is 98% cache miss, costs ~0.76% of
@@ -766,6 +798,104 @@ export async function compactConversation(
     context.setResponseLength?.(() => 0)
     context.onCompactProgress?.({ type: 'compact_end' })
     context.setSDKStatus?.(null)
+  }
+}
+
+/** Rough characters per token, for turning a window measured in tokens into a budget measured in characters. */
+const CHARS_PER_TOKEN = 3.5
+
+/**
+ * Tries to compact messages using the `context.compact` decision.
+ * Returns null when the judge is unavailable or nothing was pruned,
+ * so the caller can fall back to the LLM summary path.
+ */
+async function tryMuCompact(
+  messages: Message[],
+  context: ToolUseContext,
+): Promise<CompactionResult | null> {
+  try {
+    const loaded = loadConfig({ env: process.env })
+    // CODEV_JUDGE=off keeps every decision off; the LLM summary runs.
+    if (loaded.disabled) return null
+
+    const built = buildJudge(loaded.config, { env: process.env, fetch: globalThis.fetch })
+
+    // The kernel defaults every decision to shadow until its verdicts are compared with outcomes. This
+    // integration is active out of the box: a failing judge costs nothing, the LLM summary is the fallback.
+    // "modes": {"context.compact": "off"|"shadow"} under `judge` in settings.json (or CODEV_JUDGE_MODE)
+    // is the conservative override.
+    const defaultMode: DecisionMode = loaded.config.modes.default === 'off' ? 'off' : 'active'
+    const engine = new DecisionEngine({
+      judge: built.judge,
+      ledger: new MemoryLedger(),
+      defaultMode,
+      modes: Object.fromEntries(
+        Object.entries(loaded.config.modes).filter(([specId]) => specId !== 'default'),
+      ),
+    })
+
+    const mode = engine.getMode(contextCompact.id)
+    if (mode === 'off') return null
+
+    const options = featureOptions(loaded.config, 'compaction', {
+      enabled: true,
+      keepThreshold: 0.5,
+      minChars: 600,
+      headChars: 300,
+      targetRatio: 0.5,
+      maxWindowShare: 0.25,
+      freeChars: 24_000,
+      maxJudged: 120,
+    })
+    if (!options.enabled) return null
+
+    const contextWindow = getContextWindowForModel(context.options.mainLoopModel) * CHARS_PER_TOKEN
+
+    const result = await tryCodevCompact(messages, {
+      engine,
+      contextWindow,
+      keepThreshold: options.keepThreshold,
+      minChars: options.minChars,
+      headChars: options.headChars,
+      targetRatio: options.targetRatio,
+      maxWindowShare: options.maxWindowShare,
+      freeChars: options.freeChars,
+      maxJudged: options.maxJudged,
+      signal: context.abortController.signal,
+    })
+
+    // shadow: the judge recorded its verdicts; the summary still runs.
+    if (!result || mode === 'shadow') return null
+
+    // Nothing was summarized: the marker says so, so nothing later mistakes this history for a summary.
+    const boundaryMarker = createCompactBoundaryMessage(
+      'judge',
+      0,
+      messages.at(-1)?.uuid as UUID | undefined,
+    )
+
+    const summaryMessages: UserMessage[] = [
+      createUserMessage({
+        content: result.historyText,
+        isCompactSummary: true,
+        isVisibleInTranscriptOnly: true,
+      }),
+    ]
+
+    const postCompactTokenCount = roughTokenCountEstimation(result.historyText)
+
+    return {
+      boundaryMarker,
+      summaryMessages,
+      attachments: [],
+      hookResults: [],
+      preCompactTokenCount: tokenCountWithEstimation(messages),
+      postCompactTokenCount: postCompactTokenCount,
+      truePostCompactTokenCount: postCompactTokenCount,
+    }
+  } catch {
+    // Judge unavailable — fall back to LLM summary
+    return null
   }
 }
 
