@@ -145,17 +145,6 @@ import { isPowerShellToolEnabled } from './utils/shell/shellToolUtils.js'
 import { isAgentSwarmsEnabled } from './utils/agentSwarmsEnabled.js'
 import { isWorktreeModeEnabled } from './utils/worktreeModeEnabled.js'
 /* eslint-disable @typescript-eslint/no-require-imports */
-/**
- * Runtime RLMTool resolver.
- *
- * RLM is gated on /rlm mode being enabled; resolved lazily here to keep the
- * module graph cycle-free (RLMTool pulls in the RLM engine and Python sandbox).
- */
-export function getRlmTool(): Tool {
-  return (
-    require('./tools/RLMTool/RLMTool.js') as typeof import('./tools/RLMTool/RLMTool.js')
-  ).RLMTool
-}
 const getPowerShellTool = () => {
   if (!isPowerShellToolEnabled()) return null
   return (
@@ -238,7 +227,6 @@ export function getAllBaseTools(): Tools {
       ? [getTeamCreateTool(), getTeamDeleteTool()]
       : []),
     ...(VerifyPlanExecutionTool ? [VerifyPlanExecutionTool] : []),
-    getRlmTool(),
     ...(WorkflowTool ? [WorkflowTool] : []),
     ...(SleepTool ? [SleepTool] : []),
     ...cronTools,

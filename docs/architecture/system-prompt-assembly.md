@@ -225,7 +225,6 @@ function getSimpleToneAndStyleSection(): string {
 | `scratchpad` | 启用 | 临时文件目录指引 |
 | `frc` | 特定模型 | 函数结果清除指引 |
 | `token_budget` | feature('TOKEN_BUDGET') | token 预算指引 |
-| `rlm_mode` | /rlm 启用 | RLM 模式指引 |
 
 ---
 

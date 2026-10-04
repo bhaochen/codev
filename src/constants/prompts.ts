@@ -518,20 +518,7 @@ ${CYBER_RISK_INSTRUCTION}`,
           : getMcpInstructionsSection(mcpClients),
       'MCP servers connect/disconnect between turns',
     ),
-    DANGEROUS_uncachedSystemPromptSection(
-      'rlm_mode',
-      async () => {
-        try {
-          const { rlmController, rlmSystemPromptAddendum } = await import('../tools/RLMTool/controller.js')
-          if (!rlmController.isEnabled()) return null
-          return rlmSystemPromptAddendum()
-        } catch {
-          return null
-        }
-      },
-      'RLM mode can toggle mid-session',
-    ),
-    systemPromptSection('scratchpad', () => getScratchpadInstructions()),
+        systemPromptSection('scratchpad', () => getScratchpadInstructions()),
     systemPromptSection('frc', () => getFunctionResultClearingSection(model)),
     systemPromptSection(
       'summarize_tool_results',

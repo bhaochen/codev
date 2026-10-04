@@ -90,8 +90,6 @@ import {
 import { ESCALATED_MAX_TOKENS } from './utils/context.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from './services/analytics/growthbook.js'
 import { SLEEP_TOOL_NAME } from './tools/SleepTool/prompt.js'
-import { RLM_TOOL_NAME } from './tools/RLMTool/constants.js'
-import { rlmController } from './tools/RLMTool/controller.js'
 import { executePostSamplingHooks } from './utils/hooks/postSamplingHooks.js'
 import { executeStopFailureHooks } from './utils/hooks.js'
 import type { QuerySource } from './constants/querySource.js'
@@ -655,14 +653,6 @@ async function* queryLoop(
     }
 
   let attemptWithFallback = true
-  // /rlm is an execution mode, not merely a prompt hint. Force the first
-  // model request of each user query to emit the RLM tool call; after that
-  // call returns, the normal follow-up model request may synthesize the answer.
-  // This prevents long non-streaming thinking from hiding the RLM graph before
-  // the tool has even started.
-  let forceRlmTool =
-    rlmController.isEnabled() &&
-    toolUseContext.options.tools.some(tool => tool.name === RLM_TOOL_NAME)
 
   queryCheckpoint('query_api_loop_start')
     try {
@@ -670,10 +660,7 @@ async function* queryLoop(
         attemptWithFallback = false
         try {
           let streamingFallbackOccured = false
-          const toolChoice = forceRlmTool
-            ? { type: 'tool' as const, name: RLM_TOOL_NAME }
-            : undefined
-          forceRlmTool = false
+          const toolChoice = undefined
           queryCheckpoint('query_api_streaming_start')
           for await (const message of deps.callModel({
             messages: prependUserContext(messagesForQuery, userContext),
