@@ -96,7 +96,15 @@ export function startTunnel(
     try {
       child = spawn(
         found.path,
-        ['tunnel', '--url', `http://127.0.0.1:${port}`, '--no-autoupdate'],
+        [
+          'tunnel',
+          '--url',
+          `http://127.0.0.1:${port}`,
+          '--no-autoupdate',
+          '--no-prechecks',
+          '--protocol',
+          'http2',
+        ],
         { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true },
       )
     } catch (err) {
