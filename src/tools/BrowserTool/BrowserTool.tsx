@@ -465,6 +465,16 @@ const REQUIRED_BY_ACTION: Partial<Record<Input['action'], Array<keyof Input>>> =
   switch_tab: ['tabIndex'],
 }
 
+// 模型偶尔会把动作参数包进 `args` 子对象（如 { "action": "wait", "args": { "ms": 8000 } }），
+// 在 strict schema 校验前把它平铺回来，避免每个字段都被判为缺失。
+function normalizeBrowserInput(input: Input): Input {
+  const nested = (input as { args?: unknown }).args
+  if (nested !== null && typeof nested === 'object' && !Array.isArray(nested)) {
+    return { ...input, ...(nested as Record<string, unknown>) } as Input
+  }
+  return input
+}
+
 function validateBrowserInput(input: Input): ValidationResult {
   const required = REQUIRED_BY_ACTION[input.action]
   if (required) {
@@ -1580,7 +1590,7 @@ export const BrowserTool = buildTool({
     }
   },
   async validateInput(input) {
-    return validateBrowserInput(input)
+    return validateBrowserInput(normalizeBrowserInput(input))
   },
   async checkPermissions(input): Promise<PermissionResult> {
     const risk = riskForInput(input, getBrowserSession().getLastKnownUrl())
@@ -1636,7 +1646,7 @@ export const BrowserTool = buildTool({
   },
   async call(input, context) {
     try {
-      const data = await runAction(input, context)
+      const data = await runAction(normalizeBrowserInput(input), context)
       return { data }
     } catch (error) {
       if (context.abortController.signal.aborted) {
