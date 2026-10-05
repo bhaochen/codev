@@ -24,6 +24,11 @@ export const FULL_EXPERIMENTAL_FEATURES: readonly string[] = [
   'KAIROS_CHANNELS',
   'LODESTONE',
   'MCP_RICH_OUTPUT',
+  // Reconstructed runtime capabilities. These must be compile-time enabled;
+  // otherwise the tool implementations are present but never registered.
+  'WEB_BROWSER_TOOL',
+  'TERMINAL_PANEL',
+  'COORDINATOR_MODE',
   'MESSAGE_ACTIONS',
   'NATIVE_CLIPBOARD_IMAGE',
   'NEW_INIT',
