@@ -20,6 +20,7 @@ import {
   resolveGlyphMode,
   sextantGlyph,
   resolveImageColorDepth,
+  resolveInteractiveImageColorDepth,
   subpixelsPerCellX,
   subpixelsPerCellY,
   toAnsi256,
@@ -76,6 +77,15 @@ function depthOf(
   chalkLevel = 2,
 ): ImageColorDepth {
   return resolveImageColorDepth(env, isTTY, chalkLevel)
+}
+
+/** Resolve an interactive preview against an explicit environment. */
+function interactiveDepthOf(
+  env: NodeJS.ProcessEnv,
+  isTTY = true,
+  chalkLevel = 2,
+): ImageColorDepth {
+  return resolveInteractiveImageColorDepth(env, isTTY, chalkLevel)
 }
 
 // --- Platform detection matrix ---------------------------------------------
@@ -215,6 +225,50 @@ test('NO_COLOR disables inline images', () => {
     depthOf({ NO_COLOR: '1', COLORTERM: 'truecolor' }),
     'none',
     'NO_COLOR is honoured',
+  )
+})
+
+test('interactive image previews ignore NO_COLOR when enabled', () => {
+  assertEqual(
+    interactiveDepthOf({ NO_COLOR: '1', COLORTERM: 'truecolor' }),
+    'truecolor',
+    'NO_COLOR only disables text styling',
+  )
+  assertEqual(
+    interactiveDepthOf({ NO_COLOR: '1', TERM: 'xterm-256color' }),
+    'ansi256',
+    'terminal depth detection still applies',
+  )
+  assertEqual(
+    interactiveDepthOf({ NO_COLOR: '1', TERM: 'screen' }, true, 0),
+    'ansi256',
+    'chalk cached NO_COLOR does not suppress the conservative image fallback',
+  )
+})
+
+test('interactive images retain explicit disable and terminal guards', () => {
+  assertEqual(
+    interactiveDepthOf({
+      NO_COLOR: '1',
+      CODEV_INLINE_IMAGES: 'off',
+      COLORTERM: 'truecolor',
+    }),
+    'none',
+    'the image-specific opt-out wins',
+  )
+  assertEqual(
+    interactiveDepthOf({
+      NO_COLOR: '1',
+      FORCE_COLOR: '0',
+      COLORTERM: 'truecolor',
+    }),
+    'none',
+    'FORCE_COLOR=0 remains an explicit color disable',
+  )
+  assertEqual(
+    interactiveDepthOf({ NO_COLOR: '1', COLORTERM: 'truecolor' }, false),
+    'none',
+    'non-TTY output remains unsupported',
   )
 })
 
@@ -932,6 +986,35 @@ testAsync('without an exact box the aspect fit still applies', async () => {
   assert(
     rendered!.columns < 220 || rendered!.rows < 30,
     'a square image does not fill a 220x30 box on its own',
+  )
+})
+
+testAsync('an enabled preview encodes under NO_COLOR', async () => {
+  const { clearInlineImageCache, renderInlineImage } = await import(
+    './terminalImage.js'
+  )
+  const { PNG } = await import('pngjs')
+  const raw = Buffer.alloc(128 * 64 * 4, 180)
+  for (let i = 3; i < raw.length; i += 4) raw[i] = 255
+  const data = PNG.sync.write({ width: 128, height: 64, data: raw })
+  const depth = interactiveDepthOf(
+    { NO_COLOR: '1', COLORTERM: 'truecolor' },
+    true,
+    0,
+  )
+
+  clearInlineImageCache()
+  const rendered = await renderInlineImage(data, {
+    maxColumns: 16,
+    maxRows: 4,
+    depth,
+  }  )
+  assert(rendered !== null, 'NO_COLOR does not suppress an enabled preview')
+  assertEqual(rendered!.columns, 16, 'the PNG is resized to the requested width')
+  assertEqual(rendered!.rows, 4, 'the PNG is resized to the requested height')
+  assert(
+    rendered!.lines.some(line => line.includes('\x1b[')),
+    'the raster retains its image color sequences',
   )
 })
 

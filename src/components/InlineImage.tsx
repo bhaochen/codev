@@ -35,6 +35,7 @@ import {
   maxRowsForViewport,
   renderInlineImage,
 } from '../utils/terminalImage.js'
+import { logForDebugging } from '../utils/debug.js'
 import {
   applyWithBatch,
   beginImageRender,
@@ -249,9 +250,15 @@ export function InlineImage({
           setOverlay(rendered ? overlay : null)
           setWithheld(rendered !== null && (unsettled || outdated))
         })
-      } catch {
+      } catch (error) {
         // renderInlineImage already swallows decode failures; this only catches
-        // a malformed base64 payload. The summary line stands on its own.
+        // failures in the graphics/layout path. Keep the summary visible, but
+        // record why the decorative image was omitted for `--debug` sessions.
+        logForDebugging(
+          `InlineImage: preview failed — ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        )
         if (!active) return
         renderPending.current = false
         endImageRender(token)

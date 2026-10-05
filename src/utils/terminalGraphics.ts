@@ -1,6 +1,11 @@
 import type { Buffer } from 'buffer'
 import { getImageProcessor } from '../tools/FileReadTool/imageProcessor.js'
 import { logForDebugging } from './debug.js'
+import {
+  decodePngPixels,
+  encodePngPixels,
+  resizePngPixels,
+} from './pngPixels.js'
 
 /**
  * Pixel-accurate inline graphics: protocol selection, cell geometry, and
@@ -421,7 +426,6 @@ export function resolveGraphicsProtocol(
   if (forced === 'sixel') return 'sixel'
 
   if (!isTTY) return 'none'
-  if (env.NO_COLOR) return 'none'
   // See doc comment: passthrough is protocol-specific and unimplemented.
   if (env.TMUX || env.STY) return 'none'
   // xterm.js draws neither Kitty APC nor sixel; it would print the payload.
@@ -774,9 +778,12 @@ export async function renderGraphicsOverlay(
 
   graphicsEncodesInFlight++
   try {
-    const processor = await getImageProcessor()
-    const probe = processor(imageData) as unknown as GraphicsSharp
-    const metadata = await probe.metadata()
+    const sourcePixels = decodePngPixels(imageData)
+    const processor = sourcePixels ? null : await getImageProcessor()
+    const probe = processor
+      ? (processor(imageData) as unknown as GraphicsSharp)
+      : null
+    const metadata = sourcePixels?.info ?? (await probe!.metadata())
 
     const cell = getCellPixelSize()
     const fit = fitGraphicsToCells(
@@ -802,32 +809,39 @@ export async function renderGraphicsOverlay(
     const pixelHeight = rows * cell.height
 
     if (protocol === 'sixel') {
-      const pipeline = processor(imageData) as unknown as GraphicsSharp
-      if (!pipelineSupports(pipeline, 'raw')) {
-        logForDebugging('terminalGraphics: processor cannot produce raw pixels')
-        return null
+      let rgba: Uint8Array | null
+      if (sourcePixels) {
+        rgba = resizePngPixels(sourcePixels, pixelWidth, pixelHeight).data
+      } else {
+        const pipeline = processor!(imageData) as unknown as GraphicsSharp
+        if (!pipelineSupports(pipeline, 'raw')) {
+          logForDebugging(
+            'terminalGraphics: processor cannot produce raw pixels',
+          )
+          return null
+        }
+        const result = await pipeline
+          .resize(pixelWidth, pixelHeight, { fit: 'fill' })
+          .raw()
+          .toBuffer({ resolveWithObject: true })
+        if (!('data' in result)) return null
+        rgba = widenToRgba(
+          result.data,
+          result.info.width,
+          result.info.height,
+          result.info.channels,
+        )
       }
-      const result = await pipeline
-        .resize(pixelWidth, pixelHeight, { fit: 'fill' })
-        .raw()
-        .toBuffer({ resolveWithObject: true })
-      if (!('data' in result)) return null
-      const rgba = widenToRgba(
-        result.data,
-        result.info.width,
-        result.info.height,
-        result.info.channels,
-      )
       if (rgba === null) {
         logForDebugging(
-          `terminalGraphics: unexpected channel count ${result.info.channels}`,
+          'terminalGraphics: unexpected pixel channel count',
         )
         return null
       }
       const sequence = await encodeSixelGraphics(
         rgba,
-        result.info.width,
-        result.info.height,
+        pixelWidth,
+        pixelHeight,
       )
       if (!sequence) return null
       return {
@@ -842,13 +856,18 @@ export async function renderGraphicsOverlay(
       }
     }
 
-    const pipeline = processor(imageData) as unknown as GraphicsSharp
-    if (!pipelineSupports(pipeline, 'png')) return null
-    const encoded = await pipeline
-      .resize(pixelWidth, pixelHeight, { fit: 'fill' })
-      .png()
-      .toBuffer()
-    if ('data' in encoded) return null
+    const encoded = sourcePixels
+      ? encodePngPixels(resizePngPixels(sourcePixels, pixelWidth, pixelHeight))
+      : await (async () => {
+          const pipeline = processor!(imageData) as unknown as GraphicsSharp
+          if (!pipelineSupports(pipeline, 'png')) return null
+          const output = await pipeline
+            .resize(pixelWidth, pixelHeight, { fit: 'fill' })
+            .png()
+            .toBuffer()
+          return 'data' in output ? null : output
+        })()
+    if (!encoded) return null
     const base64 = encoded.toString('base64')
     // Kitty images are addressable by id, so give this one its own and hand
     // back the matching delete. Without an id the terminal assigns its own,

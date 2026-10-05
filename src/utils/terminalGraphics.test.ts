@@ -11,6 +11,8 @@
  * Run via: bun run src/utils/terminalGraphics.test.ts
  */
 
+import { Buffer } from 'buffer'
+import { PNG } from 'pngjs'
 import {
   INITIAL_STATE,
   type ParsedInput,
@@ -156,12 +158,12 @@ test('xterm.js terminals are excluded', () => {
   )
 })
 
-test('a non-TTY and NO_COLOR are excluded', () => {
+test('a non-TTY is excluded but NO_COLOR does not disable image previews', () => {
   assertEqual(protocolOf({ TERM: 'xterm-kitty' }, [4], false), 'none', 'not a TTY')
   assertEqual(
     protocolOf({ NO_COLOR: '1', TERM: 'xterm-kitty' }, [4]),
-    'none',
-    'NO_COLOR',
+    'kitty',
+    'NO_COLOR is unrelated to a supported image protocol',
   )
 })
 
@@ -429,6 +431,37 @@ test('a graphic fits its box for any plausible cell geometry', () => {
 })
 
 // --- Encoding --------------------------------------------------------------
+
+await asyncTest(
+  'Kitty graphics encodes a PNG without the native image processor',
+  async () => {
+    const width = 128
+    const height = 64
+    const pixels = Buffer.alloc(width * height * 4, 255)
+    const imageData = PNG.sync.write({ width, height, data: pixels })
+    setCellPixelSize({ width: 8, height: 16 })
+
+    const overlay = await renderGraphicsOverlay(
+      imageData,
+      40,
+      20,
+      'kitty',
+      1234,
+    )
+    assert(overlay !== null, 'the PNG graphic is encoded')
+    assertEqual(overlay.protocol, 'kitty', 'uses the Kitty graphics protocol')
+    assert(overlay.sequence.includes('\x1b_Ga=T,f=100'), 'emits a Kitty APC')
+    assert(
+      overlay.sequence.includes(',i=1234,'),
+      'keeps the requested Kitty image id',
+    )
+    const payload = overlay.sequence.match(/;([A-Za-z0-9+/=]+)\x1b\\$/)?.[1]
+    assert(payload !== undefined, 'contains an inline PNG payload')
+    const encodedPng = PNG.sync.read(Buffer.from(payload, 'base64'))
+    assertEqual(encodedPng.width, overlay.pixelWidth, 'PNG width matches cell box')
+    assertEqual(encodedPng.height, overlay.pixelHeight, 'PNG height matches cell box')
+  },
+)
 
 test('a small Kitty payload is a single APC', () => {
   const seq = encodeKittyGraphics('AAAA', 10, 5)

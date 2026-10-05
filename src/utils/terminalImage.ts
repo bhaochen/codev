@@ -1,10 +1,11 @@
-import type { Buffer } from 'buffer'
+import { Buffer } from 'buffer'
 import chalk from 'chalk'
-import {
-  getImageProcessor,
-  type SharpInstance,
-} from '../tools/FileReadTool/imageProcessor.js'
+import { getImageProcessor } from '../tools/FileReadTool/imageProcessor.js'
 import { logForDebugging } from './debug.js'
+import {
+  decodePngPixels,
+  resizePngPixels,
+} from './pngPixels.js'
 
 /**
  * Inline image rendering for the TUI, as Unicode half-block cells.
@@ -378,6 +379,42 @@ export function resolveImageColorDepth(
   if (chalkLevel >= 3) return 'truecolor'
   if (chalkLevel === 2) return 'ansi256'
   return 'none'
+}
+
+/**
+ * Resolve the depth for an already-enabled interactive image preview.
+ *
+ * `NO_COLOR` is a process-wide convention for text styling.  It is commonly
+ * exported by shell profiles and is also inherited by agents launched from a
+ * non-visual command.  It must not silently turn off the separate, explicit
+ * `/config -> Display images` feature: that was the reason a Python figure
+ * ended with only the "cell produced no output" placeholder.  Keep the normal
+ * resolver strict for callers that are probing terminal capabilities, but let
+ * the interactive image path ignore only NO_COLOR.  Explicit CODEV_INLINE_IMAGES
+ * values (especially `off`) and non-TTY/unsupported terminal checks still win.
+ */
+export function resolveInteractiveImageColorDepth(
+  env: NodeJS.ProcessEnv = process.env,
+  isTTY: boolean = process.stdout?.isTTY === true,
+  chalkLevel: number = chalk.level,
+): ImageColorDepth {
+  const override = env.CODEV_INLINE_IMAGES?.trim().toLowerCase()
+  if (override === 'off' || override === '0' || override === 'false') {
+    return 'none'
+  }
+  if (!env.NO_COLOR) {
+    return resolveImageColorDepth(env, isTTY, chalkLevel)
+  }
+  const withoutNoColor = { ...env }
+  delete withoutNoColor.NO_COLOR
+  // Chalk detects NO_COLOR once at module load, so its cached level remains
+  // zero even after removing the variable from the detection environment.
+  // When no more specific terminal signal exists, keep the image fallback
+  // conservative rather than letting that cached text-color setting suppress
+  // an explicitly enabled preview.
+  const imageChalkLevel =
+    chalkLevel === 0 && env.FORCE_COLOR !== '0' ? 2 : chalkLevel
+  return resolveImageColorDepth(withoutNoColor, isTTY, imageChalkLevel)
 }
 
 /**
@@ -767,47 +804,6 @@ export function renderPixelsToQuadrants(
   return renderPixelsToSubcells(pixels, width, height, channels, depth, 'quadrant')
 }
 
-/**
- * Minimal surface needed to decode to raw pixels.
- *
- * Declared locally rather than widening the shared `SharpInstance`: the bundled
- * build can substitute `image-processor-napi`, which implements the resize and
- * encode surface but not necessarily `raw()`. The member is optional and
- * feature-detected at call time so that substitution degrades to the caller's
- * fallback instead of throwing.
- */
-// `resize`/`toBuffer` are omitted before intersecting: keeping the originals
-// would leave the narrower `SharpInstance` signatures in play, so `.resize()`
-// would come back typed as `SharpInstance` and lose the `raw()` member.
-type RawPixelSharp = Omit<SharpInstance, 'resize' | 'toBuffer'> & {
-  raw?: () => RawPixelSharp
-  resize: (
-    width: number,
-    height: number,
-    options?: { fit?: string; withoutEnlargement?: boolean },
-  ) => RawPixelSharp
-  toBuffer: (options?: {
-    resolveWithObject?: boolean
-  }) => Promise<RawPixelResult | Buffer>
-}
-
-type RawPixelResult = {
-  data: Buffer
-  info: { width: number; height: number; channels: number }
-}
-
-function isRawPixelResult(value: unknown): value is RawPixelResult {
-  if (!value || typeof value !== 'object') return false
-  const candidate = value as Partial<RawPixelResult>
-  return (
-    !!candidate.data &&
-    !!candidate.info &&
-    typeof candidate.info.width === 'number' &&
-    typeof candidate.info.height === 'number' &&
-    typeof candidate.info.channels === 'number'
-  )
-}
-
 export type InlineImageOptions = {
   /** Terminal width; the rendered block never exceeds this. */
   maxColumns: number
@@ -889,7 +885,7 @@ export async function renderInlineImage(
   imageData: Buffer,
   options: InlineImageOptions,
 ): Promise<InlineImage | null> {
-  const depth = options.depth ?? resolveImageColorDepth()
+  const depth = options.depth ?? resolveInteractiveImageColorDepth()
   if (depth === 'none') return null
 
   const maxColumns = Math.min(
@@ -928,18 +924,13 @@ export async function renderInlineImage(
   }
 
   try {
-    const processor = await getImageProcessor()
-    const probe = processor(imageData) as RawPixelSharp
-    if (typeof probe.raw !== 'function') {
-      logForDebugging(
-        'terminalImage: image processor lacks raw() — skipping inline render',
-      )
-      return null
-    }
+    const pngPixels = decodePngPixels(imageData)
+    const processor = pngPixels ? null : await getImageProcessor()
+    const probe = processor ? processor(imageData) : null
 
     // `metadata()` may report undefined dimensions for some formats;
     // `fitImageToCells` rejects non-finite input rather than propagating NaN.
-    const metadata = await probe.metadata()
+    const metadata = pngPixels?.info ?? (await probe!.metadata())
     const fit =
       exact === undefined
         ? fitImageToCells(
@@ -961,14 +952,20 @@ export async function renderInlineImage(
     // when choosing the cell box, and the quadrant grid is deliberately stretched
     // horizontally to match the half-width subpixels. Preserving the source
     // aspect here would undo that and letterbox the result.
-    const result = await (processor(imageData) as RawPixelSharp)
-      .resize(fit.pixelWidth, fit.pixelHeight, { fit: 'fill' })
-      .raw!()
-      .toBuffer({ resolveWithObject: true })
-
-    if (!isRawPixelResult(result)) {
-      logForDebugging('terminalImage: raw decode returned an unexpected shape')
-      return null
+    let result: { data: Buffer; info: { width: number; height: number; channels: number } }
+    if (pngPixels) {
+      result = resizePngPixels(pngPixels, fit.pixelWidth, fit.pixelHeight)
+    } else {
+      const resizedPng = await probe!
+        .resize(fit.pixelWidth, fit.pixelHeight, { fit: 'fill' })
+        .png()
+        .toBuffer()
+      const decoded = decodePngPixels(resizedPng)
+      if (!decoded) {
+        logForDebugging('terminalImage: resized image was not a valid PNG')
+        return null
+      }
+      result = decoded
     }
 
     const { data, info } = result
