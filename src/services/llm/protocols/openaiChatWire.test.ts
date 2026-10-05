@@ -343,7 +343,7 @@ describe('agentMessagesToOpenAIChatMessages', () => {
     ])
     expect(msgs[0].content).toBe('a\nb')
     const empty = agentMessagesToOpenAIChatMessages([wrapperAssistant([])])
-    expect(empty[0].content).toBeNull()
+    expect(empty[0].content).toBe('(empty)')
   })
 
   test('tool_use → tool_calls with JSON-stringified args', () => {

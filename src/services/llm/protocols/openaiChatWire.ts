@@ -653,6 +653,27 @@ export function agentMessagesToOpenAIChatMessages(
     }
   }
 
+  // 部分 OpenAI 兼容后端（如 opencode Console / Go 后端）拒绝对空 content
+  // 的消息（"message content cannot be empty"）：空字符串的 user/tool
+  // 消息、null 且无 tool_calls 的 assistant 消息都是非法的。统一替换成
+  // 非空占位，保证语义序列保留的同时通过校验。
+  for (const m of result) {
+    if (m.role === 'tool') {
+      if (m.content === '' || (Array.isArray(m.content) && m.content.length === 0)) {
+        m.content = '(empty tool result)'
+      }
+    } else if (m.role === 'user') {
+      if (m.content === '' || (Array.isArray(m.content) && m.content.length === 0)) {
+        m.content = '(empty)'
+      }
+    } else if (m.role === 'assistant') {
+      const hasToolCalls = Array.isArray(m.tool_calls) && m.tool_calls.length > 0
+      if (!hasToolCalls && (m.content === null || m.content === '')) {
+        m.content = '(empty)'
+      }
+    }
+  }
+
   return result
 }
 
