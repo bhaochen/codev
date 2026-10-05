@@ -1,11 +1,13 @@
 import { getNvidiaApiKey } from '../auth.js'
 import { getNvidiaBaseUrl } from './providers.js'
+import { recordProviderContextWindows } from './contextWindowStore.js'
 
 const MODELS_META_URL = 'https://models.dev/api.json'
 
 type CachedNvidiaModel = {
   id: string
   contextWindow?: number
+  promptLimit?: number
   maxTokens?: number
   reasoningOptions?: string[]
 }
@@ -32,7 +34,9 @@ export function getCachedNvidiaModels(): CachedNvidiaModel[] {
 export function getNvidiaModelContextWindow(modelId: string): number | undefined {
   if (!cachedNvidiaModels) return undefined
   const model = cachedNvidiaModels.find(m => m.id === modelId)
-  return model?.contextWindow
+  return model?.contextWindow && model.promptLimit
+    ? Math.min(model.contextWindow, model.promptLimit)
+    : model?.contextWindow
 }
 
 export function getNvidiaModelMaxTokens(modelId: string): number | undefined {
@@ -88,7 +92,7 @@ export async function fetchNvidiaModels(apiKey?: string): Promise<string[]> {
     }
 
     // Fetch context windows from models.dev API (canonical source for context limits)
-    const contextWindows = new Map<string, { contextWindow?: number; maxTokens?: number; reasoningOptions?: string[] }>()
+    const contextWindows = new Map<string, { contextWindow?: number; promptLimit?: number; maxTokens?: number; reasoningOptions?: string[] }>()
     try {
       const metaRes = await fetch('https://models.dev/api.json', {
         headers: { 'User-Agent': 'opencode/1.15.6 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14' },
@@ -103,6 +107,7 @@ export async function fetchNvidiaModels(apiKey?: string): Promise<string[]> {
           )?.values
           contextWindows.set(modelId, {
             contextWindow: config.limit?.context,
+            promptLimit: config.limit?.input,
             maxTokens: config.limit?.output,
             reasoningOptions,
           })
@@ -121,9 +126,18 @@ export async function fetchNvidiaModels(apiKey?: string): Promise<string[]> {
     cachedNvidiaModels = modelIds.map(id => ({
       id,
       contextWindow: contextWindows.get(id)?.contextWindow,
+      promptLimit: contextWindows.get(id)?.promptLimit,
       maxTokens: contextWindows.get(id)?.maxTokens,
       reasoningOptions: contextWindows.get(id)?.reasoningOptions,
     }))
+    recordProviderContextWindows(
+      'nvidia',
+      cachedNvidiaModels.flatMap(model =>
+        model.contextWindow
+          ? [{ id: model.id, contextWindow: model.contextWindow, promptLimit: model.promptLimit }]
+          : [],
+      ),
+    )
 
     return modelIds
   })()

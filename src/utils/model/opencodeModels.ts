@@ -1,6 +1,7 @@
 import type { ModelOption } from './modelOptions.js'
 import { getOpenCodeApiKey, getOpenCodeModelName } from '../auth.js'
 import { getOpencodeBaseUrl } from './providers.js'
+import { recordProviderContextWindows } from './contextWindowStore.js'
 
 const OPENCODE_BASE_URL = 'https://opencode.ai/zen/v1'
 // 模型目录源与官方 opencode 对齐：优先自建镜像，失败回退上游 models.dev
@@ -14,6 +15,7 @@ type CachedOpencodeModel = {
   name?: string
   isFree: boolean
   contextWindow?: number
+  promptLimit?: number
   maxTokens?: number
   reasoningOptions?: string[]
 }
@@ -77,12 +79,21 @@ export async function fetchOpencodeModels(): Promise<void> {
           name: config.name || modelId,
           isFree: isFreeModel,
           contextWindow: config.limit?.context,
+          promptLimit: config.limit?.input,
           maxTokens: config.limit?.output,
           reasoningOptions,
         })
       }
 
       cachedModels = modelList
+      recordProviderContextWindows(
+        'opencode',
+        modelList.flatMap(model =>
+          model.contextWindow
+            ? [{ id: model.id, contextWindow: model.contextWindow, promptLimit: model.promptLimit }]
+            : [],
+        ),
+      )
     } catch (error) {
       console.error('[opencodeModels] Error in dynamic TUI flow simulation:', error)
       if (!cachedModels) {
@@ -121,7 +132,9 @@ export function getOpencodeModelDisplayName(modelId: string): string | undefined
 export function getOpencodeModelContextWindow(modelId: string): number | undefined {
   if (!cachedModels) return undefined
   const model = cachedModels.find(m => m.id === modelId)
-  return model?.contextWindow
+  return model?.contextWindow && model.promptLimit
+    ? Math.min(model.contextWindow, model.promptLimit)
+    : model?.contextWindow
 }
 
 export function getOpencodeModelMaxTokens(modelId: string): number | undefined {

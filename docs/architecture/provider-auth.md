@@ -579,8 +579,13 @@ flowchart LR
 * **12D Cache** (`models/modelsDevCache.ts:57`): `GET https://models.dev/models.json → XDG_CACHE_HOME/ ~/.cache/codev/models.json` TTL 24h 原子写, `CODEV_MODELS_CACHE_PATH` 覆盖, 腐坏/空/离线 → 回退本地, `catalog.json` 兼容
 * **12E Audit**: `startDeferredPrefetches` 后台非阻塞 + `syncInProgress` 防重入, `ModelDefinition {id, capabilities:{tools,vision,reasoning,streaming}}` 未污染, 89 tests 覆盖 `cache hit/miss/expired/corrupt/offline` 等
 
+## 13. Provider-scoped Context Windows
 
-## 12. 参考资料
+* OpenCode、OpenRouter 与 NVIDIA 从模型目录获得的上下文窗口写入 `~/.claude/cache/model-context-windows.json`，按 provider 和规范化模型 ID 隔离；目录请求完成前，自动压缩等调用可以使用上次缓存，避免启动期间误退回通用 200K 默认值。
+* models.dev 同时提供 `limit.input` 和 `limit.context` 时，Codev 使用两者较小值作为 provider 可接受的 prompt 上限；没有 prompt 上限时使用 `limit.context` 或 provider 自身返回的窗口值。
+* 缓存仅是目录不可用时的兜底：新目录快照会替换该 provider 的记录。Llama.cpp 等 local provider 的运行时窗口不写入跨会话缓存。
+
+## 14. 参考资料
 
 - **cc-switch** (原始 Proxy 参考实现): https://github.com/farion1231/cc-switch
 - **Anthropic Messages API**: https://docs.anthropic.com/en/api/messages

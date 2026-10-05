@@ -10,6 +10,7 @@ import { getAPIProvider } from './model/providers.js'
 import { getOpencodeModelContextWindow } from './model/opencodeModels.js'
 import { getNvidiaModelContextWindow } from './model/nvidiaModels.js'
 import { getOpenRouterModelContextWindow } from './model/openRouterModels.js'
+import { getStoredProviderContextWindow } from './model/contextWindowStore.js'
 import { getLocalModelContextWindow } from '../services/api/localClient.js'
 import { getInitialSettings } from './settings/settings.js'
 
@@ -127,6 +128,11 @@ export function getContextWindowForModel(
     const orCtx = getOpenRouterModelContextWindow(model)
     if (orCtx) return orCtx
   }
+
+  // Provider-scoped persisted catalogs cover startup before the async catalog
+  // fetch completes; never reuse these values for another provider or local runtime.
+  const storedContextWindow = getStoredProviderContextWindow(getAPIProvider(), model)
+  if (storedContextWindow) return storedContextWindow
 
   // Local provider (Llama.cpp) — read context window from native /models endpoint
   // or fall back to a conservative default when the cache isn't ready yet.

@@ -1,10 +1,12 @@
 import type { ModelOption } from './modelOptions.js'
+import { recordProviderContextWindows } from './contextWindowStore.js'
 
 const MODELS_META_URL = 'https://models.dev/api.json'
 
 type OpenRouterModelInfo = {
   id: string
   contextWindow?: number
+  promptLimit?: number
   maxTokens?: number
   reasoningOptions?: string[]
 }
@@ -139,6 +141,7 @@ export async function fetchOpenRouterModels(
           modelInfos.set(modelId, {
             id: modelId,
             contextWindow: config.limit?.context,
+            promptLimit: config.limit?.input,
             maxTokens: config.limit?.output,
             reasoningOptions,
           })
@@ -161,6 +164,14 @@ export async function fetchOpenRouterModels(
     // Update caches
     openRouterModelsCache = options
     openRouterModelInfos = modelInfos
+    recordProviderContextWindows(
+      'openrouter',
+      [...modelInfos.values()].flatMap(info =>
+        info.contextWindow
+          ? [{ id: info.id, contextWindow: info.contextWindow, promptLimit: info.promptLimit }]
+          : [],
+      ),
+    )
     cacheTimestamp = Date.now()
 
     return options
@@ -201,7 +212,10 @@ export function clearOpenRouterModelsCache(): void {
 
 export function getOpenRouterModelContextWindow(modelId: string): number | undefined {
   if (!openRouterModelInfos) return undefined
-  return openRouterModelInfos.get(modelId)?.contextWindow
+  const info = openRouterModelInfos.get(modelId)
+  return info?.contextWindow && info.promptLimit
+    ? Math.min(info.contextWindow, info.promptLimit)
+    : info?.contextWindow
 }
 
 export function getOpenRouterModelReasoningOptions(modelId: string): string[] | undefined {
