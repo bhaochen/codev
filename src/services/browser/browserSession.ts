@@ -2314,7 +2314,10 @@ class BrowserSessionService {
             : `${options.path}.png`,
         )
       : undefined;
-    const asPng = !!toFile && /\.png$/i.test(toFile);
+    // 内联预览是 default 渲染路径，而 InlineImage/终端 graphics 管线的 PNG
+    // 快速路径只能解 PNG；JPEG 需要 sharp 的原生替代，在编译后的浏览器输出里
+    // 常常不可用。为了直接展示给用户，未落盘的内联截图一律用 PNG。
+    const asPng = !toFile || /\.png$/i.test(toFile);
     const params: Record<string, unknown> = asPng
       ? { format: "png" }
       : { format: "jpeg", quality: toFile ? 80 : quality };
