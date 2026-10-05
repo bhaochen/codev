@@ -11,12 +11,8 @@ import {
  * Pixel-accurate inline graphics: protocol selection, cell geometry, and
  * encoding.
  *
- * This is the high-fidelity path. Where `terminalImage.ts` approximates an
- * image with block glyphs — capped by the terminal's column count, so a
- * downscaled plot loses its axis labels — these protocols hand the terminal
- * real pixels. The two are complementary, not alternatives: the block render
- * reserves the layout box and remains the visible fallback, and the graphic is
- * painted over it by `ink/graphicsPlacement.ts` whenever it can be placed.
+ * These protocols hand the terminal real image pixels. `ink/graphicsPlacement.ts`
+ * positions the payload over blank cells reserved by the image component.
  *
  * Three protocols, in descending order of preference:
  *
@@ -99,8 +95,8 @@ let cellPixelSize: CellPixelSize | null = null
  * erase is computed from. Those pixels can never be cleared afterwards. That is
  * the duplicated, half-scaled copy that survives a redraw.
  *
- * Graphics are therefore withheld while this holds, and the block-glyph render
- * — which is measured in cells and so cannot be wrong about them — stands in.
+ * Native graphics are therefore withheld while this holds, until a fresh
+ * measurement arrives.
  */
 let staleUntil = 0
 
@@ -109,9 +105,9 @@ let staleUntil = 0
  *
  * The mark has to announce its own expiry. Withholding a graphic is a decision
  * taken while rendering, and nothing re-runs on its own when the clock moves
- * past a deadline — so a mark that lapsed quietly left every image on block
- * glyphs with no edge left to bring them back. That was the whole of "it goes
- * blurry when I zoom and never comes back": the probe answer normally supplies
+ * past a deadline — so a mark that lapsed quietly left every image absent
+ * with no edge left to bring them back. That was the whole of "it
+ * disappears when I zoom and never comes back": the probe answer normally supplies
  * the edge, and when it is dropped or coalesced away, nothing else did.
  */
 let staleTimer: ReturnType<typeof setTimeout> | null = null
@@ -122,9 +118,9 @@ let staleTimer: ReturnType<typeof setTimeout> | null = null
  * The mark is normally lifted by the re-measure landing. That cannot be relied
  * on: `TerminalQuerier` never times out — a batch settles only when the DA1
  * sentinel comes back — so a reply dropped during a resize leaves the promise
- * unsettled forever. Gating a visible feature on that would mean images falling
- * back to block glyphs permanently, which is a far worse outcome than a briefly
- * mis-sized one. The deadline makes the withholding self-limiting no matter
+ * unsettled forever. Gating a visible feature on that would mean images staying
+ * absent permanently, which is a far worse outcome than a briefly mis-sized
+ * one. The deadline makes the withholding self-limiting no matter
  * what the terminal does.
  */
 const STALE_TIMEOUT_MS = 400
@@ -182,8 +178,8 @@ function clearStaleLapse(): void {
  *
  * The DA1 and cell-size replies arrive asynchronously, one round-trip after
  * startup, so an image rendered in that window would resolve the protocol as
- * `none` and — with nothing to invalidate it — stay a block render for the rest
- * of the session. Components subscribe and re-encode when this changes.
+ * `none` and — with nothing to invalidate it — stay absent for the rest of the
+ * session. Components subscribe and re-encode when this changes.
  */
 let capabilityGeneration = 0
 const capabilityListeners = new Set<() => void>()
@@ -381,7 +377,7 @@ export function setDeviceAttributes(params: readonly number[]): void {
     isLegacyConsoleHost(params)
       ? `terminalGraphics: DA1 params [${params.join(',')}] came from an old ` +
           'Windows ConPTY, not the terminal. It drops Kitty and sixel data, so ' +
-          'images stay block glyphs; WezTerm nightly and Windows Terminal 1.22+ ' +
+          'native images stay unavailable; WezTerm nightly and Windows Terminal 1.22+ ' +
           'ship a ConPTY that passes them through'
       : `terminalGraphics: DA1 params [${params.join(',')}] — sixel ${
           params.includes(DA1_SIXEL) ? 'advertised' : 'not advertised'
@@ -443,9 +439,8 @@ export function resolveGraphicsProtocol(
 /**
  * Fit an image into a cell box, in whole cells, given real cell geometry.
  *
- * Unlike the block-glyph fit this needs no aspect fudging: pixels are pixels,
- * so the image scales to fit the box's pixel extent and the cell counts follow
- * by division. Never enlarges — an image smaller than its box stays sharp.
+ * Pixels are pixels, so the image scales to fit the box's pixel extent and the
+ * cell counts follow by division. Never enlarges — a small image stays sharp.
  */
 export function fitGraphicsToCells(
   imageWidth: number,
@@ -475,10 +470,9 @@ export function fitGraphicsToCells(
   // Snap to whole cells, then take the pixel size *from* that cell count.
   //
   // The graphic has to cover its reserved box exactly. Sized to the aspect
-  // alone it lands a fraction of a cell short, and the fallback rendered
-  // underneath shows through along the right and bottom edges — which reads as
-  // the image having a ragged border of block glyphs. Rounding to the nearest
-  // cell costs at most half a cell of aspect distortion (sub-percent
+  // alone it lands a fraction of a cell short, leaving blank cells along the
+  // right and bottom edges. Rounding to the nearest cell costs at most half a
+  // cell of aspect distortion (sub-percent
   // horizontally, a couple of percent on a short image) and buys exact
   // coverage, which matters far more.
   const columns = Math.max(
@@ -581,7 +575,7 @@ export function encodeITerm2Graphics(
  * Encode raw RGBA pixels as a sixel sequence.
  *
  * Returns null rather than throwing: the encoder is an optional dependency and
- * a failure here must fall back to the block-glyph render, not break the frame.
+ * a failure here must not break the frame.
  */
 export async function encodeSixelGraphics(
   rgba: Buffer | Uint8Array,
@@ -612,7 +606,7 @@ export async function encodeSixelGraphics(
  */
 const MAX_GRAPHIC_EDGE_PX = 1400
 
-/** Minimal sharp surface used here; see `terminalImage.ts` for why it is local. */
+/** Minimal image-processor surface used by native image protocols. */
 type GraphicsSharp = {
   metadata(): Promise<{ width: number; height: number }>
   resize: (
@@ -649,16 +643,6 @@ function pipelineSupports(
 
 /**
  * Widen raw pixels to the four-byte stride the sixel encoder indexes by.
- *
- * Done here rather than with the processor's `ensureAlpha()`, which was the one
- * call in this path the block renderer does not also make. That asymmetry is a
- * silent-degradation trap: any pipeline that can `raw()` but stumbles on
- * `ensureAlpha()` — a substituted processor, or two copies of the native image
- * library loaded into one process, where the second one's colourspace enum no
- * longer resolves — produced block glyphs on every image with nothing visible
- * to explain it. The two renderers now need exactly the same capability, so
- * they succeed and fail together.
- *
  * Sixel has no alpha of its own; the fourth byte is stride, not transparency.
  */
 function widenToRgba(
@@ -725,15 +709,10 @@ export function graphicsEncodeQuietFor(now: number = Date.now()): number {
 /**
  * Encode an image and report the cell box it occupies.
  *
- * The graphic owns the box, rather than being fitted into one the block render
- * chose. Those two size images by different rules — blocks stretch to the 1:2
- * cell and count subpixels, graphics use real pixels — so a graphic fitted into
- * a block-derived box is always slightly smaller than it, and the blocks show
- * through around the edges. Deriving the box here, from real cell geometry,
- * makes coverage exact.
+ * The graphic owns the box, and the dimensions come from real cell geometry so
+ * the reserved layout rectangle and terminal pixels match exactly.
  *
- * Returns null on any problem, leaving the caller to size and render blocks
- * however it likes.
+ * Returns null on any problem, leaving the caller to show its summary only.
  */
 export async function renderGraphicsOverlay(
   imageData: Buffer,
@@ -747,8 +726,8 @@ export async function renderGraphicsOverlay(
    */
   imageId?: number,
 ): Promise<GraphicsOverlay | null> {
-  // Every path out of here falls back to block glyphs, and for a long time all
-  // of them were silent — which is why "it just renders blurry" took so many
+  // Every path out of here leaves the image absent, and for a long time all of
+  // them were silent — which is why "it just disappears" took so many
   // rounds to place. Each one now names itself under `codev --debug`.
   if (protocol === 'none') {
     logForDebugging('terminalGraphics: no graphics protocol for this terminal')
@@ -762,11 +741,10 @@ export async function renderGraphicsOverlay(
   // Every protocol here sizes in pixels while the layout reserves whole cells,
   // so the conversion between them is the one number that must be right. Guess
   // it and the payload is drawn at a size the reserved box does not match: too
-  // small leaves the block render showing around the edges, too large spills
+  // small leaves blank cells showing around the edges, too large spills
   // pixels past the rectangle every erase is computed from, where nothing will
   // ever clear them. A terminal that advertises sixel through DA1 but never
-  // answers `CSI 16 t` or `CSI 14 t` gets the block render, which is exact in
-  // cells by construction.
+  // answers `CSI 16 t` or `CSI 14 t` leaves the image unavailable.
   if (!hasMeasuredCellSize()) {
     logForDebugging('terminalGraphics: terminal never reported its cell size')
     return null

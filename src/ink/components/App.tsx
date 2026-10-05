@@ -155,7 +155,7 @@ export default class App extends PureComponent<Props, State> {
    * Log a terminal reply nothing was waiting for.
    *
    * These are silent failures otherwise: a cell-size reply that lands after
-   * its DA1 barrier leaves images on block glyphs with nothing in the log to
+   * its DA1 barrier leaves native images unavailable with nothing in the log to
    * say the terminal did answer — only too late for the querier to use it.
    */
   noteUnclaimedResponse(response: TerminalResponse): void {
@@ -266,7 +266,7 @@ export default class App extends PureComponent<Props, State> {
     // Ask immediately, not only after the debounce. The window is held back
     // from drawing graphics until an answer arrives, and a drag-resize does not
     // change the cell size at all — waiting out the debounce there would drop
-    // every image to block glyphs for 150ms for no reason. A local round trip
+    // every image unavailable for 150ms for no reason. A local round trip
     // is a millisecond or two, so asking on the leading edge makes the gap
     // imperceptible. `inFlight` keeps a drag, which fires continuously, to one
     // outstanding query rather than dozens.
@@ -524,7 +524,7 @@ export default class App extends PureComponent<Props, State> {
                 }, this.terminalGrid());
               }
             } else {
-              logForDebugging('terminalGraphics: no cell size reply (CSI 16 t or 14 t) before DA1; inline images use block glyphs');
+              logForDebugging('terminalGraphics: no cell size reply (CSI 16 t or 14 t) before DA1; native inline images are unavailable');
             }
           });
         });

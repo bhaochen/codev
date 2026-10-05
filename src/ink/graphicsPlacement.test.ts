@@ -503,7 +503,7 @@ test('a wiped screen redraws a stationary image even with no damage', () => {
   // invalidation used to be skipped. The image had not moved and a settled
   // frame reports no damage, so the redraw was suppressed as "already on
   // screen" while the terminal had in fact dropped the pixels. What was left
-  // was the block-glyph fallback: sharp image, then blurry after a resize,
+  // was no native image: sharp image, then absent after a resize,
   // until some later turn happened to repaint those cells.
   reset()
   const { screen, stylePool } = makeScreen('X')
@@ -526,7 +526,7 @@ test('a wiped screen redraws a stationary image even with no damage', () => {
 test('a box overflowing the bottom reports the room it actually had', () => {
   // Withholding a too-tall image is correct but used to be terminal: the
   // component had no way to learn its box could not be drawn, so it re-encoded
-  // the same size every time and the block fallback stood for good.
+  // the same size every time and the native image stayed absent.
   reset()
   const { screen, stylePool } = makeScreen('X')
   // Viewport is rows 0..39. A 12-row box at row 32 runs four rows past it.
@@ -808,9 +808,9 @@ const windowAt = (
 const WHOLE_FRAME = { x: 0, y: 0, width: 60, height: 80 }
 
 test('an image scrolling into history keeps its pixels', () => {
-  // The "sharp, then blocky one turn later" bug. The next turn's text pushed
+  // The "sharp, then absent one turn later" bug. The next turn's text pushed
   // the image's top above the window, the viewport rule erased it, and nothing
-  // can draw above the viewport again, so the block fallback stood for good.
+  // can draw above the viewport again, so the image stayed absent.
   // The terminal had already carried the pixels up with the text.
   reset()
   const { screen, stylePool } = makeScreenOf(60, 80, 'X')

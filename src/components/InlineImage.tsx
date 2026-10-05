@@ -17,7 +17,7 @@ import {
   setGraphicsPlacement,
   subscribeGraphicsConstraints,
 } from '../ink/graphicsPlacement.js'
-import { Box, RawAnsi, Text } from '../ink.js'
+import { Box, RawAnsi } from '../ink.js'
 import type { GraphicsOverlay } from '../utils/terminalGraphics.js'
 import {
   allocateKittyImageId,
@@ -25,16 +25,11 @@ import {
   getGraphicsGeneration,
   hasMeasuredCellSize,
   isCellGeometryStale,
-  isLegacyConsoleHost,
   renderGraphicsOverlay,
   resolveGraphicsProtocol,
   subscribeGraphicsCapability,
 } from '../utils/terminalGraphics.js'
-import {
-  type InlineImage as RenderedImage,
-  maxRowsForViewport,
-  renderInlineImage,
-} from '../utils/terminalImage.js'
+import { maxRowsForViewport } from '../utils/imageLayout.js'
 import { logForDebugging } from '../utils/debug.js'
 import {
   applyWithBatch,
@@ -55,23 +50,10 @@ const TRANSCRIPT_GUTTER_COLUMNS = 8
 /**
  * How long to wait before looking again when a graphic was withheld.
  *
- * Short enough that the block fallback reads as a flicker during a resize
- * rather than a downgrade, long enough that a drag does not re-encode per
- * frame — and while the reason still holds, a retry costs one cached block
- * render and no encode at all.
+ * Long enough that a drag does not re-encode per frame, while ensuring a
+ * withheld native image is retried promptly after terminal geometry settles.
  */
 const GRAPHICS_RETRY_MS = 120
-
-/**
- * Shown under a block render that an old Windows ConPTY forced. Without it the
- * downgrade is silent, and the fix is outside Codev: the terminal has to ship a
- * ConPTY that passes image data through.
- */
-const LEGACY_CONSOLE_HOST_HINT =
-  'Blocky preview: an old Windows ConPTY drops image data. Use WezTerm nightly or Windows Terminal 1.22+ for real images.'
-
-/** The mounted image carrying that hint; one in the transcript is enough. */
-let legacyHintOwner: string | null = null
 
 type Props = {
   /** Base64-encoded image bytes, as produced by the read tools. */
@@ -87,13 +69,10 @@ type Props = {
 /**
  * Renders an image inline in the transcript, above its summary line.
  *
- * Decoding is asynchronous — the image processor is an optional native module
- * loaded on demand — so the summary alone is what shows on the first paint, and
- * all that shows whenever rendering is unavailable: a terminal without enough
- * color depth, a build without the processor, or a file that fails to decode.
- * There is deliberately no spinner; for a file already on disk the decode lands
- * within a frame or two, and a placeholder would be noisier than the line it
- * would replace.
+ * Images are encoded with a native terminal graphics protocol and written
+ * outside Ink's cell renderer. A terminal without a supported protocol or
+ * measured pixel geometry shows the summary only; there is no block-glyph
+ * approximation.
  */
 export function InlineImage({
   base64,
@@ -106,15 +85,14 @@ export function InlineImage({
   // taken down, because unmounting the box below unregisters the placement and
   // the renderer erases the pixels it recorded for it on the next frame.
   const imagesEnabled = useSettings().inlineImagesEnabled !== false
-  const [image, setImage] = useState<RenderedImage | null>(null)
   const [overlay, setOverlay] = useState<GraphicsOverlay | null>(null)
   // Reconciliation, not an edge. Every reason a graphic is withheld is
   // temporary — a resize is in flight, the first geometry probe has not
   // answered, the measurement moved while this was encoding — but each is
   // announced by something that can be dropped: a reply lost in a resize burst,
   // a probe coalesced into one already out, a deadline that lapses with nobody
-  // watching the clock. Waiting to be told is what left an image on block
-  // glyphs for the rest of the session after a zoom. Instead, when the render
+  // watching the clock. Waiting to be told is what left an image absent for
+  // the rest of the session after a zoom. Instead, when the render
   // that just finished is not the one that should be on screen, come back and
   // look. The condition is self-limiting: it can only hold while the geometry
   // is unsettled, and that has a deadline of its own.
@@ -148,8 +126,7 @@ export function InlineImage({
   const renderPending = useRef(false)
   // How many rows the renderer found available last time this image was too
   // tall to draw. Without it the component would keep re-encoding the same
-  // oversized box, be withheld every frame, and leave the block-glyph fallback
-  // standing for good.
+  // oversized box, be withheld every frame, and never produce a native image.
   const constraintGeneration = useSyncExternalStore(
     subscribeGraphicsConstraints,
     getGraphicsConstraintGeneration,
@@ -175,7 +152,6 @@ export function InlineImage({
       // Clearing the state is what removes the box, and removing the box is
       // what erases the pixels. Doing it here rather than by returning early
       // from render keeps the hook order stable.
-      setImage(null)
       setOverlay(null)
       setWithheld(false)
       return
@@ -191,18 +167,14 @@ export function InlineImage({
       try {
         const data = Buffer.from(base64, 'base64')
 
-        // Graphics first, because when available it owns the box. The two
-        // renderers size images by different rules — blocks stretch to the 1:2
-        // cell and count subpixels, graphics use real pixels — so letting the
-        // block render choose leaves the graphic smaller than the box it
-        // covers, and the blocks show through around its edges as a ragged
-        // ASCII border. Deriving the box from the graphic and rendering blocks
-        // *into* it keeps the fallback while guaranteeing exact coverage.
+        // Only native graphics protocols are used for image pixels. If the
+        // terminal or its geometry is not ready, keep the summary without
+        // substituting a Unicode approximation.
         const wantsGraphics = resolveGraphicsProtocol() !== 'none'
         // Asked and answered before spending anything on an encode that
         // `renderGraphicsOverlay` would refuse anyway — and, unlike its own
-        // guard, visible here, so the retry below knows the fallback standing
-        // in is temporary.
+        // guard, visible here, so the retry below knows the image is temporarily
+        // withheld.
         const unsettled =
           wantsGraphics && hasMeasuredCellSize() && isCellGeometryStale()
         const overlay =
@@ -217,20 +189,6 @@ export function InlineImage({
               )
         if (!active) return
 
-        // With a graphic the box is already chosen, and the blocks have to fill
-        // it exactly: they are what shows whenever the overlay is withheld, and
-        // any rectangle they leave over is blank screen rather than image.
-        const rendered = await renderInlineImage(
-          data,
-          overlay === null
-            ? { maxColumns, maxRows: effectiveRowBudget }
-            : {
-                maxColumns: overlay.columns,
-                maxRows: overlay.rows,
-                exact: { columns: overlay.columns, rows: overlay.rows },
-              },
-        )
-        if (!active) return
         // Encoding is asynchronous, so a zoom can land inside it and leave the
         // payload already the wrong size for its box. The renderer withholds a
         // placement whose geometry disagrees with the current cell, which is
@@ -246,23 +204,18 @@ export function InlineImage({
         applyWithBatch(token, () => {
           if (!active) return
           renderPending.current = false
-          setImage(rendered)
-          setOverlay(rendered ? overlay : null)
-          setWithheld(rendered !== null && (unsettled || outdated))
+          setOverlay(overlay)
+          setWithheld(unsettled || outdated)
         })
       } catch (error) {
-        // renderInlineImage already swallows decode failures; this only catches
-        // failures in the graphics/layout path. Keep the summary visible, but
-        // record why the decorative image was omitted for `--debug` sessions.
         logForDebugging(
-          `InlineImage: preview failed — ${
+          `InlineImage: native image failed — ${
             error instanceof Error ? error.message : String(error)
           }`,
         )
         if (!active) return
         renderPending.current = false
         endImageRender(token)
-        setImage(null)
         setOverlay(null)
         setWithheld(false)
       }
@@ -290,7 +243,7 @@ export function InlineImage({
   // It only looks again once nothing is still rendering. A render under way
   // lands by itself, and restarting it throws its encode away: after a resize,
   // every encode slower than the retry interval was restarted over and over,
-  // and the images stayed blocky for seconds.
+  // and the images stayed absent for seconds.
   useEffect(() => {
     if (!withheld || !imagesEnabled) return
     let timer: ReturnType<typeof setTimeout>
@@ -305,24 +258,6 @@ export function InlineImage({
     return () => clearTimeout(timer)
   }, [withheld, attempt, imagesEnabled])
 
-  // Behind an old Windows ConPTY the block render is all there will ever be.
-  // Say why under one image, claimed in an effect so an abandoned render cannot
-  // hold the hint, and released on unmount so a later image can take it over.
-  const blockedByConsoleHost =
-    imagesEnabled && image !== null && overlay === null && isLegacyConsoleHost()
-  const [ownsLegacyHint, setOwnsLegacyHint] = useState(false)
-  useEffect(() => {
-    if (!blockedByConsoleHost) return
-    const id = placementId.current!
-    if (legacyHintOwner !== null && legacyHintOwner !== id) return
-    legacyHintOwner = id
-    setOwnsLegacyHint(true)
-    return () => {
-      if (legacyHintOwner === id) legacyHintOwner = null
-      setOwnsLegacyHint(false)
-    }
-  }, [blockedByConsoleHost])
-
   // Register the encoded payload for the renderer to draw over the box above.
   useLayoutEffect(() => {
     const id = placementId.current!
@@ -334,7 +269,7 @@ export function InlineImage({
     // Register during the layout phase. Ink defers its terminal frame to a
     // microtask after layout effects, while passive effects run later. A
     // passive registration can therefore miss the only frame caused by this
-    // state update and leave the block fallback visible until some unrelated
+    // state update and leave the native image absent until some unrelated
     // animation happens to repaint the transcript.
     //
     // Use the geometry captured by the encoder rather than reading it again
@@ -354,25 +289,31 @@ export function InlineImage({
     }
   }, [overlay])
 
-  if (!imagesEnabled || !image) return children
+  const reservationLines = useMemo(
+    () =>
+      overlay
+        ? Array.from({ length: overlay.rows }, () =>
+            ' '.repeat(overlay.columns),
+          )
+        : [],
+    [overlay],
+  )
+
+  if (!imagesEnabled || !overlay) return children
 
   return (
     <Box flexDirection="column">
       {children}
-      {/* Sized to the graphic when there is one, so the reserved cells and the
-          pixels drawn over them are the same box — no block glyphs peeking out
-          along the edges. Without a graphic the block render sizes itself. */}
+      {/* Blank cells reserve the exact terminal-pixel box; the image itself is
+          drawn out-of-band with the selected native graphics protocol. */}
       <Box
         ref={boxRef}
-        width={overlay?.columns}
-        height={overlay?.rows}
+        width={overlay.columns}
+        height={overlay.rows}
         flexShrink={0}
       >
-        <RawAnsi lines={image.lines} width={image.columns} />
+        <RawAnsi lines={reservationLines} width={overlay.columns} />
       </Box>
-      {ownsLegacyHint && blockedByConsoleHost && (
-        <Text dimColor>{LEGACY_CONSOLE_HOST_HINT}</Text>
-      )}
     </Box>
   )
 }

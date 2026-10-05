@@ -247,7 +247,7 @@ test('forcing a protocol still beats an old ConPTY', () => {
 
 // --- Cell geometry ---------------------------------------------------------
 
-test('implausible cell sizes are rejected, keeping the fallback', () => {
+test('implausible cell sizes are rejected, withholding the native image', () => {
   const before = getCellPixelSize()
   for (const bogus of [
     { width: 0, height: 0 },
@@ -301,8 +301,8 @@ test('a graphic never exceeds its reserved box', () => {
 
 test('a graphic covers its cell box exactly', () => {
   // The ragged-ASCII-border bug: sized to the aspect alone, the graphic lands a
-  // fraction of a cell short and the fallback rendered underneath shows through
-  // along the right and bottom edges. Pixel extent must be an exact multiple of
+  // fraction of a cell short, leaving a strip of blank cells along the right
+  // and bottom edges. Pixel extent must be an exact multiple of
   // the cell, so the box it reports is the box it fills.
   for (const cell of [
     { width: 7, height: 14 },
@@ -342,7 +342,7 @@ test('fitting preserves aspect ratio', () => {
 test('a small graphic is not scaled up beyond cell rounding', () => {
   // Exact cell coverage and exact source dimensions cannot both hold: a 30px
   // image in 20px cells is either one row or two, never one and a half.
-  // Coverage wins — a fractional cell is where the fallback shows through —
+  // Coverage wins — a fractional cell would leave a blank strip —
   // so the guarantee is that rounding never moves the image by more than one
   // cell in either direction.
   const cell = { width: 10, height: 20 }
@@ -617,8 +617,8 @@ await asyncTest('the stale mark lapses on its own', async () => {
   // relied on: TerminalQuerier never times out — a batch settles only when its
   // DA1 sentinel returns — so a reply dropped during a resize leaves the
   // promise unsettled for good. Nothing here may depend on it: a mark that
-  // outlives its window means every image falls back to block glyphs
-  // permanently, which is what "sharp at first, blurry after I resize" was.
+  // outlives its window means every native image stays absent
+  // permanently, which is what "sharp at first, absent after I resize" was.
   setCellPixelSize({ width: 10, height: 20 })
   markCellGeometryStale()
   assert(isCellGeometryStale(), 'marked')
@@ -746,10 +746,10 @@ test('a grid we cannot read is not evidence either way', () => {
 })
 
 await asyncTest('the stale mark announces its own expiry', async () => {
-  // The latch behind "it goes blurry when I zoom and never comes back".
+  // The latch behind "it disappears when I zoom and never comes back".
   // Withholding a graphic is a decision taken while rendering, and nothing
   // re-runs on its own when the clock passes a deadline — so the mark lapsing
-  // quietly left every image on block glyphs with no edge left to bring them
+  // quietly left every image absent with no edge left to bring them
   // back. The probe reply normally supplies that edge, and it is exactly what
   // goes missing in a resize burst: coalesced into a query already out, or
   // dropped along with the DA1 sentinel that would have settled it.

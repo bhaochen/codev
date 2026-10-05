@@ -153,7 +153,7 @@ type DrawnRect = CellRect & {
  * past the bottom edge can scroll the window. Withholding on that basis is
  * correct but was terminal: the component had no way to learn it had asked for
  * a box that could not be drawn, so it kept re-encoding the same too-tall image
- * and the block-glyph fallback stood indefinitely. Reporting how many rows were
+ * and the image stayed absent indefinitely. Reporting how many rows were
  * actually available closes the loop, and an image that would not fit comes back
  * one size smaller instead of not at all.
  *
@@ -164,7 +164,7 @@ const rowLimits = new Map<string, number>()
 let constraintGeneration = 0
 const constraintListeners = new Set<() => void>()
 
-/** Below this a shrunken image is not worth drawing; the blocks are better. */
+/** Below this a shrunken image is not worth drawing. */
 const MIN_PLACEMENT_ROWS = 6
 
 /** Rows this placement may occupy, or undefined if it has never been clipped. */
@@ -241,7 +241,7 @@ export type RowGraphic = {
  * A full reset reprints the whole transcript and every image goes back out with
  * its rows — that is what keeps history sharp. Without a bound, a session with
  * hundreds of images would hand the terminal tens of megabytes in one frame.
- * An image past the budget keeps its block render, as every image did before.
+ * An image past the budget is omitted rather than sending an unbounded payload.
  */
 const ROW_GRAPHICS_BUDGET_CHARS = 16 * 1024 * 1024
 
@@ -586,10 +586,9 @@ function overlaps(rect: CellRect, damage: Rectangle | undefined): boolean {
  * and forced a full re-send of the payload each time. That is what made the
  * image thrash and the terminal tear.
  *
- * The cells under a graphic are its block-glyph fallback, which only changes
- * when the image is re-encoded, and log-update writes a cell only when its
- * content differs. So an unchanged checksum means those cells were not
- * rewritten, which means the pixels are still there.
+ * The cells under a graphic are blank reservations, and log-update writes a
+ * cell only when its content differs. So an unchanged checksum means those
+ * cells were not rewritten, which means the pixels are still there.
  *
  * A few thousand cell reads per frame, against a payload of hundreds of
  * kilobytes avoided.
@@ -795,15 +794,15 @@ export function buildGraphicsSequence(options: {
    * *top*. Nothing below the image moves when it shrinks, so removing one row
    * lifts the transcript end by one and drops the box's top by one relative to
    * the viewport — shrinking to exactly the rows still visible lands the top on
-   * `viewportTop`, exactly. Declining to report that was the whole of "it goes
-   * blocky when the window gets shorter and never comes back": the row budget
+   * `viewportTop`, exactly. Declining to report that was the whole of "it
+   * disappears when the window gets shorter and never comes back": the row budget
    * leaves a fixed ten rows for chrome, which stops being enough below a 40-row
    * viewport, and the only recovery path was one that cannot fire here.
    *
    * Budgeted per epoch so this answers a *window* change, not a scroll. A
    * streaming transcript pushes an image off the top too, and shrinking there
-   * would fight the scroll a step at a time until it hit the floor and fell
-   * back to blocks anyway. An image genuinely scrolled into history yields a
+   * would fight the scroll a step at a time until it hit the floor and stayed
+   * absent anyway. An image genuinely scrolled into history yields a
    * number below `MIN_PLACEMENT_ROWS`, which `reportRowLimit` declines, so the
    * two cases separate themselves.
    *
@@ -884,8 +883,8 @@ export function buildGraphicsSequence(options: {
     // The window changed size and the re-measure has not answered. Every
     // payload on screen was encoded against the previous pixels-per-cell, so
     // none of them fits the box the layout now reserves — on zoom out they
-    // overflow it, past where any erase can reach. Take them down and let the
-    // block render, which is exact in cells, stand until a fresh encode lands.
+    // overflow it, past where any erase can reach. Take them down until a fresh
+    // encode against the new geometry lands.
     if (isCellGeometryStale()) {
       trace.push(`skip ${id}: cell geometry stale, awaiting re-measure`)
       erase(id)
@@ -898,7 +897,7 @@ export function buildGraphicsSequence(options: {
     // between encode and layout all produce a smaller one. Drawing anyway spills
     // pixels into cells outside the rectangle, and every erase is computed from
     // that rectangle, so nothing will ever clear them. That is a permanent
-    // ghost, so withhold instead and let the block render stand.
+    // ghost, so withhold it until its exact box is available.
     if (rect.width < placement.columns || rect.height < placement.rows) {
       trace.push(
         `skip ${id}: box ${rect.width}x${rect.height} smaller than ` +
@@ -922,8 +921,8 @@ export function buildGraphicsSequence(options: {
       // image already drawn, still the same payload in the same transcript
       // cells, that is leaving through the top was carried there by the
       // terminal: the pixels belong to buffer cells, and cells scroll into
-      // history with the text. Erasing it here was what turned every image
-      // blocky one turn later, for good. Anything that breaks the match — a
+      // history with the text. Erasing it here was what made every image
+      // disappear one turn later, for good. Anything that breaks the match — a
       // move, a re-encode, a resize epoch, new cell geometry, text written
       // under it — still falls through to the erase below.
       const leftThroughTop =

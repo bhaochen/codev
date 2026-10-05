@@ -6,7 +6,6 @@ import {
   resolveGraphicsProtocol,
   setCellPixelSize,
 } from './terminalGraphics.js'
-import { renderInlineImage } from './terminalImage.js'
 import type { DOMElement } from '../ink/dom.js'
 import {
   buildGraphicsSequence,
@@ -35,26 +34,6 @@ for (let y = 0; y < height; y++) {
     pixels[offset + 3] = 255
   }
 }
-
-const rendered = await renderInlineImage(
-  PNG.sync.write({ width, height, data: pixels }),
-  {
-    maxColumns: 16,
-    maxRows: 4,
-    depth: 'truecolor',
-  },
-)
-
-if (
-  rendered === null ||
-  rendered.columns !== 16 ||
-  rendered.rows !== 4 ||
-  !rendered.lines.some(line => line.includes('\x1b['))
-) {
-  throw new Error('Compiled terminal image rendering did not produce a PNG preview')
-}
-
-console.log('Compiled PNG preview rendered as 16 columns x 4 rows')
 
 setCellPixelSize({ width: 8, height: 16 })
 const protocol = resolveGraphicsProtocol({ TERM: 'xterm-kitty' }, null, true)
