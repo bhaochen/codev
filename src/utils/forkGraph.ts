@@ -49,6 +49,21 @@ export async function buildForkForest(logs: LogOption[]): Promise<ForkNode[]> {
   return roots
 }
 
+export function updateForkForestTitle(
+  nodes: ForkNode[],
+  sessionId: string,
+  title: string,
+): ForkNode[] {
+  return nodes.map(node => ({
+    ...node,
+    log:
+      node.sessionId === sessionId
+        ? { ...node.log, customTitle: title }
+        : node.log,
+    children: updateForkForestTitle(node.children, sessionId, title),
+  }))
+}
+
 async function readForkParentId(log: LogOption): Promise<string | null> {
   const path = log.fullPath
   if (!path) return null
