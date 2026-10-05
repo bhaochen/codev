@@ -57,6 +57,7 @@ export function toLLMRequest(args: {
   }
   const context: LLMRuntimeContext = {
     model: options.model,
+    providerOverride: options.providerOverride,
     getToolPermissionContext: options.getToolPermissionContext,
     agents: options.agents,
     allowedAgentTypes: options.allowedAgentTypes,

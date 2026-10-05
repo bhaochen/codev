@@ -14,6 +14,7 @@ import type { AgentContentBlock } from '../../../types/agentMessage.js'
 import { APIUserAbortError } from '@anthropic-ai/sdk/error'
 import { randomUUID } from 'crypto'
 import { httpRequest } from '../transport/http.js'
+import { requestWithRetry } from '../transport/retryHttpRequest.js'
 import { parseOpenAIChunksFromSSE } from '../transport/sse.js'
 import { getSessionId } from '../../../bootstrap/state.js'
 import { getModelMaxOutputTokens } from '../../../utils/context.js'
@@ -132,9 +133,13 @@ export async function* queryOpenAICompatibleChat(
 
     const fetchOverride = context.fetchOverride as unknown as typeof fetch | undefined
     const url = endpoint.includes('/chat/completions') ? endpoint : chatCompletionsUrlFromBase(endpoint)
-    const response = await httpRequest(
-      { url, method: 'POST', headers, body: JSON.stringify(body), signal },
-      fetchOverride,
+    const response = await requestWithRetry(
+      () =>
+        httpRequest(
+          { url, method: 'POST', headers, body: JSON.stringify(body), signal },
+          fetchOverride,
+        ),
+      signal,
     )
     if (!response.ok) {
       const text = await response.text().catch(() => '')

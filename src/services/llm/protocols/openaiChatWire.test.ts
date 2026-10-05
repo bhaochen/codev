@@ -815,4 +815,34 @@ describe('queryOpenAIChat integration', () => {
     expect((body.messages as Array<{ role: string }>)[0]!.role).toBe('system')
     expect((body.messages as Array<{ role: string }>)[1]!.role).toBe('user')
   })
+
+  test('retries a transient HTTP response before consuming the stream', async () => {
+    const { queryOpenAIChat } = await import('../clients/openaiChat.js')
+    let requests = 0
+    const fetchOverride = async (): Promise<Response> => {
+      requests++
+      if (requests === 1) {
+        return new Response(null, {
+          status: 503,
+          headers: { 'retry-after': '0' },
+        })
+      }
+      return new Response(sseStream(textChunks(['recovered'], 'stop')), { status: 200 })
+    }
+    const req = makeRequest({
+      messages: [wrapperUser([{ type: 'text', text: 'hi' }])],
+      systemPrompt: asSystemPrompt(['sys']),
+      context: { ...makeRequest().context, fetchOverride: fetchOverride as never },
+    })
+
+    const assistant: Array<{ type: string; message?: unknown }> = []
+    for await (const raw of queryOpenAIChat(route, req)) {
+      if ((raw as { type: string }).type === 'assistant') {
+        assistant.push(raw as { type: string; message?: unknown })
+      }
+    }
+
+    expect(requests).toBe(2)
+    expect(assistant).toHaveLength(1)
+  })
 })

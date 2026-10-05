@@ -45,6 +45,13 @@ import {
 } from './services/api/errors.js'
 import { logAntError, logForDebugging } from './utils/debug.js'
 import {
+  getConfiguredFallbackChain,
+  isFallbackEligibleError,
+  type FallbackTarget,
+} from './utils/model/fallbackChain.js'
+import type { ProviderId } from './services/llm/types.js'
+import { getAPIProvider } from './utils/model/providers.js'
+import {
   createUserMessage,
   createUserInterruptionMessage,
   normalizeMessagesForAPI,
@@ -298,6 +305,10 @@ async function* queryLoop(
   // Snapshot immutable env/statsig/session state once at entry. See QueryConfig
   // for what's included and why feature() gates are intentionally excluded.
   const config = buildQueryConfig()
+  const fallbackChain = getConfiguredFallbackChain()
+  let fallbackTargetIndex = 0
+  let activeFallbackProvider: ProviderId | undefined
+  let activeFallbackEffort: FallbackTarget['effort']
 
   // Fired once per user turn — the prompt is invariant across loop iterations,
   // so per-iteration firing would ask sideQuery the same question N times.
@@ -660,6 +671,8 @@ async function* queryLoop(
         attemptWithFallback = false
         try {
           let streamingFallbackOccured = false
+          let selectedFallback: FallbackTarget | undefined
+          let streamOutputStarted = false
           const toolChoice = undefined
           queryCheckpoint('query_api_streaming_start')
           for await (const message of deps.callModel({
@@ -674,6 +687,7 @@ async function* queryLoop(
                 return appState.toolPermissionContext
               },
               model: currentModel,
+              providerOverride: activeFallbackProvider,
               ...(config.gates.fastModeEnabled && {
                 fastMode: appState.fastMode,
               }),
@@ -697,7 +711,7 @@ async function* queryLoop(
                 c => c.type === 'pending',
               ),
               queryTracking,
-              effortValue: appState.effortValue,
+              effortValue: activeFallbackEffort ?? appState.effortValue,
               advisorModel: appState.advisorModel,
               skipCacheWrite,
               agentId: toolUseContext.agentId,
@@ -717,6 +731,51 @@ async function* queryLoop(
               }),
             },
           })) {
+            if (
+              !streamOutputStarted &&
+              assistantMessages.length === 0 &&
+              typeof querySource === 'string' &&
+              querySource.startsWith('repl_main_thread') &&
+              !toolUseContext.options.isNonInteractiveSession &&
+              !toolUseContext.agentId &&
+              message.type === 'assistant' &&
+              message.isApiErrorMessage === true &&
+              isFallbackEligibleError(
+                message.error ?? message.apiError,
+                Array.isArray(message.message.content)
+                  ? message.message.content
+                      .flatMap(block =>
+                        block.type === 'text' ? [block.text] : [],
+                      )
+                      .join('\n')
+                  : message.message.content,
+              )
+            ) {
+              const currentProvider = activeFallbackProvider ?? getAPIProvider()
+              while (fallbackTargetIndex < fallbackChain.length) {
+                const candidate = fallbackChain[fallbackTargetIndex++]!
+                const candidateProvider =
+                  candidate.provider === 'anthropic'
+                    ? 'firstParty'
+                    : candidate.provider
+                if (candidateProvider === currentProvider && candidate.model === currentModel) {
+                  continue
+                }
+                selectedFallback = candidate
+                activeFallbackProvider = candidateProvider
+                break
+              }
+              if (selectedFallback) {
+                activeFallbackEffort = selectedFallback.effort
+                currentModel = selectedFallback.model
+                toolUseContext.options.mainLoopModel = selectedFallback.model
+                attemptWithFallback = true
+                break
+              }
+            }
+            if (message.type !== 'assistant' && message.type !== 'system') {
+              streamOutputStarted = true
+            }
             // We won't use the tool_calls from the first attempt
             // We could.. but then we'd have to merge assistant messages
             // with different ids and double up on full the tool_results
@@ -873,6 +932,16 @@ async function* queryLoop(
             }
           }
           queryCheckpoint('query_api_streaming_end')
+          if (selectedFallback) {
+            logForDebugging(
+              `[Fallback] Switching to ${selectedFallback.provider}/${selectedFallback.model} after provider error`,
+            )
+            yield createSystemMessage(
+              `Provider request failed; retrying with ${selectedFallback.provider}/${selectedFallback.model}`,
+              'warning',
+            )
+            continue
+          }
 
           // Yield deferred microcompact boundary message using actual API-reported
           // token deletion count instead of client-side estimates.

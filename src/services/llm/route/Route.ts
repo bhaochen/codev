@@ -7,10 +7,13 @@ import type { LLMRoute, ProviderId, ProtocolId } from '../types.js'
 
 export type { LLMRoute, ProviderId, ProtocolId }
 
-export type RouteInput = string | { model: string; protocol?: ProtocolId; endpoint?: string }
+export type RouteInput =
+  | string
+  | { model: string; provider?: ProviderId; protocol?: ProtocolId; endpoint?: string }
 
 export function normalizeRouteInput(input: RouteInput): {
   rawModel: string
+  overrideProvider?: ProviderId
   overrideProtocol?: ProtocolId
   overrideEndpoint?: string
 } {
@@ -19,6 +22,7 @@ export function normalizeRouteInput(input: RouteInput): {
   }
   return {
     rawModel: input.model,
+    overrideProvider: input.provider,
     overrideProtocol: input.protocol,
     overrideEndpoint: input.endpoint,
   }

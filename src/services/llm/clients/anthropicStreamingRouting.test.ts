@@ -54,6 +54,11 @@ describe('usesNativeAnthropicStreaming provider gating', () => {
     expect(usesNativeAnthropicStreaming()).toBe(true)
   })
 
+  test('explicit firstParty fallback wins over the configured default provider', () => {
+    process.env.CLAUDE_CODE_USE_BEDROCK = '1'
+    expect(usesNativeAnthropicStreaming('firstParty')).toBe(true)
+  })
+
   test('Bedrock opts out to the legacy SDK path', () => {
     process.env.CLAUDE_CODE_USE_BEDROCK = '1'
     expect(usesNativeAnthropicStreaming()).toBe(false)
@@ -133,11 +138,14 @@ function sseResponse() {
   })
 }
 
-function buildRequest(fetchOverride: typeof fetch) {
+function buildRequest(
+  fetchOverride: typeof fetch,
+  provider: 'firstParty' | 'bedrock' = 'firstParty',
+) {
   const model = 'claude-opus-4-6'
   return {
     route: {
-      provider: 'firstParty',
+      provider,
       model,
       protocol: 'anthropic-messages',
       endpoint: undefined,
@@ -163,8 +171,11 @@ function buildRequest(fetchOverride: typeof fetch) {
   }
 }
 
-async function collectAssistant(fetchOverride: typeof fetch) {
-  const { route, request } = buildRequest(fetchOverride)
+async function collectAssistant(
+  fetchOverride: typeof fetch,
+  provider: 'firstParty' | 'bedrock' = 'firstParty',
+) {
+  const { route, request } = buildRequest(fetchOverride, provider)
   const seen: any[] = []
   for await (const item of queryAnthropicMessages(route, request)) {
     seen.push(item)
@@ -191,6 +202,16 @@ describe('firstParty native streaming integration', () => {
     expect(assistant[0]!.message.stop_reason).toBe('end_turn')
     expect(assistant[0]!.message.usage.output_tokens).toBe(4)
   }, 30000)
+
+  test('explicit firstParty route uses native transport when Bedrock is the default', async () => {
+    process.env.CLAUDE_CODE_USE_BEDROCK = '1'
+    process.env.CLAUDE_CODE_SKIP_BEDROCK_AUTH = '1'
+    const calls = stubFetch(async () => sseResponse())
+    await collectAssistant(globalThis.fetch, 'firstParty')
+    const messageCalls = calls.filter(c => c.url.endsWith('/v1/messages'))
+    expect(messageCalls).toHaveLength(1)
+    expect(messageCalls[0]!.url).toBe('https://api.anthropic.com/v1/messages')
+  }, 30000)
 })
 
 describe('Bedrock legacy streaming integration', () => {
@@ -203,7 +224,7 @@ describe('Bedrock legacy streaming integration', () => {
     // taken, native first-party endpoint untouched), so any terminal outcome
     // is acceptable as long as every inference call targets Bedrock.
     try {
-      await collectAssistant(globalThis.fetch)
+      await collectAssistant(globalThis.fetch, 'bedrock')
     } catch {
       // expected: mock cannot satisfy Bedrock wire framing
     }

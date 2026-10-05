@@ -13,6 +13,7 @@ import type { AgentContentBlock } from '../../../types/agentMessage.js'
 import { APIUserAbortError } from '@anthropic-ai/sdk/error'
 import { randomUUID } from 'crypto'
 import { httpRequest } from '../transport/http.js'
+import { requestWithRetry } from '../transport/retryHttpRequest.js'
 import { parseOpenAIChunksFromSSE } from '../transport/sse.js'
 import { getSessionId } from '../../../bootstrap/state.js'
 import { getModelMaxOutputTokens } from '../../../utils/context.js'
@@ -59,7 +60,7 @@ export async function* queryOpenAIChat(
   let stopReason: string | null = null
   let maxTokens = 0
   try {
-    const model = route.model
+    let model = route.model
     const endpoint = route.endpoint ?? ''
     if (!endpoint) throw new Error(`openai-chat route missing endpoint for provider ${route.provider}`)
     const cred = resolveAuth(route.provider)
@@ -190,21 +191,24 @@ export async function* queryOpenAIChat(
     else headers.Authorization = 'Bearer public'
     const fetchOverride = context.fetchOverride as unknown as typeof fetch | undefined
     const url = endpoint.includes('/chat/completions') ? endpoint : chatCompletionsUrlFromBase(endpoint)
-    let response = await httpRequest(
-      { url, method: 'POST', headers, body: JSON.stringify(body), signal },
-      fetchOverride,
-    )
+    const sendRequest = () =>
+      requestWithRetry(
+        () =>
+          httpRequest(
+            { url, method: 'POST', headers, body: JSON.stringify(body), signal },
+            fetchOverride,
+          ),
+        signal,
+      )
+    let response = await sendRequest()
     // 免费模型瞬态 500 按 opencode 策略重试并回退至 big-pickle，确保 hi 可用
     if (!response.ok && isFree && response.status === 500 && model !== 'big-pickle') {
-      const fallbackBody = { ...body, model: 'big-pickle' }
       logForDebugging(`[OpenAIChat] free model ${model} 500, fallback to big-pickle`)
-      response = await httpRequest(
-        { url, method: 'POST', headers, body: JSON.stringify(fallbackBody), signal },
-        fetchOverride,
-      )
+      ;(body as { model?: string }).model = 'big-pickle'
+      model = 'big-pickle'
+      response = await sendRequest()
       if (response.ok) {
-        // 回退成功，更新 model 供后续 usage 统计
-        ;(body as { model?: string }).model = 'big-pickle'
+        logForDebugging(`[OpenAIChat] free-tier fallback succeeded with ${model}`)
       }
     }
     if (!response.ok) {

@@ -11,7 +11,10 @@ import type { LLMRequest } from './types.js'
 
 export class ModelRuntime {
   async *generate(request: LLMRequest) {
-    const route = resolveRoute(request.model)
+    const route = resolveRoute({
+      model: request.model,
+      provider: request.context.providerOverride,
+    })
     const modelMeta = getModelMetadata(route.model)
     const client = getClientForRoute(route)
     if (!client) {

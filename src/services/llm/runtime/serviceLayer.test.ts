@@ -21,6 +21,7 @@ function sampleOptions(): Options {
   return {
     getToolPermissionContext: async () => ({}) as never,
     model: 'claude-sonnet-4-6',
+    providerOverride: 'openai',
     isNonInteractiveSession: true,
     querySource: 'main',
     agents: [],
@@ -134,6 +135,7 @@ describe('LLM service layer: Options → LLMRequest → Options round-trip', () 
     expect(request.config.temperature).toBe(0.3)
     expect(request.config.thinking).toEqual({ type: 'enabled', budgetTokens: 1024 })
     expect(request.context.agents).toBe(options.agents)
+    expect(request.context.providerOverride).toBe('openai')
 
     const rebuilt = assembleAnthropicOptions(request)
     // thinkingConfig is the one field that crosses via a separate arg (not via

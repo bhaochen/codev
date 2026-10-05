@@ -78,6 +78,21 @@ describe('resolveRoute', () => {
     expect(r.provider).toBe('bedrock')
     expect(r.protocol).toBe('anthropic-messages')
   })
+
+  test('explicit provider override resolves a cross-provider fallback route', () => {
+    process.env.CLAUDE_CODE_API_PROVIDER = 'opencode'
+    const r = resolveRoute({ provider: 'openai', model: 'gpt-5' })
+    expect(r.provider).toBe('openai')
+    expect(r.protocol).toBe('openai-chat')
+    expect(r.model).toBe('gpt-5')
+    expect(r.endpoint).toContain('api.openai.com')
+  })
+
+  test('anthropic fallback alias normalizes to firstParty', () => {
+    const r = resolveRoute({ provider: 'anthropic', model: 'claude-sonnet-4-6' })
+    expect(r.provider).toBe('firstParty')
+    expect(r.protocol).toBe('anthropic-messages')
+  })
 })
 
 describe('Client=Protocol', () => {

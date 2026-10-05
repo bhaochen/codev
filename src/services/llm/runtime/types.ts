@@ -16,6 +16,7 @@
  * must not reach past this layer into provider SDK types.
  */
 import type { AgentId } from '../../../types/ids.js'
+import type { ProviderId } from '../types.js'
 import type { Message, StreamEvent } from '../../../types/message.js'
 import type {
   QueryChainTracking,
@@ -98,6 +99,7 @@ export type LLMRequestConfig = {
  */
 export type LLMRuntimeContext = {
   model: string
+  providerOverride?: ProviderId
   getToolPermissionContext: () => Promise<ToolPermissionContext>
   agents: AgentDefinition[]
   allowedAgentTypes?: string[]

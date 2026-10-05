@@ -376,6 +376,31 @@ export const SettingsSchema = lazySchema(() =>
         .string()
         .optional()
         .describe('Override the default model used by Claude Code'),
+      fallbackEnabled: z
+        .boolean()
+        .optional()
+        .describe('Whether the configured cross-provider fallback chain is enabled'),
+      fallbackChain: z
+        .array(
+          z.object({
+            provider: z.enum([
+              'firstParty',
+              'anthropic',
+              'openai',
+              'opencode',
+              'nvidia',
+            ]),
+            model: z.string().min(1),
+            effort: z
+              .enum(['minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+              .optional(),
+          }),
+        )
+        .max(3)
+        .optional()
+        .describe(
+          'Ordered provider/model targets used for interactive recovery from authentication, quota, rate-limit, and server errors.',
+        ),
       // Enterprise allowlist of models
       availableModels: z
         .array(z.string())

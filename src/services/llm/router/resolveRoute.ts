@@ -12,8 +12,12 @@ import { buildRoute, normalizeRouteInput, type RouteInput } from '../route/Route
 export type ResolveRouteInput = RouteInput
 
 export function resolveRoute(input: ResolveRouteInput): LLMRoute {
-  const { rawModel, overrideProtocol, overrideEndpoint } = normalizeRouteInput(input)
-  const { provider } = resolveProviderContext()
+  const { rawModel, overrideProvider, overrideProtocol, overrideEndpoint } = normalizeRouteInput(input)
+  const { provider: defaultProvider } = resolveProviderContext()
+  const provider =
+    overrideProvider === 'anthropic'
+      ? 'firstParty'
+      : overrideProvider ?? defaultProvider
   const model = resolveModel(provider, rawModel)
   const def = getProviderDef(provider) as {
     defaultProtocol?: LLMRoute['protocol']

@@ -279,7 +279,7 @@ import {
 } from '../../api/withRetry.js'
 import { StreamingSpecDispatcher } from '../../tools/StreamingSpecDispatcher.js'
 
-import type { LLMRoute } from '../types.js'
+import type { LLMRoute, ProviderId } from '../types.js'
 import type { LLMRequest } from '../runtime/types.js'
 
 // Native Anthropic wire protocol helpers
@@ -768,6 +768,7 @@ export function assistantMessageToMessageParam(
 export type Options = {
   getToolPermissionContext: () => Promise<ToolPermissionContext>
   model: string
+  providerOverride?: ProviderId
   toolChoice?: BetaToolChoiceTool | BetaToolChoiceAuto | undefined
   isNonInteractiveSession: boolean
   extraToolSchemas?: BetaToolUnion[]
@@ -832,11 +833,20 @@ function getNonstreamingFallbackTimeoutMs(): number {
   return isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) ? 120_000 : 300_000
 }
 
-function usesLegacySdkProvider(): boolean {
+function usesLegacySdkProvider(
+  provider?: ProviderId | ReturnType<typeof getAPIProvider>,
+): boolean {
+  if (provider === undefined) {
+    return (
+      isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK) ||
+      isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY) ||
+      isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX)
+    )
+  }
   return (
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX)
+    provider === 'bedrock' ||
+    provider === 'foundry' ||
+    provider === 'vertex'
   )
 }
 
@@ -847,8 +857,11 @@ function usesLegacySdkProvider(): boolean {
  * style providers need their own base-URL routing — both still served by
  * the legacy SDK client factory.
  */
-export function usesNativeAnthropicStreaming(): boolean {
-  return getAPIProvider() === 'firstParty'
+export function usesNativeAnthropicStreaming(
+  provider?: ProviderId | ReturnType<typeof getAPIProvider>,
+): boolean {
+  const resolvedProvider = provider ?? getAPIProvider()
+  return resolvedProvider === 'firstParty' || resolvedProvider === 'anthropic'
 }
 
 /**
@@ -922,11 +935,12 @@ async function nativeNonStreamingCreate(
  */
 async function getNonStreamingClient(clientOptions: {
   model: string
+  provider?: ProviderId
   fetchOverride?: Options['fetchOverride']
   source: string
   apiKeyOverride?: string | null
 }): Promise<Anthropic> {
-  if (usesLegacySdkProvider()) {
+  if (usesLegacySdkProvider(clientOptions.provider)) {
     return getLegacyNonStreamingClient(clientOptions)
   }
   const timeoutMs = getNonstreamingFallbackTimeoutMs()
@@ -957,6 +971,7 @@ async function getNonStreamingClient(clientOptions: {
 export async function* executeNonStreamingRequest(
   clientOptions: {
     model: string
+    provider?: ProviderId
     fetchOverride?: Options['fetchOverride']
     source: string
   },
@@ -1199,6 +1214,7 @@ export function assembleAnthropicOptions(request: LLMRequest): Options {
   if (config.cache?.enabled !== undefined) options.enablePromptCaching = config.cache.enabled
   if (config.cache?.skipWrite !== undefined) options.skipCacheWrite = config.cache.skipWrite
   if (context.advisorModel !== undefined) options.advisorModel = context.advisorModel
+  if (context.providerOverride !== undefined) options.providerOverride = context.providerOverride
   ;(options as unknown as { thinkingConfig: ThinkingConfig }).thinkingConfig =
     config.thinking ?? { type: 'disabled' }
   return options
@@ -1242,7 +1258,7 @@ export async function* queryAnthropicMessages(
   const previousRequestId = getPreviousRequestIdFromMessages(messages)
 
   const resolvedModel =
-    getAPIProvider() === 'bedrock' &&
+    route.provider === 'bedrock' &&
     route.model.includes('application-inference-profile')
       ? ((await getInferenceProfileBackingModel(route.model)) ??
         route.model)
@@ -1362,7 +1378,7 @@ export async function* queryAnthropicMessages(
   // Header differs by provider: 1P/Foundry use advanced-tool-use, Vertex/Bedrock use tool-search-tool
   // For Bedrock, this header must go in extraBodyParams, not the betas array
   const toolSearchHeader = useToolSearch ? getToolSearchBetaHeader() : null
-  if (toolSearchHeader && getAPIProvider() !== 'bedrock') {
+  if (toolSearchHeader && route.provider !== 'bedrock') {
     if (!betas.includes(toolSearchHeader)) {
       betas.push(toolSearchHeader)
     }
@@ -1620,7 +1636,7 @@ export async function* queryAnthropicMessages(
     if (
       !cacheEditingHeaderLatched &&
       cachedMCEnabled &&
-      getAPIProvider() === 'firstParty' &&
+      route.provider === 'firstParty' &&
       options.querySource === 'repl_main_thread'
     ) {
       cacheEditingHeaderLatched = true
@@ -1739,7 +1755,7 @@ export async function* queryAnthropicMessages(
 
     // For Bedrock, include both model-based betas and dynamically-added tool search header
     const bedrockBetas =
-      getAPIProvider() === 'bedrock'
+      route.provider === 'bedrock'
         ? [
             ...getBedrockExtraBodyParamsBetas(retryContext.model),
             ...(toolSearchHeader ? [toolSearchHeader] : []),
@@ -1865,11 +1881,11 @@ export async function* queryAnthropicMessages(
     // the feature disables but the header doesn't flip.
     const useCachedMC =
       cachedMCEnabled &&
-      getAPIProvider() === 'firstParty' &&
+      route.provider === 'firstParty' &&
       options.querySource === 'repl_main_thread'
     if (
       cacheEditingHeaderLatched &&
-      getAPIProvider() === 'firstParty' &&
+      route.provider === 'firstParty' &&
       options.querySource === 'repl_main_thread' &&
       !betasParams.includes(cacheEditingBetaHeader)
     ) {
@@ -1980,14 +1996,14 @@ export async function* queryAnthropicMessages(
 
     // Provider gating: only firstParty has a proven native transport.
     // Bedrock / Vertex / Foundry / local keep the legacy SDK streaming path.
-    if (usesNativeAnthropicStreaming()) {
+    if (usesNativeAnthropicStreaming(route.provider)) {
       // Build request params once (they don't change across retries except for max_tokens)
       const baseParams = paramsFromContext({ model: route.model, thinkingConfig })
       captureAPIRequest(baseParams, options.querySource)
 
       // Generate client request ID for first-party tracking
       const clientRequestId =
-        getAPIProvider() === 'firstParty' && isFirstPartyAnthropicBaseUrl()
+        route.provider === 'firstParty' && isFirstPartyAnthropicBaseUrl()
           ? randomUUID()
           : undefined
 
@@ -2126,7 +2142,7 @@ export async function* queryAnthropicMessages(
           // server request ID) can still be correlated with server logs.
           // First-party only — 3P providers don't log it (inc-4029 class).
           clientRequestId =
-            getAPIProvider() === 'firstParty' && isFirstPartyAnthropicBaseUrl()
+            route.provider === 'firstParty' && isFirstPartyAnthropicBaseUrl()
               ? randomUUID()
               : undefined
 
@@ -2875,7 +2891,11 @@ export async function* queryAnthropicMessages(
           : 'other') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       })
       const result = yield* executeNonStreamingRequest(
-        { model: route.model, source: options.querySource },
+        {
+          model: route.model,
+          provider: route.provider,
+          source: options.querySource,
+        },
         {
           model: route.model,
           fallbackModel: options.fallbackModel,
@@ -2974,7 +2994,11 @@ export async function* queryAnthropicMessages(
       try {
         // Fall back to non-streaming mode
         const result = yield* executeNonStreamingRequest(
-          { model: route.model, source: options.querySource },
+          {
+            model: route.model,
+            provider: route.provider,
+            source: options.querySource,
+          },
           {
             model: route.model,
             fallbackModel: options.fallbackModel,

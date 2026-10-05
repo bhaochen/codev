@@ -3,7 +3,7 @@ import { isUltrathinkEnabled } from './thinking.js'
 import { getInitialSettings } from './settings/settings.js'
 import { isProSubscriber, isMaxSubscriber, isTeamSubscriber } from './auth.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
-import { getAPIProvider } from './model/providers.js'
+import { getAPIProvider, type APIProvider } from './model/providers.js'
 import { get3PModelCapabilityOverride } from './model/modelSupportOverrides.js'
 import { isEnvTruthy } from './envUtils.js'
 import { getCanonicalName } from './model/model.js'
@@ -181,7 +181,10 @@ function modelNameSupportsMax(model: string): boolean {
  * Checks: 1) model-specific config from env, 2) model id prefix matching,
  * 3) falls back to default levels (minus 'max' for non-Opus models).
  */
-export function getModelSupportedEfforts(model: string): EffortLevel[] {
+export function getModelSupportedEfforts(
+  model: string,
+  provider: APIProvider | null = getAPIProvider(),
+): EffortLevel[] {
   const configs = resolveModelEffortConfigs()
   const canonical = getCanonicalName(model)
 
@@ -197,7 +200,7 @@ export function getModelSupportedEfforts(model: string): EffortLevel[] {
   }
 
   // 3. Provider-specific reasoning_options from models.dev cache
-  if (getAPIProvider() === 'nvidia') {
+  if (provider === 'nvidia') {
     const { getNvidiaModelReasoningOptions } = require('./model/nvidiaModels.js') as {
       getNvidiaModelReasoningOptions: (id: string) => string[] | undefined
     }
@@ -210,7 +213,7 @@ export function getModelSupportedEfforts(model: string): EffortLevel[] {
     }
   }
 
-  if (getAPIProvider() === 'opencode') {
+  if (provider === 'opencode') {
     const { getOpencodeModelReasoningOptions } = require('./model/opencodeModels.js') as {
       getOpencodeModelReasoningOptions: (id: string) => string[] | undefined
     }
@@ -223,7 +226,7 @@ export function getModelSupportedEfforts(model: string): EffortLevel[] {
     }
   }
 
-  if (getAPIProvider() === 'openrouter') {
+  if (provider === 'openrouter') {
     const { getOpenRouterModelReasoningOptions } = require('./model/openRouterModels.js') as {
       getOpenRouterModelReasoningOptions: (id: string) => string[] | undefined
     }
