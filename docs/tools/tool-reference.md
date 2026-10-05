@@ -14,6 +14,7 @@
 | **Glob** (GlobTool) | 核心 | 使用 glob 模式快速搜索文件名。支持 `.gitignore` 排除规则 | `pattern` (必填), `path` (可选) |
 | **Grep** (GrepTool) | 核心 | 使用正则表达式搜索文件内容。基于 ripgrep，支持多种输出模式 | `pattern` (必填), `path` (可选), `glob`, `output_mode`, `-B`, `-A`, `-C`, `-i`, `type`, `head_limit`, `multiline` |
 | **NotebookEdit** (NotebookEditTool) | 核心 | 编辑 Jupyter Notebook (.ipynb) 文件的单元格。支持 replace / insert / delete 模式 | `notebook_path` (必填), `cell_id`, `new_source`, `cell_type`, `edit_mode` |
+| **Snapshot** (SnapshotTool) | 核心 | Shadow Git 快照与时间旅行：save / list / diff / restore 工作区快照，不触碰项目 `.git` 的 index 与 refs；>2MB 文件跳过，每周自动 gc。默认开启，`CODEV_SNAPSHOT_DISABLE=1` 关闭 | `action` (必填: save/list/diff/restore), `hash`, `compareHash`, `label`, `limit` |
 
 ---
 

@@ -8,6 +8,7 @@ import { FileReadTool } from './tools/FileReadTool/FileReadTool.js'
 import { FileWriteTool } from './tools/FileWriteTool/FileWriteTool.js'
 import { GlobTool } from './tools/GlobTool/GlobTool.js'
 import { NotebookEditTool } from './tools/NotebookEditTool/NotebookEditTool.js'
+import { SnapshotTool } from './tools/SnapshotTool/SnapshotTool.js'
 import { WebFetchTool } from './tools/WebFetchTool/WebFetchTool.js'
 import { TaskStopTool } from './tools/TaskStopTool/TaskStopTool.js'
 import { BriefTool } from './tools/BriefTool/BriefTool.js'
@@ -202,6 +203,8 @@ export function getAllBaseTools(): Tools {
     FileEditTool,
     FileWriteTool,
     NotebookEditTool,
+    // SnapshotTool defaults ON. Opt out: CODEV_SNAPSHOT_DISABLE=1.
+    ...(isEnvTruthy(process.env.CODEV_SNAPSHOT_DISABLE) ? [] : [SnapshotTool]),
     WebFetchTool,
     TodoWriteTool,
     WebSearchTool,
