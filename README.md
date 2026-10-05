@@ -299,3 +299,23 @@ credential values before anything leaves the machine.
     <td><img src="assets/WebSearchTool3.png"></td>
   </tr>
 </table>
+
+### Browser Automation & Python Kernel
+
+Drive a real Chromium and run Python side by side, with everything rendered inline
+in the terminal:
+
+- **Browser** talks to a real Chrome/Edge over the DevTools protocol: `observe`
+  turns the page into numbered `@N` refs, then `click` / `fill` / `type` / `eval`
+  act by ref instead of guessing coordinates. Screenshots come back inline in the
+  transcript — including pages you are not logged in to — and reflow with the
+  terminal size.
+- **Python kernel** is persistent: run cells, keep state across calls, and let
+  Matplotlib figures render directly into the conversation, next to the page the
+  browser is driving.
+
+<table align="center">
+  <tr>
+    <td><img src="assets/browser_python_kernel.png"></td>
+  </tr>
+</table>
