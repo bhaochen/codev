@@ -60,7 +60,6 @@ import { logForDebugging } from '../utils/debug.js'
 import { loadMemoryPrompt } from '../memdir/memdir.js'
 import { isUndercover } from '../utils/undercover.js'
 import { isMcpInstructionsDeltaEnabled } from '../utils/mcpInstructionsDelta.js'
-import { getMermaidDiagramsReminder } from '../utils/mermaidDiagramsReminder.js'
 import { EVAL_TOOL_NAME } from '../tools/EvalTool/constants.js'
 
 // Dead code elimination: conditional imports for feature-gated modules
@@ -299,9 +298,6 @@ function getUsingYourToolsSection(enabledTools: Set<string>): string {
 
   const items = [
     `Do NOT use the ${BASH_TOOL_NAME} to run commands when a relevant dedicated tool is provided. Using dedicated tools allows the user to better understand and review your work. This is CRITICAL to assisting the user:`,
-    getInitialSettings().mermaidDiagrams === false
-      ? null
-      : getMermaidDiagramsReminder(true),
     providedToolSubitems,
     taskToolName
       ? `Break down and manage your work with the ${taskToolName} tool. These tools are helpful for planning your work and helping the user track your progress. Mark each task as completed as soon as you are done with the task. Do not batch up multiple tasks before marking them as completed.`

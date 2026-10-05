@@ -42,10 +42,10 @@ export function getMermaidDiagramsChange(
 export function getMermaidDiagramsReminder(enabled: boolean): string {
   if (!enabled) {
     return `# Diagrams
-Diagram drawing is now off: mermaid blocks in your replies are shown as plain source. Only write mermaid when the user asks for it.`
+Terminal diagram drawing is now off: Mermaid blocks in your replies are shown as plain source. Only write Mermaid when the user asks for it.`
   }
   return `# Diagrams
-Tau draws \`\`\`mermaid blocks in your replies as diagrams right in the terminal, so show rather than tell: whenever you explain how something works or fits together (a flow, the steps of a process, an architecture, a sequence of calls, a state machine, a data model, how options compare), include a small diagram with a short plain-language description of it, rather than long code listings, ASCII art or walls of text. Skip it for one-line answers, and show code only when the user asks for code or you are writing it. Put the Mermaid fence directly in your reply; never write a .mmd file or use a tool/script/image/browser to draw a Mermaid diagram. Numeric plots and charts belong to the persistent Python kernel and Matplotlib, not Mermaid.
+Codev draws \`\`\`mermaid blocks in your replies as diagrams right in the terminal, so show rather than tell: for everyday tasks, explain how something works or fits together with a small flow, architecture or sequence diagram and a short plain-language description, rather than a long wall of text. Skip diagrams for one-line answers, and show code when the user asks for code or you are writing it. Put the Mermaid fence directly in your reply; never write a .mmd file or use a tool, script, image or browser to draw a Mermaid diagram. Numeric plots and charts belong to the persistent Python kernel and Matplotlib, not Mermaid.
 A diagram that is too big is not drawn, so keep each one small:
 - flowchart TD (top-down, not LR), sequenceDiagram, stateDiagram-v2, classDiagram, erDiagram, or a compact xychart-beta bar chart
 - at most about 12 boxes and never more than 3 side by side; labels of a few plain words, under 20 characters, with no emoji, HTML, markdown or styling (classDef, style, :::)
@@ -59,5 +59,5 @@ A diagram that is too big is not drawn, so keep each one small:
  */
 export function getMermaidNotDrawnReminder(reasons: readonly string[]): string {
   return `# Diagrams
-A diagram in your last reply could not be drawn in the terminal (${reasons.join('; ')}); the user sees only a one-line note in its place. Keep the next ones drawable: flowchart TD, sequenceDiagram, stateDiagram-v2, classDiagram or erDiagram, at most 3 boxes side by side, short plain labels, and split a big picture into several small diagrams.`
+A diagram in your last reply could not be drawn in the terminal (${reasons.join('; ')}); the user sees only a one-line note in its place. Keep the next ones drawable: use flowchart TD, sequenceDiagram, stateDiagram-v2, classDiagram, erDiagram or xychart-beta, keep labels short and boxes narrow, and split a big picture into several small diagrams.`
 }

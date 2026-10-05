@@ -68,6 +68,10 @@ import {
   type HookPermissionDecisionAttachment,
   memoryHeader,
 } from './attachments.js'
+import {
+  getMermaidDiagramsReminder,
+  getMermaidNotDrawnReminder,
+} from './mermaidDiagramsReminder.js'
 import { quote } from './bash/shellQuote.js'
 import { formatNumber, formatTokens } from './format.js'
 import { getPewterLedgerVariant } from './planModeV2.js'
@@ -3859,6 +3863,22 @@ Read the team config to discover your teammates' names. Check the task list peri
       return wrapMessagesInSystemReminder([
         createUserMessage({
           content: `${outputStyle.name} output style is active. Remember to follow the specific guidelines for this style.`,
+          isMeta: true,
+        }),
+      ])
+    }
+    case 'mermaid_diagrams': {
+      return wrapMessagesInSystemReminder([
+        createUserMessage({
+          content: getMermaidDiagramsReminder(attachment.enabled),
+          isMeta: true,
+        }),
+      ])
+    }
+    case 'mermaid_not_drawn': {
+      return wrapMessagesInSystemReminder([
+        createUserMessage({
+          content: getMermaidNotDrawnReminder(attachment.reasons),
           isMeta: true,
         }),
       ])

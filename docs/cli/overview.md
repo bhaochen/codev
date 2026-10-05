@@ -259,7 +259,7 @@ CLI 入口由 **Commander.js** 解析命令行参数，随后启动 **REPL**（�
 - **项目设置**：`.claude/settings.json`（项目级覆盖）
 - **会话设置**：仅当前会话有效
 
-支持的配置项包括 theme、model、permissions（权限模式）、音效、通知等。
+支持的配置项包括 theme、model、permissions（权限模式）、音效、通知等。交互式终端会将回复中的 Mermaid 图表绘制成终端图形；可在 `/config` 的 Display 区域关闭 **Draw diagrams**。图表源码仍保留在会话历史中。
 
 相关文件：
 - `/home/yuki/Code/Agent/Codev/src/commands.ts` — 命令注册与过滤核心

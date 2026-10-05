@@ -102,7 +102,7 @@ export function mermaidArtFits(art: MermaidArt, columns: number): boolean {
  */
 export function fitMermaidArt(source: string, columns: number): MermaidDrawing {
   const xychart = renderXyChart(source, columns)
-  if (xychart !== null) return { art: xychart }
+  if (xychart !== null) return xychart
 
   const drawn = drawCached(source)
   if (drawn.art === null || mermaidArtFits(drawn.art, columns)) return drawn
@@ -125,56 +125,122 @@ export function fitMermaidArt(source: string, columns: number): MermaidDrawing {
  * xychart-beta is data-oriented, so render its common bar form directly and
  * make it responsive to the current terminal width.
  */
-function renderXyChart(source: string, columns: number): MermaidArt | null {
-  if (!/^\s*xychart-beta\b/im.test(source)) return null
+function renderXyChart(source: string, columns: number): MermaidDrawing | null {
+  if (source.length > MAX_MERMAID_SOURCE_CHARS) return null
+  const safeSource = prepareMermaidSource(source)
+  const header = safeSource
+    .split('\n')
+    .find(line => line.trim() !== '' && !line.trimStart().startsWith('%%'))
+  if (!header || !/^xychart-beta\b/i.test(header.trim())) return null
 
-  const axis = /x-axis\s+\[([\s\S]*?)\]/im.exec(source)?.[1]
-  const bars = /\bbar\s+\[([^\]]+)\]/im.exec(source)?.[1]
-  if (!axis || !bars) return null
+  const xAxes = [...safeSource.matchAll(/\bx-axis\s+\[([\s\S]*?)\]/gi)]
+  const barSeries = [...safeSource.matchAll(/\bbar\s+\[([^\]]+)\]/gi)]
+  if (
+    xAxes.length !== 1 ||
+    barSeries.length !== 1 ||
+    /\bline\s*\[/i.test(safeSource)
+  ) {
+    return {
+      art: null,
+      fallback: { kind: 'unsupported', name: 'xychart-beta' },
+    }
+  }
+  const bars = barSeries[0]![1]
 
-  const labels = [...axis.matchAll(/"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'/g)]
-    .map(match => (match[1] ?? match[2] ?? '').replace(/\\([\\"'])/g, '$1'))
-  const values = bars
-    .split(',')
-    .map(value => Number(value.trim()))
-    .filter(value => Number.isFinite(value))
-  if (labels.length === 0 || values.length === 0) return null
-
-  const count = Math.min(labels.length, values.length)
-  const available = Math.max(24, columns - MERMAID_WIDTH_MARGIN)
-  const labelWidth = Math.min(
-    28,
-    Math.max(8, Math.floor(available * 0.42)),
+  const labels = parseXyLabels(xAxes[0]![1]!)
+  const rawValues = bars.split(',').map(value => value.trim())
+  if (labels.length === 0 || labels.length !== rawValues.length) {
+    return { art: null, fallback: { kind: 'unreadable' } }
+  }
+  if (labels.length > 20) {
+    return { art: null, fallback: { kind: 'too-large' } }
+  }
+  if (rawValues.some(value => !/^\d+(?:\.\d+)?$/.test(value))) {
+    return { art: null, fallback: { kind: 'unreadable' } }
+  }
+  const values = rawValues.map(Number)
+  if (values.some(value => !Number.isFinite(value))) {
+    return { art: null, fallback: { kind: 'unreadable' } }
+  }
+  const range = /\by-axis(?:\s+"[^"]*")?\s+(-?\d+(?:\.\d+)?)\s*-->\s*(-?\d+(?:\.\d+)?)/i.exec(
+    safeSource,
   )
-  const valueWidth = Math.max(5, String(Math.max(...values)).length)
-  const barWidth = Math.max(4, available - labelWidth - valueWidth - 6)
-  const maximum = Math.max(...values, 1)
-  const title = /^\s*title\s+["']([^"']+)["']/im.exec(source)?.[1]
+  const minimum = range ? Number(range[1]) : 0
+  const maximum = range ? Number(range[2]) : Math.max(...values)
+  if (
+    minimum < 0 ||
+    (range && maximum <= minimum) ||
+    values.some(value => value < minimum || value > maximum)
+  ) {
+    return { art: null, fallback: { kind: 'unreadable' } }
+  }
+
+  const available = Math.max(0, columns - MERMAID_WIDTH_MARGIN)
+  const labelWidth = Math.min(28, Math.max(4, Math.floor(available * 0.35)))
+  const valueWidth = Math.max(1, ...rawValues.map(value => stringWidth(value)))
+  const barWidth = available - labelWidth - valueWidth - 2
+  if (barWidth < 4) {
+    return {
+      art: null,
+      fallback: {
+        kind: 'too-wide',
+        columnsNeeded: 4 + valueWidth + 2 + 4 + MERMAID_WIDTH_MARGIN,
+        columns,
+      },
+    }
+  }
+
+  const title = /^\s*title\s+["']([^"']+)["']/im.exec(safeSource)?.[1]
   const rows: Span[][] = []
 
-  if (title) rows.push([{ text: ` ${truncateMermaidText(title, available)} `, cls: 'title' }])
-  for (let i = 0; i < count; i++) {
-    const label = truncateMermaidText(labels[i]!, labelWidth).padEnd(labelWidth)
-    const value = String(values[i]!).padStart(valueWidth)
-    const filled = Math.max(1, Math.round((values[i]! / maximum) * barWidth))
+  if (title) {
+    rows.push([
+      { text: truncateMermaidText(title, available), cls: 'title' },
+    ])
+  }
+  for (let i = 0; i < labels.length; i++) {
+    const truncatedLabel = truncateMermaidText(labels[i]!, labelWidth)
+    const label = truncatedLabel + ' '.repeat(
+      Math.max(0, labelWidth - stringWidth(truncatedLabel)),
+    )
+    const value = rawValues[i]!.padStart(valueWidth)
+    const filled =
+      maximum === minimum
+        ? 0
+        : Math.round(
+            ((values[i]! - minimum) / (maximum - minimum)) * barWidth,
+          )
     rows.push([
       { text: `${label} `, cls: 'text' },
-      { text: '█'.repeat(Math.min(barWidth, filled)), cls: 'edge' },
+      { text: '█'.repeat(filled).padEnd(barWidth), cls: 'edge' },
       { text: ` ${value}`, cls: 'text' },
     ])
   }
 
-  return {
-    rows,
-    width: available,
-    omitted: labels.length === values.length ? 0 : 1,
+  return { art: { rows, width: available, omitted: 0 } }
+}
+
+function parseXyLabels(axis: string): string[] {
+  const labels: string[] = []
+  const pattern = /"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^,\[\]]+)/g
+  for (const match of axis.matchAll(pattern)) {
+    const label = (match[1] ?? match[2] ?? match[3] ?? '')
+      .replace(/\\([\\"'])/g, '$1')
+      .trim()
+    if (label) labels.push(label)
   }
+  return labels
 }
 
 function truncateMermaidText(value: string, width: number): string {
+  if (width <= 0) return ''
   if (stringWidth(value) <= width) return value
-  if (width <= 1) return value.slice(0, width)
-  return `${value.slice(0, Math.max(1, width - 1))}…`
+  let truncated = ''
+  for (const character of value) {
+    if (stringWidth(`${truncated}${character}…`) > width) break
+    truncated += character
+  }
+  return `${truncated}…`
 }
 
 /** The dim line shown in place of a block that is not drawn. */

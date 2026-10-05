@@ -157,8 +157,14 @@ import {
   getLastEmittedDate,
   setLastEmittedDate,
   getKairosActive,
+  getIsInteractive,
 } from '../bootstrap/state.js'
 import type { QuerySource } from '../constants/querySource.js'
+import {
+  getMermaidDiagramsChange,
+} from './mermaidDiagramsReminder.js'
+import { getUndrawnMermaidReasons } from './mermaidDiagramFeedback.js'
+import { getInitialSettings } from './settings/settings.js'
 import {
   getDeferredToolsDelta,
   isDeferredToolsDeltaEnabled,
@@ -555,6 +561,14 @@ export type Attachment =
   | {
       type: 'output_style'
       style: string
+    }
+  | {
+      type: 'mermaid_diagrams'
+      enabled: boolean
+    }
+  | {
+      type: 'mermaid_not_drawn'
+      reasons: string[]
     }
   | {
       type: 'diagnostics'
@@ -958,6 +972,31 @@ export async function getAttachments(
         maybe('output_style', async () =>
           Promise.resolve(getOutputStyleAttachment()),
         ),
+        maybe('mermaid_diagrams', async () => {
+          if (!getIsInteractive()) return []
+          const change = getMermaidDiagramsChange(
+            getInitialSettings().mermaidDiagrams !== false,
+            messages ?? [],
+          )
+          return change === null
+            ? []
+            : [{ type: 'mermaid_diagrams' as const, enabled: change }]
+        }),
+        maybe('mermaid_not_drawn', async () => {
+          if (
+            !getIsInteractive() ||
+            getInitialSettings().mermaidDiagrams === false
+          ) {
+            return []
+          }
+          const reasons = getUndrawnMermaidReasons(
+            messages ?? [],
+            process.stdout.columns || 80,
+          )
+          return reasons.length === 0
+            ? []
+            : [{ type: 'mermaid_not_drawn' as const, reasons }]
+        }),
         maybe('diagnostics', async () =>
           getDiagnosticAttachments(toolUseContext),
         ),
