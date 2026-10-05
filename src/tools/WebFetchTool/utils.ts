@@ -1,4 +1,5 @@
 import { LRUCache } from 'lru-cache'
+import { isIP } from 'node:net'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -6,12 +7,10 @@ import {
 import { queryHaiku } from '../../services/llm/query/haiku.js'
 import { AbortError } from '../../utils/errors.js'
 import { getWebFetchUserAgent } from '../../utils/http.js'
-import { logError } from '../../utils/log.js'
 import {
   isBinaryContentType,
   persistBinaryContent,
 } from '../../utils/mcpOutputStorage.js'
-import { getSettings_DEPRECATED } from '../../utils/settings/settings.js'
 import { asSystemPrompt } from '../../utils/systemPromptType.js'
 import { isPreapprovedHost } from './preapproved.js'
 import { makeSecondaryModelPrompt } from './prompt.js'
@@ -70,18 +69,39 @@ async function fetchWithTimeout(
   options: RequestInit & { timeout?: number } = {},
 ): Promise<Response> {
   const { timeout = 30000, ...fetchOptions } = options
-  const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), timeout)
+  const externalSignal = fetchOptions.signal
+  const timeoutSignal = AbortSignal.timeout(timeout)
+  const signal = externalSignal
+    ? AbortSignal.any([externalSignal, timeoutSignal])
+    : timeoutSignal
+  return fetch(url, { ...fetchOptions, signal })
+}
 
-  try {
-    const response = await fetch(url, {
-      ...fetchOptions,
-      signal: controller.signal,
-    })
-    return response
-  } finally {
-    clearTimeout(timeoutId)
+async function readResponseBody(response: Response): Promise<Buffer> {
+  const declaredLength = Number(response.headers.get('content-length'))
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_HTTP_CONTENT_LENGTH) {
+    throw new Error(`WebFetch response exceeds ${MAX_HTTP_CONTENT_LENGTH} bytes`)
   }
+  if (!response.body) return Buffer.alloc(0)
+
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      total += value.byteLength
+      if (total > MAX_HTTP_CONTENT_LENGTH) {
+        await reader.cancel()
+        throw new Error(`WebFetch response exceeds ${MAX_HTTP_CONTENT_LENGTH} bytes`)
+      }
+      chunks.push(value)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+  return Buffer.concat(chunks, total)
 }
 
 /**
@@ -226,24 +246,113 @@ export function validateURL(url: string): boolean {
     return false
   }
 
-  // We don't need to check protocol here, as we'll upgrade http to https when making the request
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return false
+  }
 
-  // As long as we aren't supporting aiming to cookies or internal domains,
-  // we should block URLs with usernames/passwords too, even though these
-  // seem exceedingly unlikely.
   if (parsed.username || parsed.password) {
     return false
   }
 
-  // Initial filter that this isn't a privileged, company-internal URL
-  // by checking that the hostname is publicly resolvable
-  const hostname = parsed.hostname
-  const parts = hostname.split('.')
-  if (parts.length < 2) {
+  return isPublicFetchHost(parsed.hostname)
+}
+
+function isPublicFetchHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '')
+  if (
+    !host ||
+    host === 'localhost' ||
+    host.endsWith('.localhost') ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal')
+  ) {
     return false
   }
 
-  return true
+  const ipVersion = isIP(host)
+  if (ipVersion === 0) return host.includes('.')
+  if (ipVersion === 4) {
+    const octets = host.split('.').map(Number)
+    const [a, b, c] = octets
+    return !(
+      a === 0 ||
+      a === 10 ||
+      a === 127 ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b! >= 16 && b! <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 192 && b === 0 && c === 0) ||
+      (a === 192 && b === 0 && c === 2) ||
+      (a === 192 && b === 88 && c === 99) ||
+      (a === 198 && b === 18) ||
+      (a === 198 && b === 19) ||
+      (a === 198 && b === 51 && c === 100) ||
+      (a === 203 && b === 0 && c === 113) ||
+      (a === 100 && b! >= 64 && b! <= 127) ||
+      a! >= 224
+    )
+  }
+
+  const normalized = host.toLowerCase()
+  const address = parseIPv6(normalized)
+  if (address === null || (address >> 125n) !== 1n) return false
+  const reservedPrefixes: readonly [bigint, number][] = [
+    [0x20010000000000000000000000000000n, 23],
+    [0x20010db8000000000000000000000000n, 32],
+    [0x20020000000000000000000000000000n, 16],
+    [0x3fff0000000000000000000000000000n, 20],
+  ]
+  return !reservedPrefixes.some(([prefix, bits]) => {
+    const shift = BigInt(128 - bits)
+    return (address >> shift) === (prefix >> shift)
+  })
+}
+
+function parseIPv6(hostname: string): bigint | null {
+  const sections = hostname.split('::')
+  if (sections.length > 2) return null
+  const parseSection = (section: string): number[] => {
+    if (!section) return []
+    const values: number[] = []
+    for (const part of section.split(':')) {
+      if (part.includes('.')) {
+        const octets = part.split('.').map(Number)
+        if (
+          octets.length !== 4 ||
+          octets.some(octet => !Number.isInteger(octet) || octet < 0 || octet > 255)
+        ) {
+          return []
+        }
+        values.push((octets[0]! << 8) | octets[1]!, (octets[2]! << 8) | octets[3]!)
+      } else {
+        const value = Number.parseInt(part, 16)
+        if (!part || !/^[\da-f]{1,4}$/i.test(part) || !Number.isInteger(value)) {
+          return []
+        }
+        values.push(value)
+      }
+    }
+    return values
+  }
+
+  const left = parseSection(sections[0]!)
+  const right = parseSection(sections[1] ?? '')
+  if (
+    (sections[0] && left.length === 0) ||
+    (sections[1] && right.length === 0)
+  ) {
+    return null
+  }
+  const missing = 8 - left.length - right.length
+  if (
+    (sections.length === 1 && missing !== 0) ||
+    (sections.length === 2 && missing < 1)
+  ) {
+    return null
+  }
+  const words = [...left, ...Array(Math.max(0, missing)).fill(0), ...right]
+  if (words.length !== 8) return null
+  return words.reduce((value, word) => (value << 16n) | BigInt(word), 0n)
 }
 
 /**
@@ -303,6 +412,17 @@ type RedirectInfo = {
   statusCode: number
 }
 
+export class WebFetchHttpError extends Error {
+  constructor(
+    readonly statusCode: number,
+    readonly statusText: string,
+    message: string,
+  ) {
+    super(message)
+    this.name = 'WebFetchHttpError'
+  }
+}
+
 export async function getWithPermittedRedirects(
   url: string,
   signal: AbortSignal,
@@ -341,6 +461,7 @@ export async function getWithPermittedRedirects(
       const redirectUrl = new URL(redirectLocation, url).toString()
 
       if (redirectChecker(url, redirectUrl)) {
+        await response.body?.cancel()
         // Recursively follow the permitted redirect
         return getWithPermittedRedirects(
           redirectUrl,
@@ -350,6 +471,7 @@ export async function getWithPermittedRedirects(
           userAgent,
         )
       } else {
+        await response.body?.cancel()
         // Return redirect information to the caller
         return {
           type: 'redirect',
@@ -371,10 +493,15 @@ export async function getWithPermittedRedirects(
   }
 }
 
-function isRedirectInfo(
-  response: Response | RedirectInfo,
+function isRedirectInfo<T>(
+  response: T | RedirectInfo,
 ): response is RedirectInfo {
-  return 'type' in response && response.type === 'redirect'
+  return (
+    typeof response === 'object' &&
+    response !== null &&
+    'type' in response &&
+    response.type === 'redirect'
+  )
 }
 
 export type FetchedContent = {
@@ -395,92 +522,116 @@ async function localFetch(
   url: string,
   signal: AbortSignal,
   redirectChecker: (originalUrl: string, redirectUrl: string) => boolean,
-  extractMode: 'markdown' | 'text' = 'markdown'
-): Promise<{
-  content: string
-  contentType: string
-  finalUrl?: string
-  persistedPath?: string
-  persistedSize?: number
-}> {
-  // Use a simple User-Agent to avoid MACRO dependency issues
-  const userAgent = 'Mozilla/5.0 (compatible; WebFetchTool/1.0)'
-
-  // 1. Use getWithPermittedRedirects to handle redirects with custom headers
-  const response = await getWithPermittedRedirects(url, signal, redirectChecker, userAgent as unknown as number)
+  extractMode: 'markdown' | 'text' = 'markdown',
+): Promise<
+  | {
+      content: string
+      contentType: string
+      code: number
+      codeText: string
+      finalUrl?: string
+      persistedPath?: string
+      persistedSize?: number
+    }
+  | RedirectInfo
+> {
+  const response = await getWithPermittedRedirects(
+    url,
+    signal,
+    redirectChecker,
+    0,
+    getWebFetchUserAgent(),
+  )
 
   if (isRedirectInfo(response)) {
-    throw new Error('Cross-host redirect detected')
+    return response
   }
 
-  // 2. Check Content-Type
   const contentType = response.headers.get('content-type') || 'text/html'
+  const code = response.status
+  const codeText = response.statusText || 'Unknown'
 
-  // 3. Handle binary content
+  if (!response.ok) {
+    const body = await readResponseBody(response)
+    const detail = normalizeText(body.toString('utf8')).slice(0, 2_000)
+    throw new WebFetchHttpError(
+      code,
+      codeText,
+      `WebFetch returned HTTP ${code} ${codeText}${detail ? `: ${detail}` : ''}`,
+    )
+  }
+
+  const body = await readResponseBody(response)
   if (isBinaryContentType(contentType)) {
-    const buffer = Buffer.from(await response.arrayBuffer())
-    const persisted = await persistBinaryContent(buffer, contentType, Date.now().toString())
+    const persisted = await persistBinaryContent(
+      body,
+      contentType,
+      `webfetch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    )
     if ('error' in persisted) {
       throw new Error(persisted.error)
     }
     return {
       content: `[Binary content saved to ${persisted.filepath}]`,
       contentType,
+      code,
+      codeText,
       persistedPath: persisted.filepath,
       persistedSize: persisted.size,
     }
   }
 
-  // 4. Handle HTML content
+  const sourceText = body.toString('utf8')
   if (contentType.includes('text/html')) {
-    const htmlContent = await response.text()
-
-    // Convert to markdown or text based on extractMode
     let markdown: string
     if (extractMode === 'markdown') {
       const turndownService = await getTurndownService()
-      markdown = turndownService.turndown(htmlContent)
+      markdown = turndownService.turndown(sourceText)
     } else {
-      // Text mode: only strip tags
-      markdown = stripTags(htmlContent)
+      markdown = stripTags(sourceText)
     }
 
-    // Clean and normalize content
     markdown = normalizeText(markdown)
-
-    // Truncate if too long
     if (markdown.length > MAX_MARKDOWN_LENGTH) {
-      markdown = markdown.slice(0, MAX_MARKDOWN_LENGTH) + '\n\n[Content truncated due to length...]'
+      markdown =
+        markdown.slice(0, MAX_MARKDOWN_LENGTH) +
+        '\n\n[Content truncated due to length...]'
     }
 
-    // Add untrusted banner
     return {
-      content: markdown,
+      content: `${UNTRUSTED_BANNER}\n\n${markdown}`,
       contentType: 'text/markdown',
+      code,
+      codeText,
       finalUrl: response.url,
     }
   }
 
-  // 5. Handle JSON content
   if (contentType.includes('application/json')) {
-    const jsonContent = await response.json()
-    const formattedJson = JSON.stringify(jsonContent, null, 2)
-    const jsonText = `# JSON Response\n\n\`\`\`json\n${formattedJson}\n\`\`\``
-
+    let jsonText: string
+    try {
+      jsonText = `# JSON Response\n\n\`\`\`json\n${JSON.stringify(
+        JSON.parse(sourceText),
+        null,
+        2,
+      )}\n\`\`\``
+    } catch {
+      jsonText = sourceText
+    }
     return {
       content: jsonText,
       contentType: 'application/json',
+      code,
+      codeText,
       finalUrl: response.url,
     }
   }
 
-  // 6. Handle other text content
-  const textContent = await response.text()
-  const plainText = normalizeText(textContent)
-
   return {
-    content: plainText,
-    contentType: contentType,
+    content: normalizeText(sourceText).slice(0, MAX_MARKDOWN_LENGTH),
+    contentType,
+    code,
+    codeText,
     finalUrl: response.url,
   }
 }
@@ -507,65 +658,43 @@ export async function getURLMarkdownContent(
     }
   }
 
-  let parsedUrl: URL
-  let upgradedUrl = url
-
-  try {
-    parsedUrl = new URL(url)
-
-    // Upgrade http to https if needed
-    if (parsedUrl.protocol === 'http:') {
-      parsedUrl.protocol = 'https:'
-      upgradedUrl = parsedUrl.toString()
-    }
-
-    const hostname = parsedUrl.hostname
-
-    // Domain check removed - all domains are now allowed
-    if (process.env.USER_TYPE === 'ant') {
-      logEvent('tengu_web_fetch_host', {
-        hostname:
-          hostname as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      })
-    }
-  } catch (e) {
-    logError(e)
+  const parsedUrl = new URL(url)
+  if (parsedUrl.protocol === 'http:') {
+    parsedUrl.protocol = 'https:'
+  }
+  const upgradedUrl = parsedUrl.toString()
+  const hostname = parsedUrl.hostname
+  if (process.env.USER_TYPE === 'ant') {
+    logEvent('tengu_web_fetch_host', {
+      hostname:
+        hostname as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
   }
 
-  // Use local fetch to get content
-  try {
-    console.log('[WebFetch] Using local fetch for:', upgradedUrl)
-
-    const localResult = await retryWithBackoff(
-      () => localFetch(upgradedUrl, abortController.signal, isPermittedRedirect, 'markdown'),
-      {
-        maxRetries: 3,
-        initialDelay: 1000,
-        retryableErrors: ['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND'],
-      }
-    )
-
-    const bytes = Buffer.byteLength(localResult.content)
-
-    // Store the fetched content in cache
-    const entry: CacheEntry = {
-      bytes,
-      code: 200,
-      codeText: 'OK',
-      content: localResult.content,
-      contentType: localResult.contentType,
-      persistedPath: localResult.persistedPath,
-      persistedSize: localResult.persistedSize,
-    }
-    URL_CACHE.set(url, entry, { size: Math.max(1, bytes) })
-    console.log('[WebFetch] Local fetch succeeded')
-    return entry
-  } catch (error) {
-    console.error('[WebFetch] Local fetch failed:', error)
-    logError(new Error('Local fetch failed', { cause: error }))
-
-    throw new Error(`Failed to fetch URL: ${error instanceof Error ? error.message : String(error)}`)
+  const localResult = await retryWithBackoff(
+    () => localFetch(upgradedUrl, abortController.signal, isPermittedRedirect),
+    {
+      maxRetries: 2,
+      initialDelay: 300,
+      maxDelay: 1_200,
+      retryableErrors: ['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'ECONNREFUSED'],
+    },
+  )
+  if (isRedirectInfo(localResult)) {
+    return localResult
   }
+  const bytes = Buffer.byteLength(localResult.content)
+  const entry: CacheEntry = {
+    bytes,
+    code: localResult.code,
+    codeText: localResult.codeText,
+    content: localResult.content,
+    contentType: localResult.contentType,
+    persistedPath: localResult.persistedPath,
+    persistedSize: localResult.persistedSize,
+  }
+  URL_CACHE.set(url, entry, { size: Math.max(1, bytes) })
+  return entry
 }
 
 export async function applyPromptToMarkdown(

@@ -10,6 +10,7 @@ export function getWebSearchPrompt(): string {
 - Provides up-to-date information for current events, technical documentation, and recent data
 - Returns structured search results including titles, URLs, and snippets
 - Works with all AI providers including local models
+- Use allowed_domains and blocked_domains when the user limits or excludes source domains
 
 CRITICAL RULE — When the user asks to see images/photos/pictures:
   You MUST set search_images=true in the WebSearch call. Example:

@@ -255,23 +255,33 @@ LLM 请求工具调用
 
 ### WebSearch / WebFetch
 
-#### 双后端架构
+#### 搜索后端
 
-WebSearchTool 支持两个搜索后端：
+WebSearchTool 支持以下搜索后端：
 
 | 后端 | 类型 | 配置 | 特点 |
 |------|------|------|------|
-| **Tavily** | 云 API | `TAVILY_API_KEY` 环境变量 | 稳定、无需自托管 |
-| **SearXNG** | 自托管 | Docker 运行 `verspersearch` | 完全隐私、无 API 成本 |
+| **Firecrawl** | 云 API | `FIRECRAWL_API_KEY`；可选 `FIRECRAWL_API_URL` | 普通网页搜索默认优先使用，可同时抓取 Markdown 摘要 |
+| **Tavily** | 云 API | `TAVILY_API_KEY` | Firecrawl 未配置或失败时，作为首选回退 |
+| **SearXNG** | 自托管 | `SEARXNG_BASE_URL`，默认 `http://localhost:8080` | Tavily 未配置或失败时回退；图片搜索仍使用此后端 |
 
-后端自动选择：若配置了 `TAVILY_API_KEY` 则使用 Tavily，否则回退到本地 SearXNG。
+普通搜索按 Firecrawl → Tavily → SearXNG 的顺序尝试；某个已配置后端失败时继续
+尝试下一个。`allowed_domains` 和
+`blocked_domains` 用于限制结果域名；图片搜索通过 `search_images: true` 使用
+SearXNG 的图片分类。
 
 #### WebFetch
 
-抓取 URL 内容并应用 prompt 处理（提取、总结）。支持将结果渲染为 Markdown 格式，包含图片链接。
+直接通过 HTTP(S) 抓取网页，将 HTML 转为 Markdown，再由 Codev 的小型快速模型
+根据 `prompt` 提取或总结。WebFetch 会对未预批准域名逐域请求授权，拒绝本地/
+私网 IP 字面量和非 HTTP(S) URL，自动跟随同主机（含 `www` 变体）的有限重定向，
+对跨主机重定向要求再次调用授权，并将响应体限制为 10 MiB。
 
-配置项：
-- `JINA_API_KEY` — 可选的 Jina AI API 密钥，用于增强型内容提取
+搜索配置项：
+- `FIRECRAWL_API_KEY` — Firecrawl 搜索 API 密钥
+- `FIRECRAWL_API_URL` — 可选的 Firecrawl API 地址覆盖
+- `TAVILY_API_KEY` — Firecrawl 不可用时的云搜索回退
+- `SEARXNG_BASE_URL` — SearXNG 服务地址
 
 相关文件：
 - `/home/yuki/Code/Agent/Codev/src/Tool.ts` — Tool 类型与 buildTool 框架

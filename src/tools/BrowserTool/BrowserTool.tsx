@@ -910,7 +910,7 @@ async function runFlow(
       }
     }
     const outcome = await replayStep(session, step, signal)
-    if (!outcome.ok) {
+    if ('error' in outcome) {
       trace.push(`  ✗ ${position} — ${outcome.error}`)
       return {
         action: 'flow',

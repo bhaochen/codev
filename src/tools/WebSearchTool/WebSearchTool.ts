@@ -5,6 +5,7 @@ import { lazySchema } from '../../utils/lazySchema.js'
 import { logError } from '../../utils/log.js'
 import { getWebSearchPrompt, WEB_SEARCH_TOOL_NAME } from './prompt.js'
 import { tavily } from '@tavily/core'
+import { hasFirecrawlConfig, searchWithFirecrawl } from './firecrawl.js'
 import {
   getToolUseSummary,
   renderToolResultMessage,
@@ -14,6 +15,14 @@ import {
 const inputSchema = lazySchema(() =>
   z.strictObject({
     query: z.string().min(2).describe('The search query to use'),
+    allowed_domains: z
+      .array(z.string())
+      .optional()
+      .describe('Limit results to these domain names'),
+    blocked_domains: z
+      .array(z.string())
+      .optional()
+      .describe('Exclude results from these domain names'),
     search_images: z.boolean().optional().describe(
       'IMPORTANT: Set to true when the user asks to see/show/find photos, images, pictures, or ' +
       'visual references (e.g. "show me photos of...", "find pictures of...", "look up images of..."). ' +
@@ -70,18 +79,13 @@ async function searchSearXNG(
       url.searchParams.set('categories', 'images')
     }
 
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 10000)
-
     const res = await fetch(url.toString(), {
-      signal: controller.signal,
+      signal: AbortSignal.timeout(10_000),
       headers: {
         'User-Agent': 'Mozilla/5.0 (compatible; WebSearchTool/1.0)',
         'Accept': 'application/json',
       },
     })
-
-    clearTimeout(timeout)
 
     if (!res.ok) {
       const errorText = await res.text()
@@ -167,9 +171,51 @@ function cleanSearchResult(result: any) {
   }
 }
 
+function matchesDomain(hostname: string, domain: string): boolean {
+  const normalizedHost = hostname.toLowerCase().replace(/\.$/, '')
+  const normalizedDomain = domain
+    .trim()
+    .toLowerCase()
+    .replace(/^\*\./, '')
+    .replace(/\.$/, '')
+  return Boolean(
+    normalizedDomain &&
+      (normalizedHost === normalizedDomain ||
+        normalizedHost.endsWith(`.${normalizedDomain}`)),
+  )
+}
+
+function filterSearchResults(
+  results: Array<{ title: string; url: string; snippet?: string; image?: string }>,
+  allowedDomains?: string[],
+  blockedDomains?: string[],
+) {
+  return results.filter(result => {
+    let hostname: string
+    try {
+      const parsedUrl = new URL(result.url)
+      if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+        return false
+      }
+      hostname = parsedUrl.hostname
+    } catch {
+      return false
+    }
+    if (
+      blockedDomains?.some(domain => matchesDomain(hostname, domain))
+    ) {
+      return false
+    }
+    return (
+      !allowedDomains?.length ||
+      allowedDomains.some(domain => matchesDomain(hostname, domain))
+    )
+  })
+}
+
 export const WebSearchTool = buildTool(({
   name: WEB_SEARCH_TOOL_NAME,
-  description: 'Search the web — Tavily (when TAVILY_API_KEY is set) for general search, SearXNG for image search' as unknown as ToolDef['description'],
+  description: 'Search the web using Firecrawl, Tavily, or SearXNG; image searches use SearXNG.' as unknown as ToolDef['description'],
   // 不 defer: 让 LLM 始终能看到 search_images 参数和图片搜索规则
   shouldDefer: false,
 
@@ -248,14 +294,53 @@ export const WebSearchTool = buildTool(({
         })
       }
 
-      // Tavily 只做通用搜索，SearXNG 只做图片搜索
-      const results = input.search_images
-        ? await searchSearXNG(input.query, true)
-        : process.env.TAVILY_API_KEY
-          ? await searchTavily(input.query)
-          : await searchSearXNG(input.query, false)
+      let results: Array<{
+        title: string
+        url: string
+        snippet?: string
+        image?: string
+      }> | undefined
+      if (input.search_images) {
+        results = await searchSearXNG(input.query, true)
+      } else {
+        if (hasFirecrawlConfig()) {
+          try {
+            results = await searchWithFirecrawl(input.query, {
+              allowedDomains: input.allowed_domains,
+              blockedDomains: input.blocked_domains,
+            })
+          } catch (firecrawlError) {
+            logError(
+              new Error('Firecrawl search failed; trying the next backend', {
+                cause: firecrawlError,
+              }),
+            )
+          }
+        }
 
-      const cleaned = results.map(r => ({
+        if (!results && process.env.TAVILY_API_KEY) {
+          try {
+            results = await searchTavily(input.query)
+          } catch (tavilyError) {
+            logError(
+              new Error('Tavily search failed; trying SearXNG', {
+                cause: tavilyError,
+              }),
+            )
+          }
+        }
+
+        if (!results) {
+          results = await searchSearXNG(input.query, false)
+        }
+      }
+
+      const filtered = filterSearchResults(
+        results,
+        input.search_images ? undefined : input.allowed_domains,
+        input.search_images ? undefined : input.blocked_domains,
+      )
+      const cleaned = filtered.map(r => ({
         ...r,
         ...cleanSearchResult(r),
       }))

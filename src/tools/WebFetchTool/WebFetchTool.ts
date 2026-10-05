@@ -1,8 +1,9 @@
 import { z } from 'zod/v4' // 引入 Zod: 定义 & 检验输入输出结构
 import { buildTool, type ToolDef } from '../../Tool.js' // 构建工具对象, 工具类型约束
-import { formatFileSize } from '../../utils/format.js' // 字节 -> 可读格式(KB/MB)
 import { lazySchema } from '../../utils/lazySchema.js' // 延迟初始化 schema (避免循环依赖)
 import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js' // 权限检查返回结构
+import { getRuleByContentsForTool } from '../../utils/permissions/permissions.js'
+import type { PermissionUpdate } from '../../types/permissions.js'
 import { DESCRIPTION, WEB_FETCH_TOOL_NAME } from './prompt.js' // 工具描述 & 名字
 import {
   getToolUseSummary,
@@ -12,7 +13,11 @@ import {
 } from './UI.js' // UI 渲染函数
 import {
   type FetchedContent,
+  applyPromptToMarkdown,
   getURLMarkdownContent,
+  isPreapprovedUrl,
+  validateURL,
+  WebFetchHttpError,
 } from './utils.js' // 抓网页, 处理 markdown
 
 const inputSchema = lazySchema(() =>
@@ -84,12 +89,82 @@ export const WebFetchTool = buildTool({
   toAutoClassifierInput(input) {
     return input.prompt ? `${input.url}: ${input.prompt}` : input.url
   },
-  // 权限检查 - 完全开放，允许所有 WebFetch 请求
-  async checkPermissions(_input, _context): Promise<PermissionDecision> {
-    return {
+  async checkPermissions(input, context): Promise<PermissionDecision> {
+    if (!validateURL(input.url)) {
+      return {
+        behavior: 'deny',
+        message: 'WebFetch requires a valid public HTTP or HTTPS URL.',
+        decisionReason: { type: 'other', reason: 'Invalid or private URL' },
+      }
+    }
+
+    let hostname: string
+    try {
+      hostname = new URL(input.url).hostname.toLowerCase()
+    } catch {
+      return {
+        behavior: 'deny',
+        message: 'WebFetch requires a valid public HTTP or HTTPS URL.',
+        decisionReason: { type: 'other', reason: 'Invalid URL' },
+      }
+    }
+
+    if (isPreapprovedUrl(input.url)) {
+      return {
+        behavior: 'allow',
+        updatedInput: input,
+        decisionReason: { type: 'other', reason: 'Preapproved documentation host' },
+      }
+    }
+
+    const ruleContent = `domain:${hostname}`
+    const permissionContext = context.getAppState().toolPermissionContext
+    const denyRule = getRuleByContentsForTool(
+      permissionContext,
+      WebFetchTool,
+      'deny',
+    ).get(ruleContent)
+    if (denyRule) {
+      return {
+        behavior: 'deny',
+        message: `WebFetch is denied for ${hostname}.`,
+        decisionReason: { type: 'rule', rule: denyRule },
+      }
+    }
+
+    const allowRule = getRuleByContentsForTool(
+      permissionContext,
+      WebFetchTool,
+      'allow',
+    ).get(ruleContent)
+    if (allowRule) {
+      return {
+        behavior: 'allow',
+        updatedInput: input,
+        decisionReason: { type: 'rule', rule: allowRule },
+      }
+    }
+
+    const askRule = getRuleByContentsForTool(
+      permissionContext,
+      WebFetchTool,
+      'ask',
+    ).get(ruleContent)
+    const suggestion: PermissionUpdate = {
+      type: 'addRules',
+      destination: 'localSettings',
+      rules: [{ toolName: WEB_FETCH_TOOL_NAME, ruleContent }],
       behavior: 'allow',
-      updatedInput: _input,
-      decisionReason: { type: 'other', reason: 'All web fetches allowed' },
+    }
+    return {
+      behavior: 'ask',
+      message: askRule
+        ? `WebFetch requires approval for ${hostname}.`
+        : `Allow WebFetch to access ${hostname}?`,
+      ...(askRule && {
+        decisionReason: { type: 'rule' as const, rule: askRule },
+      }),
+      suggestions: [suggestion],
     }
   },
   async prompt(_options) {
@@ -121,9 +196,13 @@ ${DESCRIPTION}`
   renderToolResultMessage,
   async call(
     { url, prompt },
-    { abortController },
+    context,
   ) {
     const start = Date.now()
+    const abortController =
+      context?.abortController ?? new AbortController()
+    const isNonInteractiveSession =
+      context?.options?.isNonInteractiveSession ?? false
 
     try {
       const response = await getURLMarkdownContent(url, abortController)
@@ -171,8 +250,14 @@ To complete your request, I need to fetch content from the redirected URL. Pleas
         persistedSize,
       } = response as FetchedContent
 
-      // Directly return the content fetched by Jina API without Claude processing
-      let result = content
+      // Apply the requested extraction to the fetched page content.
+      let result = await applyPromptToMarkdown(
+        prompt,
+        content,
+        abortController.signal,
+        isNonInteractiveSession,
+        isPreapprovedUrl(url),
+      )
 
       // Binary content (PDFs, etc.) was additionally saved to disk with a
       // mime-derived extension. Note it so the user can inspect the raw file.
@@ -195,11 +280,15 @@ To complete your request, I need to fetch content from the redirected URL. Pleas
     } catch (error) {
       // Handle errors from getURLMarkdownContent
       const errorMessage = `Failed to fetch URL: ${error instanceof Error ? error.message : String(error)}`
-      
+      const statusCode =
+        error instanceof WebFetchHttpError ? error.statusCode : 0
+      const statusText =
+        error instanceof WebFetchHttpError ? error.statusText : 'Error'
+
       const output: Output = {
         bytes: Buffer.byteLength(errorMessage),
-        code: 0,
-        codeText: 'Error',
+        code: statusCode,
+        codeText: statusText,
         result: errorMessage,
         durationMs: Date.now() - start,
         url,
@@ -217,6 +306,8 @@ To complete your request, I need to fetch content from the redirected URL. Pleas
       content: [
         { type: 'text', text: output.result },
       ],
+      is_error:
+        output.code === 0 || output.code >= 400 ? true : undefined,
     }
   },
 } satisfies ToolDef<InputSchema, Output>)

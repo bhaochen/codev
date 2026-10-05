@@ -152,15 +152,13 @@ test('Eval is never deferred behind a ToolSearch round-trip', () => {
   )
 })
 
-test('Eval is in the cheap-mode core set', () => {
+test('Eval is registered as a built-in tool', () => {
   const here = dirname(fileURLToPath(import.meta.url))
-  const source = readFileSync(
-    join(here, '..', '..', 'constants', 'cheapModeTools.ts'),
-    'utf8',
-  )
+  const source = readFileSync(join(here, '..', '..', 'tools.ts'), 'utf8')
   assert(
-    source.includes('  EVAL_TOOL_NAME,'),
-    'cheap mode dropped Eval',
+    source.includes("import { EvalTool } from './tools/EvalTool/EvalTool.js'") &&
+      source.includes('    EvalTool,'),
+    'the built-in tool registry dropped Eval',
   )
 })
 

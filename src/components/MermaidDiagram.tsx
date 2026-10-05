@@ -39,7 +39,7 @@ function MermaidSource({ token }: { token: Tokens.Code }): React.ReactNode {
 function MermaidArtOrReason({ token, showSource }: Props): React.ReactNode {
   const { columns } = useTerminalSize()
   const drawing = fitMermaidArt(token.text, columns)
-  if (drawing.art === null) {
+  if ('fallback' in drawing) {
     const reason = describeMermaidFallback(drawing.fallback)
     // One line in the normal view; the ctrl+o view shows the source.
     if (!showSource) {

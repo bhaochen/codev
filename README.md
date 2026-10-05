@@ -96,8 +96,8 @@ ln -sf dist/codev ~/.local/bin/codev
 > If you no need `auto-compact / dream / control context-window`
 > and `websearch` feature. you can no configuration anything
 >
-> if you no need free `local-websearch` you can skip config `searxng``
-> and just set`TAVILY_API_KEY` in env
+> If using hosted search, configure `FIRECRAWL_API_KEY` (preferred) or
+> `TAVILY_API_KEY`; SearXNG remains the local fallback.
 
 ```bash
 # or local llm via llama.cpp
@@ -124,6 +124,7 @@ ln -sf dist/codev ~/.local/bin/codev
     "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "200000",
     "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "200000",
     "ENABLE_TOOL_SEARCH": "true",
+    "FIRECRAWL_API_KEY": "",
     "TAVILY_API_KEY": "",
     # "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "0", default 1 
     "teammateMode": "tmux", # or in-process
