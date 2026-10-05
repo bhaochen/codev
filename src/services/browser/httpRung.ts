@@ -15,10 +15,10 @@
 
 /** Visible text below this length on an HTML page means the markup was a shell. */
 const MIN_MEANINGFUL_TEXT = 200;
-/** Hard cap on decoded body text held in memory. */
+/** Limit decoded text passed through the extractor. */
 const MAX_BODY_CHARS = 2_000_000;
-/** Refuse to download bodies larger than this when the server declares a size. */
-const MAX_DECLARED_BYTES = 25 * 1024 * 1024;
+/** Hard cap on body bytes read, whether or not the server declares a size. */
+const MAX_BODY_BYTES = 25 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 15_000;
 /** Pinned so two runs on one machine send identical headers. */
 const CHROME_MAJOR = 131;
@@ -249,6 +249,39 @@ function isTextualContentType(contentType: string): boolean {
   ) || /\+(json|xml)/i.test(contentType);
 }
 
+async function readBoundedBody(response: Response): Promise<{
+  bytes: Uint8Array
+  byteLength: number
+  tooLarge: boolean
+}> {
+  const reader = response.body?.getReader()
+  if (!reader) return { bytes: new Uint8Array(), byteLength: 0, tooLarge: false }
+
+  const chunks: Uint8Array[] = []
+  let byteLength = 0
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (!value) continue
+      const remaining = MAX_BODY_BYTES - byteLength
+      if (value.byteLength > remaining) {
+        try {
+          await reader.cancel()
+        } catch {
+          // The size limit still applies if the remote stream cannot be cancelled.
+        }
+        return { bytes: new Uint8Array(), byteLength: MAX_BODY_BYTES, tooLarge: true }
+      }
+      chunks.push(value)
+      byteLength += value.byteLength
+    }
+  } finally {
+    reader.releaseLock()
+  }
+  return { bytes: Buffer.concat(chunks), byteLength, tooLarge: false }
+}
+
 /**
  * Fetches a URL and reports what came back, including whether the answer is
  * trustworthy. Never throws for network failure — a failed rung is a result.
@@ -276,8 +309,14 @@ export async function fetchHttpRung(
       signal: controller.signal,
     });
     const contentType = response.headers.get("content-type") ?? "";
-    const declared = Number(response.headers.get("content-length") ?? "");
-    if (Number.isFinite(declared) && declared > MAX_DECLARED_BYTES) {
+    const declaredHeader = response.headers.get("content-length");
+    const declared = declaredHeader === null ? undefined : Number(declaredHeader);
+    if (declared !== undefined && Number.isFinite(declared) && declared > MAX_BODY_BYTES) {
+      try {
+        await response.body?.cancel()
+      } catch {
+        // A declared oversize response is rejected regardless of cancellation support.
+      }
       return {
         ...empty,
         ok: false,
@@ -286,26 +325,38 @@ export async function fetchHttpRung(
         contentType,
         bytes: declared,
         escalate: false,
-        error: `Body is ${Math.round(declared / 1024 / 1024)}MB — too large to read as text.`,
+        error: `Body is ${Math.round(declared / 1024 / 1024)}MB — too large to read.`,
       };
+    }
+    const body = await readBoundedBody(response)
+    if (body.tooLarge) {
+      return {
+        ...empty,
+        ok: false,
+        status: response.status,
+        url: response.url || url,
+        contentType,
+        bytes: body.byteLength,
+        escalate: false,
+        error: `Body exceeds ${Math.round(MAX_BODY_BYTES / 1024 / 1024)}MB — too large to read.`,
+      }
     }
     if (!isTextualContentType(contentType) && contentType !== "") {
       // Binary: report it honestly instead of decoding noise. A browser would
       // not read it any better, so this is not an escalation.
-      const buffer = await response.arrayBuffer();
       return {
         ...empty,
         ok: response.ok,
         status: response.status,
         url: response.url || url,
         contentType,
-        bytes: buffer.byteLength,
+        bytes: body.byteLength,
         binary: true,
         escalate: false,
       };
     }
-    const body = await response.text();
-    const html = body.length > MAX_BODY_CHARS ? body.slice(0, MAX_BODY_CHARS) : body;
+    const bodyText = Buffer.from(body.bytes).toString("utf8")
+    const html = bodyText.length > MAX_BODY_CHARS ? bodyText.slice(0, MAX_BODY_CHARS) : bodyText;
     const isMarkup = /html|xml/i.test(contentType) || /^\s*<(!doctype|html)/i.test(html);
     const text = isMarkup ? htmlToReadableText(html) : html;
     const reason = shouldEscalate({
@@ -321,7 +372,7 @@ export async function fetchHttpRung(
       contentType,
       text,
       ...(isMarkup ? { title: extractTitle(html) } : {}),
-      bytes: body.length,
+      bytes: body.byteLength,
       escalate: reason !== null,
       ...(reason ? { escalateReason: reason } : {}),
     };
