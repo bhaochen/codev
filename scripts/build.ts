@@ -1,5 +1,6 @@
 import { chmodSync, cpSync, existsSync, mkdirSync } from 'fs'
-import { dirname, join } from 'path'
+import { createRequire } from 'node:module'
+import { basename, dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 
 const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)))
@@ -146,6 +147,38 @@ const sourceVendorDir = join(projectRoot, 'vendor')
 if (!existsSync(vendorDir) && existsSync(sourceVendorDir)) {
   cpSync(sourceVendorDir, vendorDir, { recursive: true })
   console.log(`Copied vendor/ → ${vendorDir}/`)
+}
+
+// Tree-sitter WASM assets are loaded lazily at runtime, so Bun cannot discover
+// them while bundling the standalone executable. Keep the runtime and grammar
+// blobs beside it for structure reads in packaged builds.
+const buildRequire = createRequire(import.meta.url)
+const treeSitterAssets = [
+  'web-tree-sitter/web-tree-sitter.wasm',
+  ...[
+    'typescript',
+    'tsx',
+    'javascript',
+    'python',
+    'go',
+    'rust',
+    'java',
+    'ruby',
+    'c-sharp',
+    'cpp',
+    'php',
+  ].map(
+    grammar =>
+      `@vscode/tree-sitter-wasm/wasm/tree-sitter-${grammar}.wasm`,
+  ),
+]
+const treeSitterDir = join(vendorDir, 'tree-sitter')
+mkdirSync(treeSitterDir, { recursive: true })
+for (const asset of treeSitterAssets) {
+  const source = buildRequire.resolve(asset)
+  const destination = join(treeSitterDir, basename(source))
+  cpSync(source, destination)
+  chmodSync(destination, 0o644)
 }
 
 console.log(`Built ${outfile}`)

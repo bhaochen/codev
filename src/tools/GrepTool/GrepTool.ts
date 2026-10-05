@@ -22,6 +22,7 @@ import { ripGrep } from '../../utils/ripgrep.js'
 import { semanticBoolean } from '../../utils/semanticBoolean.js'
 import { semanticNumber } from '../../utils/semanticNumber.js'
 import { plural } from '../../utils/stringUtils.js'
+import { buildGroupedGrepSummary } from './groupFlood.js'
 import { GREP_TOOL_NAME, getDescription } from './prompt.js'
 import {
   getToolUseSummary,
@@ -78,7 +79,7 @@ const inputSchema = lazySchema(() =>
         'File type to search (rg --type). Common types: js, py, rust, go, java, etc. More efficient than include for standard file types.',
       ),
     head_limit: semanticNumber(z.number().optional()).describe(
-      'Limit output to first N lines/entries, equivalent to "| head -N". Works across all output modes: content (limits output lines), files_with_matches (limits file paths), count (limits count entries). Defaults to 250 when unspecified. Pass 0 for unlimited (use sparingly — large result sets waste context).',
+      'Limit output to first N lines/entries, equivalent to "| head -N". Works across all output modes: content (limits output lines), files_with_matches (limits file paths), count (limits count entries). Defaults to 250 when unspecified. Flooded content searches may return per-file counts and line anchors instead. Pass 0 for unlimited (use sparingly — large result sets waste context).',
     ),
     offset: semanticNumber(z.number().optional()).describe(
       'Skip first N lines/entries before applying head_limit, equivalent to "| tail -n +N | head -N". Works across all output modes. Defaults to 0.',
@@ -444,6 +445,30 @@ export const GrepTool = buildTool({
     const results = await ripGrep(args, absolutePath, abortController.signal)
 
     if (output_mode === 'content') {
+      const wantsContext =
+        context !== undefined ||
+        context_c !== undefined ||
+        context_before !== undefined ||
+        context_after !== undefined
+      if (offset === 0 && head_limit !== 0 && !wantsContext && show_line_numbers) {
+        const grouped = buildGroupedGrepSummary(
+          results,
+          head_limit ?? DEFAULT_HEAD_LIMIT,
+          toRelativePath,
+        )
+        if (grouped) {
+          return {
+            data: {
+              mode: 'content' as const,
+              numFiles: grouped.numFiles,
+              filenames: [],
+              content: grouped.content,
+              numLines: grouped.numLines,
+            },
+          }
+        }
+      }
+
       // For content mode, results are the actual content lines
       // Convert absolute paths to relative paths to save tokens
 

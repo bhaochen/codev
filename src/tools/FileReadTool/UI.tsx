@@ -145,7 +145,6 @@ export function renderToolResultMessage(output: Output, _progressMessages: Progr
             </Box>
           </MessageResponse>;
         }
-
         return <MessageResponse height={1}>
           <Text>
             Read <Text bold>{numLines}</Text>{' '}
@@ -153,6 +152,16 @@ export function renderToolResultMessage(output: Output, _progressMessages: Progr
           </Text>
         </MessageResponse>;
       }
+    case 'skeleton':
+      return (
+        <MessageResponse height={1}>
+          <Text>
+            Read structure: {output.file.elidedRegions} function{' '}
+            {output.file.elidedRegions === 1 ? 'body' : 'bodies'} elided
+            {output.file.auto ? ' (automatic)' : ''}
+          </Text>
+        </MessageResponse>
+      );
     case 'file_unchanged':
       {
         return <MessageResponse height={1}>

@@ -142,9 +142,20 @@ export function AttachmentMessage({
             Read <Text bold>{attachment.displayPath}</Text> (unchanged)
           </Line>;
       }
+      if (attachment.content.type === 'skeleton') {
+        return <Line>
+            Read structure from <Text bold>{attachment.displayPath}</Text> (
+            {attachment.content.file.elidedRegions} function{' '}
+            {attachment.content.file.elidedRegions === 1 ? 'body' : 'bodies'} elided)
+          </Line>;
+      }
       return <Line>
           Read <Text bold>{attachment.displayPath}</Text> (
-          {attachment.content.type === 'text' ? `${attachment.content.file.numLines}${attachment.truncated ? '+' : ''} lines` : formatFileSize(attachment.content.file.originalSize)}
+          {attachment.content.type === 'text'
+            ? `${attachment.content.file.numLines}${attachment.truncated ? '+' : ''} lines`
+            : 'originalSize' in attachment.content.file
+              ? formatFileSize(attachment.content.file.originalSize)
+              : 'file'}
           )
         </Line>;
     case 'compact_file_reference':

@@ -77,6 +77,13 @@ import { jsonStringify } from '../../utils/slowOperations.js'
 import { BASH_TOOL_NAME } from '../BashTool/toolName.js'
 import { getDefaultFileReadingLimits } from './limits.js'
 import {
+  buildSkeleton,
+  fileReadTokenLimitAdvice,
+  getAutoSkeletonMinBytes,
+  isAutoSkeletonEnabled,
+  isSkeletonSupportedExt,
+} from './skeleton.js'
+import {
   DESCRIPTION,
   FILE_READ_TOOL_NAME,
   FILE_UNCHANGED_STUB,
@@ -177,9 +184,10 @@ export class MaxFileReadTokenExceededError extends Error {
   constructor(
     public tokenCount: number,
     public maxTokens: number,
+    advice = 'Use offset and limit parameters to read specific portions of the file, or search for specific content instead of reading the whole file.',
   ) {
     super(
-      `File content (${tokenCount} tokens) exceeds maximum allowed tokens (${maxTokens}). Use offset and limit parameters to read specific portions of the file, or search for specific content instead of reading the whole file.`,
+      `File content (${tokenCount} tokens) exceeds maximum allowed tokens (${maxTokens}). ${advice}`,
     )
     this.name = 'MaxFileReadTokenExceededError'
   }
@@ -234,6 +242,9 @@ const inputSchema = lazySchema(() =>
     limit: semanticNumber(z.number().int().positive().optional()).describe(
       'The number of lines to read. Only provide if the file is too large to read at once.',
     ),
+    skeleton: z.boolean().optional().describe(
+      'Return a structural outline of a supported code file, eliding long function bodies. Whole-file reads of large code files use this automatically; false forces full content.',
+    ),
     pages: z
       .string()
       .optional()
@@ -266,6 +277,21 @@ const outputSchema = lazySchema(() => {
           .describe('Number of lines in the returned content'),
         startLine: z.number().describe('The starting line number'),
         totalLines: z.number().describe('Total number of lines in the file'),
+      }),
+    }),
+    z.object({
+      type: z.literal('skeleton'),
+      file: z.object({
+        filePath: z.string(),
+        formatted: z.string(),
+        keptLines: z.number(),
+        elidedLines: z.number(),
+        elidedRegions: z.number(),
+        truncatedLines: z.number(),
+        truncatedChars: z.number(),
+        totalLines: z.number(),
+        language: z.string(),
+        auto: z.boolean().optional(),
       }),
     }),
     z.object({
@@ -337,7 +363,7 @@ export type Output = z.infer<OutputSchema>
 
 export const FileReadTool = buildTool({
   name: FILE_READ_TOOL_NAME,
-  searchHint: 'read files, images, PDFs, notebooks',
+  searchHint: 'read files, code structure, images, PDFs, notebooks',
   // Output is bounded by maxTokens (validateContentTokens). Persisting to a
   // file the model reads back with Read is circular — never persist.
   maxResultSizeChars: Infinity,
@@ -498,7 +524,7 @@ export const FileReadTool = buildTool({
     return { result: true }
   },
   async call(
-    { file_path, offset = 1, limit = undefined, pages },
+    { file_path, offset = 1, limit = undefined, pages, skeleton },
     context,
     _canUseTool?,
     parentMessage?,
@@ -603,6 +629,7 @@ export const FileReadTool = buildTool({
         offset,
         limit,
         pages,
+        skeleton,
         maxSizeBytes,
         maxTokens,
         readFileState,
@@ -626,6 +653,7 @@ export const FileReadTool = buildTool({
               offset,
               limit,
               pages,
+              skeleton,
               maxSizeBytes,
               maxTokens,
               readFileState,
@@ -692,6 +720,14 @@ export const FileReadTool = buildTool({
           tool_use_id: toolUseID,
           type: 'tool_result',
           content: FILE_UNCHANGED_STUB,
+        }
+      case 'skeleton':
+        return {
+          tool_use_id: toolUseID,
+          type: 'tool_result',
+          content:
+            `${data.file.formatted}\n\n<system-reminder>Structural outline only: long function bodies and overlong lines may be elided. Line numbers are original file lines. Read the indicated ranges before editing.${data.file.auto ? ' This view was selected automatically; use skeleton: false to force the full file.' : ''}</system-reminder>` +
+            CYBER_RISK_MITIGATION_REMINDER,
         }
       case 'text': {
         let content: string
@@ -760,6 +796,7 @@ async function validateContentTokens(
   content: string,
   ext: string,
   maxTokens?: number,
+  skeletonRequested = false,
 ): Promise<void> {
   const effectiveMaxTokens =
     maxTokens ?? getDefaultFileReadingLimits().maxTokens
@@ -771,7 +808,11 @@ async function validateContentTokens(
   const effectiveCount = tokenCount ?? tokenEstimate
 
   if (effectiveCount > effectiveMaxTokens) {
-    throw new MaxFileReadTokenExceededError(effectiveCount, effectiveMaxTokens)
+    throw new MaxFileReadTokenExceededError(
+      effectiveCount,
+      effectiveMaxTokens,
+      fileReadTokenLimitAdvice(ext, skeletonRequested),
+    )
   }
 }
 
@@ -813,6 +854,7 @@ async function callInner(
   offset: number,
   limit: number | undefined,
   pages: string | undefined,
+  skeleton: boolean | undefined,
   maxSizeBytes: number,
   maxTokens: number,
   readFileState: ToolUseContext['readFileState'],
@@ -1020,6 +1062,72 @@ async function callInner(
     }
   }
 
+  const wholeFileRead = offset === 1 && limit === undefined
+  const skeletonSupported = wholeFileRead && isSkeletonSupportedExt(ext)
+  const autoSkeleton =
+    skeletonSupported &&
+    skeleton !== false &&
+    isAutoSkeletonEnabled() &&
+    (await getFsImplementation().stat(resolvedFilePath)).size >= getAutoSkeletonMinBytes()
+  if (skeletonSupported && (skeleton === true || autoSkeleton)) {
+    const skeletonSizeBytes = Math.max(
+      maxSizeBytes,
+      Math.min(maxSizeBytes * 4, 2_000_000),
+    )
+    const fullRead = await readFileInRange(
+      resolvedFilePath,
+      0,
+      undefined,
+      skeletonSizeBytes,
+      context.abortController.signal,
+      { truncateOnByteLimit: true },
+    )
+    const result = await buildSkeleton(fullRead.content, ext, (content, startLine) =>
+      addLineNumbers({ content, startLine }),
+    )
+    if (result) {
+      const formatted =
+        fullRead.truncatedByBytes
+          ? `${result.formatted}\n     ⋮ [skeleton input capped at ${skeletonSizeBytes} bytes (source file: ${fullRead.totalBytes} bytes); later declarations may be missing]`
+          : result.formatted
+      await validateContentTokens(formatted, ext, maxTokens, true)
+      readFileState.set(fullFilePath, {
+        content: fullRead.content,
+        timestamp: Math.floor(fullRead.mtimeMs),
+        offset: undefined,
+        limit: undefined,
+        isPartialView: true,
+      })
+      context.nestedMemoryAttachmentTriggers?.add(fullFilePath)
+      for (const listener of fileReadListeners.slice()) {
+        listener(resolvedFilePath, fullRead.content)
+      }
+      logFileOperation({
+        operation: 'read',
+        tool: 'FileReadTool',
+        filePath: fullFilePath,
+        content: formatted,
+      })
+      return {
+        data: {
+          type: 'skeleton',
+          file: {
+            filePath: file_path,
+            formatted,
+            keptLines: result.keptLines,
+            elidedLines: result.elidedLines,
+            elidedRegions: result.elidedRegions,
+            truncatedLines: result.truncatedLines,
+            truncatedChars: result.truncatedChars,
+            totalLines: fullRead.totalLines,
+            language: result.language,
+            ...(autoSkeleton && { auto: true }),
+          },
+        },
+      }
+    }
+  }
+
   // --- Text file (single async read via readFileInRange) ---
   const lineOffset = offset === 0 ? 0 : offset - 1
   const { content, lineCount, totalLines, totalBytes, readBytes, mtimeMs } =
@@ -1031,7 +1139,7 @@ async function callInner(
       context.abortController.signal,
     )
 
-  await validateContentTokens(content, ext, maxTokens)
+  await validateContentTokens(content, ext, maxTokens, skeleton === true)
 
   readFileState.set(fullFilePath, {
     content,
