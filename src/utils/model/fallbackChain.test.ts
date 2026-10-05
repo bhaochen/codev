@@ -19,4 +19,19 @@ describe('isFallbackEligibleError', () => {
     expect(isFallbackEligibleError(new TypeError('fetch failed'))).toBe(false)
     expect(isFallbackEligibleError(new Error('model not found'))).toBe(false)
   })
+
+  test('treats 400/404 endpoint-unavailable errors as eligible', () => {
+    expect(
+      isFallbackEligibleError(
+        'api_error',
+        'API Error: Upstream opencode failed (400): {"error":{"type":"server_error","message":"Error from provider (Console): Upstream request failed: Endpoint is unavailable."}}',
+      ),
+    ).toBe(true)
+    expect(
+      isFallbackEligibleError(new Error('Upstream nvidia failed (404): {"error":{"message":"No such model"}}')),
+    ).toBe(true)
+    expect(
+      isFallbackEligibleError('api_error', 'API Error: Upstream opencode failed (400): {"error":{"message":"bad request: invalid params"}}'),
+    ).toBe(false)
+  })
 })
