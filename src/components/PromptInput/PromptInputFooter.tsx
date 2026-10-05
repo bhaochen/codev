@@ -37,6 +37,8 @@ type Props = {
   };
   vimMode: VimMode | undefined;
   mode: PromptInputMode;
+  /** Bash mode with a `!!cmd`: its output won't be sent to the model. */
+  hiddenBashInput?: boolean;
   autoUpdaterResult: AutoUpdaterResult | null;
   isAutoUpdating: boolean;
   verbose: boolean;
@@ -71,6 +73,7 @@ function PromptInputFooter({
   exitMessage,
   vimMode,
   mode,
+  hiddenBashInput,
   autoUpdaterResult,
   isAutoUpdating,
   verbose,
@@ -149,7 +152,7 @@ function PromptInputFooter({
       <Box flexDirection={isNarrow ? 'column' : 'row'} justifyContent={isNarrow ? 'flex-start' : 'space-between'} paddingX={2} gap={isNarrow ? 0 : 1}>
         <Box flexDirection="column" flexShrink={isNarrow ? 0 : 1}>
           {mode === 'prompt' && !isShort && !exitMessage.show && !isPasting && statusLineShouldDisplay(settings) && <StatusLine messagesRef={messagesRef} lastAssistantMessageId={lastAssistantMessageId} vimMode={vimMode} />}
-          <PromptInputFooterLeftSide exitMessage={exitMessage} vimMode={vimMode} mode={mode} toolPermissionContext={toolPermissionContext} suppressHint={suppressHint} isLoading={isLoading} tasksSelected={pillSelected} teamsSelected={teamsSelected} teammateFooterIndex={teammateFooterIndex} tmuxSelected={tmuxSelected} isPasting={isPasting} isSearching={isSearching} historyQuery={historyQuery} setHistoryQuery={setHistoryQuery} historyFailedMatch={historyFailedMatch} onOpenTasksDialog={onOpenTasksDialog} />
+          <PromptInputFooterLeftSide exitMessage={exitMessage} vimMode={vimMode} mode={mode} hiddenBashInput={hiddenBashInput} toolPermissionContext={toolPermissionContext} suppressHint={suppressHint} isLoading={isLoading} tasksSelected={pillSelected} teamsSelected={teamsSelected} teammateFooterIndex={teammateFooterIndex} tmuxSelected={tmuxSelected} isPasting={isPasting} isSearching={isSearching} historyQuery={historyQuery} setHistoryQuery={setHistoryQuery} historyFailedMatch={historyFailedMatch} onOpenTasksDialog={onOpenTasksDialog} />
           {apiKeyStatus !== 'invalid' && apiKeyStatus !== 'missing' && tokenUsage > 0 && <CtxProgressBar currentTokens={tokenUsage} contextWindowTokens={getEffectiveContextWindowSize(mainLoopModel)} compactionTargetTokens={getAutoCompactThreshold(mainLoopModel)} utilizationPct={Math.round((tokenUsage / Math.max(1, getEffectiveContextWindowSize(mainLoopModel))) * 100)} />}
         </Box>
         <Box flexShrink={1} gap={1}>

@@ -7,6 +7,7 @@ import { useKeybindings } from '../keybindings/useKeybinding.js';
 import { logEvent } from '../services/analytics/index.js';
 import type { AgentContentBlock } from '../types/agentMessage.js';
 import type { GroupedToolUseMessage, NormalizedUserMessage, RenderableMessage } from '../types/message.js';
+import { isHiddenBashMessage } from '../utils/hiddenBashMessage.js';
 import { isEmptyMessageText, SYNTHETIC_MESSAGES } from '../utils/messages.js';
 type GroupedToolUseWithResults = GroupedToolUseMessage & {
   results: NormalizedUserMessage[];
@@ -40,6 +41,9 @@ export function isNavigableMessage(msg: NavigableMessage): boolean {
         return !stripSystemReminders(b.text as string).startsWith('<');
       }
     case 'system':
+      // `!!cmd` output, like `!cmd` output (XML-wrapped user messages above),
+      // isn't a message to act on.
+      if (isHiddenBashMessage(msg)) return false;
       // biome-ignore lint/nursery/useExhaustiveSwitchCases: blocklist — fallthrough return-true is the design
       switch (msg.subtype) {
         case 'api_metrics':

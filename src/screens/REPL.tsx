@@ -182,7 +182,7 @@ import {
   expandPastedTextRefs,
   parseReferences,
 } from '../history.js'
-import { prependModeCharacterToInput } from '../components/PromptInput/inputModes.js'
+import { isHiddenBashInput, prependModeCharacterToInput } from '../components/PromptInput/inputModes.js'
 import { prependToShellHistoryCache } from '../utils/suggestions/shellHistoryCompletion.js'
 import { useApiKeyVerification } from '../hooks/useApiKeyVerification.js'
 import { GlobalKeybindingHandlers } from '../hooks/useGlobalKeybindings.js'
@@ -4555,6 +4555,17 @@ export function REPL({
       // Remote mode: skip empty input early before any state mutations
       if (activeRemote.isRemoteMode && !input.trim()) {
         return
+      }
+
+      // Remote sessions send bash-mode input to the remote model as a prompt,
+      // and a hidden `!!cmd` must never reach a model: keep it in the input.
+      if (activeRemote.isRemoteMode && inputMode === 'bash' && isHiddenBashInput(input)) {
+        addNotification({
+          key: 'hidden-bash-remote',
+          text: '!! commands only run in a local session',
+          priority: 'immediate'
+        });
+        return;
       }
 
       // Idle-return: prompt returning users to start fresh when the

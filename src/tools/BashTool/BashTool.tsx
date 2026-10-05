@@ -641,7 +641,12 @@ export const BashTool = buildTool({
     let wasInterrupted = false;
     let result: ExecResult;
     const isMainThread = !toolUseContext.agentId;
-    const preventCwdChanges = !isMainThread;
+    // A hidden `!!` command (typed by the user, output never sent to the
+    // model) must leave nothing the model would notice later: no background
+    // task (its notifications reach the model) and no session cwd change
+    // (a persisted cd also resets the cached env_info prompt section).
+    const isHiddenCommand = toolUseContext.hiddenShellCommand === true;
+    const preventCwdChanges = !isMainThread || isHiddenCommand;
     try {
       // Use the new async generator version of runShellCommand
       const commandGenerator = runShellCommand({
@@ -652,6 +657,7 @@ export const BashTool = buildTool({
         setAppState: toolUseContext.setAppStateForTasks ?? setAppState,
         setToolJSX,
         preventCwdChanges,
+        keepInForeground: isHiddenCommand,
         isMainThread,
         toolUseId: toolUseContext.toolUseId,
         agentId: toolUseContext.agentId
@@ -830,6 +836,7 @@ async function* runShellCommand({
   setAppState,
   setToolJSX,
   preventCwdChanges,
+  keepInForeground,
   isMainThread,
   toolUseId,
   agentId
@@ -839,6 +846,8 @@ async function* runShellCommand({
   setAppState: (f: (prev: AppState) => AppState) => void;
   setToolJSX?: SetToolJSXFn;
   preventCwdChanges?: boolean;
+  /** Never background the command (hidden `!!` commands). */
+  keepInForeground?: boolean;
   isMainThread?: boolean;
   toolUseId?: string;
   agentId?: AgentId;
@@ -878,7 +887,7 @@ async function* runShellCommand({
   // Determine if auto-backgrounding should be enabled
   // Only enable for commands that are allowed to be auto-backgrounded
   // and when background tasks are not disabled
-  const shouldAutoBackground = !isBackgroundTasksDisabled && isAutobackgroundingAllowed(command);
+  const shouldAutoBackground = !keepInForeground && !isBackgroundTasksDisabled && isAutobackgroundingAllowed(command);
   const shellCommand = await exec(command, abortController.signal, 'bash', {
     timeout: timeoutMs,
     onProgress(lastLines, allLines, totalLines, totalBytes, isIncomplete) {
@@ -974,7 +983,7 @@ async function* runShellCommand({
   // In assistant mode, the main agent should stay responsive. Auto-background
   // blocking commands after ASSISTANT_BLOCKING_BUDGET_MS so the agent can keep
   // coordinating instead of waiting. The command keeps running — no state loss.
-  if (feature('KAIROS') && getKairosActive() && isMainThread && !isBackgroundTasksDisabled && run_in_background !== true) {
+  if (feature('KAIROS') && getKairosActive() && isMainThread && !keepInForeground && !isBackgroundTasksDisabled && run_in_background !== true) {
     setTimeout(() => {
       if (shellCommand.status === 'running' && backgroundShellId === undefined) {
         assistantAutoBackgrounded = true;
@@ -1108,7 +1117,7 @@ async function* runShellCommand({
 
       // Show minimal backgrounding UI if available
       // Skip if background tasks are disabled
-      if (!isBackgroundTasksDisabled && backgroundShellId === undefined && elapsedSeconds >= PROGRESS_THRESHOLD_MS / 1000 && setToolJSX) {
+      if (!keepInForeground && !isBackgroundTasksDisabled && backgroundShellId === undefined && elapsedSeconds >= PROGRESS_THRESHOLD_MS / 1000 && setToolJSX) {
         // Register this command as a foreground task so it can be backgrounded via Ctrl+B
         if (!foregroundTaskId) {
           foregroundTaskId = registerForeground({

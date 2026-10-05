@@ -133,6 +133,7 @@ export type SystemMessage = {
   isMeta?: boolean
   text?: string
   content?: string
+  interrupted?: boolean
 }
 
 export type SystemMessageLevel = 'info' | 'warning' | 'error' | 'debug' | 'suggestion'

@@ -450,6 +450,9 @@ export const PowerShellTool = buildTool({
       setToolJSX
     } = toolUseContext;
     const isMainThread = !toolUseContext.agentId;
+    // A hidden `!!` command stays in the foreground and can't change the
+    // session cwd (see BashTool).
+    const isHiddenCommand = toolUseContext.hiddenShellCommand === true;
     let progressCounter = 0;
     try {
       const commandGenerator = runPowerShellCommand({
@@ -459,7 +462,8 @@ export const PowerShellTool = buildTool({
         // shell tasks are actually registered (and killable on agent exit).
         setAppState: toolUseContext.setAppStateForTasks ?? setAppState,
         setToolJSX,
-        preventCwdChanges: !isMainThread,
+        preventCwdChanges: !isMainThread || isHiddenCommand,
+        keepInForeground: isHiddenCommand,
         isMainThread,
         toolUseId: toolUseContext.toolUseId,
         agentId: toolUseContext.agentId
@@ -666,6 +670,7 @@ async function* runPowerShellCommand({
   setAppState,
   setToolJSX,
   preventCwdChanges,
+  keepInForeground,
   isMainThread,
   toolUseId,
   agentId
@@ -675,6 +680,8 @@ async function* runPowerShellCommand({
   setAppState: (f: (prev: AppState) => AppState) => void;
   setToolJSX?: SetToolJSXFn;
   preventCwdChanges?: boolean;
+  /** Never background the command (hidden `!!` commands). */
+  keepInForeground?: boolean;
   isMainThread?: boolean;
   toolUseId?: string;
   agentId?: AgentId;
@@ -713,7 +720,7 @@ async function* runPowerShellCommand({
       resolveProgress = () => resolve(null);
     });
   }
-  const shouldAutoBackground = !isBackgroundTasksDisabled && isAutobackgroundingAllowed(command);
+  const shouldAutoBackground = !keepInForeground && !isBackgroundTasksDisabled && isAutobackgroundingAllowed(command);
   const powershellPath = await getCachedPowerShellPath();
   if (!powershellPath) {
     // Pre-flight failure: pwsh not installed. Return code 0 so call() surfaces
@@ -830,7 +837,7 @@ async function* runPowerShellCommand({
   // In assistant mode, the main agent should stay responsive. Auto-background
   // blocking commands after ASSISTANT_BLOCKING_BUDGET_MS so the agent can keep
   // coordinating instead of waiting. The command keeps running — no state loss.
-  if (feature('KAIROS') && getKairosActive() && isMainThread && !isBackgroundTasksDisabled && run_in_background !== true) {
+  if (feature('KAIROS') && getKairosActive() && isMainThread && !keepInForeground && !isBackgroundTasksDisabled && run_in_background !== true) {
     setTimeout(() => {
       if (shellCommand.status === 'running' && backgroundShellId === undefined) {
         assistantAutoBackgrounded = true;
@@ -925,7 +932,7 @@ async function* runPowerShellCommand({
       // User submitted a new message - background instead of killing
       if (abortController.signal.aborted && abortController.signal.reason === 'interrupt' && !interruptBackgroundingStarted) {
         interruptBackgroundingStarted = true;
-        if (!isBackgroundTasksDisabled) {
+        if (!keepInForeground && !isBackgroundTasksDisabled) {
           startBackgrounding('tengu_powershell_command_interrupt_backgrounded');
           // Reloop so the backgroundShellId check (above) catches the sync
           // foregroundTaskId→background path. Without this, we fall through
@@ -955,7 +962,7 @@ async function* runPowerShellCommand({
       const elapsedSeconds = Math.floor(elapsed / 1000);
 
       // Show backgrounding UI hint after threshold
-      if (!isBackgroundTasksDisabled && backgroundShellId === undefined && elapsedSeconds >= PROGRESS_THRESHOLD_MS / 1000 && setToolJSX) {
+      if (!keepInForeground && !isBackgroundTasksDisabled && backgroundShellId === undefined && elapsedSeconds >= PROGRESS_THRESHOLD_MS / 1000 && setToolJSX) {
         if (!foregroundTaskId) {
           foregroundTaskId = registerForeground({
             command,
