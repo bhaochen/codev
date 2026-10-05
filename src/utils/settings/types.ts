@@ -693,6 +693,12 @@ export const SettingsSchema = lazySchema(() =>
         .boolean()
         .optional()
         .describe('Whether to disable syntax highlighting in diffs'),
+      mermaidDiagrams: z
+        .boolean()
+        .optional()
+        .describe(
+          'Whether to draw ```mermaid blocks in replies as terminal diagrams (defaults to true).',
+        ),
       terminalTitleFromRename: z
         .boolean()
         .optional()

@@ -112,7 +112,6 @@ export class PythonKernel {
     const runner = ensureRunnerOnDisk()
     // A program the Bash tool finds must be findable from a cell as well.
     const bashPath = await bashToolPathEntries()
-
     const proc = spawn(interpreter, ['-u', runner], {
       cwd: this.options.cwd,
       env: withAppendedPath(

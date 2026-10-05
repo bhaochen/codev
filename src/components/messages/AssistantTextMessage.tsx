@@ -238,7 +238,7 @@ export function AssistantTextMessage(t0) {
         }
         let t5;
         if ($[25] !== text) {
-          t5 = <Box flexDirection="column"><Markdown>{text}</Markdown></Box>;
+          t5 = <Box flexDirection="column"><Markdown mermaid mermaidSource={verbose}>{text}</Markdown></Box>;
           $[25] = text;
           $[26] = t5;
         } else {

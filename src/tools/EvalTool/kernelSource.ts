@@ -62,8 +62,36 @@ import _thread
 
 KERNEL_VERSION = "1"
 
-os.environ.setdefault("MPLBACKEND", "Agg")
+# The kernel is headless and captures figures after each cell.  Do not let a
+# user's desktop backend (TkAgg/QtAgg/etc.) take over: those backends may make
+# plt.show() hand the figure to a GUI and close or detach it before capture.
+os.environ["MPLBACKEND"] = "Agg"
 os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+
+# Prefer an installed CJK font so Chinese chart titles and labels survive the
+# PNG capture.  Matplotlib's default DejaVu Sans does not contain CJK glyphs;
+# its warnings otherwise flood the Eval result and can hide the useful chart.
+try:
+    import warnings
+    warnings.filterwarnings("ignore", message=r"Glyph .* missing from font\(s\)")
+    import matplotlib
+    from matplotlib import font_manager
+    preferred_fonts = (
+        "Noto Sans CJK SC",
+        "Noto Sans CJK TC",
+        "Source Han Sans SC",
+        "WenQuanYi Zen Hei",
+    )
+    installed_fonts = {font.name for font in font_manager.fontManager.ttflist}
+    cjk_font = next((name for name in preferred_fonts if name in installed_fonts), None)
+    if cjk_font:
+        matplotlib.rcParams["font.sans-serif"] = [cjk_font, "DejaVu Sans"]
+        matplotlib.rcParams["font.family"] = "sans-serif"
+    matplotlib.rcParams["axes.unicode_minus"] = False
+except Exception:
+    # Plotting must remain optional: a missing/broken Matplotlib install should
+    # not prevent ordinary Python cells from starting.
+    pass
 
 _emit_lock = threading.Lock()
 _raw_stdout = sys.stdout

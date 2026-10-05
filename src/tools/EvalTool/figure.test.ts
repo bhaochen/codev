@@ -108,6 +108,23 @@ async function main(): Promise<void> {
     }
   })
 
+  await asyncTest('plt.show() still leaves a figure for capture', async () => {
+    const k = kernel()
+    try {
+      const outcome = await k.execute(
+        'import matplotlib.pyplot as plt\nplt.plot([1,2,3])\nplt.show()',
+        { timeoutMs: 120_000 },
+      )
+      assert(outcome.ok, `cell failed: ${outcome.error?.evalue}`)
+      assert(
+        outcome.displays.some(d => d.mime === 'image/png'),
+        'plt.show() produced no captured image',
+      )
+    } finally {
+      await k.shutdown()
+    }
+  })
+
   await asyncTest('display() renders an explicit object', async () => {
     const k = kernel()
     try {

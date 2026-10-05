@@ -771,9 +771,9 @@ async function live(): Promise<void> {
   await asyncTest('a kernel does not outlive a hard-killed parent', async () => {
     // registerCleanup covers a graceful exit, but Windows has no process groups
     // and the child is not detached-killed with the parent. What actually saves
-    // us is the read loop: when the parent dies its pipe closes, readline
-    // returns EOF, and the kernel exits on its own. If that ever regresses,
-    // every crashed session leaks a python.exe.
+    // us is the read loop: when the parent dies its stdin pipe closes and the
+    // kernel exits on its own. If that ever regresses, every crashed session
+    // leaks a python.exe.
     assert(
       PYTHON_KERNEL_SOURCE.includes('if not line:\n            return'),
       'the kernel no longer exits on stdin EOF; a killed parent would leak it',

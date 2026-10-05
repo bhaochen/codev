@@ -10,6 +10,7 @@
  */
 
 import { z } from 'zod/v4'
+import { unlink, writeFile } from 'fs/promises'
 
 import { PythonKernel } from './kernel.js'
 import { resolvePythonInterpreter } from './pythonRuntime.js'
@@ -129,6 +130,48 @@ async function main(): Promise<void> {
         assert(calls.length === 1 && calls[0]?.name === 'Read', 'the call was not recorded')
       },
     )
+  })
+
+  await asyncTest('Bash bridge reads full persisted output instead of the transcript preview', async () => {
+    const path = `/tmp/codev-bridge-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`
+    const fullOutput = Array.from({ length: 2_000 }, (_, i) => `path-${i}.ts`).join('\n')
+    await writeFile(path, fullOutput, 'utf8')
+    try {
+      const bash = {
+        name: 'Bash',
+        inputSchema: z.object({ file_path: z.string() }),
+        async call() {
+          return {
+            data: {
+              stdout: 'preview only',
+              stderr: '',
+              interrupted: false,
+              persistedOutputPath: path,
+              persistedOutputSize: fullOutput.length,
+            },
+          }
+        },
+        mapToolResultToToolResultBlockParam() {
+          return {
+            type: 'tool_result' as const,
+            tool_use_id: 'test',
+            content: '<persisted-output>preview only</persisted-output>',
+          }
+        },
+      }
+      await withBridge({ tools: [bash] }, async kernel => {
+        const outcome = await kernel.execute(
+          'out = tool.Bash(file_path="ignored")\nprint(len(out.splitlines()))\nprint(out.splitlines()[-1])',
+          { timeoutMs: 20_000 },
+        )
+        assert(outcome.ok, `cell failed: ${outcome.error?.evalue}`)
+        assert(outcome.stdout.includes('2000'), outcome.stdout)
+        assert(outcome.stdout.includes('path-1999.ts'), outcome.stdout)
+        assert(!outcome.stdout.includes('<persisted-output>'), outcome.stdout)
+      })
+    } finally {
+      await unlink(path).catch(() => undefined)
+    }
   })
 
   await asyncTest('dict-style and kwargs-style arguments both work', async () => {

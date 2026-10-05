@@ -60,6 +60,8 @@ import { logForDebugging } from '../utils/debug.js'
 import { loadMemoryPrompt } from '../memdir/memdir.js'
 import { isUndercover } from '../utils/undercover.js'
 import { isMcpInstructionsDeltaEnabled } from '../utils/mcpInstructionsDelta.js'
+import { getMermaidDiagramsReminder } from '../utils/mermaidDiagramsReminder.js'
+import { EVAL_TOOL_NAME } from '../tools/EvalTool/constants.js'
 
 // Dead code elimination: conditional imports for feature-gated modules
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -275,7 +277,14 @@ function getUsingYourToolsSection(enabledTools: Set<string>): string {
   // dedicated Glob/Grep tools, so skip guidance pointing at them.
   const embedded = hasEmbeddedSearchTools()
 
+  const workflowToolOrientationItems = [
+    enabledTools.has(EVAL_TOOL_NAME)
+      ? `${EVAL_TOOL_NAME}: use the persistent Python kernel as the general Python workspace, not merely as a statistics tool. When the task is Python-native — data analysis, file parsing/transformation, automation, simulations, document processing, or plotting — call it first without being asked. For work over many files or commits, gather data inside the cell and print only the aggregate. Use Bash for shell-native build/test/git/package commands; do not run Python through Bash. For plots, use Matplotlib so the figure is returned inline; do not write a .mmd file or call a separate image tool.`
+      : null,
+  ].filter((item): item is string => item !== null)
+
   const providedToolSubitems = [
+    ...workflowToolOrientationItems,
     `To read files use ${FILE_READ_TOOL_NAME} instead of cat, head, tail, or sed`,
     `To edit files use ${FILE_EDIT_TOOL_NAME} instead of sed or awk`,
     `To create files use ${FILE_WRITE_TOOL_NAME} instead of cat with heredoc or echo redirection`,
@@ -290,6 +299,9 @@ function getUsingYourToolsSection(enabledTools: Set<string>): string {
 
   const items = [
     `Do NOT use the ${BASH_TOOL_NAME} to run commands when a relevant dedicated tool is provided. Using dedicated tools allows the user to better understand and review your work. This is CRITICAL to assisting the user:`,
+    getInitialSettings().mermaidDiagrams === false
+      ? null
+      : getMermaidDiagramsReminder(true),
     providedToolSubitems,
     taskToolName
       ? `Break down and manage your work with the ${taskToolName} tool. These tools are helpful for planning your work and helping the user track your progress. Mark each task as completed as soon as you are done with the task. Do not batch up multiple tasks before marking them as completed.`

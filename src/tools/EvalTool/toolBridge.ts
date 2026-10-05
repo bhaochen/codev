@@ -1,6 +1,7 @@
 import { getAgentContext, runWithAgentContext } from '../../utils/agentContext.js'
 import { randomUUID } from 'crypto'
 import { createServer, type Server } from 'http'
+import { readFile } from 'fs/promises'
 
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
 
@@ -138,6 +139,30 @@ function describeCall(name: string, args: Record<string, unknown>): string {
   return text.length > 120 ? `${text.slice(0, 117)}...` : text
 }
 
+/**
+ * Bash deliberately keeps very large output out of its model-facing result:
+ * `mapToolResultToToolResultBlockParam` replaces it with a persisted-output
+ * preview. That is correct for the normal transcript, but it is the wrong
+ * contract for Python. A cell needs the value so it can parse/aggregate it;
+ * otherwise Python receives the preview wrapper and starts counting that
+ * wrapper as if it were git output.
+ */
+async function readPersistedBridgeOutput(
+  name: string,
+  data: unknown,
+): Promise<string | undefined> {
+  if (name !== 'Bash' || !data || typeof data !== 'object') return undefined
+  const path = (data as Record<string, unknown>).persistedOutputPath
+  if (typeof path !== 'string' || path.length === 0) return undefined
+  try {
+    return await readFile(path, 'utf8')
+  } catch {
+    // The regular preview remains a useful fallback if the temporary output
+    // file was cleaned up before the bridge could read it.
+    return undefined
+  }
+}
+
 async function invoke(
   entry: BridgeRegistration,
   name: string,
@@ -208,8 +233,10 @@ async function invoke(
       ? await runWithAgentContext(
           { agentId: cellAgentId, agentType: 'subagent', invocationEmitted: false },
           invoke,
-        )
+      )
       : await invoke()
+  const persistedOutput = await readPersistedBridgeOutput(name, result.data)
+  if (persistedOutput !== undefined) return persistedOutput
   const block = tool.mapToolResultToToolResultBlockParam(result.data, toolUseId)
   const { text, images } = textFromContent(block.content)
   // A tool can report failure by RETURNING an error result instead of throwing

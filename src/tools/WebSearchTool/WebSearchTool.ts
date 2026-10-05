@@ -17,7 +17,7 @@ const inputSchema = lazySchema(() =>
     search_images: z.boolean().optional().describe(
       'IMPORTANT: Set to true when the user asks to see/show/find photos, images, pictures, or ' +
       'visual references (e.g. "show me photos of...", "find pictures of...", "look up images of..."). ' +
-      'When true, results contain direct image URLs (.jpg/.png/.gif) ready to use with ImageShowTool. ' +
+      'When true, results contain direct image URLs (.jpg/.png/.gif) for citation or image-aware workflows. ' +
       'Without this flag, image URLs are NOT available in results.'
     ),
   }),

@@ -4,6 +4,7 @@ import { extractTag } from 'src/utils/messages.js';
 import { FallbackToolUseErrorMessage } from '../../components/FallbackToolUseErrorMessage.js';
 import { FilePathLink } from '../../components/FilePathLink.js';
 import { HighlightedCode } from '../../components/HighlightedCode.js';
+import { InlineImage } from '../../components/InlineImage.js';
 import { MessageResponse } from '../../components/MessageResponse.js';
 import { Box, Text } from '../../ink.js';
 import type { ProgressMessage } from '../../types/message.js';
@@ -86,11 +87,14 @@ export function renderToolResultMessage(output: Output, _progressMessages: Progr
     case 'image':
       {
         const {
-          originalSize
+          originalSize,
+          base64
         } = output.file;
         const formattedSize = formatFileSize(originalSize);
-        return <MessageResponse height={1}>
-          <Text>Read image ({formattedSize})</Text>
+        return <MessageResponse>
+          <InlineImage base64={base64}>
+            <Text>Read image ({formattedSize})</Text>
+          </InlineImage>
         </MessageResponse>;
       }
     case 'notebook':

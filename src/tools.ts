@@ -75,7 +75,6 @@ import { ListMcpResourcesTool } from './tools/ListMcpResourcesTool/ListMcpResour
 import { ReadMcpResourceTool } from './tools/ReadMcpResourceTool/ReadMcpResourceTool.js'
 import { ToolSearchTool } from './tools/ToolSearchTool/ToolSearchTool.js'
 import { DebugSessionTool } from './tools/DebugSessionTool.js'
-import { ImageShowTool } from './tools/ImageShowTool/ImageShowTool.js'
 import { BenchmarkTool } from './tools/BenchmarkTool.js'
 import { LocationTool } from './tools/LocationTool/LocationTool.js'
 import { EvalTool } from './tools/EvalTool/EvalTool.js'
@@ -118,8 +117,8 @@ const TerminalCaptureTool = feature('TERMINAL_PANEL')
   ? require('./tools/TerminalCaptureTool/TerminalCaptureTool.js')
       .TerminalCaptureTool
   : null
-const WebBrowserTool = feature('WEB_BROWSER_TOOL')
-  ? require('./tools/WebBrowserTool/WebBrowserTool.js').WebBrowserTool
+const BrowserTool = feature('WEB_BROWSER_TOOL')
+  ? require('./tools/BrowserTool/BrowserTool.js').BrowserTool
   : null
 const coordinatorModeModule = feature('COORDINATOR_MODE')
   ? (require('./coordinator/coordinatorMode.js') as typeof import('./coordinator/coordinatorMode.js'))
@@ -213,7 +212,7 @@ export function getAllBaseTools(): Tools {
     ...(process.env.USER_TYPE === 'ant' ? [ConfigTool] : []),
     ...(process.env.USER_TYPE === 'ant' ? [TungstenTool] : []),
     ...(SuggestBackgroundPRTool ? [SuggestBackgroundPRTool] : []),
-    ...(WebBrowserTool ? [WebBrowserTool] : []),
+    ...(BrowserTool ? [BrowserTool] : []),
     ...(isTodoV2Enabled()
       ? [TaskCreateTool, TaskGetTool, TaskUpdateTool, TaskListTool]
       : []),
@@ -242,8 +241,6 @@ export function getAllBaseTools(): Tools {
     ...(process.env.NODE_ENV === 'test' ? [TestingPermissionTool] : []),
     // Debug session tool — used by /debug for runtime probe debugging
     DebugSessionTool,
-    // ImageShow — display images in terminal via Kitty graphics protocol
-    ImageShowTool,
     // Location & mapping tool — uses Amap (China) or Google Maps (international)
     LocationTool,
     // Benchmark — render /benchmark reports (collapsed, click to expand)

@@ -4,6 +4,7 @@ import figures from 'figures';
 import * as React from 'react';
 import type { z } from 'zod/v4';
 import { ProgressBar } from '../../components/design-system/ProgressBar.js';
+import { InlineImage } from '../../components/InlineImage.js';
 import { MessageResponse } from '../../components/MessageResponse.js';
 import { linkifyUrlsInText, OutputLine } from '../../components/shell/OutputLine.js';
 import { stringWidth } from '../../ink/stringWidth.js';
@@ -114,6 +115,12 @@ export function renderToolResultMessage(output: string | MCPToolResult, _progres
   if (Array.isArray(mcpOutput)) {
     const contentBlocks = mcpOutput.map((item, i) => {
       if (item.type === 'image') {
+        const source = item.source
+        if (source.type === 'base64') {
+          return <InlineImage key={i} base64={source.data}>
+            <Text>Browser image</Text>
+          </InlineImage>
+        }
         return <Box key={i} justifyContent="space-between" overflowX="hidden" width="100%">
             <MessageResponse height={1}>
               <Text>[Image]</Text>

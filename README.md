@@ -204,14 +204,6 @@ hf download Systran/faster-whisper-base \
 
 ## ✨ Features
 
-### ImageShow On Terminal
-
-<table align="center">
-  <tr>
-    <td><img src="assets/imageshow.png"></td>
-  </tr>
-</table>
-
 ### Agent Team and View via Tmux
 
 <table align="center">

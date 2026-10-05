@@ -147,8 +147,8 @@ export function ensureRunnerOnDisk(): string {
     .update(PYTHON_KERNEL_SOURCE)
     .digest('hex')
     .slice(0, 16)
-  const dir = join(tmpdir(), 'tau-eval-kernel', hash)
-  const file = join(dir, 'tau_kernel.py')
+  const dir = join(tmpdir(), 'codev-eval-kernel', hash)
+  const file = join(dir, 'codev_kernel.py')
   if (!existsSync(file)) {
     mkdirSync(dir, { recursive: true })
     writeFileSync(file, PYTHON_KERNEL_SOURCE, 'utf8')

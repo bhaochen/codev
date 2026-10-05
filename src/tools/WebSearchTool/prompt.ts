@@ -15,14 +15,13 @@ CRITICAL RULE — When the user asks to see images/photos/pictures:
   You MUST set search_images=true in the WebSearch call. Example:
     WebSearch({ query: "milet 写真", search_images: true })
   This returns results with direct image URLs (.jpg/.png/.gif) that you can
-  immediately pass to ImageShowTool(src: url). Do NOT do general web searches
+  return the direct image URLs as results. Do NOT do general web searches
   and try to find images inside pages — that is wasteful and often fails.
   Without search_images=true, image URLs are NOT available in the results.
 
 Image Search workflow (search_images: true):
-  - Results include direct image URLs ready for ImageShowTool
-  - Example: WebSearch(query: "...", search_images: true) → pick URLs → ImageShowTool(src: url)
-  - Do NOT pass article/page URLs to ImageShowTool — it only accepts direct image URLs
+  - Results include direct image URLs that can be cited or inspected by a suitable image-aware workflow
+  - Example: WebSearch(query: "...", search_images: true) → compare the returned image URLs
 
 CRITICAL REQUIREMENT - You MUST follow this:
   - After answering the user's question, you MUST include a "Sources:" section at the end of your response

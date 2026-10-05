@@ -23,7 +23,7 @@ import { EVAL_TOOL_NAME } from './constants.js'
  * and in practice the model only reached for it when a user said "use Eval".
  */
 export const DESCRIPTION =
-  'Compute an answer in Python instead of reading the raw material into the conversation — counts, rankings and audits over many files or large data, cross-checks, the same edit applied across many files, charts. Persistent kernel; can call your other tools from inside the code; renders figures inline.'
+  'Run Python in a persistent kernel for data analysis, parsing or transforming many files, automation, simulations, charts, document processing, or any computation that benefits from Python state. The kernel can call your other tools from inside the code and renders figures inline.'
 
 /**
  * WHY THIS PROMPT IS SHAPED THE WAY IT IS.
@@ -88,7 +88,10 @@ refine.
 </critical>
 
 Read and Edit are not more capable than a cell — cheaper for one known change.
-Anything Python can do, a cell can do, writing files included.
+Anything Python can do, a cell can do, writing files included. Use this as the
+general Python workspace, not only for statistics. Use Bash for shell-native
+commands such as build, test, git and package-manager operations; when the work
+itself is Python, run it here rather than through \`python\` in Bash.
 
 Do the gathering **inside** the cell: a separate Grep or Glob pays for its
 whole result in context; \`tool.Grep(...)\` or \`Path.rglob\` finds the same

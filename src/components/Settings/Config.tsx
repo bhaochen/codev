@@ -472,6 +472,32 @@ export function Config({
           ...prev,
           inlineImagesEnabled,
         }))
+        // InlineImage reads this value from AppState, not directly from the
+        // settings file. Keep the live transcript in sync immediately; waiting
+        // for the settings watcher leaves the current session showing only
+        // "cell produced no output" after Python successfully returned a
+        // figure.
+        setAppState(prev => ({
+          ...prev,
+          settings: {
+            ...prev.settings,
+            inlineImagesEnabled,
+          },
+        }))
+      },
+    },
+    {
+      id: 'mermaidDiagrams',
+      label: 'Draw diagrams',
+      value: settingsData?.mermaidDiagrams ?? true,
+      type: 'boolean' as const,
+      onChange(mermaidDiagrams: boolean) {
+        updateSettingsForSource('localSettings', { mermaidDiagrams })
+        setSettingsData(prev => ({ ...prev, mermaidDiagrams }))
+        setAppState(prev => ({
+          ...prev,
+          settings: { ...prev.settings, mermaidDiagrams },
+        }))
       },
     },
     {
@@ -1573,6 +1599,7 @@ export function Config({
     const il = initialLocalSettings
     updateSettingsForSource('localSettings', {
       spinnerTipsEnabled: il?.spinnerTipsEnabled,
+      mermaidDiagrams: il?.mermaidDiagrams,
       prefersReducedMotion: il?.prefersReducedMotion,
       defaultView: il?.defaultView,
       outputStyle: il?.outputStyle,
