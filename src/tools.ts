@@ -78,6 +78,7 @@ import { DebugSessionTool } from './tools/DebugSessionTool.js'
 import { ImageShowTool } from './tools/ImageShowTool/ImageShowTool.js'
 import { BenchmarkTool } from './tools/BenchmarkTool.js'
 import { LocationTool } from './tools/LocationTool/LocationTool.js'
+import { EvalTool } from './tools/EvalTool/EvalTool.js'
 import { EnterPlanModeTool } from './tools/EnterPlanModeTool/EnterPlanModeTool.js'
 import { EnterWorktreeTool } from './tools/EnterWorktreeTool/EnterWorktreeTool.js'
 import { ExitWorktreeTool } from './tools/ExitWorktreeTool/ExitWorktreeTool.js'
@@ -255,6 +256,8 @@ export function getAllBaseTools(): Tools {
     GoalCreateTool,
     GoalGetTool,
     GoalUpdateTool,
+    // Eval — persistent Python kernel with tool bridge (registers last for cache stability)
+    EvalTool,
   ]
 }
 
