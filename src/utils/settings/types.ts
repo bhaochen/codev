@@ -640,6 +640,12 @@ export const SettingsSchema = lazySchema(() =>
         .string()
         .optional()
         .describe('Controls the output style for assistant responses'),
+      inlineImagesEnabled: z
+        .boolean()
+        .optional()
+        .describe(
+          'Render images inline in the terminal transcript. Off shows a text summary line instead of the picture.',
+        ),
       language: z
         .string()
         .optional()

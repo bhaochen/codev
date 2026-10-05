@@ -91,9 +91,6 @@
     "lodash-es": "^4.17.23",
     "lru-cache": "^11.2.7",
     "marked": "^17.0.5",
-    "is-unicode-supported": "^2.1.0",
-    "iterm2-version": "^6.0.0",
-    "jimp": "^1.6.1",
     "node-fetch": "^3.3.2",
     "sixel": "^0.16.0",
     "onnxruntime-web": "^1.27.0",
@@ -134,8 +131,5 @@
     "@types/react-dom": "^19.2.3",
     "typescript": "^6.0.2",
     "vitest": "^4.1.10"
-  },
-  "patchedDependencies": {
-    "sixel@0.16.0": "patches/sixel@0.16.0.patch"
   }
 }

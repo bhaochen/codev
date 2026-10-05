@@ -41,6 +41,7 @@ type KittyResponse = Extract<TerminalResponse, { type: 'kittyKeyboard' }>
 type CursorPosResponse = Extract<TerminalResponse, { type: 'cursorPosition' }>
 type OscResponse = Extract<TerminalResponse, { type: 'osc' }>
 type XtversionResponse = Extract<TerminalResponse, { type: 'xtversion' }>
+type PixelSizeResponse = Extract<TerminalResponse, { type: 'pixelSize' }>
 
 // -- Query builders --
 
@@ -109,6 +110,32 @@ export function xtversion(): TerminalQuery<XtversionResponse> {
   return {
     request: csi('>0q'),
     match: (r): r is XtversionResponse => r.type === 'xtversion',
+  }
+}
+
+/**
+ * XTWINOPS cell size in pixels (CSI 16 t). Terminal replies with
+ * CSI 6 ; height ; width t, or ignores it.
+ *
+ * Inline graphics protocols measure in pixels while the layout reserves whole
+ * cell rows, so an image can only be sized to fit its reserved box once this is
+ * known. Terminals that answer CSI 14 t but not CSI 16 t are covered by
+ * {@link windowPixelSize}, whose result divides down to the same thing.
+ */
+export function cellPixelSize(): TerminalQuery<PixelSizeResponse> {
+  return {
+    request: csi('16t'),
+    match: (r): r is PixelSizeResponse =>
+      r.type === 'pixelSize' && r.kind === 'cell',
+  }
+}
+
+/** XTWINOPS window size in pixels (CSI 14 t). Fallback for {@link cellPixelSize}. */
+export function windowPixelSize(): TerminalQuery<PixelSizeResponse> {
+  return {
+    request: csi('14t'),
+    match: (r): r is PixelSizeResponse =>
+      r.type === 'pixelSize' && r.kind === 'window',
   }
 }
 
@@ -190,23 +217,30 @@ export class TerminalQuerier {
    *   and signal its flush() completion. Only draining up to the first
    *   sentinel keeps later batches intact when multiple callers have
    *   concurrent queries in flight.
-   * - Unsolicited responses (no match, no sentinel) are silently dropped.
+   * - Unsolicited responses (no match, no sentinel) are dropped.
+   *
+   * Returns whether anything was waiting for the response. One that nothing
+   * was waiting for usually arrived after the DA1 that closed its batch, which
+   * means something between us and the terminal answered DA1 first — an old
+   * Windows ConPTY does. The caller decides whether that is worth logging.
    */
-  onResponse(r: TerminalResponse): void {
+  onResponse(r: TerminalResponse): boolean {
     const idx = this.queue.findIndex(p => p.kind === 'query' && p.match(r))
     if (idx !== -1) {
       const [q] = this.queue.splice(idx, 1)
       if (q?.kind === 'query') q.resolve(r)
-      return
+      return true
     }
 
     if (r.type === 'da1') {
       const s = this.queue.findIndex(p => p.kind === 'sentinel')
-      if (s === -1) return
+      if (s === -1) return false
       for (const p of this.queue.splice(0, s + 1)) {
         if (p.kind === 'query') p.resolve(undefined)
         else p.resolve()
       }
+      return true
     }
+    return false
   }
 }

@@ -33,6 +33,8 @@ import createRenderer, { type Renderer } from './renderer.js';
 import { CellWidth, CharPool, cellAt, createScreen, HyperlinkPool, isEmptyCellAt, migrateScreenPools, StylePool } from './screen.js';
 import { applySearchHighlight } from './searchHighlight.js';
 import { applySelectionOverlay, captureScrolledRows, clearSelection, createSelectionState, extendSelection, type FocusMove, findPlainTextUrlAt, getSelectedText, hasSelection, moveFocus, type SelectionState, selectLineAt, selectWordAt, shiftAnchor, shiftSelection, shiftSelectionForFollow, startSelection, updateSelection } from './selection.js';
+import { buildGraphicsSequence, commitRowGraphics, discardRowGraphics, forceGraphicsRedraw, forgetGraphicsReprintRequests, hasGraphicsPlacements, invalidateGraphicsPlacements, isGraphicsReprintOwed, planRowGraphics, takeGraphicsReprintRequest } from './graphicsPlacement.js';
+import { getCellPixelSize, graphicsEncodeQuietFor } from '../utils/terminalGraphics.js';
 import { SYNC_OUTPUT_SUPPORTED, supportsExtendedKeys, type Terminal, writeDiffToTerminal } from './terminal.js';
 import { CURSOR_HOME, cursorMove, cursorPosition, DISABLE_KITTY_KEYBOARD, DISABLE_MODIFY_OTHER_KEYS, ENABLE_KITTY_KEYBOARD, ENABLE_MODIFY_OTHER_KEYS, ERASE_SCREEN } from './termio/csi.js';
 import { DBP, DFE, DISABLE_MOUSE_TRACKING, ENABLE_MOUSE_TRACKING, ENTER_ALT_SCREEN, EXIT_ALT_SCREEN, SHOW_CURSOR } from './termio/dec.js';
@@ -55,6 +57,12 @@ const ERASE_THEN_HOME_PATCH = Object.freeze({
   type: 'stdout' as const,
   content: ERASE_SCREEN + CURSOR_HOME
 });
+
+// Inline images that need their rows written again share one reprint: it waits
+// until requests and image encodes have been quiet this long — a batch, or
+// every image re-encoding after a resize — but never longer than the cap.
+const GRAPHICS_REPRINT_QUIET_MS = 150;
+const GRAPHICS_REPRINT_MAX_WAIT_MS = 3000;
 
 // Cached per-Ink-instance, invalidated on resize. frame.cursor.y for
 // alt-screen is always terminalRows - 1 (renderer.ts).
@@ -100,6 +108,11 @@ export default class Ink {
   private backFrame: Frame;
   private lastPoolResetTime = performance.now();
   private drainTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Pending reprint for inline images that can only be drawn with their rows. */
+  private graphicsReprintTimer: ReturnType<typeof setTimeout> | null = null;
+  /** When the pending reprint was first, and most recently, asked for. */
+  private graphicsReprintSince = 0;
+  private graphicsReprintLastAsk = 0;
   private lastYogaCounters: {
     ms: number;
     visited: number;
@@ -197,7 +210,8 @@ export default class Ink {
     this.backFrame = emptyFrame(this.terminalRows, this.terminalColumns, this.stylePool, this.charPool, this.hyperlinkPool);
     this.log = new LogUpdate({
       isTTY: options.stdout.isTTY as boolean | undefined || false,
-      stylePool: this.stylePool
+      stylePool: this.stylePool,
+      rowGraphics: planRowGraphics
     });
 
     // scheduleRender is called from the reconciler's resetAfterCommit, which
@@ -293,6 +307,10 @@ export default class Ink {
     this.frontFrame = emptyFrame(this.frontFrame.viewport.height, this.frontFrame.viewport.width, this.stylePool, this.charPool, this.hyperlinkPool);
     this.backFrame = emptyFrame(this.backFrame.viewport.height, this.backFrame.viewport.width, this.stylePool, this.charPool, this.hyperlinkPool);
     this.log.reset();
+    // The transcript is written out again below whatever the shell printed, so
+    // the recorded pixel rectangles describe rows that are no longer Ink's. See
+    // repaint(): kept, they would pass the images off as already on screen.
+    invalidateGraphicsPlacements();
     // Physical cursor position is unknown after the shell took over during
     // suspend. Clear displayCursor so the next frame's cursor preamble
     // doesn't emit a relative move from a stale park position.
@@ -315,6 +333,21 @@ export default class Ink {
     this.terminalColumns = cols;
     this.terminalRows = rows;
     this.altScreenParkPatch = makeAltScreenParkPatch(this.terminalRows);
+
+    // Inline graphics are the terminal's pixels, not cells in these buffers, so
+    // a resize is always a reason to redraw them, in either screen mode. The
+    // main screen — the default — resets nothing on its own: it just
+    // re-renders, and the diff then skips an image that has not moved as
+    // "already on screen" while the terminal has in fact reflowed under it.
+    //
+    // Forcing the redraw is not the same as invalidating. Nothing has cleared
+    // the terminal at this point — log-update decides that afterwards, from the
+    // diff, and onRender invalidates for real when the result carries a
+    // clearTerminal patch. Discarding the recorded rectangles here instead left
+    // the copy already on screen with nothing able to erase it: a resize that
+    // did not trigger a full reset (rows grew, width unchanged) stranded it for
+    // the rest of the session.
+    forceGraphicsRedraw();
 
     // Alt screen: reset frame buffers so the next render repaints from
     // scratch (prevFrameContaminated → every cell written, wrapped in
@@ -585,6 +618,9 @@ export default class Ink {
       };
     }
     const tDiff = performance.now();
+    // Inline images the writer draws with their rows are planned inside render
+    // and recorded below, once it is known whether this frame wiped the screen.
+    discardRowGraphics();
     const diff = this.log.render(prevFrame, frame, this.altScreenActive,
     // DECSTBM needs BSU/ESU atomicity — without it the outer terminal
     // renders the scrolled-but-not-yet-repainted intermediate state.
@@ -592,6 +628,7 @@ export default class Ink {
     // doesn't implement DEC 2026, so SYNC_OUTPUT_SUPPORTED is false).
     SYNC_OUTPUT_SUPPORTED);
     const diffMs = performance.now() - tDiff;
+    this.rootNode.rowsInScrollback = this.altScreenActive ? 'alt' : this.log.rowsInScrollback;
     // Swap buffers
     this.backFrame = this.frontFrame;
     this.frontFrame = frame;
@@ -657,11 +694,71 @@ export default class Ink {
       } else {
         optimized.unshift(CURSOR_HOME_PATCH);
       }
+      //
       // Only park the cursor (altScreenParkPatch) when the diff actually
       // moved it — on empty diffs the cursor is still at (0,0) from the
       // prepended CSI H, and re-parking would be a wasted cursor row jump.
       if (hasDiff) {
         optimized.push(this.altScreenParkPatch);
+      }
+    }
+
+    // Inline graphics: draw any registered sixel/Kitty/iTerm2 payloads over the
+    // cells their components reserved. Emitted after the frame's text patches
+    // so the pixels land on top rather than being painted over, and before the
+    // cursor parking below so the declared position still wins. The helper
+    // brackets each payload in DECSC/DECRC, leaving the cursor at frame.cursor.
+    if (hasGraphicsPlacements()) {
+      // A screen clear drops the pixels but not the origins, so the helper's
+      // "did anything move" test would wrongly conclude there is nothing to do.
+      if (optimized.some(patch => patch.type === 'clearTerminal')) {
+        invalidateGraphicsPlacements();
+      }
+      const graphicsViewportTop = this.altScreenActive ? 0 : this.log.rowsInScrollback;
+      // Images the writer just drew with their rows are on screen now. Record
+      // them before the pass below, which would otherwise draw them twice — or,
+      // for boxes the same frame pushed into history, give up on them.
+      commitRowGraphics(frame.screen, graphicsViewportTop);
+      // Where the terminal cursor physically is when this patch runs — the
+      // origin every row move in the sequence is measured from.
+      //
+      // A written frame ends with the cursor at the frame's own position (the
+      // bottom row in alt-screen, where altScreenParkPatch above put it). An
+      // EMPTY diff writes nothing, so the cursor is still parked wherever the
+      // previous frame left it: at the caret declared by the prompt input,
+      // several rows above and a few columns right of frame.cursor. Assuming
+      // frame.cursor regardless drew and erased every image at that offset —
+      // the misplaced copy with an unerasable ghost below it, appearing only
+      // once a turn ended. While a turn runs the input is unfocused, so nothing
+      // is parked and every frame has a diff; both branches agreed and the
+      // mismatch stayed invisible.
+      const restingCursor = this.altScreenActive ? {
+        x: 0,
+        y: terminalRows - 1
+      } : frame.cursor;
+      const graphicsCursor = hasDiff ? restingCursor : this.displayCursor ?? restingCursor;
+      const graphics = buildGraphicsSequence({
+        cursor: graphicsCursor,
+        // nodeCache uses logical screen rows on the main screen; the physical
+        // viewport begins at the first row not yet in scrollback, which the
+        // writer tracks (after a shrink it is not the cursor row minus rows - 1).
+        // Alt-screen coordinates are already viewport-relative.
+        viewportTop: graphicsViewportTop,
+        viewportRows: terminalRows,
+        viewportColumns: terminalWidth,
+        damage: frame.screen.damage,
+        cell: getCellPixelSize(),
+        scrollback: !this.altScreenActive,
+        // Erasing a moved graphic means rewriting the cells it used to cover,
+        // read from the frame that is being written right now.
+        screen: frame.screen,
+        stylePool: this.stylePool
+      });
+      if (graphics !== '') {
+        optimized.push({
+          type: 'stdout',
+          content: graphics
+        });
       }
     }
 
@@ -751,6 +848,20 @@ export default class Ink {
     writeDiffToTerminal(this.terminal, optimized, this.altScreenActive && !SYNC_OUTPUT_SUPPORTED);
     const writeMs = performance.now() - tWrite;
 
+    // An inline image left undrawn in terminal history can only be drawn by
+    // writing its rows again. Taken every frame so a request never outlives the
+    // screen mode it was made in. A plain timeout, like the drain timer below:
+    // this runs inside a throttled render, where scheduleRender would fire
+    // immediately.
+    if (takeGraphicsReprintRequest() && !this.altScreenActive) {
+      const now = Date.now();
+      this.graphicsReprintLastAsk = now;
+      if (this.graphicsReprintTimer === null) {
+        this.graphicsReprintSince = now;
+        this.graphicsReprintTimer = setTimeout(this.runGraphicsReprint, GRAPHICS_REPRINT_QUIET_MS);
+      }
+    }
+
     // Update blit safety for the NEXT frame. The frame just rendered
     // becomes frontFrame (= next frame's prevScreen). If we applied the
     // selection overlay, that buffer has inverted cells. selActive/hlActive
@@ -802,8 +913,35 @@ export default class Ink {
       flickers
     });
   }
+
+  /**
+   * Rewrite the transcript so inline images left undrawn in terminal history go
+   * out again with their rows. Requested from onRender.
+   */
+  private runGraphicsReprint = (): void => {
+    this.graphicsReprintTimer = null;
+    if (this.isUnmounted) return;
+    if (this.isPaused || this.altScreenActive) {
+      // Forgotten rather than kept: the first main-screen frame after the
+      // screen is handed back asks again for whatever is still undrawn.
+      forgetGraphicsReprintRequests();
+      return;
+    }
+    const now = Date.now();
+    const quietFor = Math.min(now - this.graphicsReprintLastAsk, graphicsEncodeQuietFor(now));
+    if (quietFor < GRAPHICS_REPRINT_QUIET_MS && now - this.graphicsReprintSince < GRAPHICS_REPRINT_MAX_WAIT_MS) {
+      this.graphicsReprintTimer = setTimeout(this.runGraphicsReprint, GRAPHICS_REPRINT_QUIET_MS - quietFor);
+      return;
+    }
+    // A full reset for another reason may have drawn them in the meantime.
+    if (!isGraphicsReprintOwed()) return;
+    logForDebugging('graphics: reprint — writing the transcript again to draw images left in history');
+    this.log.requestFullReset('graphics');
+    this.onRender();
+  };
   pause(): void {
     // Flush pending React updates and render before pausing.
+    // @ts-expect-error flushSyncFromReconciler exists in react-reconciler 0.31 but not in @types/react-reconciler
     reconciler.flushSyncFromReconciler();
     this.onRender();
     this.isPaused = true;
@@ -822,6 +960,12 @@ export default class Ink {
     this.frontFrame = emptyFrame(this.frontFrame.viewport.height, this.frontFrame.viewport.width, this.stylePool, this.charPool, this.hyperlinkPool);
     this.backFrame = emptyFrame(this.backFrame.viewport.height, this.backFrame.viewport.width, this.stylePool, this.charPool, this.hyperlinkPool);
     this.log.reset();
+    // Inline graphics live in the terminal, not in these buffers, so resetting
+    // the buffers is exactly when the recorded pixel rectangles stop being
+    // true. Every caller here has either erased the screen or found it
+    // corrupted by another process; either way the images are gone and the
+    // rectangles would otherwise suppress the redraw as "already on screen".
+    invalidateGraphicsPlacements();
     // Physical cursor position is unknown after external terminal corruption.
     // Clear displayCursor so the cursor preamble doesn't emit a stale
     // relative move from where we last parked it.
@@ -948,6 +1092,10 @@ export default class Ink {
     // Cancel any pending throttled render so it doesn't fire between
     // cleanupTerminalModes() and process.exit() and write to main screen.
     this.scheduleRender.cancel?.();
+    if (this.graphicsReprintTimer !== null) {
+      clearTimeout(this.graphicsReprintTimer);
+      this.graphicsReprintTimer = null;
+    }
     // Restore stdin from raw mode. unmount() used to do this via React
     // unmount (App.componentWillUnmount → handleSetRawMode(false)) but we're
     // short-circuiting that path. Must use this.options.stdin — NOT
@@ -1013,6 +1161,12 @@ export default class Ink {
     this.frontFrame = blank();
     this.backFrame = blank();
     this.log.reset();
+    // See repaint(): the pixels are the terminal's, and this is the moment they
+    // stop matching what was recorded. Resize reaches here through
+    // handleResize, ctrl+L through forceRedraw, and SIGCONT / sleep-wake /
+    // external-TUI handoff through reenterAltScreen — each of which writes
+    // ERASE_SCREEN, which drops sixels along with the text.
+    invalidateGraphicsPlacements();
     // Defense-in-depth: alt-screen skips the cursor preamble anyway (CSI H
     // resets), but a stale displayCursor would be misleading if we later
     // exit to main-screen without an intervening render.
@@ -1525,8 +1679,14 @@ export default class Ink {
       clearTimeout(this.drainTimer);
       this.drainTimer = null;
     }
+    if (this.graphicsReprintTimer !== null) {
+      clearTimeout(this.graphicsReprintTimer);
+      this.graphicsReprintTimer = null;
+    }
 
+    // @ts-expect-error updateContainerSync exists in react-reconciler but not in @types/react-reconciler
     reconciler.updateContainerSync(null, this.container, null, noop);
+    // @ts-expect-error flushSyncWork exists in react-reconciler but not in @types/react-reconciler
     reconciler.flushSyncWork();
     instances.delete(this.options.stdout);
 

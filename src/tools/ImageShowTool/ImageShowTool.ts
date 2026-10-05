@@ -1,11 +1,7 @@
-import { execFileSync } from 'child_process'
-import crypto from 'node:crypto'
 import fs from 'node:fs'
 import { z } from 'zod/v4'
-import { Jimp } from "jimp";
 import { buildTool, type ToolDef } from '../../Tool.js'
 import { lazySchema } from '../../utils/lazySchema.js'
-import { whichSync } from '../../utils/which.js'
 import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js'
 import { IMAGE_SHOW_TOOL_NAME, DESCRIPTION } from './prompt.js'
 import {
@@ -14,101 +10,69 @@ import {
   renderToolUseMessage,
 } from './UI.js'
 
-// ── Constants ──
-
-export const CELL_WIDTH = 8;
-export const CELL_HEIGHT = 16;
-
 // ── Types ──
-
-export interface ImageDimensions {
-  width: number;        // 字符宽度
-  height: number;       // 字符高度
-  pixelWidth: number;   // 像素宽度
-  pixelHeight: number;  // 像素高度
-}
 
 export interface ImageShowOutput {
   src: string
   success: boolean
-  width?: number
-  height?: number
-  pixelWidth?: number
-  pixelHeight?: number
-  kittySequence?: string
+  /** Raw image bytes, base64-encoded, for the transcript renderer. */
+  base64?: string
+  /** Byte length of the decoded image, for the summary line. */
+  bytes?: number
+  /** Why the image could not be loaded. */
+  error?: string
 }
 
 // ── Utilities ──
 
-export function getImagePath(args: string[]): string {
-  return args[0] || "/home/yuki/Pictures/Wallpapers/3god.jpg";
-}
-
 export function isUrl(path: string): boolean {
-  return path.startsWith("http://") || path.startsWith("https://");
+  return path.startsWith('http://') || path.startsWith('https://')
 }
 
 /**
- * Download a URL to a temporary file, return the path.
- * Caller should delete the file after use.
+ * Largest image the tool will load.
+ *
+ * The result is base64-encoded into the tool result and held in the transcript
+ * for the life of the session, and the renderer decodes and rescales it again
+ * on every mount. A hundred-megabyte source would cost several times that, so
+ * the ceiling is a guard rather than a limit anyone reaches in practice.
  */
-export async function downloadToTemp(url: string): Promise<string> {
-  const res = await fetch(url, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (compatible; ImageShowTool/1.0)',
-      'Accept': 'image/*',
-    },
-  })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  const buffer = Buffer.from(await res.arrayBuffer())
-  const hash = crypto.createHash('md5').update(url).digest('hex')
-  const tmp = `/tmp/img_${hash}`
-  fs.writeFileSync(tmp, buffer)
-  return tmp
-}
+export const MAX_IMAGE_BYTES = 48 * 1024 * 1024
 
-export async function loadImage(path: string) {
-  if (isUrl(path)) {
-    // Download to temp file, then read with Jimp
-    const tmp = await downloadToTemp(path)
-    try {
-      return await Jimp.read(fs.readFileSync(tmp))
-    } finally {
-      fs.unlinkSync(tmp)
+/**
+ * Load image bytes from a local path or an HTTP(S) URL.
+ *
+ * A URL is fetched straight into memory rather than staged through a temp file:
+ * the bytes are all the result needs, since rendering happens in-process from
+ * the base64 payload. That removes the temp-file dance the previous mechanism
+ * needed to hand a path to an external converter.
+ */
+export async function loadImageBytes(src: string): Promise<Buffer> {
+  if (isUrl(src)) {
+    const res = await fetch(src, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; Codev/1.0)',
+        Accept: 'image/*',
+      },
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const buffer = Buffer.from(await res.arrayBuffer())
+    if (buffer.byteLength > MAX_IMAGE_BYTES) {
+      throw new Error(
+        `image is ${(buffer.byteLength / 1024 / 1024).toFixed(1)}MB, over the ${MAX_IMAGE_BYTES / 1024 / 1024}MB limit`,
+      )
     }
-  } else {
-    // Read file to Buffer first, then pass to Jimp.read().
-    // Jimp v1.x has inconsistent path resolution in some runtimes
-    // (Bun, ESM contexts), so this avoids relying on Jimp's internal
-    // file detection by feeding the raw buffer directly.
-    const buffer = fs.readFileSync(path);
-    return Jimp.read(buffer);
+    return buffer
   }
-}
 
-export function calculateDimensions(
-  imageWidth: number,
-  imageHeight: number,
-  terminalRows: number
-): ImageDimensions {
-  // Height = 16.18% of terminal height; width derived from aspect ratio.
-  const targetH_chars = Math.floor(terminalRows * 0.1618);
-  const targetH_pixels = targetH_chars * CELL_HEIGHT;
-  const minW_chars = 3;
-
-  // Pixel width from aspect ratio, then back-compute char width to guarantee
-  // pixelWidth === width * CELL_WIDTH — no rounding gap between the
-  // placeholder Box and the actual Kitty image.
-  const targetW_pixels = Math.floor(targetH_pixels * (imageWidth / imageHeight));
-  const targetW_chars = Math.max(Math.ceil(targetW_pixels / CELL_WIDTH), minW_chars);
-  const finalPixelWidth = targetW_chars * CELL_WIDTH;
-
-  return {
-    width: targetW_chars,
-    height: targetH_chars,
-    pixelWidth: finalPixelWidth,
-    pixelHeight: targetH_pixels,
-  };
+  const stats = fs.statSync(src)
+  if (!stats.isFile()) throw new Error(`not a file: ${src}`)
+  if (stats.size > MAX_IMAGE_BYTES) {
+    throw new Error(
+      `image is ${(stats.size / 1024 / 1024).toFixed(1)}MB, over the ${MAX_IMAGE_BYTES / 1024 / 1024}MB limit`,
+    )
+  }
+  return fs.readFileSync(src)
 }
 
 // ── Tool definition ──
@@ -124,11 +88,9 @@ const outputSchema = lazySchema(() =>
   z.object({
     src: z.string(),
     success: z.boolean(),
-    width: z.number().optional(),
-    height: z.number().optional(),
-    pixelWidth: z.number().optional(),
-    pixelHeight: z.number().optional(),
-    kittySequence: z.string().optional(),
+    base64: z.string().optional(),
+    bytes: z.number().optional(),
+    error: z.string().optional(),
   }),
 )
 type OutputSchema = ReturnType<typeof outputSchema>
@@ -168,9 +130,8 @@ export const ImageShowTool = buildTool({
   get outputSchema(): OutputSchema {
     return outputSchema()
   },
-  // Kitty 协议序列是带内数据，并发写入终端会互相覆盖导致图片不显示
   isConcurrencySafe() {
-    return false
+    return true
   },
   isReadOnly() {
     return true
@@ -200,62 +161,25 @@ export const ImageShowTool = buildTool({
   renderToolUseMessage,
   renderToolResultMessage,
   async call({ src }) {
-    let tmpFile: string | undefined
     try {
-      // For URLs: download to temp file so timg can read it directly
-      let imagePath = src
-      if (isUrl(src)) {
-        tmpFile = await downloadToTemp(src)
-        imagePath = tmpFile
-      }
-
-      // Read with Jimp for dimension calculation (from buffer, no MIME restriction)
-      const image = await Jimp.read(fs.readFileSync(imagePath))
-      const rows = process.stdout.rows ?? 24
-      const dims = calculateDimensions(
-        image.bitmap.width,
-        image.bitmap.height,
-        rows,
-      )
-
-      // Generate full-resolution Kitty protocol sequence via timg
-      let kittySequence: string | undefined
-      try {
-        const timgPath = whichSync('timg')
-        if (timgPath) {
-          kittySequence = execFileSync(
-            timgPath,
-            ['-p', 'kitty', '-g', `${dims.width}x${dims.height}`, imagePath],
-            {
-              encoding: 'utf8',
-              timeout: 30000,
-              maxBuffer: 50 * 1024 * 1024,
-            },
-          )
-        }
-      } catch {
-        // timg not available — fall back to text display
-      }
-
+      const buffer = await loadImageBytes(src)
+      if (buffer.byteLength === 0) throw new Error('image is empty')
       return {
         data: {
           src,
           success: true,
-          ...dims,
-          kittySequence,
+          base64: buffer.toString('base64'),
+          bytes: buffer.byteLength,
         } satisfies ImageShowOutput,
       }
     } catch (error) {
-      console.error(`[ImageShowTool] Failed to display ${src}:`, error)
+      const message = error instanceof Error ? error.message : String(error)
       return {
         data: {
           src,
           success: false,
+          error: message,
         } satisfies ImageShowOutput,
-      }
-    } finally {
-      if (tmpFile) {
-        try { fs.unlinkSync(tmpFile) } catch {}
       }
     }
   },
@@ -268,7 +192,7 @@ export const ImageShowTool = buildTool({
           type: 'text',
           text: output.success
             ? `Image displayed: ${output.src}`
-            : `Failed to display image: ${output.src}`,
+            : `Failed to display image: ${output.src}${output.error ? ` (${output.error})` : ''}`,
         },
       ],
     }

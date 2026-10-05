@@ -460,6 +460,21 @@ export function Config({
       },
     },
     {
+      id: 'inlineImagesEnabled',
+      label: 'Display images',
+      value: settingsData?.inlineImagesEnabled ?? true,
+      type: 'boolean' as const,
+      onChange(inlineImagesEnabled: boolean) {
+        updateSettingsForSource('localSettings', {
+          inlineImagesEnabled,
+        })
+        setSettingsData(prev => ({
+          ...prev,
+          inlineImagesEnabled,
+        }))
+      },
+    },
+    {
       id: 'prefersReducedMotion',
       label: 'Reduce motion',
       value: settingsData?.prefersReducedMotion ?? false,
