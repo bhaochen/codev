@@ -18,6 +18,7 @@ import {
   type ParsedInput,
   parseMultipleKeypresses,
 } from '../ink/parse-keypress.js'
+import { stringWidth } from '../ink/stringWidth.js'
 import { cellPixelSize, TerminalQuerier } from '../ink/terminal-querier.js'
 import {
   allocateKittyImageId,
@@ -25,6 +26,7 @@ import {
   encodeITerm2Graphics,
   encodeKittyDelete,
   encodeKittyGraphics,
+  encodeKittyPlaceholderLines,
   fitGraphicsToCells,
   getCellPixelSize,
   getGraphicsGeneration,
@@ -37,6 +39,10 @@ import {
   renderGraphicsOverlay,
   resolveGraphicsProtocol,
   setCellPixelSize,
+  supportsKittyUnicodePlaceholders,
+  registerKittyVirtualImage,
+  takeKittyVirtualImageSequences,
+  unregisterKittyVirtualImage,
 } from './terminalGraphics.js'
 
 let passed = 0
@@ -98,6 +104,21 @@ test('kitty and ghostty select the Kitty protocol', () => {
     protocolOf({ TERM_PROGRAM: 'WezTerm' }),
     'kitty',
     'wezterm implements the Kitty protocol',
+  )
+})
+
+test('Kitty Unicode placeholders are enabled only for known implementations', () => {
+  assert(
+    supportsKittyUnicodePlaceholders({ TERM: 'xterm-kitty' }),
+    'kitty supports virtual placements',
+  )
+  assert(
+    supportsKittyUnicodePlaceholders({ TERM: 'xterm-ghostty' }),
+    'Ghostty supports virtual placements',
+  )
+  assert(
+    !supportsKittyUnicodePlaceholders({ TERM_PROGRAM: 'WezTerm' }),
+    'base Kitty protocol support does not imply virtual placements',
   )
 })
 
@@ -447,10 +468,17 @@ await asyncTest(
       20,
       'kitty',
       1234,
+      true,
     )
     assert(overlay !== null, 'the PNG graphic is encoded')
     assertEqual(overlay.protocol, 'kitty', 'uses the Kitty graphics protocol')
     assert(overlay.sequence.includes('\x1b_Ga=T,f=100'), 'emits a Kitty APC')
+    assert(overlay.sequence.includes(',U=1,'), 'creates a virtual placement')
+    assertEqual(
+      overlay.placeholderLines?.length,
+      overlay.rows,
+      'reserves one image-placeholder line per row',
+    )
     assert(
       overlay.sequence.includes(',i=1234,'),
       'keeps the requested Kitty image id',
@@ -469,6 +497,58 @@ test('a small Kitty payload is a single APC', () => {
     seq,
     '\x1b_Ga=T,f=100,q=2,C=1,c=10,r=5;AAAA\x1b\\',
     'single chunk',
+  )
+})
+
+test('virtual Kitty image cells encode image identity and row coordinates', () => {
+  const lines = encodeKittyPlaceholderLines(0x12_34_56, 3, 2)
+  assert(lines !== null, 'valid image geometry produces placeholder lines')
+  assertEqual(
+    lines[0],
+    '\x1b[38;2;18;52;86m\u{10eeee}\u{0305}\u{10eeee}\u{10eeee}\x1b[39m',
+    'first row identifies the image and starts at column zero',
+  )
+  assertEqual(
+    lines[1],
+    '\x1b[38;2;18;52;86m\u{10eeee}\u{030d}\u{10eeee}\u{10eeee}\x1b[39m',
+    'next row is encoded with its row diacritic',
+  )
+  assertEqual(
+    stringWidth(lines[0]!),
+    3,
+    'placeholder codepoints and combining marks occupy the intended cell width',
+  )
+  assertEqual(
+    encodeKittyPlaceholderLines(1, 1, 0),
+    null,
+    'empty geometry is rejected',
+  )
+})
+
+test('virtual Kitty uploads are queued before placeholder cells and deleted on unmount', () => {
+  const upload = encodeKittyGraphics('AAAA', 2, 1, 456, true)
+  const erase = encodeKittyDelete(456)
+  registerKittyVirtualImage('placeholder-test', upload, erase)
+  assertEqual(
+    takeKittyVirtualImageSequences(),
+    upload,
+    'new virtual image is uploaded once',
+  )
+  registerKittyVirtualImage('placeholder-test', upload, erase)
+  assertEqual(
+    takeKittyVirtualImageSequences(),
+    '',
+    'unchanged image does not retransmit',
+  )
+  unregisterKittyVirtualImage('placeholder-test')
+  assertEqual(
+    takeKittyVirtualImageSequences(),
+    erase,
+    'unmount deletes the virtual placement and its image data',
+  )
+  assert(
+    upload.includes(',U=1,'),
+    'upload creates a Kitty virtual placement',
   )
 })
 

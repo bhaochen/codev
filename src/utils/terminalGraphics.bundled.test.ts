@@ -3,8 +3,11 @@ import { Writable } from 'stream'
 import { PNG } from 'pngjs'
 import {
   renderGraphicsOverlay,
+  registerKittyVirtualImage,
   resolveGraphicsProtocol,
   setCellPixelSize,
+  takeKittyVirtualImageSequences,
+  unregisterKittyVirtualImage,
 } from './terminalGraphics.js'
 import type { DOMElement } from '../ink/dom.js'
 import {
@@ -46,6 +49,7 @@ const overlay = await renderGraphicsOverlay(
   4,
   protocol,
   1234,
+  false,
 )
 if (
   overlay === null ||
@@ -129,4 +133,50 @@ if (!terminalOutput.includes(overlay.sequence)) {
 }
 setGraphicsPlacement('compiled-smoke-image', null)
 
-console.log('Compiled PNG passed protocol detection, placement, and terminal write')
+const virtualOverlay = await renderGraphicsOverlay(
+  PNG.sync.write({ width, height, data: pixels }),
+  16,
+  4,
+  protocol,
+  5678,
+  true,
+)
+if (
+  virtualOverlay === null ||
+  !virtualOverlay.sequence.includes(',U=1,') ||
+  virtualOverlay.placeholderLines === undefined ||
+  virtualOverlay.eraseSequence === undefined
+) {
+  throw new Error('Compiled Kitty virtual placement was not encoded')
+}
+registerKittyVirtualImage(
+  'compiled-smoke-virtual-image',
+  virtualOverlay.sequence,
+  virtualOverlay.eraseSequence,
+)
+const virtualUpload = takeKittyVirtualImageSequences()
+if (virtualUpload !== virtualOverlay.sequence) {
+  throw new Error('Kitty virtual upload was not queued before cell output')
+}
+writeDiffToTerminal(
+  { stdout, stderr },
+  [
+    {
+      type: 'stdout',
+      content: `${virtualUpload}${virtualOverlay.placeholderLines.join('\n')}`,
+    },
+  ],
+  true,
+)
+const virtualTerminalOutput = Buffer.concat(writes).toString()
+const uploadIndex = virtualTerminalOutput.lastIndexOf(virtualUpload)
+const placeholderIndex = virtualTerminalOutput.indexOf('\u{10eeee}')
+if (uploadIndex < 0 || placeholderIndex < uploadIndex) {
+  throw new Error('Kitty virtual image was not uploaded before placeholder cells')
+}
+unregisterKittyVirtualImage('compiled-smoke-virtual-image')
+takeKittyVirtualImageSequences()
+
+console.log(
+  'Compiled PNG passed protocol detection, placement, virtual-cell output, and terminal write',
+)

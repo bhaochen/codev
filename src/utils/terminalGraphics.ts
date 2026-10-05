@@ -11,8 +11,9 @@ import {
  * Pixel-accurate inline graphics: protocol selection, cell geometry, and
  * encoding.
  *
- * These protocols hand the terminal real image pixels. `ink/graphicsPlacement.ts`
- * positions the payload over blank cells reserved by the image component.
+ * These protocols hand the terminal real image pixels. Kitty and Ghostty use
+ * Unicode placeholder cells so pixels scroll with the transcript; iTerm2 and
+ * Sixel use `ink/graphicsPlacement.ts` to place payloads over reserved cells.
  *
  * Three protocols, in descending order of preference:
  *
@@ -398,6 +399,24 @@ function envSaysKitty(env: NodeJS.ProcessEnv): boolean {
 }
 
 /**
+ * Kitty and Ghostty implement Kitty's Unicode-placeholder extension. Do not
+ * assume it for every terminal that implements the base Kitty graphics
+ * protocol (for example, WezTerm's protocol support is not this extension).
+ */
+export function supportsKittyUnicodePlaceholders(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const term = env.TERM?.toLowerCase() ?? ''
+  const program = env.TERM_PROGRAM?.toLowerCase()
+  return Boolean(
+    env.KITTY_WINDOW_ID ||
+      term.includes('kitty') ||
+      term.includes('ghostty') ||
+      program === 'ghostty',
+  )
+}
+
+/**
  * Choose the graphics protocol for this terminal.
  *
  * `CODEV_IMAGE_PROTOCOL` forces one (or `off`). Otherwise Kitty and iTerm2 are
@@ -543,10 +562,12 @@ export function encodeKittyGraphics(
   columns: number,
   rows: number,
   imageId?: number,
+  virtualPlacement = false,
 ): string {
   const CHUNK = 4096
   const identity = imageId === undefined ? '' : `,i=${imageId}`
-  const lead = `a=T,f=100,q=2,C=1${identity},c=${columns},r=${rows}`
+  const virtual = virtualPlacement ? ',U=1' : ''
+  const lead = `a=T,f=100,q=2,C=1${identity}${virtual},c=${columns},r=${rows}`
   if (base64Png.length <= CHUNK) {
     return `\x1b_G${lead};${base64Png}\x1b\\`
   }
@@ -671,6 +692,12 @@ export type GraphicsOverlay = {
   /** Ready-to-write escape sequence. */
   sequence: string
   /**
+   * Kitty's Unicode placeholders let the terminal move and clip a real image
+   * together with the transcript cells. When present, `sequence` creates a
+   * virtual placement and these rows are the visible cell anchors.
+   */
+  placeholderLines?: string[]
+  /**
    * Sequence that removes this graphic from the terminal, where the protocol
    * has one. Kitty does; sixel and iTerm2 do not, and there the only recourse
    * is writing text over the cells.
@@ -685,6 +712,85 @@ export type GraphicsOverlay = {
   /** Cell geometry used to size and encode this payload. */
   cellWidth: number
   cellHeight: number
+}
+
+const KITTY_ROW_DIACRITICS = [
+  0x0305, 0x030d, 0x030e, 0x0310, 0x0312, 0x033d, 0x033e, 0x033f, 0x0346,
+  0x034a, 0x034b, 0x034c, 0x0350, 0x0351, 0x0352, 0x0357, 0x035b, 0x0363,
+  0x0364, 0x0365, 0x0366, 0x0367, 0x0368, 0x0369, 0x036a, 0x036b, 0x036c,
+  0x036d, 0x036e, 0x036f, 0x0483, 0x0484, 0x0485, 0x0486, 0x0487, 0x0592,
+  0x0593, 0x0594, 0x0595, 0x0597, 0x0598, 0x0599, 0x059c, 0x059d, 0x059e,
+  0x059f, 0x05a0, 0x05a1, 0x05a8, 0x05a9, 0x05ab, 0x05ac, 0x05af, 0x05c4,
+  0x0610, 0x0611, 0x0612, 0x0613, 0x0614, 0x0615, 0x0616, 0x0617, 0x0657,
+  0x0658, 0x0659, 0x065a, 0x065b, 0x065d, 0x065e, 0x06d6, 0x06d7, 0x06d8,
+] as const
+
+/**
+ * Create cell text for Kitty's Unicode-placeholder protocol. The terminal
+ * recognizes these cells as image anchors, so scrollback and clipping follow
+ * the transcript rather than leaving a pixel overlay at a fixed screen row.
+ */
+export function encodeKittyPlaceholderLines(
+  imageId: number,
+  columns: number,
+  rows: number,
+): string[] | null {
+  if (
+    !Number.isInteger(imageId) ||
+    imageId < 1 ||
+    imageId > 0xff_ff_ff ||
+    !Number.isInteger(columns) ||
+    columns < 1 ||
+    !Number.isInteger(rows) ||
+    rows < 1 ||
+    rows > KITTY_ROW_DIACRITICS.length
+  ) {
+    return null
+  }
+  const red = (imageId >>> 16) & 0xff
+  const green = (imageId >>> 8) & 0xff
+  const blue = imageId & 0xff
+  const color = `\x1b[38;2;${red};${green};${blue}m`
+  return Array.from({ length: rows }, (_, row) => {
+    const first = `\u{10eeee}${String.fromCodePoint(KITTY_ROW_DIACRITICS[row]!)}`
+    return `${color}${first}${'\u{10eeee}'.repeat(columns - 1)}\x1b[39m`
+  })
+}
+
+type KittyVirtualImage = {
+  sequence: string
+  eraseSequence: string
+}
+
+const kittyVirtualImages = new Map<string, KittyVirtualImage>()
+let pendingKittyVirtualSequences: string[] = []
+
+/** Queue a virtual image upload before its placeholder cells are written. */
+export function registerKittyVirtualImage(
+  key: string,
+  sequence: string,
+  eraseSequence: string,
+): void {
+  const previous = kittyVirtualImages.get(key)
+  if (previous?.sequence === sequence) return
+  if (previous) pendingKittyVirtualSequences.push(previous.eraseSequence)
+  pendingKittyVirtualSequences.push(sequence)
+  kittyVirtualImages.set(key, { sequence, eraseSequence })
+}
+
+/** Queue deletion when a virtual image's transcript cells are removed. */
+export function unregisterKittyVirtualImage(key: string): void {
+  const previous = kittyVirtualImages.get(key)
+  if (!previous) return
+  kittyVirtualImages.delete(key)
+  pendingKittyVirtualSequences.push(previous.eraseSequence)
+}
+
+/** Drain virtual-image commands; the caller writes these before frame text. */
+export function takeKittyVirtualImageSequences(): string {
+  const sequences = pendingKittyVirtualSequences
+  pendingKittyVirtualSequences = []
+  return sequences.join('')
 }
 
 /** Encodes started and not yet finished; see {@link graphicsEncodeQuietFor}. */
@@ -725,6 +831,7 @@ export async function renderGraphicsOverlay(
    * mistaken for a different image; see `allocateKittyImageId`.
    */
   imageId?: number,
+  kittyPlaceholders = supportsKittyUnicodePlaceholders(),
 ): Promise<GraphicsOverlay | null> {
   // Every path out of here leaves the image absent, and for a long time all of
   // them were silent — which is why "it just disappears" took so many
@@ -764,11 +871,15 @@ export async function renderGraphicsOverlay(
     const metadata = sourcePixels?.info ?? (await probe!.metadata())
 
     const cell = getCellPixelSize()
+    const fitMaxRows =
+      protocol === 'kitty' && kittyPlaceholders
+        ? Math.min(maxRows, KITTY_ROW_DIACRITICS.length)
+        : maxRows
     const fit = fitGraphicsToCells(
       metadata.width,
       metadata.height,
       maxColumns,
-      maxRows,
+      fitMaxRows,
       cell,
     )
 
@@ -853,12 +964,23 @@ export async function renderGraphicsOverlay(
     // another placement that no erase can reach — the accumulating ghost.
     const kittyImageId =
       protocol === 'kitty' ? (imageId ?? allocateKittyImageId()) : undefined
+    const placeholderLines =
+      kittyImageId !== undefined && kittyPlaceholders
+        ? encodeKittyPlaceholderLines(kittyImageId, columns, rows)
+        : null
     const sequence =
       protocol === 'kitty'
-        ? encodeKittyGraphics(base64, columns, rows, kittyImageId)
+        ? encodeKittyGraphics(
+            base64,
+            columns,
+            rows,
+            kittyImageId,
+            placeholderLines !== null,
+          )
         : encodeITerm2Graphics(base64, columns, rows)
     return {
       sequence,
+      ...(placeholderLines !== null && { placeholderLines }),
       ...(kittyImageId !== undefined && {
         eraseSequence: encodeKittyDelete(kittyImageId),
       }),

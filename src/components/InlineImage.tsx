@@ -25,9 +25,11 @@ import {
   getGraphicsGeneration,
   hasMeasuredCellSize,
   isCellGeometryStale,
+  registerKittyVirtualImage,
   renderGraphicsOverlay,
   resolveGraphicsProtocol,
   subscribeGraphicsCapability,
+  unregisterKittyVirtualImage,
 } from '../utils/terminalGraphics.js'
 import { maxRowsForViewport } from '../utils/imageLayout.js'
 import { logForDebugging } from '../utils/debug.js'
@@ -69,10 +71,11 @@ type Props = {
 /**
  * Renders an image inline in the transcript, above its summary line.
  *
- * Images are encoded with a native terminal graphics protocol and written
- * outside Ink's cell renderer. A terminal without a supported protocol or
- * measured pixel geometry shows the summary only; there is no block-glyph
- * approximation.
+ * Image pixels use a native terminal graphics protocol. Kitty/Ghostty image
+ * anchors are written as transcript cells so they scroll with the text; other
+ * protocols are placed over reserved cells outside Ink's renderer. A terminal
+ * without a supported protocol or measured pixel geometry shows only the
+ * summary, never a block-glyph approximation.
  */
 export function InlineImage({
   base64,
@@ -262,6 +265,17 @@ export function InlineImage({
   useLayoutEffect(() => {
     const id = placementId.current!
     const node = boxRef.current
+    if (overlay?.placeholderLines && overlay.eraseSequence) {
+      setGraphicsPlacement(id, null)
+      registerKittyVirtualImage(
+        id,
+        overlay.sequence,
+        overlay.eraseSequence,
+      )
+      return () => {
+        unregisterKittyVirtualImage(id)
+      }
+    }
     if (!overlay || !node) {
       setGraphicsPlacement(id, null)
       return
@@ -292,9 +306,10 @@ export function InlineImage({
   const reservationLines = useMemo(
     () =>
       overlay
-        ? Array.from({ length: overlay.rows }, () =>
+        ? (overlay.placeholderLines ??
+          Array.from({ length: overlay.rows }, () =>
             ' '.repeat(overlay.columns),
-          )
+          ))
         : [],
     [overlay],
   )
@@ -304,8 +319,8 @@ export function InlineImage({
   return (
     <Box flexDirection="column">
       {children}
-      {/* Blank cells reserve the exact terminal-pixel box; the image itself is
-          drawn out-of-band with the selected native graphics protocol. */}
+      {/* Kitty placeholders are scrollable image anchors; other protocols use
+          blank cells for their out-of-band native image placement. */}
       <Box
         ref={boxRef}
         width={overlay.columns}

@@ -34,7 +34,7 @@ import { CellWidth, CharPool, cellAt, createScreen, HyperlinkPool, isEmptyCellAt
 import { applySearchHighlight } from './searchHighlight.js';
 import { applySelectionOverlay, captureScrolledRows, clearSelection, createSelectionState, extendSelection, type FocusMove, findPlainTextUrlAt, getSelectedText, hasSelection, moveFocus, type SelectionState, selectLineAt, selectWordAt, shiftAnchor, shiftSelection, shiftSelectionForFollow, startSelection, updateSelection } from './selection.js';
 import { buildGraphicsSequence, commitRowGraphics, discardRowGraphics, forceGraphicsRedraw, forgetGraphicsReprintRequests, hasGraphicsPlacements, invalidateGraphicsPlacements, isGraphicsReprintOwed, planRowGraphics, takeGraphicsReprintRequest } from './graphicsPlacement.js';
-import { getCellPixelSize, graphicsEncodeQuietFor } from '../utils/terminalGraphics.js';
+import { getCellPixelSize, graphicsEncodeQuietFor, takeKittyVirtualImageSequences } from '../utils/terminalGraphics.js';
 import { SYNC_OUTPUT_SUPPORTED, supportsExtendedKeys, type Terminal, writeDiffToTerminal } from './terminal.js';
 import { CURSOR_HOME, cursorMove, cursorPosition, DISABLE_KITTY_KEYBOARD, DISABLE_MODIFY_OTHER_KEYS, ENABLE_KITTY_KEYBOARD, ENABLE_MODIFY_OTHER_KEYS, ERASE_SCREEN } from './termio/csi.js';
 import { DBP, DFE, DISABLE_MOUSE_TRACKING, ENABLE_MOUSE_TRACKING, ENTER_ALT_SCREEN, EXIT_ALT_SCREEN, SHOW_CURSOR } from './termio/dec.js';
@@ -701,6 +701,17 @@ export default class Ink {
       if (hasDiff) {
         optimized.push(this.altScreenParkPatch);
       }
+    }
+
+    // Kitty virtual placements must exist before their U+10EEEE placeholder
+    // cells are written. Prepend queued uploads/deletes ahead of this frame's
+    // text diff; unlike ordinary overlays, the terminal follows the cells.
+    const kittyVirtualImages = takeKittyVirtualImageSequences();
+    if (kittyVirtualImages !== '') {
+      optimized.unshift({
+        type: 'stdout',
+        content: kittyVirtualImages
+      });
     }
 
     // Inline graphics: draw any registered sixel/Kitty/iTerm2 payloads over the
