@@ -326,7 +326,7 @@ function formatToolInput(input: unknown): string {
   }
   try {
     const serialized = typeof input === 'string' ? input : JSON.stringify(input);
-    if (!serialized) {
+    if (!serialized || serialized === '{}' || serialized === '[]') {
       return '';
     }
     return serialized.length > 2000 ? `${serialized.slice(0, 2000)}…` : serialized;

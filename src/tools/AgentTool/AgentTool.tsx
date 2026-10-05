@@ -1119,6 +1119,7 @@ export const AgentTool = buildTool({
               }
             }
             const normalizedNew = normalizeMessages([message]);
+            let forwarded = false;
             for (const m of normalizedNew) {
               for (const content of m.message.content) {
                 const block = content as AgentContentBlock;
@@ -1126,12 +1127,16 @@ export const AgentTool = buildTool({
                   continue;
                 }
 
-                // Forward progress updates
-                if (onProgress) {
+                // Forward progress updates. 使用原始 message 对象而不是
+                // normalizer 产生的浅拷贝：message_delta 会把真实 usage 写回
+                // 原始 message.message.usage，浅拷贝会保留零值快照，导致
+                // progress 统计始终显示 0 tokens。
+                if (onProgress && !forwarded) {
+                  forwarded = true;
                   onProgress({
                     toolUseID: `agent_${assistantMessage.message.id}`,
                     data: {
-                      message: m,
+                      message,
                       type: 'agent_progress',
                       // prompt only needed on first progress message (UI.tsx:624
                       // reads progressMessages[0]). Omit here to avoid duplication.
