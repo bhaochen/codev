@@ -687,6 +687,56 @@ describe('adaptOpenAIChatSSE', () => {
       .join('')
     expect(text).toBe('ok')
   })
+
+  test('inline DSML function_calls parse into tool_use blocks', async () => {
+    const dsml =
+      '<｜DSML｜function_calls>\n' +
+      '<｜DSML｜invoke name="Read">\n' +
+      '<｜DSML｜parameter name="file_path" string="true">/tmp/a.ts</｜DSML｜parameter>\n' +
+      '<｜DSML｜parameter name="limit" string="false">10</｜DSML｜parameter>\n' +
+      '</｜DSML｜invoke>\n' +
+      '</｜DSML｜function_calls>'
+    // 故意把标记切到多个 chunk，模拟流式
+    const mid = Math.floor(dsml.length / 2)
+    const events = await collectEvents([
+      ...textChunks(['before ', dsml.slice(0, 20), dsml.slice(20, mid), dsml.slice(mid)], 'stop'),
+    ])
+    const toolStart = events.find(
+      e => e.type === 'content_block_start' && e.content_block.type === 'tool_use',
+    )!
+    if (toolStart.type !== 'content_block_start') throw new Error('expected tool_use')
+    expect(toolStart.content_block).toMatchObject({ type: 'tool_use', name: 'Read' })
+    const json = events
+      .flatMap(e =>
+        e.type === 'content_block_delta' && e.delta.type === 'input_json_delta'
+          ? [e.delta.partial_json]
+          : [],
+      )
+      .join('')
+    expect(JSON.parse(json)).toEqual({ file_path: '/tmp/a.ts', limit: 10 })
+    const msgDelta = events.find(e => e.type === 'message_delta')!
+    if (msgDelta.type !== 'message_delta') throw new Error('expected message_delta')
+    expect(msgDelta.delta.stop_reason).toBe('tool_use')
+    const text = events
+      .flatMap(e =>
+        e.type === 'content_block_delta' && e.delta.type === 'text_delta' ? [e.delta.text] : [],
+      )
+      .join('')
+    expect(text).toBe('before ')
+    expect(text).not.toContain('DSML')
+  })
+
+  test('truncated DSML block falls back to raw text', async () => {
+    const events = await collectEvents(
+      textChunks(['x <｜DSML｜function_calls>\n<｜DSML｜invoke name="A">'], 'stop'),
+    )
+    const text = events
+      .flatMap(e =>
+        e.type === 'content_block_delta' && e.delta.type === 'text_delta' ? [e.delta.text] : [],
+      )
+      .join('')
+    expect(text).toContain('<｜DSML｜function_calls>')
+  })
 })
 
 // ============================================================================

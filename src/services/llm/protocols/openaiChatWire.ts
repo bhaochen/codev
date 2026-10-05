@@ -786,6 +786,157 @@ export async function* adaptOpenAIChatSSE(
   let pendingFinishReason: string | null = null
   let pendingHasToolCalls = false
 
+  // ------------------------------------------------------------------------
+  // DeepSeek DSML 内联工具调用解析。部分 OpenAI 兼容端点（如某些 NVIDIA NIM
+  // 部署的 deepseek-* 模型）不把 <｜DSML｜function_calls> 转成结构化
+  // tool_calls，而是作为 content 文本外泄。这里将其拦截并转换为
+  // tool_use 块，避免原始标记直接显示给用户、且工具调用能真正执行。
+  // ------------------------------------------------------------------------
+  const DSML_START = '<｜DSML｜function_calls>'
+  const DSML_END = '</｜DSML｜function_calls>'
+  let dsmlMode = false
+  let dsmlBuffer = ''
+  let textHoldback = ''
+  let dsmlHadToolCalls = false
+
+  function longestPartialStartSuffix(text: string): number {
+    const max = Math.min(text.length, DSML_START.length - 1)
+    for (let len = max; len > 0; len--) {
+      if (DSML_START.startsWith(text.slice(text.length - len))) return len
+    }
+    return 0
+  }
+
+  function* pushText(text: string): Generator<OpenAIChatStreamEvent, void> {
+    if (text === '') return
+    if (!textBlockOpen) {
+      if (thinkingBlockOpen) {
+        yield { type: 'content_block_stop', index: currentContentIndex }
+        openBlockIndices.delete(currentContentIndex)
+        thinkingBlockOpen = false
+      }
+      currentContentIndex++
+      textBlockOpen = true
+      openBlockIndices.add(currentContentIndex)
+      yield {
+        type: 'content_block_start',
+        index: currentContentIndex,
+        content_block: { type: 'text', text: '' },
+      }
+    }
+    yield {
+      type: 'content_block_delta',
+      index: currentContentIndex,
+      delta: { type: 'text_delta', text },
+    }
+  }
+
+  function* emitDsmlToolBlocks(block: string): Generator<OpenAIChatStreamEvent, void> {
+    if (thinkingBlockOpen) {
+      yield { type: 'content_block_stop', index: currentContentIndex }
+      openBlockIndices.delete(currentContentIndex)
+      thinkingBlockOpen = false
+    }
+    if (textBlockOpen) {
+      yield { type: 'content_block_stop', index: currentContentIndex }
+      openBlockIndices.delete(currentContentIndex)
+      textBlockOpen = false
+    }
+
+    const invokeRe =
+      /<｜DSML｜invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\/｜DSML｜invoke>/g
+    const paramRe =
+      /<｜DSML｜parameter\s+name="([^"]+)"\s+string="(true|false)"\s*>([\s\S]*?)<\/｜DSML｜parameter>/g
+
+    let invokeMatch: RegExpExecArray | null
+    while ((invokeMatch = invokeRe.exec(block)) !== null) {
+      const name = invokeMatch[1]
+      const body = invokeMatch[2]
+      const args: Record<string, unknown> = {}
+      let paramMatch: RegExpExecArray | null
+      paramRe.lastIndex = 0
+      while ((paramMatch = paramRe.exec(body)) !== null) {
+        const [, key, isString, rawValue] = paramMatch
+        if (isString === 'true') {
+          args[key] = rawValue
+        } else {
+          try {
+            args[key] = JSON.parse(rawValue)
+          } catch {
+            args[key] = rawValue
+          }
+        }
+      }
+
+      currentContentIndex++
+      const toolId = `toolu_${newMessageId().slice(5, 29)}`
+      openBlockIndices.add(currentContentIndex)
+      dsmlHadToolCalls = true
+
+      yield {
+        type: 'content_block_start',
+        index: currentContentIndex,
+        content_block: { type: 'tool_use', id: toolId, name, input: {} },
+      }
+      yield {
+        type: 'content_block_delta',
+        index: currentContentIndex,
+        delta: {
+          type: 'input_json_delta',
+          partial_json: JSON.stringify(args),
+        },
+      }
+      yield { type: 'content_block_stop', index: currentContentIndex }
+      openBlockIndices.delete(currentContentIndex)
+    }
+  }
+
+  function* handleTextDelta(text: string): Generator<OpenAIChatStreamEvent, void> {
+    if (dsmlMode) {
+      dsmlBuffer += text
+      const endIdx = dsmlBuffer.indexOf(DSML_END)
+      if (endIdx >= 0) {
+        const block = dsmlBuffer.slice(0, endIdx)
+        const rest = dsmlBuffer.slice(endIdx + DSML_END.length)
+        dsmlMode = false
+        dsmlBuffer = ''
+        yield* emitDsmlToolBlocks(block)
+        if (rest !== '') yield* handleTextDelta(rest)
+      }
+      return
+    }
+
+    textHoldback += text
+    const startIdx = textHoldback.indexOf(DSML_START)
+    if (startIdx >= 0) {
+      const before = textHoldback.slice(0, startIdx)
+      const rest = textHoldback.slice(startIdx + DSML_START.length)
+      textHoldback = ''
+      yield* pushText(before)
+      dsmlMode = true
+      dsmlBuffer = rest
+      const endIdx = dsmlBuffer.indexOf(DSML_END)
+      if (endIdx >= 0) {
+        const block = dsmlBuffer.slice(0, endIdx)
+        const tail = dsmlBuffer.slice(endIdx + DSML_END.length)
+        dsmlMode = false
+        dsmlBuffer = ''
+        yield* emitDsmlToolBlocks(block)
+        if (tail !== '') yield* handleTextDelta(tail)
+      }
+      return
+    }
+
+    const partialLen = longestPartialStartSuffix(textHoldback)
+    const emit =
+      partialLen > 0
+        ? textHoldback.slice(0, textHoldback.length - partialLen)
+        : textHoldback
+    textHoldback =
+      partialLen > 0 ? textHoldback.slice(textHoldback.length - partialLen) : ''
+    yield* pushText(emit)
+  }
+
   for await (const chunk of stream) {
     const choice = chunk.choices?.[0]
     const delta = choice?.delta
@@ -870,32 +1021,9 @@ export async function* adaptOpenAIChatSSE(
       }
     }
 
-    // text 内容
+    // text 内容（含 DeepSeek DSML 工具调用标记的内联解析）
     if (delta.content != null && delta.content !== '') {
-      if (!textBlockOpen) {
-        // 先关掉仍开着的 thinking 块
-        if (thinkingBlockOpen) {
-          yield { type: 'content_block_stop', index: currentContentIndex }
-          openBlockIndices.delete(currentContentIndex)
-          thinkingBlockOpen = false
-        }
-
-        currentContentIndex++
-        textBlockOpen = true
-        openBlockIndices.add(currentContentIndex)
-
-        yield {
-          type: 'content_block_start',
-          index: currentContentIndex,
-          content_block: { type: 'text', text: '' },
-        }
-      }
-
-      yield {
-        type: 'content_block_delta',
-        index: currentContentIndex,
-        delta: { type: 'text_delta', text: delta.content },
-      }
+      yield* handleTextDelta(delta.content)
     }
 
     // tool calls
@@ -975,8 +1103,21 @@ export async function* adaptOpenAIChatSSE(
       }
 
       pendingFinishReason = choice.finish_reason
-      pendingHasToolCalls = toolBlocks.size > 0
+      pendingHasToolCalls = toolBlocks.size > 0 || dsmlHadToolCalls
     }
+  }
+
+  // DSML 流被截断（未收到结束标记）时，把已缓冲内容原文透出，避免静默吞掉
+  if (dsmlMode) {
+    const raw = DSML_START + dsmlBuffer
+    dsmlMode = false
+    dsmlBuffer = ''
+    yield* pushText(raw)
+  }
+  if (textHoldback !== '') {
+    const held = textHoldback
+    textHoldback = ''
+    yield* pushText(held)
   }
 
   // 安全收尾：关闭仍开着的块
