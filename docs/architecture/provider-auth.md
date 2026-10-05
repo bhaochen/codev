@@ -363,6 +363,8 @@ ascending  (msg_): 同上，但 value = current（不取反）
 - **Thinking**: `OPENAI_ENABLE_THINKING` 或模型名含 `deepseek`/`mimo` 自动开启；
   请求体同时发送 `thinking`/`enable_thinking`/`chat_template_kwargs` 三套格式，
   `reasoning_content` 思维流映射为 Anthropic thinking 块（含空字符串往返）
+- **Tool calls**: 解析结构化 `tool_calls` delta；部分端点（如 NVIDIA NIM 托管的 deepseek）会把 `<｜DSML｜function_calls>…</｜DSML｜function_calls>` 以文本形式混入 content，适配器会在该处拦截并转换成标准 `tool_use` 块，否则原样外泄成可读标记。
+- **Empty content guard**: assistant `content: null` 且无 tool_calls、空 user/tool 消息等会被严格的 OpenAI 兼容后端（如 opencode Console）拒为 "message content cannot be empty"；`agentMessagesToOpenAIChatMessages` 会在转换后统一填充 `(empty)` / `(empty tool result)` 占位。
 - **适用场景**: OpenAI 官方、DeepSeek、vLLM、Ollama 等任何 OpenAI Chat Completions 端点
 
 ### 4.5 GitHub Copilot (模型列表)

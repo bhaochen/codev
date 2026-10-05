@@ -71,7 +71,7 @@ CLI 入口由 **Commander.js** 解析命令行参数，随后启动 **REPL**（�
 | `/remoteEnv` | - | 远程环境变量管理 |
 | `/passes` | - | 管理预设的 always-allow/always-deny 规则 |
 
-直接运行 `/fallback` 会打开交互面板，可从 Provider 的模型列表中搜索选择，无需记忆模型 ID；面板支持启停、添加/移除/清空目标、调整尝试顺序，以及为每个目标设置 effort（Auto、minimal、low、medium、high、xhigh、max）。配置保存到用户设置，最多 3 个目标。也可用 `/fallback add <provider> <model> [effort]` 等参数快捷操作。当前支持 Anthropic、OpenAI、OpenCode Zen 和 NVIDIA。回退仅对交互式主对话中的认证、额度、限流及服务端错误启用；若模型已开始输出或调用工具，则不会切换重放。对话内容会发送到你配置的备选 Provider。
+直接运行 `/fallback` 会打开交互面板，可从 Provider 的模型列表中搜索选择，无需记忆模型 ID；面板支持启停、添加/移除/清空目标、调整尝试顺序，以及为每个目标设置 effort（Auto、minimal、low、medium、high、xhigh、max）。配置保存到用户设置，最多 3 个目标。也可用 `/fallback add <provider> <model> [effort]` 等参数快捷操作。当前支持 Anthropic、OpenAI、OpenCode Zen 和 NVIDIA。回退仅对交互式主对话中的认证、额度、限流及服务端错误启用，以及上游端点/模型不可用（即便按 `400`/`404` 返回，只要消息体出现 `endpoint is unavailable` / `no such model` / `not available` 等语义也触发）；若模型已开始输出或调用工具，则不会切换重放。对话内容会发送到你配置的备选 Provider。
 
 ### 会话管理
 

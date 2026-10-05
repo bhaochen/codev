@@ -32,6 +32,24 @@ Tool<Input, Output, Progress>
 | `checkPermissions()` | 函数 | 检查用户权限 |
 | `validateInput()` | 函数 | 输入值校验逻辑 |
 | `renderToolUseMessage()` | 函数 | 渲染工具调用 UI |
+### 结果内联渲染 | Inline result preview
+
+工具结果通过 `renderToolResultMessage()` 渲染到 transcript。BrowserTool 的
+screenshot 走与 EvalTool 的 Python figure 相同的渲染组合：`<MessageResponse>…
+<InlineImage base64=… />`，终端用 Kitty/iTerm2 原生 graphics 直接画出图片，
+并随终端大小重排。
+
+- Browser 输入在 `validateInput()`/`call()` 入口会平铺 `args` 子对象（兼容
+  模型偶见的 `{action:..., args:{...}}` 嵌套），`wait`/`resize` 等不再被判为缺参数。
+- Browser 未落盘的内联截图现在默认使用 **PNG**；JPEG 受 `InlineImage` 的
+  `decodePngPixels` 快路径约束，不复用 sharp fallback 时不会内联。
+- 传 `path` 保存的截图只向模型返回路径（`savedPath`），不进入模型上下文，
+  但 UI 侧会从文件补读图像，内联预览与 Python kernel 的图一致。
+- 在有 `TMUX` / `STY` 的环境里，`resolveGraphicsProtocol()` 返回 `'none'`，
+  所有 native graphics（图片预览）都会被抑制为摘要行；请直接在
+  ghostty/kitty/iTerm2 环境外起 codev REPL，或在 tmux 里启用 passthrough
+  后再扩展支持。
+
 | `renderToolResultMessage()` | 函数 | 渲染工具结果 UI |
 | `renderToolUseProgressMessage()` | 函数 | 渲染执行进度 UI |
 | `userFacingName()` | 函数 | 面向用户显示的名称 |
