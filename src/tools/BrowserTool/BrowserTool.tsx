@@ -2,10 +2,11 @@ import type {
   Base64ImageSource,
   ToolResultBlockParam,
 } from '@anthropic-ai/sdk/resources/index.mjs'
-import { existsSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import { z } from 'zod/v4'
 
 import { InlineImage } from '../../components/InlineImage.js'
+import { MessageResponse } from '../../components/MessageResponse.js'
 import { Text } from '../../ink.js'
 import {
   buildTool,
@@ -463,6 +464,16 @@ const REQUIRED_BY_ACTION: Partial<Record<Input['action'], Array<keyof Input>>> =
   pdf: ['path'],
   resize: ['width', 'height'],
   switch_tab: ['tabIndex'],
+}
+
+function readScreenshotBase64(path: string): string | undefined {
+  try {
+    const buf = readFileSync(path)
+    if (buf.length === 0) return undefined
+    return buf.toString('base64')
+  } catch {
+    return undefined
+  }
 }
 
 // 模型偶尔会把动作参数包进 `args` 子对象（如 { "action": "wait", "args": { "ms": 8000 } }），
@@ -1607,9 +1618,29 @@ export const BrowserTool = buildTool({
   },
   renderToolResultMessage(output) {
     if (output.action === 'screenshot' && output.screenshot) {
-      return <InlineImage base64={output.screenshot.base64}>
-        <Text>Captured a screenshot.</Text>
-      </InlineImage>
+      // 与 EvalTool 一致：InlineImage 必须包在 MessageResponse 的底轨里才
+      // 能正确计算宽高/gutter，否则只显示摘要、没有图。
+      return (
+        <MessageResponse>
+          <InlineImage base64={output.screenshot.base64}>
+            <Text>Captured a screenshot.</Text>
+          </InlineImage>
+        </MessageResponse>
+      )
+    }
+    if (output.action === 'screenshot' && output.savedPath) {
+      // path 保存的截图不进入模型上下文，但同样应在 UI 中内联预览。
+      const preview = readScreenshotBase64(output.savedPath)
+      if (preview) {
+        return (
+          <MessageResponse>
+            <InlineImage base64={preview}>
+              <Text>Saved a screenshot to {output.savedPath}.</Text>
+            </InlineImage>
+          </MessageResponse>
+        )
+      }
+      return <MessageResponse><Text>Saved a screenshot to {output.savedPath}.</Text></MessageResponse>
     }
     if (output.action === 'read' && output.ok) {
       return <Text>Read {output.title || output.url || 'the page'}.</Text>
