@@ -26,6 +26,7 @@ import { logForDebugging } from '../../utils/debug.js'
 import { errorMessage } from '../../utils/errors.js'
 import { execFileNoThrow } from '../../utils/execFileNoThrow.js'
 import { parseUserSpecifiedModel } from '../../utils/model/model.js'
+import type { APIProvider } from '../../utils/model/providers.js'
 import type { PermissionMode } from '../../utils/permissions/PermissionMode.js'
 import { isTmuxAvailable } from '../../utils/swarm/backends/detection.js'
 import {
@@ -129,6 +130,10 @@ export type SpawnTeammateConfig = {
   use_splitpane?: boolean
   plan_mode_required?: boolean
   model?: string
+  /** Provider this teammate's model runs on, when its agent definition pins
+   * one. Set on the spawned process (tmux) or forced around the run loop
+   * (in-process), so the teammate does not fall back to the leader's provider. */
+  provider?: APIProvider
   agent_type?: string
   description?: string
   /** request_id of the API call whose response contained the tool_use that
@@ -146,6 +151,7 @@ type SpawnInput = {
   use_splitpane?: boolean
   plan_mode_required?: boolean
   model?: string
+  provider?: APIProvider
   agent_type?: string
   description?: string
   invokingRequestId?: string
@@ -437,8 +443,13 @@ async function handleSpawnSplitPane(
 
   const flagsStr = inheritedFlags ? ` ${inheritedFlags}` : ''
   // Build env var map (skips vars already in settings.json / tmux global env)
-  const envMap = buildInheritedEnvMap()
-  const envStr = buildInheritedEnvVars() // string form for send-keys fallback
+  const envVars = applyProviderEnv(
+    buildInheritedEnvMap(),
+    buildInheritedEnvVars(), // string form for send-keys fallback
+    input.provider,
+  )
+  const envMap = envVars.envMap
+  const envStr = envVars.envStr
   const spawnCommand = `${quote([binaryPath])} ${teammateArgs}${flagsStr}`
 
   // Create a pane in the swarm view, passing the command directly
@@ -662,7 +673,7 @@ async function handleSpawnSeparateWindow(
   const flagsStr = inheritedFlags ? ` ${inheritedFlags}` : ''
   // Propagate env vars that teammates need but may not inherit from tmux split-window shells.
   // Includes CLAUDECODE, CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS, and API provider vars.
-  const envStr = buildInheritedEnvVars()
+  const envStr = applyProviderEnv({}, buildInheritedEnvVars(), input.provider).envStr
   const spawnCommand = `cd ${quote([workingDir])} && env ${envStr} ${quote([binaryPath])} ${teammateArgs}${flagsStr}`
 
   // Send the command to the new window
@@ -937,6 +948,7 @@ async function handleSpawnInProcess(
       prompt,
       description: input.description,
       model,
+      provider: input.provider,
       agentDefinition,
       teammateContext: result.teammateContext,
       // Strip messages: the teammate never reads toolUseContext.messages
@@ -1086,6 +1098,29 @@ async function handleSpawn(
     return handleSpawnSplitPane(input, context)
   }
   return handleSpawnSeparateWindow(input, context)
+}
+
+/**
+ * Pin the teammate's provider in the spawned process.
+ *
+ * `getExplicitProviderOverride()` checks BETTER_CLAWD_API_PROVIDER before
+ * CLAUDE_CODE_API_PROVIDER, so set both: an inherited leader value in the
+ * first would otherwise beat the agent's own pin.
+ */
+function applyProviderEnv(
+  envMap: Record<string, string>,
+  envStr: string,
+  provider: APIProvider | undefined,
+): { envMap: Record<string, string>; envStr: string } {
+  if (!provider) return { envMap, envStr }
+  return {
+    envMap: {
+      ...envMap,
+      BETTER_CLAWD_API_PROVIDER: provider,
+      CLAUDE_CODE_API_PROVIDER: provider,
+    },
+    envStr: `${envStr} BETTER_CLAWD_API_PROVIDER=${provider} CLAUDE_CODE_API_PROVIDER=${provider}`,
+  }
 }
 
 // ============================================================================

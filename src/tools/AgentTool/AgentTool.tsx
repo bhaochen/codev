@@ -306,6 +306,9 @@ export const AgentTool = buildTool({
         use_splitpane: true,
         plan_mode_required: spawnMode === 'plan',
         model: model ?? agentDef?.model,
+        // A pinned agent definition keeps its provider in the spawned
+        // teammate: tmux via env, in-process via a forced-provider scope.
+        provider: agentDef?.provider,
         agent_type: subagent_type,
         invokingRequestId: assistantMessage?.requestId
       }, toolUseContext);
