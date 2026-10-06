@@ -12,6 +12,8 @@ type Props = {
   isLoading: boolean;
   viewingAgentName?: string;
   viewingAgentColor?: AgentColorName;
+  /** Bash mode with a `!!cmd`: the output isn't sent to the model. */
+  hiddenBashInput?: boolean;
 };
 
 /**
@@ -61,12 +63,13 @@ function PromptChar(t0) {
   return t1;
 }
 export function PromptInputModeIndicator(t0) {
-  const $ = _c(6);
+  const $ = _c(7);
   const {
     mode,
     isLoading,
     viewingAgentName,
-    viewingAgentColor
+    viewingAgentColor,
+    hiddenBashInput
   } = t0;
   let t1;
   if ($[0] === Symbol.for("react.memo_cache_sentinel")) {
@@ -78,12 +81,13 @@ export function PromptInputModeIndicator(t0) {
   const teammateColor = t1;
   const viewedTeammateThemeColor = viewingAgentColor ? AGENT_COLOR_TO_THEME_COLOR[viewingAgentColor] : undefined;
   let t2;
-  if ($[1] !== isLoading || $[2] !== mode || $[3] !== viewedTeammateThemeColor || $[4] !== viewingAgentName) {
-    t2 = <Box alignItems="flex-start" alignSelf="flex-start" flexWrap="nowrap" justifyContent="flex-start">{viewingAgentName ? <PromptChar isLoading={isLoading} themeColor={viewedTeammateThemeColor} /> : mode === "bash" ? <Text color="bashBorder" dimColor={isLoading}>! </Text> : <PromptChar isLoading={isLoading} themeColor={isAgentSwarmsEnabled() ? teammateColor : undefined} />}</Box>;
+  if ($[1] !== isLoading || $[2] !== mode || $[3] !== viewedTeammateThemeColor || $[4] !== viewingAgentName || $[6] !== hiddenBashInput) {
+    t2 = <Box alignItems="flex-start" alignSelf="flex-start" flexWrap="nowrap" justifyContent="flex-start">{viewingAgentName ? <PromptChar isLoading={isLoading} themeColor={viewedTeammateThemeColor} /> : mode === "bash" ? <Text color={hiddenBashInput ? "warning" : "bashBorder"} dimColor={isLoading}>! </Text> : <PromptChar isLoading={isLoading} themeColor={isAgentSwarmsEnabled() ? teammateColor : undefined} />}</Box>;
     $[1] = isLoading;
     $[2] = mode;
     $[3] = viewedTeammateThemeColor;
     $[4] = viewingAgentName;
+    $[6] = hiddenBashInput;
     $[5] = t2;
   } else {
     t2 = $[5];
