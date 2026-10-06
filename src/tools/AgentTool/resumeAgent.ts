@@ -1,4 +1,5 @@
 import { beginAgentFileScope } from '../../utils/agentFileClaims.js'
+import type { ModelAlias } from '../../utils/model/aliases.js'
 import { promises as fsp } from 'fs'
 import { getSdkAgentProgressSummariesEnabled } from '../../bootstrap/state.js'
 import { getSystemPrompt } from '../../constants/prompts.js'
@@ -159,11 +160,14 @@ export async function resumeAgentBackground({
     }
   }
 
+  // The model the spawn asked for; without it a resumed agent would switch to
+  // the main-loop model (a different model is a different prompt cache).
+  const spawnModel = meta?.model as ModelAlias | undefined
   // Resolve model for analytics metadata (runAgent resolves its own internally)
   const resolvedAgentModel = getAgentModel(
     selectedAgent.model,
     toolUseContext.options.mainLoopModel,
-    undefined,
+    spawnModel,
     permissionMode,
   )
 
@@ -188,7 +192,10 @@ export async function resumeAgentBackground({
       selectedAgent.agentType,
       isBuiltInAgent(selectedAgent),
     ),
-    model: undefined,
+    model: spawnModel,
+    // Rebuild the tools and CLI identity the way the spawn did (they are part
+    // of the prompt prefix). Older metadata lacks it: background shape, as before.
+    spawnedAsync: meta?.spawnedAsync,
     // Fork resume: pass parent's system prompt (cache-identical prefix).
     // Non-fork: undefined → runAgent recomputes under wrapWithCwd so
     // getCwd() sees resumedWorktreePath.

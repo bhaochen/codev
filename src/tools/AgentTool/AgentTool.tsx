@@ -942,6 +942,12 @@ export const AgentTool = buildTool({
                     for await (const msg of runAgent({
                       ...runAgentParams,
                       isAsync: true,
+                      // A spawn that was foreground keeps its foreground tool
+                      // declarations (same prompt prefix) even now that it runs
+                      // in the background; background-only policy applies via
+                      // `backgrounded` (no prompts, disallowed tools refuse).
+                      spawnedAsync: false,
+                      backgrounded: () => true,
                       // Agent is now running in background
                       override: {
                         ...runAgentParams.override,

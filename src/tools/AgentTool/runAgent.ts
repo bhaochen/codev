@@ -27,7 +27,10 @@ import type {
   ScopedMcpServerConfig,
 } from '../../services/mcp/types.js'
 import type { Tool, Tools, ToolUseContext } from '../../Tool.js'
-import { rememberAgentConversation } from './resumeParity.js'
+import {
+  refuseToolsOutsideRunPolicy,
+  rememberAgentConversation,
+} from './resumeParity.js'
 import { killShellTasksForAgent } from '../../tasks/LocalShellTask/killShellTasks.js'
 import type { Command } from '../../types/command.js'
 import type { AgentId } from '../../types/ids.js'
@@ -258,6 +261,8 @@ export async function* runAgent({
   toolUseContext,
   canUseTool,
   isAsync,
+  spawnedAsync,
+  backgrounded,
   canShowPermissionPrompts,
   forkContextMessages,
   querySource,
@@ -280,6 +285,17 @@ export async function* runAgent({
   toolUseContext: ToolUseContext
   canUseTool: CanUseToolFn
   isAsync: boolean
+  /** Whether the agent was spawned to run in the background. Defaults to
+   * isAsync. A resume always runs in the background but passes the spawn's
+   * value: the tool pool and CLI identity line are part of the prompt prefix,
+   * so building them for the background run would change the request from
+   * byte 0 and miss every provider's prompt cache. */
+  spawnedAsync?: boolean
+  /** For a foreground run: whether it has been moved to the background
+   * (Ctrl+B). The run keeps its conversation and prompt; from then on it
+   * follows the background run policy: no permission prompts, and the tools a
+   * background spawn would not get refuse. */
+  backgrounded?: () => boolean
   /** Whether this agent can show permission prompts. Defaults to !isAsync.
    * Set to true for in-process teammates that run async but share the terminal. */
   canShowPermissionPrompts?: boolean
@@ -338,6 +354,10 @@ export async function* runAgent({
 
   const appState = toolUseContext.getAppState()
   const permissionMode = appState.toolPermissionContext.mode
+  // The tool pool and CLI identity follow the spawn shape, not this run's
+  // shape, so a resumed or backgrounded agent repeats its spawn's prefix.
+  const spawnShapeAsync = spawnedAsync ?? isAsync
+  const runsInBackground = isAsync || (backgrounded?.() ?? false)
   // Always-shared channel to the root AppState store. toolUseContext.setAppState
   // is a no-op when the *parent* is itself an async agent (nested async→async),
   // so session-scoped writes (hooks, bash tasks) must go through this instead.
@@ -450,7 +470,7 @@ export async function* runAgent({
         ? !canShowPermissionPrompts
         : agentPermissionMode === 'bubble'
           ? false
-          : isAsync
+          : runsInBackground
     if (shouldAvoidPrompts) {
       toolPermissionContext = {
         ...toolPermissionContext,
@@ -463,7 +483,7 @@ export async function* runAgent({
     // Since these are background agents, waiting is fine — the user should
     // only be interrupted when automated checks can't resolve the permission.
     // This applies to bubble mode (always) and explicit canShowPermissionPrompts.
-    if (isAsync && !shouldAvoidPrompts) {
+    if (runsInBackground && !shouldAvoidPrompts) {
       toolPermissionContext = {
         ...toolPermissionContext,
         awaitAutomatedChecksBeforeDialog: true,
@@ -505,9 +525,23 @@ export async function* runAgent({
     }
   }
 
-  const resolvedTools = useExactTools
+  // Declare the tools the agent was spawned with. A foreground agent resumed
+  // or moved to the background keeps its foreground declarations (same prompt
+  // prefix); the tools the background policy excludes stay declared but refuse
+  // to run there, as they could not run in a background spawn either.
+  const declaredTools = useExactTools
     ? availableTools
-    : resolveAgentTools(agentDefinition, availableTools, isAsync).resolvedTools
+    : resolveAgentTools(agentDefinition, availableTools, spawnShapeAsync)
+        .resolvedTools
+  const resolvedTools =
+    !useExactTools && !spawnShapeAsync && (isAsync || backgrounded)
+      ? refuseToolsOutsideRunPolicy(
+          declaredTools,
+          resolveAgentTools(agentDefinition, availableTools, true).resolvedTools,
+          'is not available while this agent runs in the background.',
+          isAsync ? undefined : backgrounded,
+        )
+      : declaredTools
 
   const additionalWorkingDirectories = Array.from(
     appState.toolPermissionContext.additionalWorkingDirectories.keys(),
@@ -745,6 +779,8 @@ export async function* runAgent({
   )
   void writeAgentMetadata(agentId, {
     agentType: agentDefinition.agentType,
+    spawnedAsync: spawnShapeAsync,
+    ...(model && { model }),
     ...(worktreePath && { worktreePath }),
     ...(description && { description }),
   }).catch(_err => logForDebugging(`Failed to write agent metadata: ${_err}`))
