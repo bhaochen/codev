@@ -4,6 +4,7 @@ import {
   applyCacheStableSystemPrompt,
   freezeSessionVolatileText,
   providerSplitsSystemPromptForCache,
+  providerUsesOpenAIChatBoundary,
   splitSystemPromptForCache,
   stripSystemDynamicBoundary,
 } from './cacheStablePrompt.js'
@@ -82,6 +83,15 @@ describe('frozen volatile context', () => {
       role: 'user',
       content: '<dynamic_context>\ngitStatus: clean\n</dynamic_context>',
     })
+  })
+
+  test('the boundary is inserted for providers whose wire handles it', () => {
+    expect(providerUsesOpenAIChatBoundary('opencode')).toBe(true)
+    expect(providerUsesOpenAIChatBoundary('nvidia')).toBe(true)
+    expect(providerUsesOpenAIChatBoundary('openai')).toBe(true)
+    // firstParty/bedrock/vertex/foundry use their own cache-scope handling.
+    expect(providerUsesOpenAIChatBoundary('firstParty')).toBe(false)
+    expect(providerUsesOpenAIChatBoundary(null)).toBe(false)
   })
 
   test('only implicit-cache providers split', () => {

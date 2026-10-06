@@ -149,6 +149,22 @@ export function providerSplitsSystemPromptForCache(
   )
 }
 
+/**
+ * Providers whose openai-chat client handles the boundary marker explicitly
+ * (split for implicit-cache models, strip for the rest). Used at prompt-build
+ * time to insert the marker, so the split is exact instead of regex-heuristic.
+ */
+export function providerUsesOpenAIChatBoundary(
+  provider: string | null | undefined,
+): boolean {
+  return (
+    provider === 'openai' ||
+    provider === 'opencode' ||
+    provider === 'nvidia' ||
+    provider === 'openrouter'
+  )
+}
+
 export function applyCacheStableSystemPrompt(
   messages: OpenAIChatMessage[],
   systemText: string,

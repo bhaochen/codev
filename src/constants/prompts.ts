@@ -48,6 +48,8 @@ import { getBareModeLevel, isEnvTruthy } from '../utils/envUtils.js'
 import { feature } from 'bun:bundle'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { shouldUseGlobalCacheScope } from '../utils/betas.js'
+import { providerUsesOpenAIChatBoundary } from '../services/llm/protocols/cacheStablePrompt.js'
+import { getAPIProvider } from '../utils/model/providers.js'
 import { isForkSubagentEnabled } from '../tools/AgentTool/forkSubagent.js'
 import {
   systemPromptSection,
@@ -578,7 +580,13 @@ ${CYBER_RISK_INSTRUCTION}`,
     getSimpleToneAndStyleSection(),
     getOutputEfficiencySection(),
     // === BOUNDARY MARKER - DO NOT MOVE OR REMOVE ===
-    ...(shouldUseGlobalCacheScope() ? [SYSTEM_PROMPT_DYNAMIC_BOUNDARY] : []),
+    // firstParty splits it for cache_control scopes; openai-chat providers
+    // split or strip it in their message converter so the volatile tail never
+    // churns an already-cached prefix.
+    ...(shouldUseGlobalCacheScope() ||
+    providerUsesOpenAIChatBoundary(getAPIProvider())
+      ? [SYSTEM_PROMPT_DYNAMIC_BOUNDARY]
+      : []),
     // --- Dynamic content (registry-managed) ---
     ...resolvedDynamicSections,
   ].filter(s => s !== null)
