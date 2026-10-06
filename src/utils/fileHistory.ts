@@ -484,6 +484,154 @@ export async function fileHistoryGetDiffStats(
 }
 
 /**
+ * Batched form of {@link fileHistoryGetDiffStats} for the Rewind picker.
+ *
+ * The per-file work — reading the current file plus its backup and diffing
+ * them — depends only on (tracking path, backup version), and the comparison
+ * target is always the same working tree. Consecutive checkpoints therefore
+ * share almost all of their work: resolving N visible rows one by one re-reads
+ * and re-diffs the same backups N times. This resolves every distinct backup
+ * across all requested messages exactly once, then aggregates per message.
+ *
+ * Results are byte-for-byte the same as calling fileHistoryGetDiffStats per
+ * message, so the picker's row = what Restore code will do invariant holds.
+ */
+export async function fileHistoryGetDiffStatsBatch(
+  state: FileHistoryState,
+  messageIds: readonly UUID[],
+): Promise<Map<UUID, DiffStats | undefined>> {
+  const result = new Map<UUID, DiffStats | undefined>()
+  if (!fileHistoryEnabled()) {
+    return result
+  }
+
+  // Latest snapshot per message id, so repeated ids cost one lookup.
+  const snapshotById = new Map<UUID, FileHistorySnapshot | undefined>()
+  for (const messageId of messageIds) {
+    if (!snapshotById.has(messageId)) {
+      snapshotById.set(
+        messageId,
+        state.snapshots.findLast(snapshot => snapshot.messageId === messageId),
+      )
+    }
+  }
+
+  const firstVersionCache = new Map<string, BackupFileName | undefined>()
+  const firstVersionFor = (trackingPath: string): BackupFileName | undefined => {
+    if (!firstVersionCache.has(trackingPath)) {
+      firstVersionCache.set(
+        trackingPath,
+        getBackupFileNameFirstVersion(trackingPath, state),
+      )
+    }
+    return firstVersionCache.get(trackingPath)
+  }
+
+  /** `{filePath, stats}` = changed, null = unchanged, undefined = resolve error. */
+  type Contribution = { filePath: string; stats: DiffStats } | null | undefined
+  const contributions = new Map<string, Contribution>()
+  const contributionKey = (
+    trackingPath: string,
+    backupFileName: BackupFileName,
+  ): string =>
+    `${trackingPath}\0${backupFileName === null ? '\0null' : backupFileName}`
+
+  const pending: Promise<void>[] = []
+  for (const trackingPath of state.trackedFiles) {
+    const filePath = maybeExpandFilePath(trackingPath)
+    const versions = new Set<BackupFileName>()
+    let needsFirstVersion = false
+    for (const snapshot of snapshotById.values()) {
+      if (!snapshot) continue
+      const targetBackup = snapshot.trackedFileBackups[trackingPath]
+      if (targetBackup) {
+        versions.add(targetBackup.backupFileName)
+      } else {
+        needsFirstVersion = true
+      }
+    }
+    if (needsFirstVersion) {
+      const fallback = firstVersionFor(trackingPath)
+      if (fallback !== undefined) {
+        versions.add(fallback)
+      }
+    }
+
+    for (const backupFileName of versions) {
+      const key = contributionKey(trackingPath, backupFileName)
+      if (contributions.has(key)) continue
+      pending.push(
+        (async () => {
+          try {
+            const stats = await computeDiffStatsForFile(
+              filePath,
+              backupFileName === null ? undefined : backupFileName,
+            )
+            if (stats?.insertions || stats?.deletions) {
+              contributions.set(key, { filePath, stats })
+              return
+            }
+            if (backupFileName === null && (await pathExists(filePath))) {
+              contributions.set(key, { filePath, stats })
+              return
+            }
+            contributions.set(key, null)
+          } catch (error) {
+            logError(error)
+            logEvent('tengu_file_history_rewind_restore_file_failed', {
+              dryRun: true,
+            })
+            contributions.set(key, undefined)
+          }
+        })(),
+      )
+    }
+  }
+  await Promise.all(pending)
+
+  for (const messageId of messageIds) {
+    const targetSnapshot = snapshotById.get(messageId)
+    if (!targetSnapshot) {
+      result.set(messageId, undefined)
+      continue
+    }
+
+    const filesChanged: string[] = []
+    let insertions = 0
+    let deletions = 0
+    for (const trackingPath of state.trackedFiles) {
+      const targetBackup = targetSnapshot.trackedFileBackups[trackingPath]
+      const backupFileName: BackupFileName | undefined = targetBackup
+        ? targetBackup.backupFileName
+        : firstVersionFor(trackingPath)
+
+      if (backupFileName === undefined) {
+        // Error resolving the backup, so don't touch the file
+        logError(
+          new Error('FileHistory: Error finding the backup file to apply'),
+        )
+        logEvent('tengu_file_history_rewind_restore_file_failed', {
+          dryRun: true,
+        })
+        continue
+      }
+
+      const contribution = contributions.get(
+        contributionKey(trackingPath, backupFileName),
+      )
+      if (!contribution) continue
+
+      filesChanged.push(contribution.filePath)
+      insertions += contribution.stats?.insertions || 0
+      deletions += contribution.stats?.deletions || 0
+    }
+    result.set(messageId, { filesChanged, insertions, deletions })
+  }
+
+  return result
+}
+
+/**
  * Lightweight boolean-only check: would rewinding to this message change any
  * file on disk? Uses the same stat/content comparison as the non-dry-run path
  * of applySnapshot (checkOriginFileChanged) instead of computeDiffStatsForFile,

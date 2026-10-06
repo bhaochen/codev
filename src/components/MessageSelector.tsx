@@ -6,7 +6,7 @@ import * as React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS, logEvent } from 'src/services/analytics/index.js';
 import { useAppState } from 'src/state/AppState.js';
-import { type DiffStats, fileHistoryCanRestore, fileHistoryEnabled, fileHistoryGetDiffStats } from 'src/utils/fileHistory.js';
+import { type DiffStats, fileHistoryCanRestore, fileHistoryEnabled, fileHistoryGetDiffStats, fileHistoryGetDiffStatsBatch } from 'src/utils/fileHistory.js';
 import { logError } from 'src/utils/log.js';
 import { useExitOnCtrlCDWithKeybindings } from '../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { Box, Text } from '../ink.js';
@@ -292,34 +292,79 @@ export function MessageSelector({
   // per messageId. The cache is dropped when a new snapshot lands (fileHistory
   // identity changes), because a fresh snapshot can change what an
   // already-resolved message resolves to.
-  const metadataCacheRef = useRef<{fileHistory: unknown; byMessageId: Map<string, DiffStats | undefined>} | null>(null);
+  //
+  // The visible rows are resolved in ONE batch call: adjacent checkpoints
+  // share almost every (file, backup version) pair, and the batch reads and
+  // diffs each distinct pair once instead of once per row. Results are
+  // identical to the per-message function, so rows still equal the real
+  // restore.
+  const metadataCacheRef = useRef<{
+    fileHistory: unknown;
+    byMessageId: Map<string, DiffStats | undefined>;
+    resolved: Set<string>;
+  } | null>(null);
   useEffect(() => {
     if (!isFileHistoryEnabled) {
       return;
     }
     let cancelled = false;
     if (!metadataCacheRef.current || metadataCacheRef.current.fileHistory !== fileHistory) {
-      metadataCacheRef.current = { fileHistory, byMessageId: new Map() };
+      metadataCacheRef.current = {
+        fileHistory,
+        byMessageId: new Map(),
+        resolved: new Set()
+      };
     }
-    const cache = metadataCacheRef.current.byMessageId;
+    const { byMessageId: cache, resolved } = metadataCacheRef.current;
     const visibleEnd = Math.min(firstVisibleIndex + MAX_VISIBLE_MESSAGES, messageOptions.length);
-    void Promise.all(messageOptions.slice(firstVisibleIndex, visibleEnd).map(async (userMessage, offset) => {
+    const visibleRows: Array<{
+      itemIndex: number;
+      uuid: UUID;
+    }> = [];
+    const unresolved: UUID[] = [];
+    for (let offset = 0; offset < visibleEnd - firstVisibleIndex; offset++) {
       const itemIndex = firstVisibleIndex + offset;
-      if (userMessage.uuid === currentUUID) {
-        return;
+      const userMessage = messageOptions[itemIndex];
+      if (!userMessage || userMessage.uuid === currentUUID) {
+        continue;
       }
-      if (!cache.has(userMessage.uuid)) {
-        cache.set(userMessage.uuid, fileHistoryCanRestore(fileHistory, userMessage.uuid as UUID) ? await fileHistoryGetDiffStats(fileHistory, userMessage.uuid as UUID) : undefined);
+      const uuid = userMessage.uuid as UUID;
+      visibleRows.push({ itemIndex, uuid });
+      if (!cache.has(uuid)) {
+        cache.set(uuid, undefined);
       }
-      const diffStats_0 = cache.get(userMessage.uuid);
+      if (resolved.has(uuid)) {
+        continue;
+      }
+      if (fileHistoryCanRestore(fileHistory, uuid)) {
+        unresolved.push(uuid);
+      } else {
+        resolved.add(uuid);
+      }
+    }
+    const publish = () => {
       if (cancelled) {
         return;
       }
-      setFileHistoryMetadata(prev => prev[itemIndex] === diffStats_0 ? prev : {
-        ...prev,
-        [itemIndex]: diffStats_0
+      for (const { itemIndex, uuid } of visibleRows) {
+        const diffStats_0 = cache.get(uuid);
+        setFileHistoryMetadata(prev => prev[itemIndex] === diffStats_0 ? prev : {
+          ...prev,
+          [itemIndex]: diffStats_0
+        });
+      }
+    };
+    if (unresolved.length === 0) {
+      publish();
+    } else {
+      void fileHistoryGetDiffStatsBatch(fileHistory, unresolved).then(statsById => {
+        for (const uuid of unresolved) {
+          cache.set(uuid, statsById.get(uuid));
+          resolved.add(uuid);
+        }
+        publish();
       });
-    }));
+    }
     return () => {
       cancelled = true;
     };

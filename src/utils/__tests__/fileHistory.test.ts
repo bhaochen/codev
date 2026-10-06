@@ -17,6 +17,7 @@ import { join } from 'path'
 import type { UUID } from 'crypto'
 import {
   fileHistoryGetDiffStats,
+  fileHistoryGetDiffStatsBatch,
   fileHistoryMakeSnapshot,
   fileHistoryRewind,
   fileHistoryTrackEdit,
@@ -161,5 +162,44 @@ describe('fileHistory rewind restores what the picker promised', () => {
     await fileHistoryRewind(updateFileHistoryState, targetMessage)
 
     await expect(readFile(newFile, 'utf-8')).rejects.toThrow()
+  })
+})
+
+describe('fileHistoryGetDiffStatsBatch matches the per-message results', () => {
+  test('shared backups across checkpoints resolve identically', async () => {
+    const fileA = join(workDir, 'a.ts')
+    const fileB = join(workDir, 'b.ts')
+    await writeFile(fileA, 'a1\n', 'utf-8')
+    await writeFile(fileB, 'b1\n', 'utf-8')
+
+    const msg1 = 'msg-batch-1' as UUID
+    const msg2 = 'msg-batch-2' as UUID
+    const msg3 = 'msg-batch-3' as UUID
+
+    await fileHistoryMakeSnapshot(updateFileHistoryState, msg1)
+    await fileHistoryTrackEdit(updateFileHistoryState, fileA, msg1)
+    await writeFile(fileA, 'a2\na3\n', 'utf-8')
+
+    await fileHistoryMakeSnapshot(updateFileHistoryState, msg2)
+    await fileHistoryTrackEdit(updateFileHistoryState, fileB, msg2)
+    await writeFile(fileB, 'b2\n', 'utf-8')
+
+    await fileHistoryMakeSnapshot(updateFileHistoryState, msg3)
+
+    // Current working tree diverges from every checkpoint, so each row has
+    // real stats and the batch must reuse the shared a.ts/b.ts backups.
+    await writeFile(fileA, 'a4\n', 'utf-8')
+    await writeFile(fileB, 'b3\nb4\n', 'utf-8')
+
+    const missing = 'msg-batch-missing' as UUID
+    const ids = [msg1, msg2, msg3, missing, msg1]
+    const batch = await fileHistoryGetDiffStatsBatch(state, ids)
+
+    for (const id of [msg1, msg2, msg3, missing]) {
+      expect(batch.get(id)).toEqual(await fileHistoryGetDiffStats(state, id))
+    }
+    // Duplicate ids collapse; every requested id is present exactly once.
+    expect(batch.size).toBe(4)
+    expect(batch.get(missing)).toBeUndefined()
   })
 })
