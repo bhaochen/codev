@@ -1,3 +1,4 @@
+import { beginAgentFileScope } from '../../utils/agentFileClaims.js'
 import { promises as fsp } from 'fs'
 import { getSdkAgentProgressSummariesEnabled } from '../../bootstrap/state.js'
 import { getSystemPrompt } from '../../constants/prompts.js'
@@ -28,6 +29,7 @@ import { getTaskOutputPath } from '../../utils/task/diskOutput.js'
 import { getParentSessionId } from '../../utils/teammate.js'
 import { reconstructForSubagentResume } from '../../utils/toolResultStorage.js'
 import { runAsyncAgentLifecycle } from './agentToolUtils.js'
+import { getAgentConversation } from './resumeParity.js'
 import { GENERAL_PURPOSE_AGENT } from './built-in/generalPurposeAgent.js'
 import { FORK_AGENT, isForkSubagentEnabled } from './forkSubagent.js'
 import type { AgentDefinition } from './loadAgentsDir.js'
@@ -67,11 +69,21 @@ export async function resumeAgentBackground({
   if (!transcript) {
     throw new Error(`No transcript found for agent ID: ${agentId}`)
   }
-  const resumedMessages = filterWhitespaceOnlyAssistantMessages(
-    filterOrphanedThinkingOnlyMessages(
-      filterUnresolvedToolUses(transcript.messages),
-    ),
+  // Prefer the conversation this process ran the agent with: it keeps the
+  // attachments the transcript drops, so the resumed request repeats the
+  // prefix the agent last sent (see resumeParity.ts).
+  const liveConversation = getAgentConversation(agentId)
+  const withoutOrphans = filterOrphanedThinkingOnlyMessages(
+    filterUnresolvedToolUses(liveConversation ?? transcript.messages),
   )
+  // The whitespace filter judges each streamed block alone, so it would drop
+  // a whitespace text block (some models emit "\n\n\n" before every tool
+  // call) that the agent's requests sent merged into the tool_use turn:
+  // normalizeMessagesForAPI filters only after that merge. The live
+  // conversation already went through it on every request of the run.
+  const resumedMessages = liveConversation
+    ? withoutOrphans
+    : filterWhitespaceOnlyAssistantMessages(withoutOrphans)
   const resumedReplacementState = reconstructForSubagentResume(
     toolUseContext.contentReplacementState,
     resumedMessages,
@@ -203,6 +215,13 @@ export async function resumeAgentBackground({
     setAppState: rootSetAppState,
     toolUseId: toolUseContext.toolUseId,
   })
+
+  // Register for file-write ownership, exactly as a fresh spawn does. A
+  // resumed agent runs concurrently with whatever else is in flight and writes
+  // through the same tools, so leaving it unregistered would let it clobber a
+  // running agent's claimed file and leave its own writes unprotected.
+  // runAsyncAgentLifecycle's finally already releases the scope.
+  beginAgentFileScope(agentId, uiDescription)
 
   const metadata = {
     prompt,

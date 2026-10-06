@@ -8,6 +8,7 @@ import {
 import { z } from 'zod/v4'
 import { buildTool, type ToolDef, type ToolUseContext } from '../../Tool.js'
 import type { NotebookCell, NotebookContent } from '../../types/notebook.js'
+import { agentFileConflictMessage, checkAgentFileClaim } from '../../utils/agentFileClaims.js'
 import { getCwd } from '../../utils/cwd.js'
 import { isENOENT } from '../../utils/errors.js'
 import { getFileModificationTime, writeTextContent } from '../../utils/file.js'
@@ -181,6 +182,16 @@ export const NotebookEditTool = buildTool({
     const fullPath = isAbsolute(notebook_path)
       ? notebook_path
       : resolve(getCwd(), notebook_path)
+
+    // Ownership check before any other validation — see FileEditTool.
+    const claimOwner = checkAgentFileClaim(fullPath)
+    if (claimOwner) {
+      return {
+        result: false,
+        message: agentFileConflictMessage(fullPath, claimOwner),
+        errorCode: 0,
+      }
+    }
 
     // SECURITY: Skip filesystem operations for UNC paths to prevent NTLM credential leaks.
     if (fullPath.startsWith('\\\\') || fullPath.startsWith('//')) {

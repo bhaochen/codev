@@ -6,6 +6,7 @@ import type { AgentContentBlock } from 'src/types/agentMessage.js';
 import { getQuerySourceForAgent } from 'src/utils/promptCategory.js';
 import { z } from 'zod/v4';
 import { clearInvokedSkillsForAgent, getSdkAgentProgressSummariesEnabled } from '../../bootstrap/state.js';
+import { beginAgentFileScope, endAgentFileScope } from '../../utils/agentFileClaims.js';
 import { enhanceSystemPromptWithEnvDetails, getSystemPrompt } from '../../constants/prompts.js';
 import { isCoordinatorMode } from '../../coordinator/coordinatorMode.js';
 import { startAgentSummarization } from '../../services/AgentSummary/agentSummary.js';
@@ -695,6 +696,10 @@ export const AgentTool = buildTool({
     };
     if (shouldRunAsync) {
       const asyncAgentId = earlyAgentId;
+      // Register for file-write ownership: from here on, paths this agent
+      // writes are owned by it and refused to other running agents. Released
+      // in runAsyncAgentLifecycle's cleanup finally.
+      beginAgentFileScope(asyncAgentId, name?.trim() || description);
       const agentBackgroundTask = registerAsyncAgent({
         agentId: asyncAgentId,
         description,
@@ -775,6 +780,8 @@ export const AgentTool = buildTool({
     } else {
       // Create an explicit agentId for sync agents
       const syncAgentId = asAgentId(earlyAgentId);
+      // Register for file-write ownership (see the async branch above).
+      beginAgentFileScope(syncAgentId, name?.trim() || description);
 
       // Set up agent context for sync execution (for analytics attribution)
       const syncAgentContext = {
@@ -1045,6 +1052,7 @@ export const AgentTool = buildTool({
                     stopBackgroundedSummarization?.();
                     clearInvokedSkillsForAgent(syncAgentId);
                     clearDumpState(syncAgentId);
+                    endAgentFileScope(syncAgentId);
                     // Note: worktree cleanup is done before enqueueAgentNotification
                     // in both try and catch paths so we can include worktree info
                   }
@@ -1214,6 +1222,7 @@ export const AgentTool = buildTool({
           // Skip if backgrounded — the backgrounded agent's finally handles cleanup
           if (!wasBackgrounded) {
             clearDumpState(syncAgentId);
+            endAgentFileScope(syncAgentId);
           }
 
           // Cancel auto-background timer if agent completed before it fired

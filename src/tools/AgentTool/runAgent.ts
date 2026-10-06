@@ -27,6 +27,7 @@ import type {
   ScopedMcpServerConfig,
 } from '../../services/mcp/types.js'
 import type { Tool, Tools, ToolUseContext } from '../../Tool.js'
+import { rememberAgentConversation } from './resumeParity.js'
 import { killShellTasksForAgent } from '../../tasks/LocalShellTask/killShellTasks.js'
 import type { Command } from '../../types/command.js'
 import type { AgentId } from '../../types/ids.js'
@@ -56,7 +57,10 @@ import {
 import { registerFrontmatterHooks } from '../../utils/hooks/registerFrontmatterHooks.js'
 import { clearSessionHooks } from '../../utils/hooks/sessionHooks.js'
 import { executeSubagentStartHooks } from '../../utils/hooks.js'
-import { createUserMessage } from '../../utils/messages.js'
+import {
+  createUserMessage,
+  getMessagesAfterCompactBoundary,
+} from '../../utils/messages.js'
 import { getAgentModel } from '../../utils/model/agent.js'
 import type { ModelAlias } from '../../utils/model/aliases.js'
 import {
@@ -748,6 +752,11 @@ export async function* runAgent({
   // Track the last recorded message UUID for parent chain continuity
   let lastRecordedUuid: UUID | null = (initialMessages.at(-1)?.uuid as UUID) ?? null
 
+  // The conversation exactly as the query loop runs it, attachments included
+  // (the sidechain transcript drops those), so a resume in this process sends
+  // the same prefix. See resumeParity.ts.
+  const liveConversation: Message[] = [...initialMessages]
+
   try {
     for await (const message of query({
       messages: initialMessages,
@@ -771,6 +780,17 @@ export async function* runAgent({
         continue
       }
 
+      // A streaming fallback discards the partial assistant message it had
+      // already yielded. Drop it from the live conversation too (as the REPL
+      // does), or a resume would replay a message the agent stopped sending.
+      if (message.type === 'tombstone') {
+        const orphan = liveConversation.findIndex(
+          m => m.uuid === message.message.uuid,
+        )
+        if (orphan !== -1) liveConversation.splice(orphan, 1)
+        continue
+      }
+
       // Yield attachment messages (e.g., structured_output) without recording them
       if (message.type === 'attachment') {
         // Handle max turns reached signal from query.ts
@@ -789,6 +809,7 @@ export async function* runAgent({
           )
           break
         }
+        liveConversation.push(message)
         yield message
         continue
       }
@@ -804,6 +825,7 @@ export async function* runAgent({
         )
         if (message.type !== 'progress') {
           lastRecordedUuid = message.uuid as UUID
+          liveConversation.push(message)
         }
         yield message
       }
@@ -830,6 +852,12 @@ export async function* runAgent({
     }
     // Release cloned file state cache memory
     agentToolUseContext.readFileState.clear()
+    // Kept for a SendMessage resume, cut at the last compaction the way the
+    // transcript chain is.
+    rememberAgentConversation(
+      agentId,
+      getMessagesAfterCompactBoundary(liveConversation),
+    )
     // Release the cloned fork context messages
     initialMessages.length = 0
     // Release perfetto agent registry entry

@@ -1,6 +1,7 @@
 import { feature } from 'bun:bundle'
 import { z } from 'zod/v4'
 import { clearInvokedSkillsForAgent } from '../../bootstrap/state.js'
+import { endAgentFileScope } from '../../utils/agentFileClaims.js'
 import {
   ALL_AGENT_DISALLOWED_TOOLS,
   ASYNC_AGENT_ALLOWED_TOOLS,
@@ -707,5 +708,6 @@ export async function runAsyncAgentLifecycle({
   } finally {
     clearInvokedSkillsForAgent(agentIdForCleanup)
     clearDumpState(agentIdForCleanup)
+    endAgentFileScope(agentIdForCleanup)
   }
 }

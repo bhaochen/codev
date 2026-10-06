@@ -14,6 +14,7 @@ import {
 } from '../../skills/loadSkillsDir.js'
 import type { ToolUseContext } from '../../Tool.js'
 import { buildTool, type ToolDef } from '../../Tool.js'
+import { agentFileConflictMessage, checkAgentFileClaim } from '../../utils/agentFileClaims.js'
 import { getCwd } from '../../utils/cwd.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { countLinesChanged } from '../../utils/diff.js'
@@ -140,6 +141,17 @@ export const FileEditTool = buildTool({
     // Use expandPath for consistent path normalization (especially on Windows
     // where "/" vs "\" can cause readFileState lookup mismatches)
     const fullFilePath = expandPath(file_path)
+    // Ownership check first: it must run before the file is read or old_string
+    // is matched, otherwise the tool's own "not found" rejection fires first
+    // and never mentions the agent that actually holds this path.
+    const claimOwner = checkAgentFileClaim(fullFilePath)
+    if (claimOwner) {
+      return {
+        result: false,
+        message: agentFileConflictMessage(fullFilePath, claimOwner),
+        errorCode: 0,
+      }
+    }
 
     // Reject edits to team memory files that introduce secrets
     const secretError = checkTeamMemSecrets(fullFilePath, new_string)
