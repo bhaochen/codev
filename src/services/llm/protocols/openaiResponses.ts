@@ -32,6 +32,7 @@ import type {
 import { APIUserAbortError } from '@anthropic-ai/sdk/error'
 import { randomUUID } from 'crypto'
 import { httpRequest } from '../transport/http.js'
+import { markToolErrorText } from './toolErrorText.js'
 import { requestWithRetry } from '../transport/retryHttpRequest.js'
 import { parseSSERaw, type RawSSEEvent } from '../transport/sse.js'
 import { getSessionId } from '../../../bootstrap/state.js'
@@ -316,7 +317,12 @@ function normalizedMessageToResponsesItems(
         outputs.push({
           type: 'function_call_output',
           call_id: block.tool_use_id,
-          output: toolResultToResponsesOutput(block.content),
+          // function_call_output has no is_error field: wrap the text so a
+          // failed tool result is distinguishable from normal output.
+          output: markToolErrorText(
+            toolResultToResponsesOutput(block.content),
+            block.is_error,
+          ),
         })
       } else if (block.type === 'text') {
         parts.push({ type: 'input_text', text: block.text })

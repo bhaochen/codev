@@ -29,6 +29,7 @@ import type {
   UserMessage,
 } from '../../../types/message.js'
 import { isEnvTruthy, isEnvDefinedFalsy } from '../../../utils/envUtils.js'
+import { markToolErrorText } from './toolErrorText.js'
 
 // ============================================================================
 // Wire types
@@ -532,10 +533,19 @@ function userMessageContentToOpenAIChat(
         parts.push({ type: 'text', text })
       }
     } else if (block.type === 'tool_result') {
-      const tr = block as { content?: unknown; tool_use_id: string }
+      const tr = block as {
+        content?: unknown
+        tool_use_id: string
+        is_error?: boolean
+      }
       toolResults.push({
         role: 'tool',
-        content: normalizeToolResultContent(tr.content, supportsImages),
+        // OpenAI tool messages have no is_error field: wrap the text so a
+        // failed tool result is distinguishable from normal output.
+        content: markToolErrorText(
+          normalizeToolResultContent(tr.content, supportsImages),
+          tr.is_error,
+        ),
         tool_call_id: tr.tool_use_id,
       })
     }

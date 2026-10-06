@@ -380,6 +380,33 @@ describe('buildOpenAIResponsesBody', () => {
     ])
   })
 
+  test('failed tool result is wrapped in <tool_use_error> for the Responses wire', async () => {
+    const request = makeRequest({
+      messages: [
+        createAssistantMessage({
+          content: [
+            { type: 'tool_use', id: 'toolu_1', name: 'mock_tool', input: {} },
+          ],
+        }),
+        createUserMessage({
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'toolu_1',
+              content: 'boom',
+              is_error: true,
+            },
+          ],
+        }),
+      ],
+    })
+    const body = await buildOpenAIResponsesBody(baseRoute, request)
+    const output = body.input.find(
+      item => item.type === 'function_call_output',
+    ) as { output: string }
+    expect(output.output).toBe('<tool_use_error>boom</tool_use_error>')
+  })
+
   test('thinking block maps to reasoning summary part (no signature fake)', async () => {
     const request = makeRequest({
       messages: [

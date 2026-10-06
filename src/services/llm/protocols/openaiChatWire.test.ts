@@ -310,6 +310,33 @@ describe('agentMessagesToOpenAIChatMessages', () => {
     ])
   })
 
+  test('failed tool_result is wrapped in <tool_use_error> for the tool wire', () => {
+    const msgs = agentMessagesToOpenAIChatMessages([
+      wrapperUser([
+        { type: 'tool_result', tool_use_id: 'call_1', content: 'boom', is_error: true },
+      ]),
+    ])
+    expect(msgs[0]).toEqual({
+      role: 'tool',
+      content: '<tool_use_error>boom</tool_use_error>',
+      tool_call_id: 'call_1',
+    })
+  })
+
+  test('already-wrapped failed tool_result is not wrapped twice', () => {
+    const msgs = agentMessagesToOpenAIChatMessages([
+      wrapperUser([
+        {
+          type: 'tool_result',
+          tool_use_id: 'call_1',
+          content: '<tool_use_error>boom</tool_use_error>',
+          is_error: true,
+        },
+      ]),
+    ])
+    expect(msgs[0].content).toBe('<tool_use_error>boom</tool_use_error>')
+  })
+
   test('tool_result array content with image → parts (supportsImages), text-only otherwise', () => {
     const input = [
       {
