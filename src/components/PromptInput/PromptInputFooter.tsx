@@ -11,7 +11,7 @@ import { useSettings } from '../../hooks/useSettings.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { Box, Text } from '../../ink.js';
 import type { MCPServerConnection } from '../../services/mcp/types.js';
-import { getAutoCompactThreshold, getEffectiveContextWindowSize } from '../../services/compact/autoCompact.js';
+import { getAutoCompactThreshold } from '../../services/compact/autoCompact.js';
 import { useAppState } from '../../state/AppState.js';
 import type { ToolPermissionContext } from '../../Tool.js';
 import type { Message } from '../../types/message.js';
@@ -21,6 +21,8 @@ import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
 import { isUndercover } from '../../utils/undercover.js';
 import { getMessagesAfterCompactBoundary } from '../../utils/messages.js';
 import { tokenCountFromLastAPIResponse } from '../../utils/tokens.js';
+import { getContextWindowForModel } from '../../utils/context.js';
+import { getSdkBetas } from '../../bootstrap/state.js';
 import { CoordinatorTaskPanel, useCoordinatorTaskCount } from '../CoordinatorAgentStatus.js';
 import { CtxProgressBar } from '../CtxProgressBar.js';
 import { getLastAssistantMessageId, StatusLine, statusLineShouldDisplay } from '../StatusLine.js';
@@ -153,7 +155,13 @@ function PromptInputFooter({
         <Box flexDirection="column" flexShrink={isNarrow ? 0 : 1}>
           {mode === 'prompt' && !isShort && !exitMessage.show && !isPasting && statusLineShouldDisplay(settings) && <StatusLine messagesRef={messagesRef} lastAssistantMessageId={lastAssistantMessageId} vimMode={vimMode} />}
           <PromptInputFooterLeftSide exitMessage={exitMessage} vimMode={vimMode} mode={mode} hiddenBashInput={hiddenBashInput} toolPermissionContext={toolPermissionContext} suppressHint={suppressHint} isLoading={isLoading} tasksSelected={pillSelected} teamsSelected={teamsSelected} teammateFooterIndex={teammateFooterIndex} tmuxSelected={tmuxSelected} isPasting={isPasting} isSearching={isSearching} historyQuery={historyQuery} setHistoryQuery={setHistoryQuery} historyFailedMatch={historyFailedMatch} onOpenTasksDialog={onOpenTasksDialog} />
-          {apiKeyStatus !== 'invalid' && apiKeyStatus !== 'missing' && tokenUsage > 0 && <CtxProgressBar currentTokens={tokenUsage} contextWindowTokens={getEffectiveContextWindowSize(mainLoopModel)} compactionTargetTokens={getAutoCompactThreshold(mainLoopModel)} utilizationPct={Math.round((tokenUsage / Math.max(1, getEffectiveContextWindowSize(mainLoopModel))) * 100)} />}
+          {apiKeyStatus !== 'invalid' && apiKeyStatus !== 'missing' && tokenUsage > 0 && (() => {
+            // The bar reports the model's own window, not the smaller
+            // compaction-effective window: the marker shows where auto-compact
+            // fires, the denominator shows what the model actually serves.
+            const contextWindowTokens = getContextWindowForModel(mainLoopModel, getSdkBetas());
+            return <CtxProgressBar currentTokens={tokenUsage} contextWindowTokens={contextWindowTokens} compactionTargetTokens={getAutoCompactThreshold(mainLoopModel)} utilizationPct={Math.round((tokenUsage / Math.max(1, contextWindowTokens)) * 100)} />;
+          })()}
         </Box>
         <Box flexShrink={1} gap={1}>
           {isFullscreen ? null : <Notifications apiKeyStatus={apiKeyStatus} autoUpdaterResult={autoUpdaterResult} debug={debug} isAutoUpdating={isAutoUpdating} verbose={verbose} messages={messages} onAutoUpdaterResult={onAutoUpdaterResult} onChangeIsUpdating={onChangeIsUpdating} ideSelection={ideSelection} mcpClients={mcpClients} isInputWrapped={isInputWrapped} isNarrow={isNarrow} />}

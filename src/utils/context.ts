@@ -77,6 +77,31 @@ export function modelSupports1M(model: string): boolean {
   return canonical.includes('claude-sonnet-4') || canonical.includes('opus-4-6')
 }
 
+/**
+ * Context window from the active provider's own catalogue.
+ *
+ * A gateway's limit can differ from the same model's native host — OpenCode
+ * and NVIDIA re-serve models under their own ceilings — so provider catalogues
+ * are consulted before shared capability data or Anthropic beta logic. The
+ * persisted store is the startup fallback: it keeps a window learned in an
+ * earlier session until the async catalogue fetch answers.
+ */
+function getProviderCatalogContextWindow(
+  model: string,
+  provider: ReturnType<typeof getAPIProvider>,
+): number | undefined {
+  let live: number | undefined
+  if (provider === 'opencode') {
+    live = getOpencodeModelContextWindow(model)
+  } else if (provider === 'nvidia') {
+    live = getNvidiaModelContextWindow(model)
+  } else if (provider === 'openrouter') {
+    live = getOpenRouterModelContextWindow(model)
+  }
+  if (live) return live
+  return getStoredProviderContextWindow(provider, model)
+}
+
 export function getContextWindowForModel(
   model: string,
   betas?: string[],
@@ -95,6 +120,15 @@ export function getContextWindowForModel(
     }
   }
 
+  const provider = getAPIProvider()
+
+  // Provider gateways may cap differently from the model's native host, so
+  // their catalogue wins over shared capability data and 1M beta overrides.
+  const providerCatalogWindow = getProviderCatalogContextWindow(model, provider)
+  if (providerCatalogWindow) {
+    return providerCatalogWindow
+  }
+
   // [1m] suffix — explicit client-side opt-in, respected over all detection
   if (has1mContext(model)) {
     return 1_000_000
@@ -111,32 +145,9 @@ export function getContextWindowForModel(
     return cap.max_input_tokens
   }
 
-  // OpenCode provider — read context window from models.dev cache
-  if (getAPIProvider() === 'opencode') {
-    const ocCtx = getOpencodeModelContextWindow(model)
-    if (ocCtx) return ocCtx
-  }
-
-  // NVIDIA provider — read context window from models.dev cache
-  if (getAPIProvider() === 'nvidia') {
-    const nvCtx = getNvidiaModelContextWindow(model)
-    if (nvCtx) return nvCtx
-  }
-
-  // OpenRouter provider — read context window from models.dev cache
-  if (getAPIProvider() === 'openrouter') {
-    const orCtx = getOpenRouterModelContextWindow(model)
-    if (orCtx) return orCtx
-  }
-
-  // Provider-scoped persisted catalogs cover startup before the async catalog
-  // fetch completes; never reuse these values for another provider or local runtime.
-  const storedContextWindow = getStoredProviderContextWindow(getAPIProvider(), model)
-  if (storedContextWindow) return storedContextWindow
-
   // Local provider (Llama.cpp) — read context window from native /models endpoint
   // or fall back to a conservative default when the cache isn't ready yet.
-  if (getAPIProvider() === 'local') {
+  if (provider === 'local') {
     const localCtx = getLocalModelContextWindow(model)
     if (localCtx) return localCtx
     return 8_192
