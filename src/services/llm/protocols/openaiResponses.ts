@@ -33,6 +33,7 @@ import { APIUserAbortError } from '@anthropic-ai/sdk/error'
 import { randomUUID } from 'crypto'
 import { httpRequest } from '../transport/http.js'
 import { markToolErrorText } from './toolErrorText.js'
+import { IMAGE_OMITTED_TEXT } from './openaiChatWire.js'
 import { providerModelSupportsImages } from '../models/visionSupport.js'
 import { requestWithRetry } from '../transport/retryHttpRequest.js'
 import { parseSSERaw, type RawSSEEvent } from '../transport/sse.js'
@@ -329,8 +330,11 @@ function normalizedMessageToResponsesItems(
       } else if (block.type === 'text') {
         parts.push({ type: 'input_text', text: block.text })
       } else if (block.type === 'image') {
-        // Three-state vision: unknown models fall back to text.
-        if (!supportsImages) continue
+        // Three-state vision: unknown models fall back to a text marker.
+        if (!supportsImages) {
+          parts.push({ type: 'input_text', text: IMAGE_OMITTED_TEXT })
+          continue
+        }
         const url = imageBlockToResponsesImageUrl(block)
         if (url) parts.push({ type: 'input_image', image_url: url })
       }

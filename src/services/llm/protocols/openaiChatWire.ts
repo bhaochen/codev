@@ -480,8 +480,13 @@ function normalizeToolResultContent(
       textParts.push(c.text ?? '')
       parts.push({ type: 'text', text: c.text ?? '' })
     } else if (c?.type === 'image') {
+      if (!supportsImages) {
+        textParts.push(IMAGE_OMITTED_TEXT)
+        parts.push({ type: 'text', text: IMAGE_OMITTED_TEXT })
+        continue
+      }
       const url = base64ImageUrl(c.source ?? {})
-      if (url && supportsImages) {
+      if (url) {
         hasImage = true
         parts.push({ type: 'image_url', image_url: { url } })
       }
@@ -502,6 +507,14 @@ function normalizeToolResultContent(
 }
 
 type AgentMessageContent = string | AgentContentBlock[] | undefined
+
+/**
+ * Text left in place of an image the model is not known to accept. A silent
+ * drop would let the model build on an image it never saw; the marker costs a
+ * few tokens and keeps the omission visible.
+ */
+export const IMAGE_OMITTED_TEXT =
+  '[image omitted: model does not accept image input]'
 
 function userMessageContentToOpenAIChat(
   content: AgentMessageContent,
@@ -524,7 +537,10 @@ function userMessageContentToOpenAIChat(
         text: String((block as { text: string }).text ?? ''),
       })
     } else if (block.type === 'image') {
-      if (!supportsImages) continue
+      if (!supportsImages) {
+        parts.push({ type: 'text', text: IMAGE_OMITTED_TEXT })
+        continue
+      }
       const url = base64ImageUrl(
         (block as AgentImageBlock).source ?? {},
       )

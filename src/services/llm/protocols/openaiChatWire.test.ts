@@ -369,7 +369,12 @@ describe('agentMessagesToOpenAIChatMessages', () => {
     const noImage = agentMessagesToOpenAIChatMessages([wrapperUser(input)], undefined, {
       supportsImages: false,
     })
-    expect(noImage[0]).toEqual({ role: 'tool', tool_call_id: 'call_1', content: 'out' })
+    // The image is replaced by a visible marker, never silently dropped.
+    expect(noImage[0]).toEqual({
+      role: 'tool',
+      tool_call_id: 'call_1',
+      content: 'out\n[image omitted: model does not accept image input]',
+    })
   })
 
   test('assistant text joins and empty content becomes null', () => {
