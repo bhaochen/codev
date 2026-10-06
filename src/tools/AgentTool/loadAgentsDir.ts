@@ -42,6 +42,11 @@ import { FILE_EDIT_TOOL_NAME } from '../FileEditTool/constants.js'
 import { FILE_READ_TOOL_NAME } from '../FileReadTool/prompt.js'
 import { FILE_WRITE_TOOL_NAME } from '../FileWriteTool/prompt.js'
 import {
+  API_PROVIDERS,
+  isAPIProvider,
+  type APIProvider,
+} from '../../utils/model/providers.js'
+import {
   AGENT_COLORS,
   type AgentColorName,
   setAgentColor,
@@ -82,6 +87,7 @@ const AgentJsonSchema = lazySchema(() =>
       .min(1, 'Model cannot be empty')
       .transform(m => (m.toLowerCase() === 'inherit' ? 'inherit' : m))
       .optional(),
+    provider: z.string().optional(),
     effort: z.union([z.enum(EFFORT_LEVELS), z.number().int()]).optional(),
     permissionMode: z.enum(PERMISSION_MODES).optional(),
     mcpServers: z.array(AgentMcpServerSpecSchema()).optional(),
@@ -102,6 +108,25 @@ const AgentsJsonSchema = lazySchema(() =>
   z.record(z.string(), AgentJsonSchema()),
 )
 
+/** Normalize an agent file's `provider:` value, or explain why it cannot be used. */
+function parseAgentProvider(raw: unknown): {
+  provider?: APIProvider
+  error?: string
+} {
+  if (raw === undefined) return {}
+  if (typeof raw !== 'string') {
+    return { error: "has a non-string 'provider' in its frontmatter." }
+  }
+  const trimmed = raw.trim()
+  if (trimmed === '') return {}
+  const normalized =
+    trimmed.toLowerCase() === 'firstparty' ? 'firstParty' : trimmed.toLowerCase()
+  if (isAPIProvider(normalized)) return { provider: normalized }
+  return {
+    error: `declares provider '${trimmed}', which is not a known provider. Known providers: ${API_PROVIDERS.join(', ')}.`,
+  }
+}
+
 // Base type with common fields for all agents
 export type BaseAgentDefinition = {
   agentType: string
@@ -113,6 +138,13 @@ export type BaseAgentDefinition = {
   hooks?: HooksSettings // Session-scoped hooks registered when agent starts
   color?: AgentColorName
   model?: string
+  /** Provider this agent's model runs on, when the file pins one. Threaded
+   * through forcedProvider for the duration of the agent's run. */
+  provider?: APIProvider
+  /** Set when the agent file declared a provider we could not honor (unknown
+   * name). The spawn path refuses rather than silently running the agent on
+   * the session provider. */
+  providerConfigError?: string
   effort?: EffortValue
   permissionMode?: PermissionMode
   maxTurns?: number // Maximum number of agentic turns before stopping
@@ -472,6 +504,7 @@ export function parseAgentFromJson(
         : undefined
 
     const systemPrompt = parsed.prompt
+    const jsonProvider = parseAgentProvider(parsed.provider)
 
     const agent: CustomAgentDefinition = {
       agentType: name,
@@ -488,6 +521,10 @@ export function parseAgentFromJson(
       },
       source,
       ...(parsed.model ? { model: parsed.model } : {}),
+      ...(jsonProvider.provider ? { provider: jsonProvider.provider } : {}),
+      ...(jsonProvider.error
+        ? { providerConfigError: `Agent '${name}' ${jsonProvider.error}` }
+        : {}),
       ...(parsed.effort !== undefined ? { effort: parsed.effort } : {}),
       ...(parsed.permissionMode
         ? { permissionMode: parsed.permissionMode }
@@ -571,6 +608,7 @@ export function parseAgentFromMarkdown(
       const trimmed = modelRaw.trim()
       model = trimmed.toLowerCase() === 'inherit' ? 'inherit' : trimmed
     }
+    const parsedProvider = parseAgentProvider(frontmatter['provider'])
 
     // Parse background flag
     const backgroundRaw = frontmatter['background']
@@ -736,6 +774,10 @@ export function parseAgentFromMarkdown(
         ? { color }
         : {}),
       ...(model !== undefined ? { model } : {}),
+      ...(parsedProvider.provider ? { provider: parsedProvider.provider } : {}),
+      ...(parsedProvider.error
+        ? { providerConfigError: `Agent file ${filePath} ${parsedProvider.error}` }
+        : {}),
       ...(parsedEffort !== undefined ? { effort: parsedEffort } : {}),
       ...(isValidPermissionMode
         ? { permissionMode: permissionModeRaw as PermissionMode }

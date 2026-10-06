@@ -1,4 +1,5 @@
 import { beginAgentFileScope } from '../../utils/agentFileClaims.js'
+import { runWithAgentProvider } from '../../utils/forcedProvider.js'
 import type { ModelAlias } from '../../utils/model/aliases.js'
 import { promises as fsp } from 'fs'
 import { getSdkAgentProgressSummariesEnabled } from '../../bootstrap/state.js'
@@ -30,6 +31,7 @@ import { getTaskOutputPath } from '../../utils/task/diskOutput.js'
 import { getParentSessionId } from '../../utils/teammate.js'
 import { reconstructForSubagentResume } from '../../utils/toolResultStorage.js'
 import { runAsyncAgentLifecycle } from './agentToolUtils.js'
+import { setAgentResolvedModel } from './agentModelManager.js'
 import { getAgentConversation } from './resumeParity.js'
 import { GENERAL_PURPOSE_AGENT } from './built-in/generalPurposeAgent.js'
 import { FORK_AGENT, isForkSubagentEnabled } from './forkSubagent.js'
@@ -163,13 +165,25 @@ export async function resumeAgentBackground({
   // The model the spawn asked for; without it a resumed agent would switch to
   // the main-loop model (a different model is a different prompt cache).
   const spawnModel = meta?.model as ModelAlias | undefined
-  // Resolve model for analytics metadata (runAgent resolves its own internally)
-  const resolvedAgentModel = getAgentModel(
-    selectedAgent.model,
-    toolUseContext.options.mainLoopModel,
-    spawnModel,
-    permissionMode,
+  // Resolve model for analytics metadata (runAgent resolves its own
+  // internally). Scoped to the agent's provider so a pinned agent is not
+  // resolved under the session provider's policy.
+  const resolvedAgentModel = runWithAgentProvider(selectedAgent.provider, () =>
+    getAgentModel(
+      selectedAgent.model,
+      toolUseContext.options.mainLoopModel,
+      spawnModel,
+      permissionMode,
+    ),
   )
+
+  // Resuming re-renders the agent's tool use, so the tag needs the resolved
+  // model here too. Without this a resumed pinned agent shows no model at all,
+  // or a stale one left by whichever agent last spawned under this type.
+  setAgentResolvedModel(selectedAgent.agentType, {
+    model: resolvedAgentModel,
+    ...(selectedAgent.provider ? { provider: selectedAgent.provider } : {}),
+  })
 
   const workerPermissionContext = {
     ...appState.toolPermissionContext,

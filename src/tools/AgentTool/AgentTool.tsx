@@ -46,7 +46,9 @@ import { BASH_TOOL_NAME } from '../BashTool/toolName.js';
 import { BackgroundHint } from '../BashTool/UI.js';
 import { FILE_READ_TOOL_NAME } from '../FileReadTool/prompt.js';
 import { spawnTeammate } from '../shared/spawnMultiAgent.js';
+import { runWithAgentProvider } from '../../utils/forcedProvider.js';
 import { setAgentColor } from './agentColorManager.js';
+import { setAgentResolvedModel } from './agentModelManager.js';
 import { agentToolResultSchema, classifyHandoffIfNeeded, emitTaskProgress, extractPartialResult, finalizeAgentTool, getLastToolUseName, runAsyncAgentLifecycle } from './agentToolUtils.js';
 import { GENERAL_PURPOSE_AGENT } from './built-in/generalPurposeAgent.js';
 import { AGENT_TOOL_NAME, LEGACY_AGENT_TOOL_NAME, ONE_SHOT_BUILTIN_AGENT_TYPES } from './constants.js';
@@ -423,8 +425,22 @@ export const AgentTool = buildTool({
       setAgentColor(selectedAgent.agentType, selectedAgent.color);
     }
 
-    // Resolve agent params for logging (these are already resolved in runAgent)
-    const resolvedAgentModel = getAgentModel(selectedAgent.model, toolUseContext.options.mainLoopModel, isForkPath ? undefined : model, permissionMode);
+    // Resolve agent params for logging (these are already resolved in runAgent).
+    // Scoped to the agent's provider so a pinned agent is not resolved under
+    // the session provider's policy.
+    const resolvedAgentModel = runWithAgentProvider(selectedAgent.provider, () =>
+      getAgentModel(
+        selectedAgent.model,
+        toolUseContext.options.mainLoopModel,
+        isForkPath ? undefined : model,
+        permissionMode,
+      ),
+    );
+    // Record what actually resolved for the tool-use tag (agentModelManager).
+    setAgentResolvedModel(selectedAgent.agentType, {
+      model: resolvedAgentModel,
+      ...(selectedAgent.provider ? { provider: selectedAgent.provider } : {}),
+    });
     logEvent('tengu_agent_tool_selected', {
       agent_type: selectedAgent.agentType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       model: resolvedAgentModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,

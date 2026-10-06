@@ -28,6 +28,10 @@ import type {
 } from '../../services/mcp/types.js'
 import type { Tool, Tools, ToolUseContext } from '../../Tool.js'
 import {
+  canApplyAgentProvider,
+  runWithForcedProvider,
+} from '../../utils/forcedProvider.js'
+import {
   refuseToolsOutsideRunPolicy,
   rememberAgentConversation,
 } from './resumeParity.js'
@@ -255,7 +259,7 @@ function isRecordableMessage(
   )
 }
 
-export async function* runAgent({
+async function* runAgentWithoutProviderOverride({
   agentDefinition,
   promptMessages,
   toolUseContext,
@@ -1044,4 +1048,43 @@ function resolveSkillName(
   }
 
   return null
+}
+
+/**
+ * Run a custom agent on its configured provider without changing the session's
+ * global provider.
+ *
+ * A provider we could not resolve is fatal, not something to shrug off. The
+ * agent's `model:` was chosen for that provider, so falling through to the
+ * session provider sends a foreign model id down the wrong lane and the user
+ * sees an unrelated error from whatever provider happens to be active.
+ */
+export async function* runAgent(
+  options: Parameters<typeof runAgentWithoutProviderOverride>[0],
+): AsyncGenerator<Message, void> {
+  const configError = options.agentDefinition.providerConfigError
+  if (configError !== undefined) {
+    throw new Error(
+      `${configError}\nFix the agent's frontmatter, then spawn it again.`,
+    )
+  }
+
+  const provider = options.agentDefinition.provider
+  if (!canApplyAgentProvider(provider)) {
+    yield* runAgentWithoutProviderOverride(options)
+    return
+  }
+
+  const context = { provider, source: 'agent' as const }
+  const iterator = runAgentWithoutProviderOverride(options)
+
+  try {
+    while (true) {
+      const next = await runWithForcedProvider(context, () => iterator.next())
+      if (next.done) return
+      yield next.value as Message
+    }
+  } finally {
+    await runWithForcedProvider(context, () => iterator.return(undefined))
+  }
 }

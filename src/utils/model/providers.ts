@@ -1,5 +1,6 @@
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../services/analytics/index.js'
 import { isEnvTruthy } from '../envUtils.js'
+import { getForcedProvider } from '../forcedProvider.js'
 import { getGlobalClaudeFile } from '../env.js'
 
 export type APIProvider =
@@ -12,6 +13,23 @@ export type APIProvider =
   | 'bedrock'
   | 'vertex'
   | 'foundry'
+
+/** Every provider a pinned agent may name, in `/login` order. */
+export const API_PROVIDERS: readonly APIProvider[] = [
+  'firstParty',
+  'openrouter',
+  'openai',
+  'local',
+  'opencode',
+  'nvidia',
+  'bedrock',
+  'vertex',
+  'foundry',
+]
+
+export function isAPIProvider(value: string): value is APIProvider {
+  return (API_PROVIDERS as readonly string[]).includes(value)
+}
 
 let storedProviderCache: APIProvider | null | undefined = undefined
 
@@ -220,6 +238,13 @@ export function getOpenAIBaseUrl(): string {
 }
 
 export function getAPIProvider(): APIProvider | null {
+  // Agent-scoped pinning wins for the duration of that agent's async context
+  // (see utils/forcedProvider.ts); everything else keeps the session provider.
+  const forced = getForcedProvider()
+  if (forced) {
+    return forced
+  }
+
   const explicitProvider = getExplicitProviderOverride()
   if (explicitProvider) {
     return explicitProvider
