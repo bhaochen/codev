@@ -189,6 +189,14 @@ describe('buildOpenAIChatBody', () => {
     const thinking = buildOpenAIChatBody({ ...base, enableThinking: true, temperatureOverride: 0.2 })
     expect(thinking.temperature).toBeUndefined()
   })
+
+  test('deepseek thinking off is sent explicitly', () => {
+    const body = buildOpenAIChatBody({ model: 'deepseek-v4.1-flash', messages: [], maxTokens: 4096, enableThinking: false })
+    expect(body.thinking).toEqual({ type: 'disabled' })
+    expect(body.enable_thinking).toBeUndefined()
+    // Other models keep the old shape: no thinking field when off.
+    expect(buildOpenAIChatBody(base).thinking).toBeUndefined()
+  })
 })
 
 // ============================================================================

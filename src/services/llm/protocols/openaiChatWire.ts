@@ -274,6 +274,12 @@ export function buildOpenAIChatBody(params: {
       enable_thinking: true,
       chat_template_kwargs: { thinking: true, enable_thinking: true },
     }),
+    // DeepSeek defaults thinking ON, so "off" must be said explicitly or the
+    // model keeps reasoning and later turns 400 on a missing reasoning_content.
+    ...(!enableThinking &&
+      model.toLowerCase().includes('deepseek') && {
+        thinking: { type: 'disabled' },
+      }),
     ...(reasoningEffort && { reasoning_effort: reasoningEffort }),
     // temperature only when thinking is off (thinking endpoints ignore it)
     ...(!enableThinking &&
