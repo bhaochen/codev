@@ -46,7 +46,9 @@ import { BASH_TOOL_NAME } from '../BashTool/toolName.js';
 import { BackgroundHint } from '../BashTool/UI.js';
 import { FILE_READ_TOOL_NAME } from '../FileReadTool/prompt.js';
 import { spawnTeammate } from '../shared/spawnMultiAgent.js';
-import { runWithAgentProvider } from '../../utils/forcedProvider.js';
+import { runWithAgentProvider, runWithForcedProvider } from '../../utils/forcedProvider.js';
+import { isAPIProvider, type APIProvider } from '../../utils/model/providers.js';
+import type { ModelAlias } from '../../utils/model/aliases.js';
 import { setAgentColor } from './agentColorManager.js';
 import { setAgentResolvedModel } from './agentModelManager.js';
 import { agentToolResultSchema, classifyHandoffIfNeeded, emitTaskProgress, extractPartialResult, finalizeAgentTool, getLastToolUseName, runAsyncAgentLifecycle } from './agentToolUtils.js';
@@ -87,7 +89,9 @@ const baseInputSchema = lazySchema(() => z.object({
   description: z.string().describe('A short (3-5 word) description of the task'),
   prompt: z.string().describe('The task for the agent to perform'),
   subagent_type: z.string().optional().describe('The type of specialized agent to use for this task'),
-  model: z.enum(['sonnet', 'opus', 'haiku']).optional().describe("Optional model override for this agent. Takes precedence over the agent definition's model frontmatter. If omitted, uses the agent definition's model, or inherits from the parent."),
+  model: z.enum(['sonnet', 'opus', 'haiku']).optional().describe("Optional model override for this agent. Takes precedence over the agent definition's model frontmatter, except on an agent pinned to a provider, which keeps its own model. If omitted, uses the agent definition's model, or inherits from the parent."),
+  model_id: z.string().optional().describe('Optional fully-qualified model id (e.g. "deepseek-ai/deepseek-v4.1-flash", "moonshotai/kimi-k3"). Used when the model is not a Sonnet/Opus/Haiku tier. Takes priority over `model` when both are set. Pair with `provider` to pin the exact model. Set it only when the user asked for this model or the agent definition requires it; otherwise omit it.'),
+  provider: z.string().optional().describe('Optional provider name (e.g. "nvidia", "opencode", "openai") that this agent must route through, regardless of the session-global provider. Pair with model_id to pin the exact model. An unrecognized name is ignored. Set it only when the user asked for this provider or the agent definition requires it; otherwise omit it.'),
   run_in_background: z.boolean().optional().describe('Set to true to run this agent in the background. You will be notified when it completes.')
 }));
 
@@ -244,7 +248,9 @@ export const AgentTool = buildTool({
     prompt,
     subagent_type,
     description,
-    model: modelParam,
+    model: modelEnumParam,
+    model_id: rawModelIdParam,
+    provider: rawProviderParam,
     run_in_background,
     name,
     team_name,
@@ -259,7 +265,20 @@ export const AgentTool = buildTool({
     if (!description || typeof description !== 'string' || description.trim().length === 0) {
       throw new Error('AgentTool requires a non-empty "description" parameter');
     }
+    // Per-spawn provider routing is validated, not gated: an invented provider
+    // name is dropped (silently, no error), and model_id only survives
+    // alongside a real provider because a model id means nothing without a lane.
+    const providerParam =
+      rawProviderParam !== undefined && isAPIProvider(rawProviderParam)
+        ? (rawProviderParam as APIProvider)
+        : undefined;
+    const modelIdParam = providerParam !== undefined ? rawModelIdParam : undefined;
+
     const startTime = Date.now();
+    // model_id takes priority over the sonnet/opus/haiku enum so a spawn can be
+    // pinned to e.g. a provider-native id; getAgentModel() accepts any alias
+    // and falls back to parseUserSpecifiedModel() for non-tier strings.
+    const modelParam = modelIdParam ?? modelEnumParam;
     const model = isCoordinatorMode() ? undefined : modelParam;
 
     // Get app state for permission mode and agent filtering
@@ -306,9 +325,10 @@ export const AgentTool = buildTool({
         use_splitpane: true,
         plan_mode_required: spawnMode === 'plan',
         model: model ?? agentDef?.model,
-        // A pinned agent definition keeps its provider in the spawned
-        // teammate: tmux via env, in-process via a forced-provider scope.
-        provider: agentDef?.provider,
+        // An explicit caller provider wins; otherwise a pinned agent
+        // definition keeps its provider in the spawned teammate: tmux via env,
+        // in-process via a forced-provider scope.
+        provider: providerParam ?? agentDef?.provider,
         agent_type: subagent_type,
         invokingRequestId: assistantMessage?.requestId
       }, toolUseContext);
@@ -429,20 +449,25 @@ export const AgentTool = buildTool({
     }
 
     // Resolve agent params for logging (these are already resolved in runAgent).
-    // Scoped to the agent's provider so a pinned agent is not resolved under
-    // the session provider's policy.
-    const resolvedAgentModel = runWithAgentProvider(selectedAgent.provider, () =>
+    // Scoped to the provider this spawn will actually use: an explicit caller
+    // override wins, otherwise the agent definition's own pin. Resolving under
+    // the session provider's policy would hand a pinned agent a model its own
+    // provider does not serve.
+    const resolveModel = () =>
       getAgentModel(
         selectedAgent.model,
         toolUseContext.options.mainLoopModel,
-        isForkPath ? undefined : model,
+        isForkPath ? undefined : (model as ModelAlias | undefined),
         permissionMode,
-      ),
-    );
+      );
+    const resolvedAgentModel = providerParam
+      ? runWithForcedProvider({ provider: providerParam }, resolveModel)
+      : runWithAgentProvider(selectedAgent.provider, resolveModel);
     // Record what actually resolved for the tool-use tag (agentModelManager).
+    const effectiveProvider = providerParam ?? selectedAgent.provider;
     setAgentResolvedModel(selectedAgent.agentType, {
       model: resolvedAgentModel,
-      ...(selectedAgent.provider ? { provider: selectedAgent.provider } : {}),
+      ...(effectiveProvider ? { provider: effectiveProvider } : {}),
     });
     logEvent('tengu_agent_tool_selected', {
       agent_type: selectedAgent.agentType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -637,7 +662,10 @@ export const AgentTool = buildTool({
       canUseTool,
       isAsync: shouldRunAsync,
       querySource: toolUseContext.options.querySource ?? getQuerySourceForAgent(selectedAgent.agentType, isBuiltInAgent(selectedAgent)),
-      model: isForkPath ? undefined : model,
+      model: isForkPath ? undefined : (model as ModelAlias | undefined),
+      // Explicit caller override — a one-spawn pin that even a nested agent
+      // definition's own provider must not replace.
+      providerOverride: providerParam,
       // Fork path: pass parent's system prompt AND parent's exact tool
       // array (cache-identical prefix). workerTools is rebuilt under
       // permissionMode 'bubble' which differs from the parent's mode, so

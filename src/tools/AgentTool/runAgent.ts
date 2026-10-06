@@ -31,6 +31,7 @@ import {
   canApplyAgentProvider,
   runWithForcedProvider,
 } from '../../utils/forcedProvider.js'
+import type { APIProvider } from '../../utils/model/providers.js'
 import {
   refuseToolsOutsideRunPolicy,
   rememberAgentConversation,
@@ -272,6 +273,7 @@ async function* runAgentWithoutProviderOverride({
   querySource,
   override,
   model,
+  providerOverride,
   maxTurns,
   preserveToolUseResults,
   availableTools,
@@ -313,6 +315,10 @@ async function* runAgentWithoutProviderOverride({
     agentId?: AgentId
   }
   model?: ModelAlias
+  /** Explicit per-spawn provider pin from the Agent tool call (the `provider`
+   * param). Unlike an agent definition's own provider this is not replaceable
+   * by a nested definition: an explicit caller override wins. */
+  providerOverride?: APIProvider
   maxTurns?: number
   /** Preserve toolUseResult on messages for subagents with viewable transcripts */
   preserveToolUseResults?: boolean
@@ -1069,13 +1075,18 @@ export async function* runAgent(
     )
   }
 
-  const provider = options.agentDefinition.provider
-  if (!canApplyAgentProvider(provider)) {
+  const explicitProvider = options.providerOverride
+  const provider = explicitProvider ?? options.agentDefinition.provider
+  if (explicitProvider === undefined && !canApplyAgentProvider(provider)) {
     yield* runAgentWithoutProviderOverride(options)
     return
   }
 
-  const context = { provider, source: 'agent' as const }
+  // Caller override: no `source`, so nothing nested may replace it.
+  const context =
+    explicitProvider !== undefined
+      ? { provider: explicitProvider }
+      : { provider: provider as APIProvider, source: 'agent' as const }
   const iterator = runAgentWithoutProviderOverride(options)
 
   try {
