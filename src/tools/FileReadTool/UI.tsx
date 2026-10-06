@@ -4,7 +4,7 @@ import { extractTag } from 'src/utils/messages.js';
 import { FallbackToolUseErrorMessage } from '../../components/FallbackToolUseErrorMessage.js';
 import { FilePathLink } from '../../components/FilePathLink.js';
 import { HighlightedCode } from '../../components/HighlightedCode.js';
-import { InlineImage } from '../../components/InlineImage.js';
+import { InlineImage, NotebookImages } from '../../components/InlineImage.js';
 import { MessageResponse } from '../../components/MessageResponse.js';
 import { Box, Text } from '../../ink.js';
 import type { ProgressMessage } from '../../types/message.js';
@@ -105,10 +105,14 @@ export function renderToolResultMessage(output: Output, _progressMessages: Progr
         if (!cells || cells.length < 1) {
           return <Text color="error">No cells found in notebook</Text>;
         }
-        return <MessageResponse height={1}>
-          <Text>
-            Read <Text bold>{cells.length}</Text> cells
-          </Text>
+        // NotebookImages renders the summary alone when no cell carries a
+        // figure, so a text-only notebook still reads as one line.
+        return <MessageResponse>
+          <NotebookImages cells={cells}>
+            <Text>
+              Read <Text bold>{cells.length}</Text> cells
+            </Text>
+          </NotebookImages>
         </MessageResponse>;
       }
     case 'pdf':
