@@ -2,6 +2,7 @@ import type { ModelOption } from './modelOptions.js'
 import { getOpenCodeApiKey, getOpenCodeModelName } from '../auth.js'
 import { getOpencodeBaseUrl } from './providers.js'
 import { recordProviderContextWindows } from './contextWindowStore.js'
+import { recordModelVision, visionFromModelsDevEntry } from './visionCapability.js'
 
 const OPENCODE_BASE_URL = 'https://opencode.ai/zen/v1'
 // 模型目录源与官方 opencode 对齐：优先自建镜像，失败回退上游 models.dev
@@ -73,6 +74,11 @@ export async function fetchOpencodeModels(): Promise<void> {
         const reasoningOptions = config.reasoning_options?.find(
           (o: any) => o.type === 'effort',
         )?.values
+
+        const vision = visionFromModelsDevEntry(config)
+        if (vision !== undefined) {
+          recordModelVision('opencode', modelId, vision)
+        }
 
         modelList.push({
           id: modelId,

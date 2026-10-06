@@ -1,5 +1,6 @@
 import type { ModelOption } from './modelOptions.js'
 import { recordProviderContextWindows } from './contextWindowStore.js'
+import { recordModelVision, visionFromModelsDevEntry } from './visionCapability.js'
 
 const MODELS_META_URL = 'https://models.dev/api.json'
 
@@ -138,6 +139,10 @@ export async function fetchOpenRouterModels(
           const reasoningOptions = config.reasoning_options?.find(
             (o: any) => o.type === 'effort',
           )?.values
+          const vision = visionFromModelsDevEntry(config)
+          if (vision !== undefined) {
+            recordModelVision('openrouter', modelId, vision)
+          }
           modelInfos.set(modelId, {
             id: modelId,
             contextWindow: config.limit?.context,

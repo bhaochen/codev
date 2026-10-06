@@ -4,6 +4,7 @@ import {
   getSystemPromptSectionCache,
   setSystemPromptSectionCacheEntry,
 } from '../bootstrap/state.js'
+import { resetSessionVolatileFreeze } from '../services/llm/protocols/cacheStablePrompt.js'
 
 type ComputeFn = () => string | null | Promise<string | null>
 
@@ -65,4 +66,7 @@ export async function resolveSystemPromptSections(
 export function clearSystemPromptSections(): void {
   clearSystemPromptSectionState()
   clearBetaHeaderLatches()
+  // A frozen volatile-cache block must never outlive a deliberate prompt
+  // rebuild, or the lane would replay the pre-rebuild bytes.
+  resetSessionVolatileFreeze()
 }

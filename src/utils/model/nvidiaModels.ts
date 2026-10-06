@@ -1,6 +1,7 @@
 import { getNvidiaApiKey } from '../auth.js'
 import { getNvidiaBaseUrl } from './providers.js'
 import { recordProviderContextWindows } from './contextWindowStore.js'
+import { recordModelVision, visionFromModelsDevEntry } from './visionCapability.js'
 
 const MODELS_META_URL = 'https://models.dev/api.json'
 
@@ -105,6 +106,10 @@ export async function fetchNvidiaModels(apiKey?: string): Promise<string[]> {
           const reasoningOptions = config.reasoning_options?.find(
             (o: any) => o.type === 'effort',
           )?.values
+          const vision = visionFromModelsDevEntry(config)
+          if (vision !== undefined) {
+            recordModelVision('nvidia', modelId, vision)
+          }
           contextWindows.set(modelId, {
             contextWindow: config.limit?.context,
             promptLimit: config.limit?.input,

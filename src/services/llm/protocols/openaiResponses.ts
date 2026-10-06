@@ -33,6 +33,7 @@ import { APIUserAbortError } from '@anthropic-ai/sdk/error'
 import { randomUUID } from 'crypto'
 import { httpRequest } from '../transport/http.js'
 import { markToolErrorText } from './toolErrorText.js'
+import { providerModelSupportsImages } from '../models/visionSupport.js'
 import { requestWithRetry } from '../transport/retryHttpRequest.js'
 import { parseSSERaw, type RawSSEEvent } from '../transport/sse.js'
 import { getSessionId } from '../../../bootstrap/state.js'
@@ -299,6 +300,7 @@ function normalizedMessageToResponsesItems(
     message: { content?: unknown }
   },
   items: OpenAIResponsesInputItem[],
+  supportsImages: boolean,
 ): void {
   const content = msg.message?.content
   if (typeof content === 'string') {
@@ -327,6 +329,8 @@ function normalizedMessageToResponsesItems(
       } else if (block.type === 'text') {
         parts.push({ type: 'input_text', text: block.text })
       } else if (block.type === 'image') {
+        // Three-state vision: unknown models fall back to text.
+        if (!supportsImages) continue
         const url = imageBlockToResponsesImageUrl(block)
         if (url) parts.push({ type: 'input_image', image_url: url })
       }
@@ -418,11 +422,13 @@ export async function buildOpenAIResponsesBody(
     })
 
   const systemText = systemPrompt?.join('\n')
+  const supportsImages = providerModelSupportsImages(route.provider, model)
   const input: OpenAIResponsesInputItem[] = []
   for (const msg of messagesForAPI) {
     normalizedMessageToResponsesItems(
       msg as unknown as { type: string; message: { content?: unknown } },
       input,
+      supportsImages,
     )
   }
 

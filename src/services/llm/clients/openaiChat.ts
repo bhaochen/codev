@@ -45,6 +45,13 @@ import {
   type OpenAIChatStreamEvent,
   type OpenAIChatWireChunk,
 } from '../protocols/openaiChatWire.js'
+import {
+  applyCacheStableSystemPrompt,
+  providerSplitsSystemPromptForCache,
+  stripSystemDynamicBoundary,
+  SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+} from '../protocols/cacheStablePrompt.js'
+import { providerModelSupportsImages } from '../models/visionSupport.js'
 
 type OpenAIChatStartMessage = Extract<OpenAIChatStreamEvent, { type: 'message_start' }>['message']
 
@@ -76,11 +83,35 @@ export async function* queryOpenAIChat(
         }),
       ),
     )
-    const openaiMessages = agentMessagesToOpenAIChatMessages(
+    const systemText = systemPrompt?.join('\n')
+    // Three-state vision: only a catalog that positively knows the model takes
+    // images unlocks pixels; false and unknown fall back to text.
+    const supportsImages = providerModelSupportsImages(route.provider, model)
+    let openaiMessages = agentMessagesToOpenAIChatMessages(
       messagesForAPI,
-      systemPrompt?.join('\n'),
-      { supportsImages: true },
+      systemText,
+      { supportsImages },
     )
+    // Implicit prefix-cache providers (DeepSeek, OpenRouter): split the
+    // volatile system tail out, freeze it for the session, and pin it at a
+    // fixed leading position so a mid-session git status or MCP connect cannot
+    // rewrite the cached head. Other providers must never see the literal
+    // boundary marker.
+    if (systemText) {
+      if (providerSplitsSystemPromptForCache(route.provider, model)) {
+        openaiMessages = applyCacheStableSystemPrompt(openaiMessages, systemText, {
+          lane: route.provider,
+          model,
+          sessionId: getSessionId(),
+        })
+      } else if (systemText.includes(SYSTEM_PROMPT_DYNAMIC_BOUNDARY)) {
+        openaiMessages = agentMessagesToOpenAIChatMessages(
+          messagesForAPI,
+          stripSystemDynamicBoundary(systemText),
+          { supportsImages },
+        )
+      }
+    }
     const openaiTools = openAIChatToolsFromSchemas(
       toolSchemas
         .filter(t => {
