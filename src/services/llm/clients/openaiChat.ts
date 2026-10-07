@@ -52,6 +52,7 @@ import {
   SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
 } from '../protocols/cacheStablePrompt.js'
 import { providerModelSupportsImages } from '../models/visionSupport.js'
+import { sanitizeToolCallAdjacency } from '../protocols/sanitizeToolAdjacency.js'
 
 type OpenAIChatStartMessage = Extract<OpenAIChatStreamEvent, { type: 'message_start' }>['message']
 
@@ -111,6 +112,11 @@ export async function* queryOpenAIChat(
           { supportsImages },
         )
       }
+    }
+    // DeepSeek rejects a request whose tool results do not answer the adjacent
+    // assistant tool_calls (orphans appear after history trimming/filtering).
+    if (model.toLowerCase().includes('deepseek')) {
+      openaiMessages = sanitizeToolCallAdjacency(openaiMessages)
     }
     const openaiTools = openAIChatToolsFromSchemas(
       toolSchemas
