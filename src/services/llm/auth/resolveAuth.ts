@@ -2,6 +2,7 @@ import type { ProviderId } from '../types.js'
 import { getOpenCodeApiKey } from '../../../utils/auth.js'
 import { getOpenAIApiKey } from '../../../utils/auth.js'
 import { getNvidiaApiKey } from '../../../utils/auth.js'
+import { getOpenRouterApiKey } from '../../../utils/auth.js'
 import {
   createBearerStrategy,
   noneStrategy,
@@ -16,6 +17,7 @@ export type { Credential } from './strategies.js'
 const bearerOpenAI = createBearerStrategy(getOpenAIApiKey)
 const bearerOpenCode = createBearerStrategy(getOpenCodeApiKey, { fallbackToken: 'public' })
 const bearerNvidia = createBearerStrategy(getNvidiaApiKey)
+const bearerOpenRouter = createBearerStrategy(getOpenRouterApiKey)
 
 /**
  * Provider → AuthStrategy mapping.
@@ -26,6 +28,7 @@ const strategyByProvider: Partial<Record<ProviderId, AuthStrategy>> = {
   openai: bearerOpenAI,
   opencode: bearerOpenCode,
   nvidia: bearerNvidia,
+  openrouter: bearerOpenRouter,
   firstParty: noneStrategy,
   bedrock: noneStrategy,
   vertex: noneStrategy,

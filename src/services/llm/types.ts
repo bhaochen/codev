@@ -6,6 +6,7 @@
 export type ProviderId =
   | 'firstParty'
   | 'openai'
+  | 'openrouter'
   | 'opencode'
   | 'nvidia'
   | 'bedrock'

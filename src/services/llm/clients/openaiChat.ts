@@ -223,6 +223,10 @@ export async function* queryOpenAIChat(
       headers['HTTP-Referer'] = 'https://opencode.ai/'
       headers['X-Title'] = 'opencode'
       headers['X-BILLING-INVOKE-ORIGIN'] = 'OpenCode'
+    } else if (route.provider === 'openrouter') {
+      // OpenRouter attributes requests by referer/title; both optional.
+      headers['HTTP-Referer'] = 'https://opencode.ai/'
+      headers['X-Title'] = 'codev'
     }
     if (cred.type === 'bearer') headers.Authorization = `Bearer ${cred.token}`
     else headers.Authorization = 'Bearer public'

@@ -50,6 +50,15 @@ describe('resolveRoute', () => {
     expect(r.model).toBe('test')
   })
 
+  test('OpenRouter configured → openrouter / openai-chat / chat completions URL', () => {
+    process.env.CLAUDE_CODE_API_PROVIDER = 'openrouter'
+    const r = resolveRoute('acme/model')
+    expect(r.provider).toBe('openrouter')
+    expect(r.protocol).toBe('openai-chat')
+    expect(r.model).toBe('acme/model')
+    expect(r.endpoint).toBe('https://openrouter.ai/api/v1/chat/completions')
+  })
+
   test('OpenAI configured → openai / openai-chat', () => {
     process.env.CLAUDE_CODE_API_PROVIDER = 'openai'
     const r = resolveRoute('gpt-5')

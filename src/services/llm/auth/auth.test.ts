@@ -50,6 +50,10 @@ describe('AuthStrategy', () => {
     expect(getAuthStrategy('firstParty' as never)).toBe(getAuthStrategy('bedrock' as never))
   })
 
+  test('openrouter uses the bearer strategy like the other key-based providers', () => {
+    expect(getAuthStrategy('openrouter' as never).id).toBe('bearer')
+  })
+
   test('resolveAuth delegates to strategy', () => {
     const cred = resolveAuth('openai' as never)
     // without env, should be none (no OPENAI_API_KEY)

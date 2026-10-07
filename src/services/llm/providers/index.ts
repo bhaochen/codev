@@ -6,6 +6,7 @@ import { local } from './local.js'
 import { bedrock } from './bedrock.js'
 import { vertex } from './vertex.js'
 import { foundry } from './foundry.js'
+import { openrouter } from './openrouter.js'
 import type { ProviderId } from '../types.js'
 
 export const providers = {
@@ -13,6 +14,7 @@ export const providers = {
   openai,
   opencode,
   nvidia,
+  openrouter,
   local,
   bedrock,
   vertex,
