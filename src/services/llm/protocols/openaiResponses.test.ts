@@ -332,6 +332,32 @@ describe('buildOpenAIResponsesBody', () => {
     ])
   })
 
+  test('documents map their text source, else a visible marker', async () => {
+    const request = makeRequest({
+      messages: [
+        createUserMessage({
+          content: [
+            { type: 'text', text: 'read' },
+            { type: 'document', source: { type: 'text', media_type: 'text/plain', data: 'DOC TEXT' } },
+            { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'JVBE' } },
+          ] as never,
+        }),
+      ],
+    })
+    const body = await buildOpenAIResponsesBody(baseRoute, request)
+    expect(body.input).toEqual([
+      {
+        type: 'message',
+        role: 'user',
+        content: [
+          { type: 'input_text', text: 'read' },
+          { type: 'input_text', text: 'DOC TEXT' },
+          { type: 'input_text', text: '[document omitted: only text documents can be sent here]' },
+        ],
+      },
+    ])
+  })
+
   test('tool call → tool result round-trips through call_id', async () => {
     const tool = mockTool('mock_tool')
     const request = makeRequest({

@@ -33,7 +33,7 @@ import { APIUserAbortError } from '@anthropic-ai/sdk/error'
 import { randomUUID } from 'crypto'
 import { httpRequest } from '../transport/http.js'
 import { markToolErrorText } from './toolErrorText.js'
-import { IMAGE_OMITTED_TEXT } from './openaiChatWire.js'
+import { DOCUMENT_OMITTED_TEXT, IMAGE_OMITTED_TEXT } from './openaiChatWire.js'
 import { providerModelSupportsImages } from '../models/visionSupport.js'
 import { requestWithRetry } from '../transport/retryHttpRequest.js'
 import { parseSSERaw, type RawSSEEvent } from '../transport/sse.js'
@@ -337,8 +337,18 @@ function normalizedMessageToResponsesItems(
         }
         const url = imageBlockToResponsesImageUrl(block)
         if (url) parts.push({ type: 'input_image', image_url: url })
+      } else if (block.type === 'document') {
+        // 与 openai-chat 同能力：文本型 source 并入文本，其余留一行确定性
+        // 标记，不静默丢弃（用户文本里的 [Document #N] 提示还在）。
+        const source = (
+          block as unknown as { source?: { type?: string; data?: unknown } }
+        ).source
+        const text =
+          source?.type === 'text' && typeof source.data === 'string'
+            ? source.data
+            : DOCUMENT_OMITTED_TEXT
+        parts.push({ type: 'input_text', text })
       }
-      // document —— 与 openai-chat 保持同能力：base64 文档降级丢弃,文本型 source 并入文本
     }
     if (parts.length > 0) {
       items.push({ type: 'message', role: 'user', content: parts })

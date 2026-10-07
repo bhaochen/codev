@@ -305,6 +305,44 @@ describe('agentMessagesToOpenAIChatMessages', () => {
     })
   })
 
+  test('documents map their text source, else a visible marker', () => {
+    const msgs = agentMessagesToOpenAIChatMessages([
+      wrapperUser([
+        { type: 'text', text: 'read' },
+        { type: 'document', source: { type: 'text', media_type: 'text/plain', data: 'DOC TEXT' } },
+        { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'JVBE' } },
+      ]),
+    ])
+    expect(msgs[0]).toEqual({
+      role: 'user',
+      content: [
+        { type: 'text', text: 'read' },
+        { type: 'text', text: 'DOC TEXT' },
+        { type: 'text', text: '[document omitted: only text documents can be sent here]' },
+      ],
+    })
+  })
+
+  test('unsendable document in tool_result leaves a marker', () => {
+    const msgs = agentMessagesToOpenAIChatMessages([
+      wrapperUser([
+        {
+          type: 'tool_result',
+          tool_use_id: 'call_1',
+          content: [
+            { type: 'text', text: 'out' },
+            { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'JVBE' } },
+          ],
+        },
+      ]),
+    ])
+    expect(msgs[0]).toEqual({
+      role: 'tool',
+      tool_call_id: 'call_1',
+      content: 'out\n[document omitted: only text documents can be sent here]',
+    })
+  })
+
   test('tool_result emits tool message before user message', () => {
     const msgs = agentMessagesToOpenAIChatMessages([
       wrapperUser([

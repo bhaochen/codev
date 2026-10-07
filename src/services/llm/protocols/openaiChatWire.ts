@@ -498,10 +498,9 @@ function normalizeToolResultContent(
       const text = extractDocumentText(
         c as unknown as { source?: { type?: string; data?: unknown } },
       )
-      if (text) {
-        textParts.push(text)
-        parts.push({ type: 'text', text })
-      }
+      const marker = text ?? DOCUMENT_OMITTED_TEXT
+      textParts.push(marker)
+      parts.push({ type: 'text', text: marker })
     }
   }
   if (hasImage) {
@@ -519,6 +518,15 @@ type AgentMessageContent = string | AgentContentBlock[] | undefined
  */
 export const IMAGE_OMITTED_TEXT =
   '[image omitted: model does not accept image input]'
+
+/**
+ * Text left in place of a document this wire cannot carry (only text-source
+ * documents map to OpenAI Chat). A silent drop would leave the user's
+ * `[Document #N]` marker with nothing behind it, and the model would answer
+ * from imagination instead of saying the attachment did not arrive.
+ */
+export const DOCUMENT_OMITTED_TEXT =
+  '[document omitted: only text documents can be sent here]'
 
 function userMessageContentToOpenAIChat(
   content: AgentMessageContent,
@@ -555,9 +563,7 @@ function userMessageContentToOpenAIChat(
       const text = extractDocumentText(
         block as unknown as { source?: { type?: string; data?: unknown } },
       )
-      if (text) {
-        parts.push({ type: 'text', text })
-      }
+      parts.push({ type: 'text', text: text ?? DOCUMENT_OMITTED_TEXT })
     } else if (block.type === 'tool_result') {
       const tr = block as {
         content?: unknown
