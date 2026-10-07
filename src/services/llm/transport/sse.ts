@@ -14,11 +14,12 @@ export type RawSSEEvent = {
 /**
  * Parse a ReadableStream<Uint8Array> SSE stream into RawSSEEvent.
  * Handles:
- * - \n and \r\n line endings
+ * - \n, \r\n and bare \r line endings
  * - chunk split in middle of line
  * - multiple data lines per event joined with \n
  * - blank line delimits event
  * - `:` comment lines ignored
+ * - `data` without a colon (empty data line)
  * - `data: [DONE]` preserved as data (caller decides to stop)
  */
 export async function* parseSSERaw(
@@ -42,50 +43,68 @@ export async function* parseSSERaw(
     yield { event: ev, data }
   }
 
+  const handleLine = function* (line: string): Generator<RawSSEEvent> {
+    if (line === '') {
+      yield* dispatch()
+    } else if (line.startsWith('event:')) {
+      event = line.slice(6).trim()
+    } else if (line.startsWith('data:')) {
+      // per spec, strip single leading space after colon
+      const d = line.slice(5)
+      dataLines.push(d.startsWith(' ') ? d.slice(1) : d)
+    } else if (line === 'data') {
+      dataLines.push('')
+    } else if (line.startsWith(':')) {
+      // comment, ignore
+    }
+  }
+
   try {
     while (true) {
       const { done, value } = await reader.read()
       if (done) {
         buffer += decoder.decode()
-        // flush remaining buffer as lines
-        const lines = buffer.split(/\r?\n/)
-        for (const line of lines) {
-          if (line === '') {
-            for (const ev of dispatch()) yield ev
-          } else if (line.startsWith('event:')) {
-            event = line.slice(6).trim()
-          } else if (line.startsWith('data:')) {
-            // per spec, strip single leading space after colon
-            const d = line.slice(5)
-            dataLines.push(d.startsWith(' ') ? d.slice(1) : d)
-          } else if (line.startsWith(':')) {
-            // comment, ignore
-          }
-        }
-        for (const ev of dispatch()) yield ev
+        const { lines } = takeSseLines(buffer, true)
+        for (const line of lines) yield* handleLine(line)
+        yield* dispatch()
         break
       }
 
       buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split(/\r?\n/)
-      buffer = lines.pop() ?? ''
+      const { lines, rest } = takeSseLines(buffer, false)
+      buffer = rest
 
-      for (const line of lines) {
-        if (line === '') {
-          for (const ev of dispatch()) yield ev
-        } else if (line.startsWith('event:')) {
-          event = line.slice(6).trim()
-        } else if (line.startsWith('data:')) {
-          const d = line.slice(5)
-          dataLines.push(d.startsWith(' ') ? d.slice(1) : d)
-        } else if (line.startsWith(':')) {
-          // comment
-        }
-      }
+      for (const line of lines) yield* handleLine(line)
     }
   } finally {
     reader.releaseLock()
   }
+}
+
+/**
+ * Split the buffer into complete SSE lines, accepting LF, CRLF and bare CR.
+ * When `end` is false a trailing CR is held back — it may be half of a CRLF
+ * split across chunks.
+ */
+function takeSseLines(
+  buffer: string,
+  end: boolean,
+): { lines: string[]; rest: string } {
+  const lines: string[] = []
+  let start = 0
+  for (let i = 0; i < buffer.length; i++) {
+    const ch = buffer[i]
+    if (ch === '\n') {
+      lines.push(buffer.slice(start, i))
+      start = i + 1
+    } else if (ch === '\r') {
+      if (i + 1 >= buffer.length && !end) break
+      lines.push(buffer.slice(start, i))
+      if (buffer[i + 1] === '\n') i++
+      start = i + 1
+    }
+  }
+  return { lines, rest: buffer.slice(start) }
 }
 
 /**

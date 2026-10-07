@@ -75,6 +75,29 @@ describe('sse framing', () => {
     expect((chunks[0] as { choices: Array<{ delta: { content: string } }> }).choices[0]!.delta.content).toBe('hi')
   })
 
+  test('handles bare CR line endings', async () => {
+    const stream = sseStream(['data: {"a":1}\r\rdata: {"b":2}\r\r'])
+    const events: unknown[] = []
+    for await (const ev of parseSSERaw(stream)) events.push(ev)
+    expect(events.length).toBe(2)
+    expect((events[1] as { data: string }).data).toBe('{"b":2}')
+  })
+
+  test('CRLF split across chunks is not mistaken for two lines', async () => {
+    const stream = sseStream(['data: {"a":1}\r', '\n\r', '\ndata: {"b":2}\r\n\r\n'])
+    const events: unknown[] = []
+    for await (const ev of parseSSERaw(stream)) events.push(ev)
+    expect(events.map(e => (e as { data: string }).data)).toEqual(['{"a":1}', '{"b":2}'])
+  })
+
+  test('data without a colon is an empty data line', async () => {
+    const stream = sseStream(['data\ndata: {"a":1}\n\n'])
+    const events: unknown[] = []
+    for await (const ev of parseSSERaw(stream)) events.push(ev)
+    expect(events.length).toBe(1)
+    expect((events[0] as { data: string }).data).toBe('\n{"a":1}')
+  })
+
   test('handles event field', async () => {
     const stream = sseStream(['event: response.output_text.delta\ndata: {"x":1}\n\n'])
     const events: unknown[] = []
