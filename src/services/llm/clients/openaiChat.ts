@@ -54,6 +54,10 @@ import {
   stripSystemDynamicBoundary,
   SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
 } from '../protocols/cacheStablePrompt.js'
+import {
+  applyGeminiOpenRouterCacheAnchor,
+  isGeminiOnOpenRouter,
+} from '../protocols/openrouterGeminiCache.js'
 import { providerModelSupportsImages } from '../models/visionSupport.js'
 import { sanitizeToolCallAdjacency } from '../protocols/sanitizeToolAdjacency.js'
 
@@ -141,6 +145,12 @@ export async function* queryOpenAIChat(
           { supportsImages, supportsReasoningDetails },
         )
       }
+    }
+    // Gemini-on-OpenRouter: one explicit cache breakpoint advanced in quanta.
+    // Explicit caching is synchronous and deterministic, unlike the implicit
+    // commit lottery; see the module doc for the anchor strategy.
+    if (route.provider === 'openrouter' && isGeminiOnOpenRouter(model)) {
+      applyGeminiOpenRouterCacheAnchor(openaiMessages)
     }
     // DeepSeek rejects a request whose tool results do not answer the adjacent
     // assistant tool_calls (orphans appear after history trimming/filtering).

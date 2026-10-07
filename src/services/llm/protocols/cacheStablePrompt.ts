@@ -27,6 +27,18 @@ import type { OpenAIChatMessage } from './openaiChatWire.js'
 // registry, which calls back into resetSessionVolatileFreeze().
 export const SYSTEM_PROMPT_DYNAMIC_BOUNDARY = '__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__'
 
+/**
+ * The session-frozen volatile context messages, tracked out-of-band so the
+ * message object itself stays a plain wire shape (byte-identical when
+ * serialized). Gemini-on-OpenRouter cache anchoring reads this to keep the
+ * head [system + tools + volatile] explicitly cached from turn 1.
+ */
+const volatileContextMessages = new WeakSet<OpenAIChatMessage>()
+
+export function isVolatileContextMessage(msg: OpenAIChatMessage): boolean {
+  return volatileContextMessages.has(msg)
+}
+
 /** Remove the boundary marker from a prompt the caller is NOT going to split. */
 export function stripSystemDynamicBoundary(text: string): string {
   if (!text.includes(SYSTEM_PROMPT_DYNAMIC_BOUNDARY)) return text
@@ -188,6 +200,7 @@ export function applyCacheStableSystemPrompt(
     // for text-only user turns.
     content: `<dynamic_context>\n${frozen}\n</dynamic_context>`,
   }
+  volatileContextMessages.add(context)
   return [...out.slice(0, insertAt), context, ...out.slice(insertAt)]
 }
 

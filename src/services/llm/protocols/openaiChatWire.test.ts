@@ -1115,6 +1115,35 @@ describe('queryOpenAIChat integration', () => {
     expect(assistantWire.reasoning_content).toBeUndefined()
   })
 
+  test('gemini on openrouter gets exactly one cache anchor; other lanes do not', async () => {
+    const { queryOpenAIChat } = await import('../clients/openaiChat.js')
+    const bodies: Array<{ messages: Array<Record<string, unknown>> }> = []
+    const fetchOverride = async (_input: unknown, init?: RequestInit): Promise<Response> => {
+      bodies.push(JSON.parse(String(init?.body)) as { messages: Array<Record<string, unknown>> })
+      return new Response(sseStream(textChunks(['ok'], 'stop')), { status: 200 })
+    }
+    const req = makeRequest({
+      messages: [wrapperUser([{ type: 'text', text: 'hi' }])],
+      systemPrompt: asSystemPrompt(['sys']),
+      context: { ...makeRequest().context, fetchOverride: fetchOverride as never },
+    })
+    const countStamped = (body: { messages: Array<Record<string, unknown>> }) =>
+      body.messages.filter(
+        m =>
+          Array.isArray(m.content) &&
+          (m.content as Array<Record<string, unknown>>).some(p => p.cache_control),
+      ).length
+
+    for await (const _ of queryOpenAIChat({ ...route, provider: 'openrouter', model: 'google/gemini-2.5-flash' }, req)) { /* drain */ }
+    expect(countStamped(bodies[0]!)).toBe(1)
+
+    for await (const _ of queryOpenAIChat({ ...route, provider: 'openrouter', model: 'anthropic/claude-sonnet-4.5' }, req)) { /* drain */ }
+    expect(countStamped(bodies[1]!)).toBe(0)
+
+    for await (const _ of queryOpenAIChat(route, req)) { /* drain */ }
+    expect(countStamped(bodies[2]!)).toBe(0)
+  })
+
   test('retries a transient HTTP response before consuming the stream', async () => {
     const { queryOpenAIChat } = await import('../clients/openaiChat.js')
     let requests = 0
