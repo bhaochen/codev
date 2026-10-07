@@ -10,6 +10,7 @@ import {
 } from '../services/tokenEstimation.js'
 import { compressImageBlock } from './imageResizer.js'
 import { logError } from './log.js'
+import { surrogateSafeEnd } from './wellFormedText.js'
 
 export const MCP_TOKEN_COUNT_THRESHOLD_FACTOR = 0.5
 export const IMAGE_TOKEN_ESTIMATE = 1600
@@ -88,7 +89,9 @@ function truncateString(content: string, maxChars: number): string {
   if (content.length <= maxChars) {
     return content
   }
-  return content.slice(0, maxChars)
+  // Never cut between the halves of an astral character: a lone surrogate in a
+  // tool result makes every later request fail as invalid JSON.
+  return content.slice(0, surrogateSafeEnd(content, maxChars))
 }
 
 async function truncateContentBlocks(
@@ -107,7 +110,10 @@ async function truncateContentBlocks(
         result.push(block)
         currentChars += block.text.length
       } else {
-        result.push({ type: 'text', text: block.text.slice(0, remainingChars) })
+        result.push({
+          type: 'text',
+          text: block.text.slice(0, surrogateSafeEnd(block.text, remainingChars)),
+        })
         break
       }
     } else if (isImageBlock(block)) {

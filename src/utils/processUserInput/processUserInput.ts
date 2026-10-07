@@ -56,6 +56,7 @@ import {
 } from '../messages.js'
 import { queryCheckpoint } from '../queryProfiler.js'
 import { parseSlashCommand } from '../slashCommandParsing.js'
+import { surrogateSafeEnd } from '../wellFormedText.js'
 import {
   hasUltraplanKeyword,
   replaceUltraplanKeyword,
@@ -282,7 +283,12 @@ const MAX_HOOK_OUTPUT_LENGTH = 10000
 
 function applyTruncation(content: string): string {
   if (content.length > MAX_HOOK_OUTPUT_LENGTH) {
-    return `${content.substring(0, MAX_HOOK_OUTPUT_LENGTH)}… [output truncated - exceeded ${MAX_HOOK_OUTPUT_LENGTH} characters]`
+    // Cut around surrogate pairs so hook output cannot poison the history.
+    const head = content.slice(
+      0,
+      surrogateSafeEnd(content, MAX_HOOK_OUTPUT_LENGTH),
+    )
+    return `${head}… [output truncated - exceeded ${MAX_HOOK_OUTPUT_LENGTH} characters]`
   }
   return content
 }
