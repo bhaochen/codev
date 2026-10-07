@@ -73,6 +73,7 @@ export function stripTrailingWhitespace(str: string): string {
 export function findActualString(
   fileContent: string,
   searchString: string,
+  options: { whitespaceFlexible?: boolean } = {},
 ): string | null {
   // First try exact match
   if (fileContent.includes(searchString)) {
@@ -89,6 +90,56 @@ export function findActualString(
     return fileContent.substring(searchIndex, searchIndex + searchString.length)
   }
 
+  // Last rung: per-line whitespace-insensitive match, for the common case
+  // where the model reproduced every character but not every space. Same line
+  // count is required, so the span maps back to exact original bytes.
+  if (options.whitespaceFlexible) {
+    return findWhitespaceInsensitiveSpan(fileContent, searchString)
+  }
+
+  return null
+}
+
+/**
+ * Find `searchString` in `fileContent` ignoring whitespace differences on each
+ * line. Requires the same number of lines and the same non-whitespace
+ * characters per line, so ambiguity stays low and the returned value is the
+ * file's own bytes (never the model's spelling).
+ */
+function findWhitespaceInsensitiveSpan(
+  fileContent: string,
+  searchString: string,
+): string | null {
+  const normalize = (line: string): string => line.replace(/\s+/g, '')
+  const fileLines = fileContent.split('\n')
+  const searchLines = searchString.split('\n')
+  if (searchLines.length === 0) return null
+  if (searchLines.every(line => normalize(line) === '')) return null
+
+  for (let i = 0; i + searchLines.length <= fileLines.length; i++) {
+    let matches = true
+    for (let j = 0; j < searchLines.length; j++) {
+      if (normalize(fileLines[i + j] ?? '') !== normalize(searchLines[j] ?? '')) {
+        matches = false
+        break
+      }
+    }
+    if (!matches) continue
+
+    let start = 0
+    for (let k = 0; k < i; k++) start += (fileLines[k] ?? '').length + 1
+    // Cover full lines but not the terminator after the last one; a trailing
+    // CR belongs to that terminator, so CRLF files map back to exact bytes.
+    let span = 0
+    const last = i + searchLines.length - 1
+    for (let k = i; k <= last; k++) {
+      const line = fileLines[k] ?? ''
+      span += line.length
+      if (k < last) span += 1
+      else if (line.endsWith('\r')) span -= 1
+    }
+    return fileContent.slice(start, Math.min(fileContent.length, start + span))
+  }
   return null
 }
 

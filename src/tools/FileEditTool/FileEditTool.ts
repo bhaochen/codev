@@ -325,8 +325,12 @@ export const FileEditTool = buildTool({
 
     const file = fileContent
 
-    // Use findActualString to handle quote normalization
-    const actualOldString = findActualString(file, old_string)
+    // Use findActualString to handle quote normalization; a single edit also
+    // accepts per-line whitespace differences, while replace_all stays exact
+    // (it must not silently rewrite differently-spaced occurrences).
+    const actualOldString = findActualString(file, old_string, {
+      whitespaceFlexible: !replace_all,
+    })
     if (!actualOldString) {
       return {
         result: false,
@@ -480,9 +484,12 @@ export const FileEditTool = buildTool({
       }
     }
 
-    // 3. Use findActualString to handle quote normalization
+    // 3. Use findActualString to handle quote normalization (and, for a single
+    // edit, per-line whitespace differences)
     const actualOldString =
-      findActualString(originalFileContents, old_string) || old_string
+      findActualString(originalFileContents, old_string, {
+        whitespaceFlexible: !replace_all,
+      }) || old_string
 
     // Preserve curly quotes in new_string when the file uses them
     const actualNewString = preserveQuoteStyle(
