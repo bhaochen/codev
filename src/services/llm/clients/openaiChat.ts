@@ -12,10 +12,11 @@ import type { StreamEvent, AssistantMessage, SystemAPIErrorMessage } from '../..
 import type { AgentContentBlock } from '../../../types/agentMessage.js'
 import { APIUserAbortError } from '@anthropic-ai/sdk/error'
 import { randomUUID } from 'crypto'
+import { setTimeout as sleep } from 'node:timers/promises'
 import { httpRequest } from '../transport/http.js'
 import { requestWithRetry } from '../transport/retryHttpRequest.js'
 import { parseOpenAIChunksFromSSE } from '../transport/sse.js'
-import { detectUpstreamFailures } from '../protocols/upstreamError.js'
+import { detectUpstreamFailures, UpstreamStreamError } from '../protocols/upstreamError.js'
 import { getSessionId } from '../../../bootstrap/state.js'
 import { getModelMaxOutputTokens } from '../../../utils/context.js'
 import { logForDebugging } from '../../../utils/debug.js'
@@ -56,6 +57,28 @@ import { providerModelSupportsImages } from '../models/visionSupport.js'
 import { sanitizeToolCallAdjacency } from '../protocols/sanitizeToolAdjacency.js'
 
 type OpenAIChatStartMessage = Extract<OpenAIChatStreamEvent, { type: 'message_start' }>['message']
+
+// Upstream-retry policy (mirrors the OpenRouter lane): capacity errors back
+// off, anything else gets one recovery attempt; both stop once content has
+// been published.
+let capacityRetryDelaysMs = [2_000, 4_000, 8_000, 16_000]
+let recoveryRetryDelayMs = 500
+const MAX_CAPACITY_WAIT_MS = 60_000
+const MAX_TOTAL_RETRY_WAIT_MS = 30_000
+
+/** Test-only: shrink the backoff so retry paths run fast. */
+export function _setOpenAIStreamRetryDelaysForTest(
+  capacity?: number[],
+  recovery?: number,
+): void {
+  if (capacity) capacityRetryDelaysMs = capacity
+  if (recovery !== undefined) recoveryRetryDelayMs = recovery
+}
+
+export function _resetOpenAIStreamRetryDelaysForTest(): void {
+  capacityRetryDelaysMs = [2_000, 4_000, 8_000, 16_000]
+  recoveryRetryDelayMs = 500
+}
 
 export async function* queryOpenAIChat(
   route: LLMRoute,
@@ -242,87 +265,136 @@ export async function* queryOpenAIChat(
           ),
         signal,
       )
-    let response = await sendRequest()
-    // 免费模型瞬态 500 按 opencode 策略重试并回退至 big-pickle，确保 hi 可用
-    if (!response.ok && isFree && response.status === 500 && model !== 'big-pickle') {
-      logForDebugging(`[OpenAIChat] free model ${model} 500, fallback to big-pickle`)
-      ;(body as { model?: string }).model = 'big-pickle'
-      model = 'big-pickle'
+    let response: Response
+    // Retry only while nothing has reached the consumer: an upstream error
+    // frame as the first stream event (OpenRouter reports rate limiting and
+    // no-capacity that way) is retried; once any event has been yielded,
+    // replaying would duplicate content, so the error surfaces instead.
+    let published = false
+    let capacityWaits = 0
+    let waitedMs = 0
+    let recoveryUsed = false
+    let newMessages: AssistantMessage[] = []
+    for (;;) {
       response = await sendRequest()
-      if (response.ok) {
-        logForDebugging(`[OpenAIChat] free-tier fallback succeeded with ${model}`)
+      // 免费模型瞬态 500 按 opencode 策略重试并回退至 big-pickle，确保 hi 可用
+      if (!response.ok && isFree && response.status === 500 && model !== 'big-pickle') {
+        logForDebugging(`[OpenAIChat] free model ${model} 500, fallback to big-pickle`)
+        ;(body as { model?: string }).model = 'big-pickle'
+        model = 'big-pickle'
+        response = await sendRequest()
+        if (response.ok) {
+          logForDebugging(`[OpenAIChat] free-tier fallback succeeded with ${model}`)
+        }
       }
-    }
-    if (!response.ok) {
-      const text = await response.text().catch(() => '')
-      throw new Error(`Upstream ${route.provider} failed (${response.status})${text ? `: ${text.slice(0, 800)}` : ''}`)
-    }
-    if (!response.body) throw new Error('Upstream response missing body')
-    const adaptedStream = adaptOpenAIChatSSE(detectUpstreamFailures(parseOpenAIChunksFromSSE(response.body) as AsyncIterable<Record<string, unknown>>) as AsyncIterable<OpenAIChatWireChunk>, model, { includeCacheWriteTokens: false })
-    const newMessages: AssistantMessage[] = []
-    const contentBlocks: Record<number, Record<string, unknown>> = {}
-    for await (const event of adaptedStream) {
-      switch (event.type) {
-        case 'message_start': {
-          partialMessage = event.message
-          ttftMs = Date.now() - start
-          if (event.message.usage) usage = { ...usage, ...(event.message.usage as unknown as typeof usage) }
-          break
-        }
-        case 'content_block_start': {
-          const idx = event.index
-          const cb = event.content_block as unknown as Record<string, unknown>
-          if (cb.type === 'tool_use') contentBlocks[idx] = { ...cb, input: '' }
-          else if (cb.type === 'text') contentBlocks[idx] = { ...cb, text: '' }
-          else if (cb.type === 'thinking') contentBlocks[idx] = { ...cb, thinking: '' }
-          else contentBlocks[idx] = { ...cb }
-          break
-        }
-        case 'content_block_delta': {
-          const idx = event.index
-          const block = contentBlocks[idx] as Record<string, unknown> | undefined
-          if (!block) break
-          const delta = event.delta as { type: string; text?: string; partial_json?: string; thinking?: string }
-          if (delta.type === 'text_delta') block.text = ((block.text as string | undefined) || '') + delta.text
-          else if (delta.type === 'input_json_delta') block.input = ((block.input as string | undefined) || '') + delta.partial_json
-          else if (delta.type === 'thinking_delta') block.thinking = ((block.thinking as string | undefined) || '') + delta.thinking
-          break
-        }
-        case 'content_block_stop': {
-          const contentBlock = contentBlocks[event.index]
-          if (!contentBlock || !partialMessage) break
-          const m: AssistantMessage = {
-            message: {
-              ...partialMessage,
-              content: normalizeContentFromAPI([contentBlock] as unknown as AgentContentBlock[], tools, context.agentId as AgentId | undefined),
-            },
-            requestId: undefined,
-            type: 'assistant',
-            uuid: randomUUID(),
-            timestamp: new Date().toISOString(),
-          } as unknown as AssistantMessage
-          newMessages.push(m)
-          yield m
-          break
-        }
-        case 'message_delta': {
-          const deltaUsage = event.usage
-          if (deltaUsage) usage = updateOpenAIUsage(usage, deltaUsage as unknown as Parameters<typeof updateOpenAIUsage>[1])
-          if (event.delta?.stop_reason != null) stopReason = event.delta.stop_reason
-          const lastMsg = newMessages.at(-1) as (AssistantMessage & { message: { usage?: typeof usage; stop_reason?: string | null } }) | undefined
-          if (lastMsg) {
-            lastMsg.message.usage = usage
-            lastMsg.message.stop_reason = stopReason
-          }
-          if (usage.input_tokens + usage.output_tokens > 0) {
-            const costUSD = calculateUSDCost(model, usage as unknown as Parameters<typeof calculateUSDCost>[1])
-            addToTotalSessionCost(costUSD, usage as unknown as Parameters<typeof addToTotalSessionCost>[1], context.model)
-          }
-          break
-        }
-        case 'message_stop': break
+      if (!response.ok) {
+        const text = await response.text().catch(() => '')
+        throw new Error(`Upstream ${route.provider} failed (${response.status})${text ? `: ${text.slice(0, 800)}` : ''}`)
       }
-      yield { type: 'stream_event', event, ...(event.type === 'message_start' ? { ttftMs } : undefined) } as unknown as StreamEvent
+      if (!response.body) throw new Error('Upstream response missing body')
+      partialMessage = null
+      stopReason = null
+      usage = { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
+      newMessages = []
+      const adaptedStream = adaptOpenAIChatSSE(detectUpstreamFailures(parseOpenAIChunksFromSSE(response.body) as AsyncIterable<Record<string, unknown>>) as AsyncIterable<OpenAIChatWireChunk>, model, { includeCacheWriteTokens: false })
+      const contentBlocks: Record<number, Record<string, unknown>> = {}
+      try {
+      for await (const event of adaptedStream) {
+        switch (event.type) {
+          case 'message_start': {
+            partialMessage = event.message
+            ttftMs = Date.now() - start
+            if (event.message.usage) usage = { ...usage, ...(event.message.usage as unknown as typeof usage) }
+            break
+          }
+          case 'content_block_start': {
+            const idx = event.index
+            const cb = event.content_block as unknown as Record<string, unknown>
+            if (cb.type === 'tool_use') contentBlocks[idx] = { ...cb, input: '' }
+            else if (cb.type === 'text') contentBlocks[idx] = { ...cb, text: '' }
+            else if (cb.type === 'thinking') contentBlocks[idx] = { ...cb, thinking: '' }
+            else contentBlocks[idx] = { ...cb }
+            break
+          }
+          case 'content_block_delta': {
+            const idx = event.index
+            const block = contentBlocks[idx] as Record<string, unknown> | undefined
+            if (!block) break
+            const delta = event.delta as { type: string; text?: string; partial_json?: string; thinking?: string }
+            if (delta.type === 'text_delta') block.text = ((block.text as string | undefined) || '') + delta.text
+            else if (delta.type === 'input_json_delta') block.input = ((block.input as string | undefined) || '') + delta.partial_json
+            else if (delta.type === 'thinking_delta') block.thinking = ((block.thinking as string | undefined) || '') + delta.thinking
+            break
+          }
+          case 'content_block_stop': {
+            const contentBlock = contentBlocks[event.index]
+            if (!contentBlock || !partialMessage) break
+            const m: AssistantMessage = {
+              message: {
+                ...partialMessage,
+                content: normalizeContentFromAPI([contentBlock] as unknown as AgentContentBlock[], tools, context.agentId as AgentId | undefined),
+              },
+              requestId: undefined,
+              type: 'assistant',
+              uuid: randomUUID(),
+              timestamp: new Date().toISOString(),
+            } as unknown as AssistantMessage
+            newMessages.push(m)
+            published = true
+            yield m
+            break
+          }
+          case 'message_delta': {
+            const deltaUsage = event.usage
+            if (deltaUsage) usage = updateOpenAIUsage(usage, deltaUsage as unknown as Parameters<typeof updateOpenAIUsage>[1])
+            if (event.delta?.stop_reason != null) stopReason = event.delta.stop_reason
+            const lastMsg = newMessages.at(-1) as (AssistantMessage & { message: { usage?: typeof usage; stop_reason?: string | null } }) | undefined
+            if (lastMsg) {
+              lastMsg.message.usage = usage
+              lastMsg.message.stop_reason = stopReason
+            }
+            if (usage.input_tokens + usage.output_tokens > 0) {
+              const costUSD = calculateUSDCost(model, usage as unknown as Parameters<typeof calculateUSDCost>[1])
+              addToTotalSessionCost(costUSD, usage as unknown as Parameters<typeof addToTotalSessionCost>[1], context.model)
+            }
+            break
+          }
+          case 'message_stop': break
+        }
+        published = true
+        yield { type: 'stream_event', event, ...(event.type === 'message_start' ? { ttftMs } : undefined) } as unknown as StreamEvent
+      }
+      break
+      } catch (error) {
+        if (isAbortError(error)) throw error
+        if (!(error instanceof UpstreamStreamError)) throw error
+        const failure = error.failure
+        let delayMs: number
+        if (failure.capacity) {
+          const scheduled = capacityRetryDelaysMs[capacityWaits]
+          if (
+            published ||
+            scheduled === undefined ||
+            (failure.retryAfterMs ?? 0) > MAX_CAPACITY_WAIT_MS ||
+            waitedMs + scheduled > MAX_TOTAL_RETRY_WAIT_MS
+          ) {
+            error.message += ` Recovery was not attempted${published ? ': output was already published' : ''}.`
+            throw error
+          }
+          delayMs = Math.max(failure.retryAfterMs ?? 0, Math.round(scheduled * (0.8 + Math.random() * 0.4)))
+          capacityWaits++
+        } else {
+          if (published || recoveryUsed) {
+            error.message += ` Recovery was not attempted${published ? ': output was already published' : ': the recovery retry already ran'}.`
+            throw error
+          }
+          recoveryUsed = true
+          delayMs = recoveryRetryDelayMs
+        }
+        logForDebugging(`[OpenAIChat] retrying after upstream error (${failure.capacity ? 'capacity' : 'recovery'}): ${failure.message}`)
+        waitedMs += delayMs
+        await sleep(delayMs, undefined, { signal })
+      }
     }
     const lastMsg = newMessages.at(-1) as
       | (AssistantMessage & {

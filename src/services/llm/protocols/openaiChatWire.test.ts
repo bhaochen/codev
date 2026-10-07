@@ -935,4 +935,82 @@ describe('queryOpenAIChat integration', () => {
     expect(requests).toBe(2)
     expect(assistant).toHaveLength(1)
   })
+
+  test('retries an upstream error frame before any output, then succeeds', async () => {
+    const { queryOpenAIChat, _setOpenAIStreamRetryDelaysForTest, _resetOpenAIStreamRetryDelaysForTest } =
+      await import('../clients/openaiChat.js')
+    _setOpenAIStreamRetryDelaysForTest([1], 1)
+    try {
+      let requests = 0
+      const fetchOverride = async (): Promise<Response> => {
+        requests++
+        if (requests === 1) {
+          return new Response(
+            sseStream([
+              chatDelta('chat.completion.chunk', {
+                id: 'c',
+                error: {
+                  message: 'Provider returned error',
+                  code: 429,
+                  metadata: { provider_name: 'Acme' },
+                },
+              }),
+            ]),
+            { status: 200 },
+          )
+        }
+        return new Response(sseStream(textChunks(['recovered'], 'stop')), { status: 200 })
+      }
+      const req = makeRequest({
+        messages: [wrapperUser([{ type: 'text', text: 'hi' }])],
+        systemPrompt: asSystemPrompt(['sys']),
+        context: { ...makeRequest().context, fetchOverride: fetchOverride as never },
+      })
+      const assistant: Array<{ type: string }> = []
+      for await (const raw of queryOpenAIChat(route, req)) {
+        if ((raw as { type: string }).type === 'assistant') assistant.push(raw as { type: string })
+      }
+      expect(requests).toBe(2)
+      expect(assistant).toHaveLength(1)
+    } finally {
+      _resetOpenAIStreamRetryDelaysForTest()
+    }
+  })
+
+  test('does not retry once output has been published', async () => {
+    const { queryOpenAIChat, _setOpenAIStreamRetryDelaysForTest, _resetOpenAIStreamRetryDelaysForTest } =
+      await import('../clients/openaiChat.js')
+    _setOpenAIStreamRetryDelaysForTest([1], 1)
+    try {
+      let requests = 0
+      const fetchOverride = async (): Promise<Response> => {
+        requests++
+        return new Response(
+          sseStream([
+            ...textChunks(['partial'], 'stop').slice(0, 1),
+            chatDelta('chat.completion.chunk', {
+              id: 'c',
+              error: { message: 'Provider returned error', code: 429 },
+            }),
+          ]),
+          { status: 200 },
+        )
+      }
+      const req = makeRequest({
+        messages: [wrapperUser([{ type: 'text', text: 'hi' }])],
+        systemPrompt: asSystemPrompt(['sys']),
+        context: { ...makeRequest().context, fetchOverride: fetchOverride as never },
+      })
+      const errors: string[] = []
+      for await (const raw of queryOpenAIChat(route, req)) {
+        const msg = raw as { isApiErrorMessage?: boolean; message?: { content?: Array<{ text?: string }> } }
+        if (msg.isApiErrorMessage) errors.push(msg.message?.content?.[0]?.text ?? '')
+      }
+      expect(requests).toBe(1)
+      expect(errors).toHaveLength(1)
+      expect(errors[0]).toContain('Recovery was not attempted')
+    } finally {
+      _resetOpenAIStreamRetryDelaysForTest()
+    }
+  })
 })
