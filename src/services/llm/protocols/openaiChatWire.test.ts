@@ -977,6 +977,58 @@ describe('queryOpenAIChat integration', () => {
     }
   })
 
+  test('non-capacity failure recovers with one non-streaming request', async () => {
+    const { queryOpenAIChat, _setOpenAIStreamRetryDelaysForTest, _resetOpenAIStreamRetryDelaysForTest } =
+      await import('../clients/openaiChat.js')
+    _setOpenAIStreamRetryDelaysForTest([1], 1)
+    try {
+      const bodies: Array<Record<string, unknown>> = []
+      const fetchOverride = async (_input: unknown, init?: RequestInit): Promise<Response> => {
+        const parsed = JSON.parse(String(init?.body)) as Record<string, unknown>
+        bodies.push(parsed)
+        if (parsed.stream === false) {
+          return new Response(
+            JSON.stringify({
+              id: 'cc1',
+              model: 'gpt-4o',
+              choices: [
+                { index: 0, message: { role: 'assistant', content: 'recovered' }, finish_reason: 'stop' },
+              ],
+              usage: { prompt_tokens: 5, completion_tokens: 2 },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          )
+        }
+        return new Response(
+          sseStream([
+            chatDelta('chat.completion.chunk', {
+              id: 'c',
+              error: { message: 'provider exploded', code: 503 },
+            }),
+          ]),
+          { status: 200 },
+        )
+      }
+      const req = makeRequest({
+        messages: [wrapperUser([{ type: 'text', text: 'hi' }])],
+        systemPrompt: asSystemPrompt(['sys']),
+        context: { ...makeRequest().context, fetchOverride: fetchOverride as never },
+      })
+      const contents: string[] = []
+      for await (const raw of queryOpenAIChat(route, req)) {
+        if ((raw as { type: string }).type === 'assistant') {
+          const content = (raw as { message: { content: Array<{ text?: string }> } }).message.content
+          contents.push(content.map(b => b.text ?? '').join(''))
+        }
+      }
+      expect(bodies).toHaveLength(2)
+      expect(bodies[1]!.stream).toBe(false)
+      expect(contents.join('')).toContain('recovered')
+    } finally {
+      _resetOpenAIStreamRetryDelaysForTest()
+    }
+  })
+
   test('does not retry once output has been published', async () => {
     const { queryOpenAIChat, _setOpenAIStreamRetryDelaysForTest, _resetOpenAIStreamRetryDelaysForTest } =
       await import('../clients/openaiChat.js')

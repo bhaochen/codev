@@ -17,6 +17,7 @@ import { httpRequest } from '../transport/http.js'
 import { requestWithRetry } from '../transport/retryHttpRequest.js'
 import { parseOpenAIChunksFromSSE } from '../transport/sse.js'
 import { detectUpstreamFailures, UpstreamStreamError } from '../protocols/upstreamError.js'
+import { completionToChunks } from '../protocols/openaiCompletionToChunks.js'
 import { getSessionId } from '../../../bootstrap/state.js'
 import { getModelMaxOutputTokens } from '../../../utils/context.js'
 import { logForDebugging } from '../../../utils/debug.js'
@@ -256,15 +257,19 @@ export async function* queryOpenAIChat(
     else headers.Authorization = 'Bearer public'
     const fetchOverride = context.fetchOverride as unknown as typeof fetch | undefined
     const url = endpoint.includes('/chat/completions') ? endpoint : chatCompletionsUrlFromBase(endpoint)
-    const sendRequest = () =>
+    const sendRequest = (requestBody: object) =>
       requestWithRetry(
         () =>
           httpRequest(
-            { url, method: 'POST', headers, body: JSON.stringify(body), signal },
+            { url, method: 'POST', headers, body: JSON.stringify(requestBody), signal },
             fetchOverride,
           ),
         signal,
       )
+    const buildRecoveryBody = () => {
+      const { stream_options: _streamOptions, ...rest } = body as unknown as Record<string, unknown>
+      return { ...rest, stream: false }
+    }
     let response: Response
     // Retry only while nothing has reached the consumer: an upstream error
     // frame as the first stream event (OpenRouter reports rate limiting and
@@ -274,15 +279,19 @@ export async function* queryOpenAIChat(
     let capacityWaits = 0
     let waitedMs = 0
     let recoveryUsed = false
+    // Non-capacity failures get one non-streaming recovery: a complete JSON
+    // completion cannot fail midway the way the stream did.
+    let recovery = false
     let newMessages: AssistantMessage[] = []
     for (;;) {
-      response = await sendRequest()
+      const attemptBody = recovery ? buildRecoveryBody() : body
+      response = await sendRequest(attemptBody)
       // 免费模型瞬态 500 按 opencode 策略重试并回退至 big-pickle，确保 hi 可用
       if (!response.ok && isFree && response.status === 500 && model !== 'big-pickle') {
         logForDebugging(`[OpenAIChat] free model ${model} 500, fallback to big-pickle`)
         ;(body as { model?: string }).model = 'big-pickle'
         model = 'big-pickle'
-        response = await sendRequest()
+        response = await sendRequest(attemptBody)
         if (response.ok) {
           logForDebugging(`[OpenAIChat] free-tier fallback succeeded with ${model}`)
         }
@@ -296,7 +305,12 @@ export async function* queryOpenAIChat(
       stopReason = null
       usage = { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
       newMessages = []
-      const adaptedStream = adaptOpenAIChatSSE(detectUpstreamFailures(parseOpenAIChunksFromSSE(response.body) as AsyncIterable<Record<string, unknown>>) as AsyncIterable<OpenAIChatWireChunk>, model, { includeCacheWriteTokens: false })
+      const chunkSource: AsyncIterable<Record<string, unknown>> = recovery
+        ? (async function* () {
+            for (const chunk of completionToChunks(await response.json())) yield chunk
+          })()
+        : (parseOpenAIChunksFromSSE(response.body) as AsyncIterable<Record<string, unknown>>)
+      const adaptedStream = adaptOpenAIChatSSE(detectUpstreamFailures(chunkSource) as AsyncIterable<OpenAIChatWireChunk>, model, { includeCacheWriteTokens: false })
       const contentBlocks: Record<number, Record<string, unknown>> = {}
       try {
       for await (const event of adaptedStream) {
@@ -389,6 +403,7 @@ export async function* queryOpenAIChat(
             throw error
           }
           recoveryUsed = true
+          recovery = true
           delayMs = recoveryRetryDelayMs
         }
         logForDebugging(`[OpenAIChat] retrying after upstream error (${failure.capacity ? 'capacity' : 'recovery'}): ${failure.message}`)
