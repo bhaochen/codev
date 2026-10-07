@@ -134,4 +134,50 @@ describe('toolCallGuard', () => {
     expect(r3.status).toBe('fatal')
     expect(r3.disposition).toBe('fatal')
   })
+
+  describe('placeholder arguments', () => {
+    const phSchema = z.strictObject({
+      path: z.string().min(1),
+      limit: z.number().min(1).optional(),
+      id: z.string().min(1).optional(),
+      verbose: z.boolean().optional(),
+    })
+
+    test('0 on a min-1 optional number is dropped as a placeholder', () => {
+      const tool = makeTool('PhNumber', phSchema)
+      const r = guardToolInput(tool, { path: 'a.ts', limit: 0 }, 'ph-num-1')
+      expect(r.status).toBe('repaired')
+      expect(r.repairs.some(x => x.action === 'drop_placeholder')).toBe(true)
+      expect((r.parsedInput?.data as { limit?: number }).limit).toBeUndefined()
+    })
+
+    test('multiple placeholders are dropped in one shot', () => {
+      const tool = makeTool('PhMulti', phSchema)
+      const r = guardToolInput(
+        tool,
+        { path: 'a.ts', verbose: null, id: '' },
+        'ph-multi-1',
+      )
+      expect(r.status).toBe('repaired')
+      const data = r.parsedInput?.data as { verbose?: boolean; id?: string }
+      expect(data.verbose).toBeUndefined()
+      expect(data.id).toBeUndefined()
+    })
+
+    test('a required placeholder is never dropped', () => {
+      const tool = makeTool('PhRequired', phSchema)
+      const r = guardToolInput(tool, { path: '' }, 'ph-req-1')
+      expect(r.status).toBe('retry')
+      expect(r.repairs).toHaveLength(0)
+    })
+
+    test('array items are never removed', () => {
+      const tool = makeTool(
+        'PhArray',
+        z.strictObject({ tags: z.array(z.string().min(1)).min(1) }),
+      )
+      const r = guardToolInput(tool, { tags: [''] }, 'ph-arr-1')
+      expect(r.status).toBe('retry')
+    })
+  })
 })

@@ -27,7 +27,11 @@ export const MAX_RETRIES = 2
 
 export type RepairDisposition = 'auto_repair' | 'retry' | 'fatal'
 
-export type RepairActionKind = 'auto_fill' | 'drop_unknown_key' | 'coerce_type'
+export type RepairActionKind =
+  | 'auto_fill'
+  | 'drop_unknown_key'
+  | 'drop_placeholder'
+  | 'coerce_type'
 
 export interface RepairAction {
   type: string
@@ -174,6 +178,150 @@ function applyAutoRepairs(
   return { repaired: cloned, repairs }
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * Values models use to mean "not set". Zero and `false` count: a model that
+ * fills every declared field writes an unused number as 0 and an unused flag
+ * as false. They are only ever dropped when the contract itself rejects them.
+ */
+export function isPlaceholderValue(value: unknown): boolean {
+  if (value === null || value === 0 || value === false) return true
+  if (typeof value === 'string') return value.trim().length === 0
+  if (Array.isArray(value)) return value.length === 0
+  if (isPlainObject(value)) return Object.keys(value).length === 0
+  return false
+}
+
+function childOf(
+  node: unknown,
+  segment: string | number,
+): { found: boolean; value?: unknown } {
+  if (Array.isArray(node)) {
+    const index = typeof segment === 'number' ? segment : Number(segment)
+    if (!Number.isInteger(index) || index < 0 || index >= node.length) {
+      return { found: false }
+    }
+    return { found: true, value: node[index] }
+  }
+  if (!isPlainObject(node)) return { found: false }
+  const key = String(segment)
+  if (!Object.prototype.hasOwnProperty.call(node, key)) return { found: false }
+  return { found: true, value: node[key] }
+}
+
+function samePath(
+  a: readonly (string | number)[],
+  b: readonly (string | number)[],
+): boolean {
+  return (
+    a.length === b.length &&
+    a.every((segment, index) => String(segment) === String(b[index]))
+  )
+}
+
+/**
+ * For each issue, the first OBJECT property along its path whose value is a
+ * placeholder. Array items are never blamed (only plain-object nodes are), so
+ * a placeholder leaf can only be the issue itself or, for an empty object, a
+ * key inside it.
+ */
+function blamedPlaceholderPaths(
+  input: unknown,
+  issues: readonly ZodIssueLike[],
+): (string | number)[][] {
+  const blamed: (string | number)[][] = []
+  for (const issue of issues) {
+    let node: unknown = input
+    for (let depth = 0; depth < issue.path.length; depth++) {
+      const segment = issue.path[depth]!
+      const child = childOf(node, segment)
+      if (!child.found) break
+      if (isPlainObject(node) && isPlaceholderValue(child.value)) {
+        const path = issue.path.slice(0, depth + 1)
+        if (!blamed.some(existing => samePath(existing, path))) blamed.push(path)
+        break
+      }
+      node = child.value
+    }
+  }
+  return blamed
+}
+
+function getAtPath(root: unknown, path: readonly (string | number)[]): unknown {
+  let node = root
+  for (const segment of path) {
+    const child = childOf(node, segment)
+    if (!child.found) return undefined
+    node = child.value
+  }
+  return node
+}
+
+/** Remove the OBJECT property at `path` (never an array item). */
+function deleteAtPath(root: unknown, path: readonly (string | number)[]): void {
+  if (path.length === 0 || !isPlainObject(root)) return
+  let node: Record<string, unknown> = root
+  for (let i = 0; i < path.length - 1; i++) {
+    const next = node[path[i]! as string]
+    if (!isPlainObject(next)) return
+    node = next
+  }
+  delete node[path[path.length - 1]! as string]
+}
+
+/**
+ * Drop optional parameters the model filled with a placeholder the contract
+ * rejects, then re-validate the WHOLE input. Multiple passes so a drop can
+ * expose the next blamed field. Returns null when no pass makes progress or
+ * the result still fails — a required placeholder stays and the call fails
+ * exactly as before.
+ */
+function dropBlamedPlaceholders(
+  schema: z.ZodTypeAny,
+  input: unknown,
+  firstError: z.ZodError,
+): {
+  repaired: unknown
+  repairs: RepairAction[]
+  parsed: { success: true; data: unknown }
+} | null {
+  const repaired = structuredClone(input)
+  const repairs: RepairAction[] = []
+  let parsed: z.ZodSafeParseResult<unknown> = {
+    success: false,
+    error: firstError,
+  }
+  for (let pass = 0; pass < 4 && !parsed.success; pass++) {
+    const blamed = blamedPlaceholderPaths(
+      repaired,
+      parsed.error.issues as unknown as ZodIssueLike[],
+    )
+    if (blamed.length === 0) break
+    let droppedThisPass = false
+    for (const path of blamed) {
+      const last = path[path.length - 1]
+      if (typeof last !== 'string') continue
+      if (getAtPath(repaired, path) === undefined) continue
+      const from = getAtPath(repaired, path)
+      deleteAtPath(repaired, path)
+      repairs.push({
+        type: 'placeholder_argument',
+        path: [...path],
+        action: 'drop_placeholder',
+        from,
+      })
+      droppedThisPass = true
+    }
+    if (!droppedThisPass) break
+    parsed = schema.safeParse(repaired)
+  }
+  if (!parsed.success || repairs.length === 0) return null
+  return { repaired, repairs, parsed: parsed as { success: true; data: unknown } }
+}
+
 // Retry accounting. Each model retry typically arrives as a fresh tool_use with
 // a new id, so we also track a short sliding window per tool name to break
 // pathological loops where the model keeps emitting the same bad call.
@@ -257,8 +405,26 @@ export function guardToolInput(
   const issues = parsed.error.issues as unknown as ZodIssueLike[]
   const { attempt, capped } = recordAttempt(toolUseID, tool.name)
 
-  const { repaired, repairs } = applyAutoRepairs(tool.name, input, issues)
-  const reParsed = repairs.length > 0 ? tool.inputSchema.safeParse(repaired) : parsed
+  let { repaired, repairs } = applyAutoRepairs(tool.name, input, issues)
+  let reParsed = repairs.length > 0 ? tool.inputSchema.safeParse(repaired) : parsed
+
+  // Second grader: optional parameters the model filled with a placeholder the
+  // contract rejects (null / \"\" / 0 / false / [] / {}). Drop only when the
+  // whole input then validates; a required placeholder is never dropped.
+  if (!reParsed.success) {
+    const candidate =
+      repairs.length > 0 ? repaired : input
+    const dropped = dropBlamedPlaceholders(
+      tool.inputSchema as unknown as z.ZodTypeAny,
+      candidate,
+      reParsed.error,
+    )
+    if (dropped) {
+      repaired = dropped.repaired
+      repairs = [...repairs, ...dropped.repairs]
+      reParsed = dropped.parsed as typeof reParsed
+    }
+  }
 
   if (repairs.length > 0 && reParsed.success) {
     return {
