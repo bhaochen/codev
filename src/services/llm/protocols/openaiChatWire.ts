@@ -314,6 +314,7 @@ function sanitizeJsonSchema(
     'definitions',
     '$defs',
     'patternProperties',
+    'dependentSchemas',
   ] as const
   for (const key of objectKeys) {
     const nested = result[key]
@@ -333,7 +334,10 @@ function sanitizeJsonSchema(
 
   const singleKeys = [
     'items',
+    'additionalItems',
     'additionalProperties',
+    'unevaluatedItems',
+    'unevaluatedProperties',
     'not',
     'if',
     'then',

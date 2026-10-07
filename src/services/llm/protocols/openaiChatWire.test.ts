@@ -466,6 +466,44 @@ describe('openAIChatToolsFromSchemas', () => {
     })
   })
 
+  test('const inside dependentSchemas / unevaluated* is sanitized too', () => {
+    const tools = openAIChatToolsFromSchemas([
+      {
+        name: 't',
+        input_schema: {
+          type: 'object',
+          properties: { a: { type: 'string' } },
+          dependentSchemas: { a: { properties: { b: { const: 'x' } } } },
+          unevaluatedProperties: { const: 'y' },
+        },
+      },
+    ])
+    expect(tools[0]!.function.parameters).toEqual({
+      type: 'object',
+      properties: { a: { type: 'string' } },
+      dependentSchemas: { a: { properties: { b: { enum: ['x'] } } } },
+      unevaluatedProperties: { enum: ['y'] },
+    })
+  })
+
+  test('a parameter named "const" inside properties is left alone', () => {
+    const tools = openAIChatToolsFromSchemas([
+      {
+        name: 't',
+        input_schema: {
+          type: 'object',
+          properties: { default: { type: 'number' }, const: { type: 'string' } },
+          required: ['default', 'const'],
+        },
+      },
+    ])
+    expect(tools[0]!.function.parameters).toEqual({
+      type: 'object',
+      properties: { default: { type: 'number' }, const: { type: 'string' } },
+      required: ['default', 'const'],
+    })
+  })
+
   test('items const is sanitized', () => {
     const tools = openAIChatToolsFromSchemas([
       { name: 't', input_schema: { type: 'array', items: { const: 'v' } } },
