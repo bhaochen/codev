@@ -23,6 +23,7 @@ import { formatFileSize } from './format.js'
 import { logError } from './log.js'
 import { getProjectDir } from './sessionStorage.js'
 import { jsonStringify } from './slowOperations.js'
+import { surrogateSafeEnd, toWellFormedText } from './wellFormedText.js'
 
 // Subdirectory name for tool results within a session
 export const TOOL_RESULTS_SUBDIR = 'tool-results'
@@ -266,6 +267,37 @@ export function isToolResultContentEmpty(
 }
 
 /**
+ * Replace lone surrogates in tool_result text with U+FFFD. Strings are
+ * repaired directly; arrays keep their block shape and only text blocks are
+ * touched. Non-text blocks (images) are passed through untouched.
+ */
+function withWellFormedContent(
+  content: NonNullable<ToolResultBlockParam['content']>,
+): NonNullable<ToolResultBlockParam['content']> {
+  if (typeof content === 'string') return toWellFormedText(content)
+  if (!Array.isArray(content)) return content
+  let changed = false
+  const repaired = content.map(block => {
+    if (
+      block &&
+      typeof block === 'object' &&
+      'type' in block &&
+      block.type === 'text' &&
+      'text' in block &&
+      typeof block.text === 'string'
+    ) {
+      const text = toWellFormedText(block.text)
+      if (text !== block.text) {
+        changed = true
+        return { ...block, text }
+      }
+    }
+    return block
+  })
+  return changed ? repaired : content
+}
+
+/**
  * Handle large tool results by persisting to disk instead of truncating.
  * Returns the original block if no persistence needed, or a modified block
  * with the content replaced by a reference to the persisted file.
@@ -299,21 +331,27 @@ async function maybePersistLargeToolResult(
     return toolResultBlock
   }
 
+  // A lone surrogate serializes as a bare \udXXX escape that strict JSON parsers
+  // reject (Anthropic: 400 "no low surrogate in string"), and once it is in the
+  // frozen history every later request fails the same way. Repair once, here,
+  // where the result is created — never revisited, so cache-safe.
+  const wellFormed = withWellFormedContent(content)
+
   // Skip persistence for image content blocks - they need to be sent as-is to Claude
-  if (hasImageBlock(content)) {
-    return toolResultBlock
+  if (hasImageBlock(wellFormed)) {
+    return { ...toolResultBlock, content: wellFormed }
   }
 
-  const size = contentSize(content)
+  const size = contentSize(wellFormed)
 
   // Use tool-specific threshold if provided, otherwise fall back to global limit
   const threshold = persistenceThreshold ?? MAX_TOOL_RESULT_BYTES
   if (size <= threshold) {
-    return toolResultBlock
+    return { ...toolResultBlock, content: wellFormed }
   }
 
   // Persist the entire content as a unit
-  const result = await persistToolResult(content, toolResultBlock.tool_use_id)
+  const result = await persistToolResult(wellFormed, toolResultBlock.tool_use_id)
   if (isPersistError(result)) {
     // If persistence failed, return the original block unchanged
     return toolResultBlock
@@ -346,14 +384,17 @@ export function generatePreview(
   }
 
   // Find the last newline within the limit to avoid cutting mid-line
-  const truncated = content.slice(0, maxBytes)
+  const truncated = content.slice(0, surrogateSafeEnd(content, maxBytes))
   const lastNewline = truncated.lastIndexOf('\n')
 
   // If we found a newline reasonably close to the limit, use it
   // Otherwise fall back to the exact limit
   const cutPoint = lastNewline > maxBytes * 0.5 ? lastNewline : maxBytes
 
-  return { preview: content.slice(0, cutPoint), hasMore: true }
+  return {
+    preview: content.slice(0, surrogateSafeEnd(content, cutPoint)),
+    hasMore: true,
+  }
 }
 
 /**
