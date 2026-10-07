@@ -761,6 +761,107 @@ describe('adaptOpenAIChatSSE', () => {
     expect(details[0]).toEqual([{ type: 'reasoning.encrypted', id: 'e2', data: 'BLOB' }])
   })
 
+  test('non-array tool fragments are rejected', async () => {
+    await expect(
+      collectEvents([
+        chatDelta('chat.completion.chunk', {
+          id: 'c',
+          choices: [{ delta: { tool_calls: {} }, index: 0 }],
+        }),
+      ]),
+    ).rejects.toThrow(/indexed array/)
+  })
+
+  test('a tool fragment without a valid index is rejected', async () => {
+    await expect(
+      collectEvents([
+        chatDelta('chat.completion.chunk', {
+          id: 'c',
+          choices: [{ delta: { tool_calls: [{ index: -1, function: { name: 'x' } }] }, index: 0 }],
+        }),
+      ]),
+    ).rejects.toThrow(/no valid index/)
+  })
+
+  test('a tool index changing function names mid-stream is rejected', async () => {
+    await expect(
+      collectEvents([
+        chatDelta('chat.completion.chunk', {
+          id: 'c',
+          choices: [{ delta: { tool_calls: [{ index: 0, id: 'a', function: { name: 'x', arguments: '{}' } }] }, index: 0 }],
+        }),
+        chatDelta('chat.completion.chunk', {
+          id: 'c',
+          choices: [{ delta: { tool_calls: [{ index: 0, function: { name: 'y', arguments: '{}' } }] }, index: 0 }],
+        }),
+      ]),
+    ).rejects.toThrow(/changed function names/)
+  })
+
+  test('non-string tool arguments are rejected instead of coerced', async () => {
+    await expect(
+      collectEvents([
+        chatDelta('chat.completion.chunk', {
+          id: 'c',
+          choices: [{ delta: { tool_calls: [{ index: 0, id: 'a', function: { name: 'x', arguments: {} } }] }, index: 0 }],
+        }),
+      ]),
+    ).rejects.toThrow(/JSON text/)
+  })
+
+  test('tool fragments after the completion boundary are rejected', async () => {
+    await expect(
+      collectEvents([
+        chatDelta('chat.completion.chunk', {
+          id: 'c',
+          choices: [{ delta: { tool_calls: [{ index: 0, id: 'a', function: { name: 'x', arguments: '{}' } }] }, index: 0 }],
+        }),
+        chatDelta('chat.completion.chunk', {
+          id: 'c',
+          choices: [{ delta: {}, index: 0, finish_reason: 'tool_calls' }],
+        }),
+        chatDelta('chat.completion.chunk', {
+          id: 'c',
+          choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{}' } }] }, index: 0 }],
+        }),
+      ]),
+    ).rejects.toThrow(/after the completion boundary/)
+  })
+
+  test('a completed batch with duplicate call ids is rejected', async () => {
+    await expect(
+      collectEvents([
+        chatDelta('chat.completion.chunk', {
+          id: 'c',
+          choices: [{ delta: { tool_calls: [{ index: 0, id: 'dup', function: { name: 'x', arguments: '{}' } }] }, index: 0 }],
+        }),
+        chatDelta('chat.completion.chunk', {
+          id: 'c',
+          choices: [{ delta: { tool_calls: [{ index: 1, id: 'dup', function: { name: 'y', arguments: '{}' } }] }, index: 0 }],
+        }),
+        chatDelta('chat.completion.chunk', {
+          id: 'c',
+          choices: [{ delta: {}, index: 0, finish_reason: 'tool_calls' }],
+        }),
+      ]),
+    ).rejects.toThrow(/missing or duplicate/)
+  })
+
+  test('a completed named batch with a missing name is rejected', async () => {
+    await expect(
+      collectEvents([
+        chatDelta('chat.completion.chunk', {
+          id: 'c',
+          choices: [{ delta: { tool_calls: [{ index: 0, id: 'a' }] }, index: 0 }],
+        }),
+        chatDelta('chat.completion.chunk', {
+          id: 'c',
+          choices: [{ delta: {}, index: 0, finish_reason: 'tool_calls' }],
+        }),
+      ]),
+    ).rejects.toThrow(/missing or duplicate/)
+  })
+
   test('tool_calls stream input_json_delta and close at finish', async () => {
     const events = await collectEvents([
       chatDelta('chat.completion.chunk', {

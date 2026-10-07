@@ -30,6 +30,7 @@ import type {
 } from '../../../types/message.js'
 import { isEnvTruthy, isEnvDefinedFalsy } from '../../../utils/envUtils.js'
 import { markToolErrorText } from './toolErrorText.js'
+import { UpstreamStreamError } from './upstreamError.js'
 
 // ============================================================================
 // Wire types
@@ -908,6 +909,13 @@ export async function* adaptOpenAIChatSSE(
     }
   }
 
+  // Structural tool-call violations: a corrupt batch must fail loudly rather
+  // than dispatch a tool under a merged/changed identity. Non-capacity, so the
+  // client never re-sends the same stream (output is already published).
+  function toolCallFailure(message: string): UpstreamStreamError {
+    return new UpstreamStreamError({ message, capacity: false })
+  }
+
   function* closeThinkingBlock(): Generator<OpenAIChatStreamEvent, void> {
     if (!thinkingBlockOpen) return
     if (reasoningDetails !== undefined) {
@@ -1175,9 +1183,35 @@ export async function* adaptOpenAIChatSSE(
     }
 
     // tool calls
+    if (delta.tool_calls != null) {
+      if (!Array.isArray(delta.tool_calls)) {
+        throw toolCallFailure('Tool fragments must arrive as an indexed array.')
+      }
+      if (delta.tool_calls.length > 0 && pendingFinishReason !== null) {
+        throw toolCallFailure('Tool fragments arrived after the completion boundary.')
+      }
+    }
     if (delta.tool_calls) {
       for (const tc of delta.tool_calls) {
         const tcIndex = tc.index ?? 0
+        if (!Number.isInteger(tcIndex) || tcIndex < 0) {
+          throw toolCallFailure('A tool fragment has no valid index; its destination is ambiguous.')
+        }
+        if (
+          (tc.id != null && typeof tc.id !== 'string') ||
+          (tc.function?.name != null && typeof tc.function.name !== 'string')
+        ) {
+          throw toolCallFailure('Tool identifiers and function names must be strings.')
+        }
+        const prior = toolBlocks.get(tcIndex)
+        if (prior) {
+          if (tc.id && prior.id !== tc.id) {
+            throw toolCallFailure('A tool index changed call IDs mid-stream.')
+          }
+          if (tc.function?.name && prior.name !== tc.function.name) {
+            throw toolCallFailure('A tool index changed function names mid-stream.')
+          }
+        }
 
         if (!toolBlocks.has(tcIndex)) {
           yield* closeThinkingBlock()
@@ -1212,6 +1246,13 @@ export async function* adaptOpenAIChatSSE(
         }
 
         const argFragment = tc.function?.arguments
+        if (
+          argFragment !== undefined &&
+          argFragment !== null &&
+          typeof argFragment !== 'string'
+        ) {
+          throw toolCallFailure('Tool argument deltas must be JSON text.')
+        }
         if (argFragment) {
           const block = toolBlocks.get(tcIndex)!
           block.arguments += argFragment
@@ -1239,6 +1280,21 @@ export async function* adaptOpenAIChatSSE(
         if (openBlockIndices.has(block.contentIndex)) {
           yield { type: 'content_block_stop', index: block.contentIndex }
           openBlockIndices.delete(block.contentIndex)
+        }
+      }
+
+      // A batch the provider calls complete must have distinct, named calls:
+      // otherwise parallel tool results cannot be paired back.
+      if (
+        (choice.finish_reason === 'tool_calls' || choice.finish_reason === 'stop') &&
+        toolBlocks.size > 0
+      ) {
+        const seenIds = new Set<string>()
+        for (const [, block] of toolBlocks) {
+          if (!block.id || !block.name || seenIds.has(block.id)) {
+            throw toolCallFailure('A completed tool batch has missing or duplicate call identifiers.')
+          }
+          seenIds.add(block.id)
         }
       }
 
