@@ -621,7 +621,14 @@ async function checkPermissionsAndCallTool(
   // safely repaired or retries are exhausted.
   const guard = guardToolInput(tool, input, toolUseID)
   if (guard.status === 'retry' || guard.status === 'fatal') {
-    let errorContent = formatZodValidationError(tool.name, guard.error!)
+    // Pass the schema and the rejected input so the model is shown exactly
+    // what shape it missed (plus what it sent) when it retries.
+    let errorContent = formatZodValidationError(
+      tool.name,
+      guard.error!,
+      tool.inputSchema as unknown as import('zod/v4').ZodTypeAny,
+      input,
+    )
 
     const schemaHint = buildSchemaNotSentHint(
       tool,
