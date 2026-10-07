@@ -45,6 +45,17 @@ describe('completionToChunks', () => {
     expect(calls.map(c => c.index)).toEqual([0, 1])
   })
 
+  test('typed reasoning_details pass through on the first chunk', () => {
+    const details = [{ type: 'reasoning.text', text: 'why' }]
+    const chunks = completionToChunks({
+      choices: [
+        { message: { role: 'assistant', content: 'ok', reasoning_details: details }, finish_reason: 'stop' },
+      ],
+    })
+    const delta = (chunks[0]!.choices as Array<{ delta: Record<string, unknown> }>)[0]!.delta
+    expect(delta.reasoning_details).toEqual(details)
+  })
+
   test('an error body rethrows as an upstream failure', () => {
     expect(() =>
       completionToChunks({ error: { message: 'provider exploded', code: 503 } }),

@@ -62,6 +62,9 @@ export function completionToChunks(
   if (typeof reasoning === 'string' && reasoning.length > 0) {
     delta.reasoning_content = reasoning
   }
+  if (Array.isArray(message.reasoning_details)) {
+    delta.reasoning_details = message.reasoning_details
+  }
   if (Array.isArray(message.tool_calls)) {
     delta.tool_calls = message.tool_calls.map((call, index) => ({
       ...asRecord(call),

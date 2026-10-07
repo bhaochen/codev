@@ -113,10 +113,14 @@ export async function* queryOpenAIChat(
     // Three-state vision: only a catalog that positively knows the model takes
     // images unlocks pixels; false and unknown fall back to text.
     const supportsImages = providerModelSupportsImages(route.provider, model)
+    // OpenRouter returns typed reasoning state (reasoning_details) that must be
+    // echoed back for multi-turn reasoning continuity; other endpoints reject
+    // the unknown field, so gate it on the provider.
+    const supportsReasoningDetails = route.provider === 'openrouter'
     let openaiMessages = agentMessagesToOpenAIChatMessages(
       messagesForAPI,
       systemText,
-      { supportsImages },
+      { supportsImages, supportsReasoningDetails },
     )
     // Implicit prefix-cache providers (DeepSeek, OpenRouter): split the
     // volatile system tail out, freeze it for the session, and pin it at a
@@ -134,7 +138,7 @@ export async function* queryOpenAIChat(
         openaiMessages = agentMessagesToOpenAIChatMessages(
           messagesForAPI,
           stripSystemDynamicBoundary(systemText),
-          { supportsImages },
+          { supportsImages, supportsReasoningDetails },
         )
       }
     }
@@ -334,10 +338,18 @@ export async function* queryOpenAIChat(
             const idx = event.index
             const block = contentBlocks[idx] as Record<string, unknown> | undefined
             if (!block) break
-            const delta = event.delta as { type: string; text?: string; partial_json?: string; thinking?: string }
+            const delta = event.delta as { type: string; text?: string; partial_json?: string; thinking?: string; reasoning_details?: unknown }
             if (delta.type === 'text_delta') block.text = ((block.text as string | undefined) || '') + delta.text
             else if (delta.type === 'input_json_delta') block.input = ((block.input as string | undefined) || '') + delta.partial_json
             else if (delta.type === 'thinking_delta') block.thinking = ((block.thinking as string | undefined) || '') + delta.thinking
+            else if (delta.type === 'reasoning_details_delta' && Array.isArray(delta.reasoning_details)) {
+              // Opaque OpenRouter reasoning state rides the thinking block so
+              // it survives transcript save/resume and is echoed next turn.
+              block.providerOptions = {
+                ...(block.providerOptions as Record<string, unknown> | undefined),
+                openrouterReasoningDetails: delta.reasoning_details,
+              }
+            }
             break
           }
           case 'content_block_stop': {

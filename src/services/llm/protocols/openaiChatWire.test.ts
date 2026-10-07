@@ -415,6 +415,31 @@ describe('agentMessagesToOpenAIChatMessages', () => {
     })
   })
 
+  test('openrouter reasoning_details echo instead of text when enabled', () => {
+    const details = [{ type: 'reasoning.text', text: 'why', signature: 'sig' }]
+    const message = wrapperAssistant([
+      {
+        type: 'thinking',
+        thinking: 'why',
+        providerOptions: { openrouterReasoningDetails: details },
+      },
+    ])
+    const on = agentMessagesToOpenAIChatMessages([message], undefined, {
+      supportsReasoningDetails: true,
+    })
+    expect(on[0]).toEqual({
+      role: 'assistant',
+      content: '(empty)',
+      reasoning_details: details,
+    })
+    const off = agentMessagesToOpenAIChatMessages([message])
+    expect(off[0]).toEqual({
+      role: 'assistant',
+      content: '(empty)',
+      reasoning_content: 'why',
+    })
+  })
+
   test('assistant text joins and empty content becomes null', () => {
     const msgs = agentMessagesToOpenAIChatMessages([
       wrapperAssistant([{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }]),
@@ -688,6 +713,52 @@ describe('adaptOpenAIChatSSE', () => {
         .join('')
       expect(thoughts).toBe(field === 'reasoning_details' ? 'r3' : value)
     }
+  })
+
+  test('reasoning_details fragments merge and emit before the thinking block closes', async () => {
+    const events = await collectEvents([
+      chatDelta('chat.completion.chunk', {
+        id: 'c',
+        choices: [{ delta: { reasoning_details: [{ type: 'reasoning.text', index: 0, text: 'par' }] }, index: 0 }],
+      }),
+      chatDelta('chat.completion.chunk', {
+        id: 'c',
+        choices: [{ delta: { reasoning_details: [
+          { type: 'reasoning.text', index: 0, text: 'tial' },
+          { type: 'reasoning.encrypted', id: 'e1', data: 'OPAQUE' },
+        ] }, index: 0 }],
+      }),
+      ...textChunks(['answer'], 'stop'),
+    ])
+    const details = events.flatMap(e =>
+      e.type === 'content_block_delta' && e.delta.type === 'reasoning_details_delta'
+        ? [e.delta.reasoning_details]
+        : [],
+    )
+    expect(details).toHaveLength(1)
+    expect(details[0]).toEqual([
+      { type: 'reasoning.text', index: 0, text: 'partial' },
+      { type: 'reasoning.encrypted', id: 'e1', data: 'OPAQUE' },
+    ])
+  })
+
+  test('encrypted-only reasoning_details still open a carrier thinking block', async () => {
+    const events = await collectEvents([
+      chatDelta('chat.completion.chunk', {
+        id: 'c',
+        choices: [{ delta: { reasoning_details: [{ type: 'reasoning.encrypted', id: 'e2', data: 'BLOB' }] }, index: 0 }],
+      }),
+      ...textChunks(['answer'], 'stop'),
+    ])
+    const starts = events.filter(e => e.type === 'content_block_start')
+    if (starts[0]!.type !== 'content_block_start') throw new Error('expected start')
+    expect(starts[0]!.content_block).toEqual({ type: 'thinking', thinking: '' })
+    const details = events.flatMap(e =>
+      e.type === 'content_block_delta' && e.delta.type === 'reasoning_details_delta'
+        ? [e.delta.reasoning_details]
+        : [],
+    )
+    expect(details[0]).toEqual([{ type: 'reasoning.encrypted', id: 'e2', data: 'BLOB' }])
   })
 
   test('tool_calls stream input_json_delta and close at finish', async () => {
@@ -980,6 +1051,68 @@ describe('queryOpenAIChat integration', () => {
     expect(body.stream).toBe(true)
     expect((body.messages as Array<{ role: string }>)[0]!.role).toBe('system')
     expect((body.messages as Array<{ role: string }>)[1]!.role).toBe('user')
+  })
+
+  test('reasoning_details ride the thinking block through queryOpenAIChat', async () => {
+    const { queryOpenAIChat } = await import('../clients/openaiChat.js')
+    const fetchOverride = fakeFetch([
+      chatDelta('chat.completion.chunk', {
+        id: 'c',
+        choices: [{ delta: { reasoning_details: [{ type: 'reasoning.text', index: 0, text: 'deep' }] }, index: 0 }],
+      }),
+      chatDelta('chat.completion.chunk', {
+        id: 'c',
+        choices: [{ delta: { content: 'ok' }, index: 0 }],
+      }),
+      chatDelta('chat.completion.chunk', {
+        id: 'c',
+        choices: [{ delta: {}, index: 0, finish_reason: 'stop' }],
+      }),
+    ])
+    const req = makeRequest({
+      messages: [wrapperUser([{ type: 'text', text: 'hi' }])],
+      systemPrompt: asSystemPrompt(['sys']),
+      context: { ...makeRequest().context, fetchOverride: fetchOverride as never },
+    })
+    const blocks: Array<Record<string, unknown>> = []
+    for await (const raw of queryOpenAIChat(route, req)) {
+      if ((raw as { type: string }).type !== 'assistant') continue
+      const content = (raw as { message: { content: Array<Record<string, unknown>> } }).message.content
+      blocks.push(...content)
+    }
+    const thinking = blocks.find(b => b.type === 'thinking')
+    expect(thinking?.providerOptions).toEqual({
+      openrouterReasoningDetails: [{ type: 'reasoning.text', index: 0, text: 'deep' }],
+    })
+  })
+
+  test('openrouter transcript echoes saved reasoning_details and drops the text copy', async () => {
+    const { queryOpenAIChat } = await import('../clients/openaiChat.js')
+    const details = [{ type: 'reasoning.text', text: 'why', signature: 'sig' }]
+    let capturedBody: string | null = null
+    const fetchOverride = async (_input: unknown, init?: RequestInit): Promise<Response> => {
+      capturedBody = String(init?.body)
+      return new Response(sseStream(textChunks(['ok'], 'stop')), { status: 200 })
+    }
+    const saved = wrapperAssistant([
+      {
+        type: 'thinking',
+        thinking: 'why',
+        providerOptions: { openrouterReasoningDetails: details },
+      },
+      { type: 'text', text: 'previous answer' },
+    ])
+    const req = makeRequest({
+      messages: [wrapperUser([{ type: 'text', text: 'hi' }]), saved, wrapperUser([{ type: 'text', text: 'more' }])],
+      systemPrompt: asSystemPrompt(['sys']),
+      context: { ...makeRequest().context, fetchOverride: fetchOverride as never },
+    })
+    const openrouterRoute: LLMRoute = { ...route, provider: 'openrouter' }
+    for await (const _ of queryOpenAIChat(openrouterRoute, req)) { /* drain */ }
+    const body = JSON.parse(capturedBody!) as { messages: Array<Record<string, unknown>> }
+    const assistantWire = body.messages.find(m => m.role === 'assistant')!
+    expect(assistantWire.reasoning_details).toEqual(details)
+    expect(assistantWire.reasoning_content).toBeUndefined()
   })
 
   test('retries a transient HTTP response before consuming the stream', async () => {

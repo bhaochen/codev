@@ -63,6 +63,9 @@ export type OpenAIChatMessage = {
   role: 'system' | 'user' | 'assistant' | 'tool'
   content: string | null | OpenAIChatMessagePart[]
   reasoning_content?: string
+  /** OpenRouter typed reasoning state (text/summary/encrypted entries) that
+   * must be echoed verbatim for multi-turn reasoning continuity. */
+  reasoning_details?: Array<Record<string, unknown>>
   tool_calls?: OpenAIChatToolCall[]
   tool_call_id?: string
 }
@@ -86,7 +89,7 @@ export type OpenAIChatWireChunk = Record<string, unknown> & {
       reasoning_content?: string | null
       reasoning?: string | null
       reasoning_text?: string | null
-      reasoning_details?: Array<{ text?: string }> | null
+      reasoning_details?: Array<Record<string, unknown>> | null
       tool_calls?: Array<{
         index?: number
         id?: string
@@ -147,6 +150,10 @@ export type OpenAIChatStreamEvent =
       delta:
         | { type: 'text_delta'; text: string }
         | { type: 'thinking_delta'; thinking: string }
+        | {
+            type: 'reasoning_details_delta'
+            reasoning_details: Array<Record<string, unknown>>
+          }
         | { type: 'input_json_delta'; partial_json: string }
     }
   | { type: 'content_block_stop'; index: number }
@@ -427,6 +434,14 @@ function pushMergedAssistant(
           ? msg.reasoning_content
           : `${last.reasoning_content}\n${msg.reasoning_content}`
     }
+    if (msg.reasoning_details && msg.reasoning_details.length > 0) {
+      last.reasoning_details = [
+        ...(last.reasoning_details || []),
+        ...msg.reasoning_details,
+      ]
+      // 已有结构性 reasoning 时不再重复发纯文本（与 OpenRouter 语义一致）
+      delete last.reasoning_content
+    }
     if (msg.tool_calls && msg.tool_calls.length > 0) {
       last.tool_calls = [...(last.tool_calls || []), ...msg.tool_calls]
     }
@@ -610,6 +625,7 @@ function userMessageContentToOpenAIChat(
 
 function assistantMessageContentToOpenAIChat(
   content: AgentMessageContent,
+  supportsReasoningDetails: boolean,
 ): OpenAIChatMessage[] {
   if (typeof content === 'string') {
     return [{ role: 'assistant', content }]
@@ -621,6 +637,7 @@ function assistantMessageContentToOpenAIChat(
   const textParts: string[] = []
   const toolCalls: OpenAIChatToolCall[] = []
   let reasoningContent: string | undefined
+  let reasoningDetails: Array<Record<string, unknown>> | undefined
 
   for (const block of content) {
     if (block.type === 'text') {
@@ -650,6 +667,17 @@ function assistantMessageContentToOpenAIChat(
             ? thinkingText
             : `${reasoningContent}\n${thinkingText}`
       }
+      const saved = (
+        block as unknown as {
+          providerOptions?: { openrouterReasoningDetails?: unknown }
+        }
+      ).providerOptions?.openrouterReasoningDetails
+      if (Array.isArray(saved) && saved.length > 0) {
+        reasoningDetails = [
+          ...(reasoningDetails ?? []),
+          ...(saved as Array<Record<string, unknown>>),
+        ]
+      }
     }
     // redacted_thinking / provider blocks that cannot map to Chat are ignored
   }
@@ -665,6 +693,11 @@ function assistantMessageContentToOpenAIChat(
   if (toolCalls.length > 0) {
     assistantMsg.tool_calls = toolCalls
   }
+  if (reasoningDetails !== undefined && supportsReasoningDetails) {
+    assistantMsg.reasoning_details = reasoningDetails
+    // details 已包含可读文本；同时回发两者会重复计入
+    delete assistantMsg.reasoning_content
+  }
   return [assistantMsg]
 }
 
@@ -675,9 +708,10 @@ function assistantMessageContentToOpenAIChat(
 export function agentMessagesToOpenAIChatMessages(
   messages: Array<AssistantMessage | UserMessage>,
   systemPrompt?: string,
-  options?: { supportsImages?: boolean },
+  options?: { supportsImages?: boolean; supportsReasoningDetails?: boolean },
 ): OpenAIChatMessage[] {
   const supportsImages = options?.supportsImages !== false
+  const supportsReasoningDetails = options?.supportsReasoningDetails === true
   const result: OpenAIChatMessage[] = []
 
   if (systemPrompt) {
@@ -689,7 +723,7 @@ export function agentMessagesToOpenAIChatMessages(
     const role = inner?.role === 'assistant' ? 'assistant' : 'user'
     const content = inner?.content
     for (const m of role === 'assistant'
-      ? assistantMessageContentToOpenAIChat(content)
+      ? assistantMessageContentToOpenAIChat(content, supportsReasoningDetails)
       : userMessageContentToOpenAIChat(content, supportsImages)) {
       pushMergedAssistant(result, m)
     }
@@ -836,6 +870,62 @@ export async function* adaptOpenAIChatSSE(
   let thinkingBlockOpen = false
   let textBlockOpen = false
 
+  // OpenRouter typed reasoning state: opaque entries (reasoning.text /
+  // reasoning.summary / encrypted) collected from deltas and attached to the
+  // thinking block via providerOptions so the next request can echo them.
+  // Adjacent fragments of the same logical block concatenate; anything else
+  // keeps its exact order (mirrors upstream collector semantics).
+  let reasoningDetails: Record<string, unknown>[] | undefined
+
+  function absorbReasoningDetails(values: unknown[]): void {
+    reasoningDetails ??= []
+    for (const value of values) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) continue
+      const detail = structuredClone(value) as Record<string, unknown>
+      const previous = reasoningDetails.at(-1)
+      const field =
+        detail.type === 'reasoning.text'
+          ? 'text'
+          : detail.type === 'reasoning.summary'
+            ? 'summary'
+            : undefined
+      const sameBlock =
+        previous !== undefined &&
+        previous.type === detail.type &&
+        ['id', 'index', 'format'].every(
+          key =>
+            previous[key] == null ||
+            detail[key] == null ||
+            previous[key] === detail[key],
+        )
+      if (field && previous) {
+        const joined =
+          String(previous[field] ?? '') + String(detail[field] ?? '')
+        Object.assign(previous, detail, { [field]: joined })
+      } else {
+        reasoningDetails.push(detail)
+      }
+    }
+  }
+
+  function* closeThinkingBlock(): Generator<OpenAIChatStreamEvent, void> {
+    if (!thinkingBlockOpen) return
+    if (reasoningDetails !== undefined) {
+      yield {
+        type: 'content_block_delta',
+        index: currentContentIndex,
+        delta: {
+          type: 'reasoning_details_delta',
+          reasoning_details: reasoningDetails,
+        },
+      }
+      reasoningDetails = undefined
+    }
+    yield { type: 'content_block_stop', index: currentContentIndex }
+    openBlockIndices.delete(currentContentIndex)
+    thinkingBlockOpen = false
+  }
+
   // OpenAI 原始 usage 跨 chunk 累计；归一化后四个字段互斥
   let rawInputTokens = 0
   let outputTokens = 0
@@ -873,11 +963,7 @@ export async function* adaptOpenAIChatSSE(
   function* pushText(text: string): Generator<OpenAIChatStreamEvent, void> {
     if (text === '') return
     if (!textBlockOpen) {
-      if (thinkingBlockOpen) {
-        yield { type: 'content_block_stop', index: currentContentIndex }
-        openBlockIndices.delete(currentContentIndex)
-        thinkingBlockOpen = false
-      }
+      yield* closeThinkingBlock()
       currentContentIndex++
       textBlockOpen = true
       openBlockIndices.add(currentContentIndex)
@@ -895,11 +981,7 @@ export async function* adaptOpenAIChatSSE(
   }
 
   function* emitDsmlToolBlocks(block: string): Generator<OpenAIChatStreamEvent, void> {
-    if (thinkingBlockOpen) {
-      yield { type: 'content_block_stop', index: currentContentIndex }
-      openBlockIndices.delete(currentContentIndex)
-      thinkingBlockOpen = false
-    }
+    yield* closeThinkingBlock()
     if (textBlockOpen) {
       yield { type: 'content_block_stop', index: currentContentIndex }
       openBlockIndices.delete(currentContentIndex)
@@ -1055,8 +1137,11 @@ export async function* adaptOpenAIChatSSE(
     if (!delta) continue
 
     // reasoning 系字段 → thinking 块。空字符串是有效信号，也必须是块（见头注释）。
+    const rawDetails = delta.reasoning_details
+    const hasDetails = Array.isArray(rawDetails) && rawDetails.length > 0
+    if (hasDetails) absorbReasoningDetails(rawDetails)
     const reasoningContent = extractOpenAIChatReasoningText(delta)
-    if (reasoningContent != null) {
+    if (reasoningContent != null || hasDetails) {
       if (!thinkingBlockOpen) {
         currentContentIndex++
         thinkingBlockOpen = true
@@ -1072,7 +1157,7 @@ export async function* adaptOpenAIChatSSE(
         }
       }
 
-      if (reasoningContent !== '') {
+      if (reasoningContent != null && reasoningContent !== '') {
         yield {
           type: 'content_block_delta',
           index: currentContentIndex,
@@ -1095,11 +1180,7 @@ export async function* adaptOpenAIChatSSE(
         const tcIndex = tc.index ?? 0
 
         if (!toolBlocks.has(tcIndex)) {
-          if (thinkingBlockOpen) {
-            yield { type: 'content_block_stop', index: currentContentIndex }
-            openBlockIndices.delete(currentContentIndex)
-            thinkingBlockOpen = false
-          }
+          yield* closeThinkingBlock()
           if (textBlockOpen) {
             yield { type: 'content_block_stop', index: currentContentIndex }
             openBlockIndices.delete(currentContentIndex)
@@ -1148,11 +1229,7 @@ export async function* adaptOpenAIChatSSE(
 
     // finish
     if (choice?.finish_reason) {
-      if (thinkingBlockOpen) {
-        yield { type: 'content_block_stop', index: currentContentIndex }
-        openBlockIndices.delete(currentContentIndex)
-        thinkingBlockOpen = false
-      }
+      yield* closeThinkingBlock()
       if (textBlockOpen) {
         yield { type: 'content_block_stop', index: currentContentIndex }
         openBlockIndices.delete(currentContentIndex)
@@ -1184,6 +1261,7 @@ export async function* adaptOpenAIChatSSE(
   }
 
   // 安全收尾：关闭仍开着的块
+  yield* closeThinkingBlock()
   for (const idx of openBlockIndices) {
     yield { type: 'content_block_stop', index: idx }
   }

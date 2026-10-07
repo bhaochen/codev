@@ -148,10 +148,16 @@ function anthropicToolResultBlockToAgent(block: ToolResultBlockParam): AgentTool
 }
 
 function anthropicThinkingBlockToAgent(block: ThinkingBlockParam): AgentThinkingBlock {
+  // providerOptions is the generic escape hatch (e.g. OpenRouter typed
+  // reasoning state attached by the Chat adapter); copy it through verbatim.
+  const providerOptions = (
+    block as unknown as { providerOptions?: AgentProviderOptions }
+  ).providerOptions
   return {
     type: 'thinking',
     thinking: block.thinking,
     signature: block.signature,
+    ...(providerOptions !== undefined && { providerOptions }),
   }
 }
 
