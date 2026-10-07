@@ -16,6 +16,7 @@ import { randomUUID } from 'crypto'
 import { httpRequest } from '../transport/http.js'
 import { requestWithRetry } from '../transport/retryHttpRequest.js'
 import { parseOpenAIChunksFromSSE } from '../transport/sse.js'
+import { detectUpstreamFailures } from './upstreamError.js'
 import { getSessionId } from '../../../bootstrap/state.js'
 import { getModelMaxOutputTokens } from '../../../utils/context.js'
 import { logForDebugging } from '../../../utils/debug.js'
@@ -146,7 +147,7 @@ export async function* queryOpenAICompatibleChat(
       throw new Error(`Upstream ${route.provider} failed (${response.status})${text ? `: ${text.slice(0, 800)}` : ''}`)
     }
     if (!response.body) throw new Error('Upstream response missing body')
-    const adaptedStream = adaptOpenAIChatSSE(parseOpenAIChunksFromSSE(response.body) as AsyncIterable<OpenAIChatWireChunk>, model, { includeCacheWriteTokens: false })
+    const adaptedStream = adaptOpenAIChatSSE(detectUpstreamFailures(parseOpenAIChunksFromSSE(response.body) as AsyncIterable<Record<string, unknown>>) as AsyncIterable<OpenAIChatWireChunk>, model, { includeCacheWriteTokens: false })
     const newMessages: AssistantMessage[] = []
     const contentBlocks: Record<number, Record<string, unknown>> = {}
     for await (const event of adaptedStream) {
