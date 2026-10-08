@@ -31,6 +31,12 @@ import type {
 import { isEnvTruthy, isEnvDefinedFalsy } from '../../../utils/envUtils.js'
 import { markToolErrorText } from './toolErrorText.js'
 import { UpstreamStreamError } from './upstreamError.js'
+import {
+  createRepetitionGuard,
+  formatRepetitionNotice,
+  type RepetitionDetection,
+  type RepetitionThresholds,
+} from '../../../utils/degenerateRepetition.js'
 
 // ============================================================================
 // Wire types
@@ -855,7 +861,11 @@ function mapFinishReason(reason: string): string {
 export async function* adaptOpenAIChatSSE(
   stream: AsyncIterable<OpenAIChatWireChunk>,
   model: string,
-  options?: { includeCacheWriteTokens?: boolean },
+  options?: {
+    includeCacheWriteTokens?: boolean
+    /** Repetition-cutoff thresholds; `false` disables the guard entirely. */
+    repetition?: RepetitionThresholds | false
+  },
 ): AsyncGenerator<OpenAIChatStreamEvent, void> {
   const messageId = newMessageId()
 
@@ -947,6 +957,17 @@ export async function* adaptOpenAIChatSSE(
   let pendingFinishReason: string | null = null
   let pendingHasToolCalls = false
 
+  // Degenerate-output guard: accumulate text and cut a loop off before the
+  // output-token ceiling. Disabled with OPENAI_DEGENERATE_REPETITION=0 or by
+  // passing `repetition: false`.
+  const repetitionGuard =
+    options?.repetition === false || process.env.OPENAI_DEGENERATE_REPETITION === '0'
+      ? null
+      : createRepetitionGuard(options?.repetition as RepetitionThresholds | undefined)
+  let repetitionStopped = false
+  let textBlockSeq = 0
+  let textAccum = ''
+
   // ------------------------------------------------------------------------
   // DeepSeek DSML 内联工具调用解析。部分 OpenAI 兼容端点（如某些 NVIDIA NIM
   // 部署的 deepseek-* 模型）不把 <｜DSML｜function_calls> 转成结构化
@@ -969,22 +990,51 @@ export async function* adaptOpenAIChatSSE(
   }
 
   function* pushText(text: string): Generator<OpenAIChatStreamEvent, void> {
-    if (text === '') return
+    if (text === '' || repetitionStopped) return
+    // Detect before emitting so the block can end exactly at keepChars.
+    let toEmit = text
+    let detection: RepetitionDetection | null = null
+    if (repetitionGuard && toolBlocks.size === 0) {
+      const prospective = textAccum + text
+      detection = repetitionGuard.check(textBlockSeq, prospective)
+      if (detection) {
+        const keep = Math.max(0, detection.keepChars - textAccum.length)
+        toEmit = text.slice(0, keep)
+      }
+    }
     if (!textBlockOpen) {
       yield* closeThinkingBlock()
       currentContentIndex++
+      textBlockSeq++
       textBlockOpen = true
       openBlockIndices.add(currentContentIndex)
+      textAccum = ''
       yield {
         type: 'content_block_start',
         index: currentContentIndex,
         content_block: { type: 'text', text: '' },
       }
     }
-    yield {
-      type: 'content_block_delta',
-      index: currentContentIndex,
-      delta: { type: 'text_delta', text },
+    if (toEmit !== '') {
+      yield {
+        type: 'content_block_delta',
+        index: currentContentIndex,
+        delta: { type: 'text_delta', text: toEmit },
+      }
+    }
+    if (detection) {
+      yield {
+        type: 'content_block_delta',
+        index: currentContentIndex,
+        delta: { type: 'text_delta', text: formatRepetitionNotice(detection) },
+      }
+      yield { type: 'content_block_stop', index: currentContentIndex }
+      openBlockIndices.delete(currentContentIndex)
+      textBlockOpen = false
+      textAccum = ''
+      repetitionStopped = true
+    } else {
+      textAccum += toEmit
     }
   }
 
@@ -1301,16 +1351,25 @@ export async function* adaptOpenAIChatSSE(
       pendingFinishReason = choice.finish_reason
       pendingHasToolCalls = toolBlocks.size > 0 || dsmlHadToolCalls
     }
+
+    // A detected loop ends the turn cleanly instead of burning tokens to the
+    // ceiling. pushText already closed the text block; synthesize a stop so
+    // the client finalizes with a real stop_reason.
+    if (repetitionStopped) {
+      pendingFinishReason = 'stop'
+      pendingHasToolCalls = false
+      break
+    }
   }
 
   // DSML 流被截断（未收到结束标记）时，把已缓冲内容原文透出，避免静默吞掉
-  if (dsmlMode) {
+  if (dsmlMode && !repetitionStopped) {
     const raw = DSML_START + dsmlBuffer
     dsmlMode = false
     dsmlBuffer = ''
     yield* pushText(raw)
   }
-  if (textHoldback !== '') {
+  if (textHoldback !== '' && !repetitionStopped) {
     const held = textHoldback
     textHoldback = ''
     yield* pushText(held)

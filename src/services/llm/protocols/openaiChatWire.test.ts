@@ -862,6 +862,38 @@ describe('adaptOpenAIChatSSE', () => {
     ).rejects.toThrow(/missing or duplicate/)
   })
 
+  test('a degenerate output loop is cut with a notice and a clean stop', async () => {
+    const loop = 'abcd'.repeat(100)
+    const events: OpenAIChatStreamEvent[] = []
+    for await (const ev of adaptOpenAIChatSSE(
+      parseOpenAIChunksFromSSE(
+        sseStream([
+          chatDelta('chat.completion.chunk', { id: 'c', choices: [{ delta: { content: loop }, index: 0 }] }),
+          chatDelta('chat.completion.chunk', { id: 'c', choices: [{ delta: { content: loop }, index: 0 }] }),
+          chatDelta('chat.completion.chunk', { id: 'c', choices: [{ delta: { content: loop }, index: 0 }] }),
+          chatDelta('chat.completion.chunk', { id: 'c', choices: [{ delta: { content: loop }, index: 0 }] }),
+        ]),
+      ),
+      'm',
+      { repetition: { minRepeats: 5, minRepeatedChars: 30 } },
+    )) {
+      events.push(ev)
+    }
+    const text = events
+      .flatMap(e =>
+        e.type === 'content_block_delta' && e.delta.type === 'text_delta'
+          ? [e.delta.text]
+          : [],
+      )
+      .join('')
+    expect(text).toContain('[stopped: output began repeating')
+    expect(text.length).toBeLessThan(loop.length * 4)
+    expect(events.some(e => e.type === 'message_stop')).toBe(true)
+    expect(
+      events.some(e => e.type === 'message_delta' && Boolean(e.delta.stop_reason)),
+    ).toBe(true)
+  })
+
   test('tool_calls stream input_json_delta and close at finish', async () => {
     const events = await collectEvents([
       chatDelta('chat.completion.chunk', {

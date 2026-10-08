@@ -77,6 +77,10 @@ export async function* parseSSERaw(
       for (const line of lines) yield* handleLine(line)
     }
   } finally {
+    // A consumer that stops early (e.g. a degenerate-repetition cutoff) leaves
+    // the upstream body open unless we cancel it here; releaseLock alone is not
+    // enough. Cancelling an already-finished body resolves harmlessly.
+    await reader.cancel().catch(() => {})
     reader.releaseLock()
   }
 }
