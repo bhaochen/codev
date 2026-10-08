@@ -5,6 +5,10 @@ import type { QuerySource } from '../../constants/querySource.js'
 import type { ToolUseContext } from '../../Tool.js'
 import type { Message } from '../../types/message.js'
 import { getGlobalConfig } from '../../utils/config.js'
+import {
+  getConfiguredThresholdPercent,
+  getConfiguredWindowCap,
+} from '../../utils/compactionConfig.js'
 import { getContextWindowForModel } from '../../utils/context.js'
 import { logForDebugging } from '../../utils/debug.js'
 import {
@@ -46,6 +50,12 @@ export function getEffectiveContextWindowSize(model: string): number {
     if (!isNaN(parsed) && parsed > 0) {
       contextWindow = Math.min(contextWindow, parsed)
     }
+  }
+
+  // Persisted ceiling (config): behave as if the window were at most this large.
+  const configuredCap = getConfiguredWindowCap()
+  if (configuredCap !== undefined) {
+    contextWindow = Math.min(contextWindow, configuredCap)
   }
 
   // For small context windows (e.g., local models with 8K-16K), ensure we don't
@@ -100,6 +110,16 @@ export function getAutoCompactThreshold(model: string): number {
     if (!isNaN(parsed) && parsed > 0 && parsed <= 100) {
       return Math.floor(effectiveContextWindow * (parsed / 100))
     }
+  }
+
+  // Persisted threshold percentage (config): compact when the usable window is
+  // this full. Undefined keeps the auto behavior below.
+  const configuredPercent = getConfiguredThresholdPercent()
+  if (configuredPercent !== undefined) {
+    return Math.max(
+      Math.floor(effectiveContextWindow * (configuredPercent / 100)),
+      1_000,
+    )
   }
 
   // Bare mode shrinks the prompt payload substantially, so compact should trigger

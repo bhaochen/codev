@@ -262,6 +262,8 @@ export type GlobalConfig = {
   bypassPermissionsModeAccepted?: boolean
   hasUsedBackslashReturn?: boolean
   autoCompactEnabled: boolean // Controls whether auto-compact is enabled
+  autoCompactThresholdPercent?: number // Compact when the usable window is this full; undefined = auto
+  autoCompactWindowCap?: number // Absolute ceiling on the effective window; undefined = none
   showTurnDuration: boolean // Controls whether to show turn duration message (e.g., "Cooked for 1m 6s")
   bareModeEnabled: boolean // Legacy max bare mode switch
   bareModeLevel?: 'extreme' | 'ultra' | 'max' | 'high' | 'medium' | 'low'
@@ -685,6 +687,8 @@ export const GLOBAL_CONFIG_KEYS = [
   'bareModeEnabled',
   'bareModeLevel',
   'autoCompactEnabled',
+  'autoCompactThresholdPercent',
+  'autoCompactWindowCap',
   'showTurnDuration',
   'diffTool',
   'env',
