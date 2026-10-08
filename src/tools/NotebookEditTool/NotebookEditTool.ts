@@ -15,7 +15,7 @@ import { getFileModificationTime, writeTextContent } from '../../utils/file.js'
 import { readFileSyncWithMetadata } from '../../utils/fileRead.js'
 import { safeParseJSON } from '../../utils/json.js'
 import { lazySchema } from '../../utils/lazySchema.js'
-import { parseCellId } from '../../utils/notebook.js'
+import { findNotebookCellIndex, parseCellId } from '../../utils/notebook.js'
 import { checkWritePermissionForTool } from '../../utils/permissions/filesystem.js'
 import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js'
 import { jsonParse, jsonStringify } from '../../utils/slowOperations.js'
@@ -277,28 +277,21 @@ export const NotebookEditTool = buildTool({
           errorCode: 7,
         }
       }
-    } else {
-      // First try to find the cell by its actual ID
-      const cellIndex = notebook.cells.findIndex(cell => cell.id === cell_id)
-
-      if (cellIndex === -1) {
-        // If not found, try to parse as a numeric index (cell-N format)
-        const parsedCellIndex = parseCellId(cell_id)
-        if (parsedCellIndex !== undefined) {
-          if (!notebook.cells[parsedCellIndex]) {
-            return {
-              result: false,
-              message: `Cell with index ${parsedCellIndex} does not exist in notebook.`,
-              errorCode: 7,
-            }
-          }
-        } else {
-          return {
-            result: false,
-            message: `Cell with ID "${cell_id}" not found in notebook.`,
-            errorCode: 8,
-          }
+    } else if (findNotebookCellIndex(notebook.cells, cell_id) === -1) {
+      // A positional id may only name a cell that has NO stored id; a position
+      // naming an id-bearing cell is stale (inserts/deletes shift positions).
+      const parsedCellIndex = parseCellId(cell_id)
+      if (parsedCellIndex !== undefined && !notebook.cells[parsedCellIndex]) {
+        return {
+          result: false,
+          message: `Cell with index ${parsedCellIndex} does not exist in notebook.`,
+          errorCode: 7,
         }
+      }
+      return {
+        result: false,
+        message: `Cell with ID "${cell_id}" not found in notebook.`,
+        errorCode: 8,
       }
     }
 
@@ -363,16 +356,7 @@ export const NotebookEditTool = buildTool({
       if (!cell_id) {
         cellIndex = 0 // Default to inserting at the beginning if no cell_id is provided
       } else {
-        // First try to find the cell by its actual ID
-        cellIndex = notebook.cells.findIndex(cell => cell.id === cell_id)
-
-        // If not found, try to parse as a numeric index (cell-N format)
-        if (cellIndex === -1) {
-          const parsedCellIndex = parseCellId(cell_id)
-          if (parsedCellIndex !== undefined) {
-            cellIndex = parsedCellIndex
-          }
-        }
+        cellIndex = findNotebookCellIndex(notebook.cells, cell_id)
 
         if (originalEditMode === 'insert') {
           cellIndex += 1 // Insert after the cell with this ID
