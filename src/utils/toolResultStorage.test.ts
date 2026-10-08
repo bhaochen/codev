@@ -18,6 +18,14 @@ describe('generatePreview', () => {
     expect(isWellFormedText(preview)).toBe(true)
   })
 
+  test('preview is bounded in UTF-8 bytes, not code units', () => {
+    const content = '中'.repeat(100) // 300 bytes, 100 code units
+    const { preview, hasMore } = generatePreview(content, 30)
+    expect(hasMore).toBe(true)
+    expect(Buffer.byteLength(preview, 'utf8')).toBeLessThanOrEqual(30)
+    expect(isWellFormedText(preview)).toBe(true)
+  })
+
   test('prefers a newline boundary and stays well-formed', () => {
     const content = `${'a'.repeat(40)}\n${'b'.repeat(60)}${EMOJI}`
     const { preview } = generatePreview(content, 50)

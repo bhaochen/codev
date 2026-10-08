@@ -23,7 +23,8 @@ import { formatFileSize } from './format.js'
 import { logError } from './log.js'
 import { getProjectDir } from './sessionStorage.js'
 import { jsonStringify } from './slowOperations.js'
-import { surrogateSafeEnd, toWellFormedText } from './wellFormedText.js'
+import { truncateUtf8ToBytes } from './utf8.js'
+import { toWellFormedText } from './wellFormedText.js'
 
 // Subdirectory name for tool results within a session
 export const TOOL_RESULTS_SUBDIR = 'tool-results'
@@ -379,22 +380,21 @@ export function generatePreview(
   content: string,
   maxBytes: number,
 ): { preview: string; hasMore: boolean } {
-  if (content.length <= maxBytes) {
+  // The budget is in BYTES: measure (and cut) in UTF-8 so a CJK/emoji payload
+  // cannot blow past the advertised preview size.
+  if (Buffer.byteLength(content, 'utf8') <= maxBytes) {
     return { preview: content, hasMore: false }
   }
 
-  // Find the last newline within the limit to avoid cutting mid-line
-  const truncated = content.slice(0, surrogateSafeEnd(content, maxBytes))
-  const lastNewline = truncated.lastIndexOf('\n')
+  const head = truncateUtf8ToBytes(content, maxBytes)
+  // Find the last newline within the limit to avoid cutting mid-line.
+  const lastNewline = head.lastIndexOf('\n')
 
   // If we found a newline reasonably close to the limit, use it
-  // Otherwise fall back to the exact limit
-  const cutPoint = lastNewline > maxBytes * 0.5 ? lastNewline : maxBytes
+  // Otherwise fall back to the byte-bounded head
+  const cutPoint = lastNewline > head.length * 0.5 ? lastNewline : head.length
 
-  return {
-    preview: content.slice(0, surrogateSafeEnd(content, cutPoint)),
-    hasMore: true,
-  }
+  return { preview: head.slice(0, cutPoint), hasMore: true }
 }
 
 /**
