@@ -52,6 +52,13 @@ import {
 import type { ProviderId } from './services/llm/types.js'
 import { getAPIProvider } from './utils/model/providers.js'
 import {
+  buildLoopBreakerGuidance,
+  collectToolCalls,
+  DEFAULT_SCAN_WINDOW,
+  detectToolLoop,
+} from './utils/toolLedger.js'
+import { sanitizeToolNameForAnalytics } from './services/analytics/metadata.js'
+import {
   createUserMessage,
   createUserInterruptionMessage,
   normalizeMessagesForAPI,
@@ -566,6 +573,9 @@ async function* queryLoop(
 
     const assistantMessages: AssistantMessage[] = []
     const toolResults: (UserMessage | AttachmentMessage)[] = []
+    // One loop-breaker nudge per (tool, input) per query, so a genuine loop
+    // is broken once rather than nagged every iteration.
+    const loopBreakersSent = new Set<string>()
     // @see https://docs.claude.com/en/docs/build-with-claude/tool-use
     // Note: stop_reason === 'tool_use' is unreliable -- it's not always set correctly.
     // Set during streaming whenever a tool_use block arrives — the sole
@@ -1735,6 +1745,41 @@ async function* queryLoop(
       queryChainId: queryChainIdForAnalytics,
       queryDepth: queryTracking.depth,
     })
+
+    // Tool thrash: the same tool, the same arguments, failing over and over.
+    // Detection is read-only over the history; the nudge is appended after every
+    // tool result and attachment (never interleaved — the API rejects that) and
+    // never rewrites anything, so the cached prefix is untouched.
+    {
+      const detection = detectToolLoop(
+        collectToolCalls(
+          [...messagesForQuery, ...assistantMessages, ...toolResults] as Parameters<
+            typeof collectToolCalls
+          >[0],
+          { scanLastMessages: DEFAULT_SCAN_WINDOW },
+        ),
+      )
+      const breakerKey = detection
+        ? `${detection.name} ${detection.inputKey}`
+        : null
+      if (detection && breakerKey && !loopBreakersSent.has(breakerKey)) {
+        loopBreakersSent.add(breakerKey)
+        logEvent('tengu_tool_loop_detected', {
+          toolName: sanitizeToolNameForAnalytics(detection.name),
+          repeatCount: detection.count,
+          queryChainId: queryChainIdForAnalytics,
+          queryDepth: queryTracking.depth,
+        })
+        // Pushed but never yielded, so it reaches the model and no user-facing
+        // surface. isMeta keeps it out of any path that does yield.
+        toolResults.push(
+          createUserMessage({
+            content: buildLoopBreakerGuidance(detection),
+            isMeta: true,
+          }),
+        )
+      }
+    }
 
     // Refresh tools between turns so newly-connected MCP servers become available
     if (updatedToolUseContext.options.refreshTools) {
