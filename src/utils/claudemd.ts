@@ -928,6 +928,8 @@ export const getMemoryFiles = memoize(
 
       // Try reading CLAUDE.md (Project) - only if projectSettings is enabled
       if (isSettingSourceEnabled('projectSettings') && !skipProject) {
+        const nativeBefore = result.length
+
         const projectPath = join(dir, 'CLAUDE.md')
         result.push(
           ...(await processMemoryFile(
@@ -949,10 +951,31 @@ export const getMemoryFiles = memoize(
           )),
         )
 
+        // No CLAUDE.md here: fall back to the cross-CLI AGENTS.md convention
+        // (OpenCode and others) so an AGENTS.md-only repo still gets its rules.
+        // Read only as a fallback so a repo carrying both does not double up.
+        if (result.length === nativeBefore) {
+          result.push(
+            ...(await processMemoryFile(
+              join(dir, 'AGENTS.md'),
+              'Project',
+              processedPaths,
+              includeExternal,
+            )),
+          )
+          result.push(
+            ...(await processMemoryFile(
+              join(dir, '.opencode', 'AGENTS.md'),
+              'Project',
+              processedPaths,
+              includeExternal,
+            )),
+          )
+        }
+
         // Native .claude/rules, then the rule directories other tools keep.
         // Each foreign dialect decides whether an unscoped rule is always-on
         // or intentionally dormant.
-        const nativeRulesBefore = result.length
         const nativeRuleDir = getNativeRuleDir(dir)
         result.push(
           ...(await processMdRules({
@@ -963,7 +986,10 @@ export const getMemoryFiles = memoize(
             conditionalRule: false,
           })),
         )
-        const hadNativeInstructions = result.length > nativeRulesBefore
+        // "Native instructions" spans CLAUDE.md/.claude/CLAUDE.md, the fallback
+        // AGENTS.md, and native rules — any of them suppresses the generic
+        // whole-project fallback files below.
+        const hadNativeInstructions = result.length > nativeBefore
         for (const descriptor of getForeignRuleDirs(dir)) {
           result.push(
             ...(await processMdRules({
@@ -1326,6 +1352,7 @@ export async function getMemoryFilesForNestedDirectory(
 
   // Process project memory files (CLAUDE.md and .claude/CLAUDE.md)
   if (isSettingSourceEnabled('projectSettings')) {
+    const nativeBefore = result.length
     const projectPath = join(dir, 'CLAUDE.md')
     result.push(
       ...(await processMemoryFile(
@@ -1344,6 +1371,25 @@ export async function getMemoryFilesForNestedDirectory(
         false,
       )),
     )
+    // Fall back to AGENTS.md when this directory has no CLAUDE.md.
+    if (result.length === nativeBefore) {
+      result.push(
+        ...(await processMemoryFile(
+          join(dir, 'AGENTS.md'),
+          'Project',
+          processedPaths,
+          false,
+        )),
+      )
+      result.push(
+        ...(await processMemoryFile(
+          join(dir, '.opencode', 'AGENTS.md'),
+          'Project',
+          processedPaths,
+          false,
+        )),
+      )
+    }
   }
 
   // Process local memory file (CLAUDE.local.md)
