@@ -212,4 +212,37 @@ describe('toolCallGuard', () => {
       expect(r.status).toBe('retry')
     })
   })
+
+  describe('unknown MCP arguments', () => {
+    const strictMcp = {
+      name: 'mcp__srv__do',
+      inputSchema: z.object({}).passthrough(),
+      inputJSONSchema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: { query: { type: 'string' } },
+      },
+    } as unknown as Tool
+
+    test('rejects a param the strict JSON schema does not declare', () => {
+      const r = guardToolInput(strictMcp, { query: 'a', bogus: 1 }, 'mcp-unknown-1')
+      expect(r.status).toBe('retry')
+      expect(r.issuesMessage).toContain('bogus')
+    })
+
+    test('accepts declared params only', () => {
+      const r = guardToolInput(strictMcp, { query: 'a' }, 'mcp-ok-1')
+      expect(r.status).toBe('ok')
+    })
+
+    test('a permissive JSON schema still accepts extras', () => {
+      const permissive = {
+        name: 'mcp__srv__perm',
+        inputSchema: z.object({}).passthrough(),
+        inputJSONSchema: { type: 'object', properties: { query: {} } },
+      } as unknown as Tool
+      const r = guardToolInput(permissive, { query: 'a', extra: 1 }, 'mcp-perm-1')
+      expect(r.status).toBe('ok')
+    })
+  })
 })

@@ -1,6 +1,7 @@
 import { z } from 'zod/v4'
 import type { Tool } from '../../Tool.js'
 import { coerceToolInput } from '../../utils/coerceToolInput.js'
+import { checkUnknownToolArguments } from '../../utils/blindToolCallValidation.js'
 
 /**
  * Generic Tool Call Recovery layer.
@@ -375,6 +376,49 @@ function buildRecord(
  * recovery outcome ('retry' | 'fatal') carrying the Zod error for the caller to
  * surface back to the model.
  */
+/**
+ * Reject invented parameters on JSON-Schema tools (MCP) whose schema forbids
+ * extras — the one check the passthrough Zod schema cannot make. Returns null
+ * when the input is acceptable.
+ */
+function unknownArgumentsGuard(
+  tool: Tool,
+  input: unknown,
+  toolUseID: string,
+  repairs: RepairAction[],
+): GuardResult | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null
+  const check = checkUnknownToolArguments(
+    tool,
+    input as Record<string, unknown>,
+  )
+  if (check.ok) return null
+  const message = (check as { message: string }).message
+
+  const { attempt, capped } = recordAttempt(toolUseID, tool.name)
+  const disposition: RepairDisposition = capped ? 'fatal' : 'retry'
+  const error = new z.ZodError([{ code: 'custom', path: [], message }])
+  return {
+    status: disposition === 'fatal' ? 'fatal' : 'retry',
+    error,
+    issuesMessage: message,
+    disposition,
+    repairs,
+    attempt,
+    recovery: buildRecord(
+      tool.name,
+      toolUseID,
+      input,
+      message,
+      repairs[0] ?? null,
+      null,
+      false,
+      disposition,
+      attempt,
+    ),
+  }
+}
+
 export function guardToolInput(
   tool: Tool,
   input: unknown,
@@ -391,6 +435,8 @@ export function guardToolInput(
   const parsed = tool.inputSchema.safeParse(coerced)
 
   if (parsed.success) {
+    const unknown = unknownArgumentsGuard(tool, coerced, toolUseID, [])
+    if (unknown) return unknown
     if (coercedChanged) {
       const { attempt } = recordAttempt(toolUseID, tool.name)
       const repair: RepairAction = {
@@ -461,6 +507,8 @@ export function guardToolInput(
   }
 
   if (repairs.length > 0 && reParsed.success) {
+    const unknown = unknownArgumentsGuard(tool, repaired, toolUseID, repairs)
+    if (unknown) return unknown
     return {
       status: 'repaired',
       parsedInput: reParsed,
