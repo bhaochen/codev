@@ -37,6 +37,10 @@ import {
   type RepetitionDetection,
   type RepetitionThresholds,
 } from '../../../utils/degenerateRepetition.js'
+import {
+  InFlightToolCall,
+  isOutputCapTruncation,
+} from '../../../utils/outputCapTruncation.js'
 
 // ============================================================================
 // Wire types
@@ -164,6 +168,7 @@ export type OpenAIChatStreamEvent =
         | { type: 'input_json_delta'; partial_json: string }
     }
   | { type: 'content_block_stop'; index: number }
+  | { type: 'tool_call_truncated'; id: string }
   | {
       type: 'message_delta'
       delta: { stop_reason: string; stop_sequence: null }
@@ -956,6 +961,11 @@ export async function* adaptOpenAIChatSSE(
 
   let pendingFinishReason: string | null = null
   let pendingHasToolCalls = false
+  // The tool call still receiving argument deltas is the only one that can be
+  // half-written when the output cap is hit; its id is surfaced for the client
+  // to drop.
+  const inFlightToolCall = new InFlightToolCall<number>()
+  let truncatedToolId: string | undefined
 
   // Degenerate-output guard: accumulate text and cut a loop off before the
   // output-token ceiling. Disabled with OPENAI_DEGENERATE_REPETITION=0 or by
@@ -991,6 +1001,8 @@ export async function* adaptOpenAIChatSSE(
 
   function* pushText(text: string): Generator<OpenAIChatStreamEvent, void> {
     if (text === '' || repetitionStopped) return
+    // Text after a tool call proves the model moved on and closed it.
+    inFlightToolCall.noteOtherOutput()
     // Detect before emitting so the block can end exactly at keepChars.
     let toEmit = text
     let detection: RepetitionDetection | null = null
@@ -1200,6 +1212,7 @@ export async function* adaptOpenAIChatSSE(
     if (hasDetails) absorbReasoningDetails(rawDetails)
     const reasoningContent = extractOpenAIChatReasoningText(delta)
     if (reasoningContent != null || hasDetails) {
+      inFlightToolCall.noteOtherOutput()
       if (!thinkingBlockOpen) {
         currentContentIndex++
         thinkingBlockOpen = true
@@ -1304,6 +1317,7 @@ export async function* adaptOpenAIChatSSE(
           throw toolCallFailure('Tool argument deltas must be JSON text.')
         }
         if (argFragment) {
+          inFlightToolCall.noteArgs(tcIndex)
           const block = toolBlocks.get(tcIndex)!
           block.arguments += argFragment
           yield {
@@ -1348,6 +1362,16 @@ export async function* adaptOpenAIChatSSE(
         }
       }
 
+      // Output-cap truncation: the call still receiving argument deltas is
+      // half-written. Surface its id so the client drops it (keeping the
+      // tool_use/tool_result pairing intact).
+      const dropIndex = inFlightToolCall.toDrop(
+        isOutputCapTruncation(choice.finish_reason),
+      )
+      if (dropIndex !== null && toolBlocks.has(dropIndex)) {
+        truncatedToolId = toolBlocks.get(dropIndex)!.id
+      }
+
       pendingFinishReason = choice.finish_reason
       pendingHasToolCalls = toolBlocks.size > 0 || dsmlHadToolCalls
     }
@@ -1381,14 +1405,17 @@ export async function* adaptOpenAIChatSSE(
     yield { type: 'content_block_stop', index: idx }
   }
 
+  if (truncatedToolId !== undefined) {
+    yield { type: 'tool_call_truncated', id: truncatedToolId }
+  }
+
   // message_delta + message_stop
   if (pendingFinishReason !== null) {
-    const stopReason =
-      pendingFinishReason === 'length'
-        ? 'max_tokens'
-        : pendingHasToolCalls
-          ? 'tool_use'
-          : mapFinishReason(pendingFinishReason)
+    const stopReason = isOutputCapTruncation(pendingFinishReason)
+      ? 'max_tokens'
+      : pendingHasToolCalls
+        ? 'tool_use'
+        : mapFinishReason(pendingFinishReason)
 
     yield {
       type: 'message_delta',

@@ -308,6 +308,21 @@ export async function* queryOpenAIChat(
     // completion cannot fail midway the way the stream did.
     let recovery = false
     let newMessages: AssistantMessage[] = []
+    // Tool_use messages are withheld until the turn's stop reason is known, so
+    // a call left half-written by an output-cap truncation can be dropped
+    // before it ever reaches the caller (keeping tool_use/tool_result pairing).
+    let pendingToolMessages: Array<{ msg: AssistantMessage; id?: string }> = []
+    const truncatedToolIds = new Set<string>()
+    function* flushPendingToolMessages(): Generator<AssistantMessage, void> {
+      const pending = pendingToolMessages
+      pendingToolMessages = []
+      for (const { msg, id } of pending) {
+        if (id !== undefined && truncatedToolIds.has(id)) continue
+        newMessages.push(msg)
+        published = true
+        yield msg
+      }
+    }
     for (;;) {
       const attemptBody = recovery ? buildRecoveryBody() : body
       response = await sendRequest(attemptBody)
@@ -330,6 +345,8 @@ export async function* queryOpenAIChat(
       stopReason = null
       usage = { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
       newMessages = []
+      pendingToolMessages = []
+      truncatedToolIds.clear()
       const chunkSource: AsyncIterable<Record<string, unknown>> = recovery
         ? (async function* () {
             for (const chunk of completionToChunks(await response.json())) yield chunk
@@ -386,12 +403,27 @@ export async function* queryOpenAIChat(
               uuid: randomUUID(),
               timestamp: new Date().toISOString(),
             } as unknown as AssistantMessage
-            newMessages.push(m)
-            published = true
-            yield m
+            if (contentBlock.type === 'tool_use') {
+              pendingToolMessages.push({
+                msg: m,
+                id:
+                  typeof contentBlock.id === 'string'
+                    ? contentBlock.id
+                    : undefined,
+              })
+            } else {
+              newMessages.push(m)
+              published = true
+              yield m
+            }
+            break
+          }
+          case 'tool_call_truncated': {
+            truncatedToolIds.add(event.id)
             break
           }
           case 'message_delta': {
+            yield* flushPendingToolMessages()
             const deltaUsage = event.usage
             if (deltaUsage) usage = updateOpenAIUsage(usage, deltaUsage as unknown as Parameters<typeof updateOpenAIUsage>[1])
             if (event.delta?.stop_reason != null) stopReason = event.delta.stop_reason
@@ -411,6 +443,8 @@ export async function* queryOpenAIChat(
         published = true
         yield { type: 'stream_event', event, ...(event.type === 'message_start' ? { ttftMs } : undefined) } as unknown as StreamEvent
       }
+      // No message_delta (stream ended without a finish reason): flush anyway.
+      yield* flushPendingToolMessages()
       break
       } catch (error) {
         if (isAbortError(error)) throw error

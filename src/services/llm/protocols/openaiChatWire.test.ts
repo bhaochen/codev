@@ -862,6 +862,45 @@ describe('adaptOpenAIChatSSE', () => {
     ).rejects.toThrow(/missing or duplicate/)
   })
 
+  test('output-cap truncation surfaces the in-flight tool call to drop', async () => {
+    const events = await collectEvents([
+      chatDelta('chat.completion.chunk', {
+        id: 'c',
+        choices: [{ delta: { tool_calls: [{ index: 0, id: 'a', function: { name: 'x', arguments: '{}' } }] }, index: 0 }],
+      }),
+      chatDelta('chat.completion.chunk', {
+        id: 'c',
+        choices: [{ delta: { tool_calls: [{ index: 1, id: 'b', function: { name: 'y', arguments: '{"p":' } }] }, index: 0 }],
+      }),
+      chatDelta('chat.completion.chunk', {
+        id: 'c',
+        choices: [{ delta: {}, index: 0, finish_reason: 'length' }],
+      }),
+    ])
+    const truncated = events.flatMap(e =>
+      e.type === 'tool_call_truncated' ? [e.id] : [],
+    )
+    expect(truncated).toEqual(['b'])
+    const delta = events.find(e => e.type === 'message_delta')
+    expect(delta && delta.type === 'message_delta' && delta.delta.stop_reason).toBe(
+      'max_tokens',
+    )
+  })
+
+  test('a normal tool finish surfaces no truncation', async () => {
+    const events = await collectEvents([
+      chatDelta('chat.completion.chunk', {
+        id: 'c',
+        choices: [{ delta: { tool_calls: [{ index: 0, id: 'a', function: { name: 'x', arguments: '{}' } }] }, index: 0 }],
+      }),
+      chatDelta('chat.completion.chunk', {
+        id: 'c',
+        choices: [{ delta: {}, index: 0, finish_reason: 'tool_calls' }],
+      }),
+    ])
+    expect(events.some(e => e.type === 'tool_call_truncated')).toBe(false)
+  })
+
   test('a degenerate output loop is cut with a notice and a clean stop', async () => {
     const loop = 'abcd'.repeat(100)
     const events: OpenAIChatStreamEvent[] = []
@@ -1275,6 +1314,52 @@ describe('queryOpenAIChat integration', () => {
 
     for await (const _ of queryOpenAIChat(route, req)) { /* drain */ }
     expect(countStamped(bodies[2]!)).toBe(0)
+  })
+
+  test('drops the half-written tool call when the output cap is hit', async () => {
+    const { queryOpenAIChat } = await import('../clients/openaiChat.js')
+    const req = makeRequest({
+      messages: [wrapperUser([{ type: 'text', text: 'hi' }])],
+      systemPrompt: asSystemPrompt(['sys']),
+      context: {
+        ...makeRequest().context,
+        fetchOverride: fakeFetch([
+          chatDelta('chat.completion.chunk', { id: 'c', choices: [{ delta: { tool_calls: [{ index: 0, id: 'a', function: { name: 'x', arguments: '{}' } }] }, index: 0 }] }),
+          chatDelta('chat.completion.chunk', { id: 'c', choices: [{ delta: { tool_calls: [{ index: 1, id: 'b', function: { name: 'y', arguments: '{"p":' } }] }, index: 0 }] }),
+          chatDelta('chat.completion.chunk', { id: 'c', choices: [{ delta: {}, index: 0, finish_reason: 'length' }] }),
+        ]) as never,
+      },
+    })
+    const toolIds: string[] = []
+    for await (const raw of queryOpenAIChat(route, req)) {
+      if ((raw as { type: string }).type !== 'assistant') continue
+      const content = (raw as { message: { content: Array<{ type: string; id?: string }> } }).message.content
+      for (const b of content) if (b.type === 'tool_use' && b.id) toolIds.push(b.id)
+    }
+    expect(toolIds).toEqual(['a'])
+  })
+
+  test('keeps every tool call on a normal finish', async () => {
+    const { queryOpenAIChat } = await import('../clients/openaiChat.js')
+    const req = makeRequest({
+      messages: [wrapperUser([{ type: 'text', text: 'hi' }])],
+      systemPrompt: asSystemPrompt(['sys']),
+      context: {
+        ...makeRequest().context,
+        fetchOverride: fakeFetch([
+          chatDelta('chat.completion.chunk', { id: 'c', choices: [{ delta: { tool_calls: [{ index: 0, id: 'a', function: { name: 'x', arguments: '{}' } }] }, index: 0 }] }),
+          chatDelta('chat.completion.chunk', { id: 'c', choices: [{ delta: { tool_calls: [{ index: 1, id: 'b', function: { name: 'y', arguments: '{}' } }] }, index: 0 }] }),
+          chatDelta('chat.completion.chunk', { id: 'c', choices: [{ delta: {}, index: 0, finish_reason: 'tool_calls' }] }),
+        ]) as never,
+      },
+    })
+    const toolIds: string[] = []
+    for await (const raw of queryOpenAIChat(route, req)) {
+      if ((raw as { type: string }).type !== 'assistant') continue
+      const content = (raw as { message: { content: Array<{ type: string; id?: string }> } }).message.content
+      for (const b of content) if (b.type === 'tool_use' && b.id) toolIds.push(b.id)
+    }
+    expect(toolIds).toEqual(['a', 'b'])
   })
 
   test('retries a transient HTTP response before consuming the stream', async () => {
