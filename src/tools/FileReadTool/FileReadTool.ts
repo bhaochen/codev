@@ -39,6 +39,7 @@ import {
   suggestPathUnderCwd,
 } from '../../utils/file.js'
 import { recordFileRead } from '../../utils/readHistory.js'
+import { searchToolResultFile } from '../../utils/toolResultSearch.js'
 import { logFileOperation } from '../../utils/fileOperationAnalytics.js'
 import { formatFileSize } from '../../utils/format.js'
 import { getFsImplementation } from '../../utils/fsOperations.js'
@@ -243,6 +244,12 @@ const inputSchema = lazySchema(() =>
     limit: semanticNumber(z.number().int().positive().optional()).describe(
       'The number of lines to read. Only provide if the file is too large to read at once.',
     ),
+    query: z
+      .string()
+      .optional()
+      .describe(
+        'Search the file for this literal, case-insensitive substring and return the matching lines with their line numbers instead of the file body. Useful for finding one entry in a large file or a persisted tool output. Not a regex.',
+      ),
     skeleton: z.boolean().optional().describe(
       'Return a structural outline of a supported code file, eliding long function bodies. Whole-file reads of large code files use this automatically; false forces full content.',
     ),
@@ -525,7 +532,7 @@ export const FileReadTool = buildTool({
     return { result: true }
   },
   async call(
-    { file_path, offset = 1, limit = undefined, pages, skeleton },
+    { file_path, offset = 1, limit = undefined, pages, skeleton, query },
     context,
     _canUseTool?,
     parentMessage?,
@@ -550,6 +557,41 @@ export const FileReadTool = buildTool({
     // Use expandPath for consistent path normalization with FileEditTool/FileWriteTool
     // (especially handles whitespace trimming and Windows path separators)
     const fullFilePath = expandPath(file_path)
+
+    // Literal search mode: return matching lines instead of the file body. A
+    // search is a partial view, so it is deliberately NOT recorded in
+    // readFileState — an edit after a search still requires a full Read.
+    if (query !== undefined && query.trim() !== '') {
+      try {
+        const found = await searchToolResultFile(fullFilePath, query, {
+          maxMatches: 200,
+          maxBytes: 60_000,
+        })
+        let content: string
+        if (found.binary) {
+          content = `This file looks binary, so "${query}" was not searched. Read a line range instead.`
+        } else if (found.matches === 0) {
+          content = `No line contains "${query}". The file has ${found.scannedLines} lines; read a line range with offset/limit instead of searching again.`
+        } else {
+          const capped = found.truncated ? ' (capped)' : ''
+          content = `${found.matches} matching line${found.matches === 1 ? '' : 's'} for "${query}"${capped}:\n${found.content}`
+        }
+        return {
+          data: {
+            type: 'text' as const,
+            file: {
+              filePath: file_path,
+              content,
+              numLines: content.split('\n').length,
+              startLine: 1,
+              totalLines: found.scannedLines,
+            },
+          },
+        }
+      } catch {
+        // Fall through to a normal read (it owns the not-found suggestions).
+      }
+    }
 
     // Dedup: if we've already read this exact range and the file hasn't
     // changed on disk, return a stub instead of re-sending the full content.
