@@ -60,10 +60,13 @@ import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.js'
 import { getErrnoCode } from './errors.js'
 import { normalizePathForComparison } from './file.js'
 import { cacheKeys, type FileStateCache } from './fileStateCache.js'
+import { parseFrontmatter } from './frontmatterParser.js'
 import {
-  parseFrontmatter,
-  splitPathInFrontmatter,
-} from './frontmatterParser.js'
+  classifyForeignRule,
+  dialectForPath,
+  FOREIGN_GENERIC_SOURCES,
+  FOREIGN_RULE_DIR_SOURCES,
+} from './foreignRuleFormats.js'
 import { getFsImplementation, safeResolvePath } from './fsOperations.js'
 import { findCanonicalGitRoot, findGitRoot } from './git.js'
 import {
@@ -96,6 +99,7 @@ export const MAX_MEMORY_CHARACTER_COUNT = 40000
 const TEXT_FILE_EXTENSIONS = new Set([
   // Markdown and text
   '.md',
+  '.mdc',
   '.txt',
   '.text',
   // Data formats
@@ -251,32 +255,6 @@ function pathInOriginalCwd(path: string): boolean {
  * @param rawContent Raw file content with frontmatter
  * @returns Object with content and globs (undefined if no paths or match-all pattern)
  */
-function parseFrontmatterPaths(rawContent: string): {
-  content: string
-  paths?: string[]
-} {
-  const { frontmatter, content } = parseFrontmatter(rawContent)
-
-  if (!frontmatter.paths) {
-    return { content }
-  }
-
-  const patterns = splitPathInFrontmatter(frontmatter.paths)
-    .map(pattern => {
-      // Remove /** suffix - ignore library treats 'path' as matching both
-      // the path itself and everything inside it
-      return pattern.endsWith('/**') ? pattern.slice(0, -3) : pattern
-    })
-    .filter((p: string) => p.length > 0)
-
-  // If all patterns are ** (match-all), treat as no globs (undefined)
-  // This means the file applies to all paths
-  if (patterns.length === 0 || patterns.every((p: string) => p === '**')) {
-    return { content }
-  }
-
-  return { content, paths: patterns }
-}
 
 /**
  * Strip block-level HTML comments (<!-- ... -->) from markdown content.
@@ -353,8 +331,18 @@ function parseMemoryFileContent(
     return { info: null, includePaths: [] }
   }
 
-  const { content: withoutFrontmatter, paths } =
-    parseFrontmatterPaths(rawContent)
+  const { frontmatter, content: withoutFrontmatter } =
+    parseFrontmatter(rawContent)
+  // Classify by the file's location: other tools' rule dialects declare scope
+  // differently, and an unscoped rule may be intentionally dormant.
+  const activation = classifyForeignRule(
+    frontmatter as Record<string, unknown>,
+    dialectForPath(filePath),
+  )
+  if (activation.kind === 'inert') {
+    return { info: null, includePaths: [] }
+  }
+  const paths = activation.kind === 'conditional' ? activation.paths : undefined
 
   // Lex once so strip and @include-extract share the same tokens. gfm:false
   // is required by extract (so ~/path doesn't tokenize as strikethrough) and
@@ -700,6 +688,7 @@ export async function processMdRules({
   processedPaths,
   includeExternal,
   conditionalRule,
+  extensions = ['.md'],
   visitedDirs = new Set(),
 }: {
   rulesDir: string
@@ -707,6 +696,7 @@ export async function processMdRules({
   processedPaths: Set<string>
   includeExternal: boolean
   conditionalRule: boolean
+  extensions?: readonly string[]
   visitedDirs?: Set<string>
 }): Promise<MemoryFileInfo[]> {
   if (visitedDirs.has(rulesDir)) {
@@ -759,10 +749,11 @@ export async function processMdRules({
             processedPaths,
             includeExternal,
             conditionalRule,
+            extensions,
             visitedDirs,
           })),
         )
-      } else if (isFile && entry.name.endsWith('.md')) {
+      } else if (isFile && extensions.some(ext => entry.name.endsWith(ext))) {
         const files = await processMemoryFile(
           resolvedEntryPath,
           type,
@@ -785,6 +776,58 @@ export async function processMdRules({
     }
     return []
   }
+}
+
+type ProjectRuleDir = { rulesDir: string; extensions: readonly string[] }
+
+/** The native rule directory (`.claude/rules`). */
+function getNativeRuleDir(dir: string): ProjectRuleDir {
+  return { rulesDir: join(dir, '.claude', 'rules'), extensions: ['.md'] }
+}
+
+/** Rule directories other tools keep in a project, scoped by their dialect. */
+function getForeignRuleDirs(dir: string): ProjectRuleDir[] {
+  return FOREIGN_RULE_DIR_SOURCES.map(source => ({
+    rulesDir: join(dir, ...source.segments),
+    extensions: source.extensions,
+  }))
+}
+
+/**
+ * Whole-project instruction files other tools keep at the project root, read
+ * only as a fallback (first hit wins) when the directory has no native
+ * instructions of its own. These all mean "apply to the entire project", so a
+ * repo that accumulated several across tool migrations would otherwise pay for
+ * near-identical copies on every request.
+ */
+async function processForeignGenericFiles(
+  dir: string,
+  type: MemoryType,
+  processedPaths: Set<string>,
+  includeExternal: boolean,
+): Promise<MemoryFileInfo[]> {
+  for (const source of FOREIGN_GENERIC_SOURCES) {
+    const base = join(dir, ...source.segments)
+    const fileResult = await processMemoryFile(
+      base,
+      type,
+      processedPaths,
+      includeExternal,
+    )
+    if (fileResult.length > 0) return fileResult
+    if (source.shape === 'file-or-dir') {
+      const dirResult = await processMdRules({
+        rulesDir: base,
+        type,
+        processedPaths,
+        includeExternal,
+        conditionalRule: false,
+        extensions: source.extensions,
+      })
+      if (dirResult.length > 0) return dirResult
+    }
+  }
+  return []
 }
 
 export const getMemoryFiles = memoize(
@@ -906,17 +949,43 @@ export const getMemoryFiles = memoize(
           )),
         )
 
-        // Try reading .claude/rules/*.md files (Project)
-        const rulesDir = join(dir, '.claude', 'rules')
+        // Native .claude/rules, then the rule directories other tools keep.
+        // Each foreign dialect decides whether an unscoped rule is always-on
+        // or intentionally dormant.
+        const nativeRulesBefore = result.length
+        const nativeRuleDir = getNativeRuleDir(dir)
         result.push(
           ...(await processMdRules({
-            rulesDir,
+            rulesDir: nativeRuleDir.rulesDir,
             type: 'Project',
             processedPaths,
             includeExternal,
             conditionalRule: false,
           })),
         )
+        const hadNativeInstructions = result.length > nativeRulesBefore
+        for (const descriptor of getForeignRuleDirs(dir)) {
+          result.push(
+            ...(await processMdRules({
+              rulesDir: descriptor.rulesDir,
+              type: 'Project',
+              processedPaths,
+              includeExternal,
+              conditionalRule: false,
+              extensions: descriptor.extensions,
+            })),
+          )
+        }
+        if (!hadNativeInstructions) {
+          result.push(
+            ...(await processForeignGenericFiles(
+              dir,
+              'Project',
+              processedPaths,
+              includeExternal,
+            )),
+          )
+        }
       }
 
       // Try reading CLAUDE.local.md (Local) - only if localSettings is enabled
@@ -962,17 +1031,19 @@ export const getMemoryFiles = memoize(
           )),
         )
 
-        // Try reading .claude/rules/*.md files from the additional directory
-        const rulesDir = join(dir, '.claude', 'rules')
-        result.push(
-          ...(await processMdRules({
-            rulesDir,
-            type: 'Project',
-            processedPaths,
-            includeExternal,
-            conditionalRule: false,
-          })),
-        )
+        // Try reading native + foreign rule directories from the additional dir
+        for (const descriptor of [getNativeRuleDir(dir), ...getForeignRuleDirs(dir)]) {
+          result.push(
+            ...(await processMdRules({
+              rulesDir: descriptor.rulesDir,
+              type: 'Project',
+              processedPaths,
+              includeExternal,
+              conditionalRule: false,
+              extensions: descriptor.extensions,
+            })),
+          )
+        }
       }
     }
 
@@ -1283,31 +1354,38 @@ export async function getMemoryFilesForNestedDirectory(
     )
   }
 
-  const rulesDir = join(dir, '.claude', 'rules')
+  const ruleDirs = [getNativeRuleDir(dir), ...getForeignRuleDirs(dir)]
 
-  // Process project unconditional .claude/rules/*.md files, which were not eagerly loaded
-  // Use a separate processedPaths set to avoid marking conditional rule files as processed
+  // Process project unconditional rule files, which were not eagerly loaded.
+  // Use a separate processedPaths set to avoid marking conditional rule files
+  // as processed.
   const unconditionalProcessedPaths = new Set(processedPaths)
-  result.push(
-    ...(await processMdRules({
-      rulesDir,
-      type: 'Project',
-      processedPaths: unconditionalProcessedPaths,
-      includeExternal: false,
-      conditionalRule: false,
-    })),
-  )
+  for (const descriptor of ruleDirs) {
+    result.push(
+      ...(await processMdRules({
+        rulesDir: descriptor.rulesDir,
+        type: 'Project',
+        processedPaths: unconditionalProcessedPaths,
+        includeExternal: false,
+        conditionalRule: false,
+        extensions: descriptor.extensions,
+      })),
+    )
+  }
 
-  // Process project conditional .claude/rules/*.md files
-  result.push(
-    ...(await processConditionedMdRules(
-      targetPath,
-      rulesDir,
-      'Project',
-      processedPaths,
-      false,
-    )),
-  )
+  // Process project conditional rule files
+  for (const descriptor of ruleDirs) {
+    result.push(
+      ...(await processConditionedMdRules(
+        targetPath,
+        descriptor.rulesDir,
+        'Project',
+        processedPaths,
+        false,
+        dir,
+      )),
+    )
+  }
 
   // processedPaths must be seeded with unconditional paths for subsequent directories
   for (const path of unconditionalProcessedPaths) {
@@ -1331,14 +1409,20 @@ export async function getConditionalRulesForCwdLevelDirectory(
   targetPath: string,
   processedPaths: Set<string>,
 ): Promise<MemoryFileInfo[]> {
-  const rulesDir = join(dir, '.claude', 'rules')
-  return processConditionedMdRules(
-    targetPath,
-    rulesDir,
-    'Project',
-    processedPaths,
-    false,
-  )
+  const results: MemoryFileInfo[] = []
+  for (const descriptor of [getNativeRuleDir(dir), ...getForeignRuleDirs(dir)]) {
+    results.push(
+      ...(await processConditionedMdRules(
+        targetPath,
+        descriptor.rulesDir,
+        'Project',
+        processedPaths,
+        false,
+        dir,
+      )),
+    )
+  }
+  return results
 }
 
 /**
@@ -1357,6 +1441,7 @@ export async function processConditionedMdRules(
   type: MemoryType,
   processedPaths: Set<string>,
   includeExternal: boolean,
+  baseDirOverride?: string,
 ): Promise<MemoryFileInfo[]> {
   const conditionedRuleMdFiles = await processMdRules({
     rulesDir,
@@ -1375,9 +1460,10 @@ export async function processConditionedMdRules(
     // For Project rules: glob patterns are relative to the directory containing .claude
     // For Managed/User rules: glob patterns are relative to the original CWD
     const baseDir =
-      type === 'Project'
+      baseDirOverride ??
+      (type === 'Project'
         ? dirname(dirname(rulesDir)) // Parent of .claude
-        : getOriginalCwd() // Project root for managed/user rules
+        : getOriginalCwd()) // Project root for managed/user rules
 
     const relativePath = isAbsolute(targetPath)
       ? relative(baseDir, targetPath)
