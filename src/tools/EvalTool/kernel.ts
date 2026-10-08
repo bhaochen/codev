@@ -1,8 +1,9 @@
-import { type ChildProcess, spawn, spawnSync } from 'child_process'
+import { type ChildProcess, spawn } from 'child_process'
 import { randomUUID } from 'crypto'
 import { connect } from 'net'
 
 import { logForDebugging } from '../../utils/debug.js'
+import { killProcessTree } from '../../utils/processTree.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import {
   EVAL_TRACE_ENV,
@@ -469,15 +470,10 @@ export class PythonKernel {
     if (process.platform === 'win32') {
       // Windows has no process groups, so signalling the direct pid leaves
       // grandchildren (a `%pip install`, a subprocess.run) holding the pipes
-      // open for the rest of the host's life. taskkill /T walks the tree.
-      try {
-        spawnSync('taskkill', ['/PID', String(proc.pid), '/T', '/F'], {
-          stdio: 'ignore',
-          windowsHide: true,
-        })
-      } catch {
-        /* the process is already gone, which is the outcome we wanted */
-      }
+      // open for the rest of the host's life. taskkill /T walks the tree —
+      // spawned by absolute System32 path so a repo-local taskkill.exe cannot
+      // hijack the kill.
+      killProcessTree(proc.pid)
       return
     }
     try {

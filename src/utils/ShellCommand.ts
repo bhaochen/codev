@@ -1,7 +1,7 @@
 import type { ChildProcess } from 'child_process'
 import { stat } from 'fs/promises'
 import type { Readable } from 'stream'
-import treeKill from 'tree-kill'
+import { killProcessTree } from './processTree.js'
 import { generateTaskId } from '../Task.js'
 import { formatDuration } from './format.js'
 import {
@@ -337,7 +337,7 @@ class ShellCommandImpl implements ShellCommand {
   #doKill(code?: number): void {
     this.#status = 'killed'
     if (this.#childProcess.pid) {
-      treeKill(this.#childProcess.pid, 'SIGKILL')
+      killProcessTree(this.#childProcess.pid)
     }
     this.#resolveExitCode(code ?? SIGKILL)
   }
