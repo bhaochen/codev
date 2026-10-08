@@ -16,6 +16,7 @@ import type {
   LLMToolChoice,
 } from '../llm/runtime/types.js'
 import { withStreamingVCR } from '../vcr.js'
+import { applyPreferredEditFormat } from '../llm/protocols/editBlockTool.js'
 
 // Re-export Options from canonical protocol client (previously defined in claude.ts)
 export type { Options } from '../llm/clients/anthropicMessages.js'
@@ -78,7 +79,18 @@ export function toLLMRequest(args: {
     specStore: options.specStore,
     specBudget: options.specBudget,
   }
-  return { model, messages, systemPrompt, tools, signal, config, context }
+  // Advertise the edit primitive this model was post-trained on. The incoming
+  // call is translated back to `Edit` before execution, so only the schema the
+  // model sees changes.
+  return {
+    model,
+    messages,
+    systemPrompt,
+    tools: applyPreferredEditFormat(tools, model),
+    signal,
+    config,
+    context,
+  }
 }
 
 export async function* queryModel(

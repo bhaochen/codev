@@ -86,6 +86,7 @@ type HookAttachmentWithName = Exclude<
 import type { APIError } from '@anthropic-ai/sdk'
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
 import { anthropicBlockToAgent } from '../types/anthropicAdapter.js'
+import { adaptEditBlockToolUse } from '../services/llm/protocols/editBlockTool.js'
 import type {
   AgentContentBlock,
   AgentRedactedThinkingBlock,
@@ -2690,6 +2691,18 @@ export function normalizeContentFromAPI(
     | { type: 'code_execution_tool_result' }
   )[])
     .map(contentBlock => {
+    // A model shown the `edit_block` advertisement calls it; translate back to
+    // the real `Edit` tool before normalization/execution.
+    if (contentBlock.type === 'tool_use') {
+      const adapted = adaptEditBlockToolUse(contentBlock)
+      if (adapted) {
+        contentBlock = {
+          ...contentBlock,
+          name: adapted.name,
+          input: adapted.input,
+        } as typeof contentBlock
+      }
+    }
     switch (contentBlock.type) {
       case 'tool_use': {
         if (
