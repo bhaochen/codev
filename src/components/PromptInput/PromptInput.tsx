@@ -752,6 +752,7 @@ function PromptInput({
         start: 0,
         end: 1,
         color: 'warning',
+        dimColor: isLoading,
         priority: 5
       });
     }
