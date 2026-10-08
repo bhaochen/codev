@@ -300,6 +300,16 @@ credential values before anything leaves the machine.
   </tr>
 </table>
 
+### Provider Fallback
+
+Single-request provider fallback with visual indicator — when the primary model fails, the request automatically retries on the next configured provider within the same HTTP call.
+
+<table align="center">
+  <tr>
+    <td><img src="assets/provider_fallback.png"></td>
+  </tr>
+</table>
+
 ### Browser Automation & Python Kernel
 
 Drive a real Chromium and run Python side by side, with everything rendered inline
