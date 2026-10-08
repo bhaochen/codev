@@ -180,4 +180,36 @@ describe('toolCallGuard', () => {
       expect(r.status).toBe('retry')
     })
   })
+
+  describe('type coercion', () => {
+    test('a numeric string for a number field is coerced', () => {
+      const tool = makeTool(
+        'CoerceNumber',
+        z.strictObject({ count: z.number() }),
+      )
+      const r = guardToolInput(tool, { count: '7' }, 'coerce-num-1')
+      expect(r.status).toBe('repaired')
+      expect(r.repairs.some(x => x.action === 'coerce_type')).toBe(true)
+      expect((r.parsedInput?.data as { count: number }).count).toBe(7)
+    })
+
+    test('a near-miss key spelling is recovered', () => {
+      const tool = makeTool(
+        'CoerceKey',
+        z.strictObject({ file_path: z.string() }),
+      )
+      const r = guardToolInput(tool, { filePath: 'a.ts' }, 'coerce-key-1')
+      expect(r.status).toBe('repaired')
+      expect((r.parsedInput?.data as { file_path: string }).file_path).toBe('a.ts')
+    })
+
+    test('coercion that cannot make input valid still retries', () => {
+      const tool = makeTool(
+        'CoerceBad',
+        z.strictObject({ count: z.number().min(10) }),
+      )
+      const r = guardToolInput(tool, { count: '3' }, 'coerce-bad-1')
+      expect(r.status).toBe('retry')
+    })
+  })
 })

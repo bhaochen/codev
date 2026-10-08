@@ -1,5 +1,6 @@
 import { z } from 'zod/v4'
 import type { Tool } from '../../Tool.js'
+import { coerceToolInput } from '../../utils/coerceToolInput.js'
 
 /**
  * Generic Tool Call Recovery layer.
@@ -379,9 +380,43 @@ export function guardToolInput(
   input: unknown,
   toolUseID: string,
 ): GuardResult {
-  const parsed = tool.inputSchema.safeParse(input)
+  // Type coercion / key recovery first: models emit stringified JSON for
+  // typed params, or a near-miss key (filePath for file_path). safeParse below
+  // still rejects anything coercion cannot make valid.
+  const coerced = coerceToolInput(
+    input as Record<string, unknown>,
+    tool.inputSchema as unknown as z.ZodTypeAny,
+  )
+  const coercedChanged = coerced !== input
+  const parsed = tool.inputSchema.safeParse(coerced)
 
   if (parsed.success) {
+    if (coercedChanged) {
+      const { attempt } = recordAttempt(toolUseID, tool.name)
+      const repair: RepairAction = {
+        type: 'coerced_input',
+        path: [],
+        action: 'coerce_type',
+      }
+      return {
+        status: 'repaired',
+        parsedInput: parsed,
+        disposition: 'auto_repair',
+        repairs: [repair],
+        attempt,
+        recovery: buildRecord(
+          tool.name,
+          toolUseID,
+          input,
+          '',
+          repair,
+          coerced,
+          true,
+          'auto_repair',
+          attempt,
+        ),
+      }
+    }
     return {
       status: 'ok',
       parsedInput: parsed,
@@ -405,15 +440,14 @@ export function guardToolInput(
   const issues = parsed.error.issues as unknown as ZodIssueLike[]
   const { attempt, capped } = recordAttempt(toolUseID, tool.name)
 
-  let { repaired, repairs } = applyAutoRepairs(tool.name, input, issues)
+  let { repaired, repairs } = applyAutoRepairs(tool.name, coerced, issues)
   let reParsed = repairs.length > 0 ? tool.inputSchema.safeParse(repaired) : parsed
 
   // Second grader: optional parameters the model filled with a placeholder the
   // contract rejects (null / \"\" / 0 / false / [] / {}). Drop only when the
   // whole input then validates; a required placeholder is never dropped.
   if (!reParsed.success) {
-    const candidate =
-      repairs.length > 0 ? repaired : input
+    const candidate = repairs.length > 0 ? repaired : coerced
     const dropped = dropBlamedPlaceholders(
       tool.inputSchema as unknown as z.ZodTypeAny,
       candidate,
