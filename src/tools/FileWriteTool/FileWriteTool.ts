@@ -17,6 +17,7 @@ import type { ToolUseContext } from '../../Tool.js'
 import { buildTool, type ToolDef } from '../../Tool.js'
 import { agentFileConflictMessage, checkAgentFileClaim } from '../../utils/agentFileClaims.js'
 import { getCwd } from '../../utils/cwd.js'
+import { partialViewRefusal, unreadFileRefusal } from '../../utils/readHistory.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { countLinesChanged, getPatchForDisplay } from '../../utils/diff.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
@@ -210,10 +211,16 @@ export const FileWriteTool = buildTool({
 
     const readTimestamp = toolUseContext.readFileState.get(fullFilePath)
     if (!readTimestamp || readTimestamp.isPartialView) {
+      const message = readTimestamp?.isPartialView
+        ? partialViewRefusal('before writing to it')
+        : unreadFileRefusal(fullFilePath, toolUseContext.agentId, {
+            neverRead:
+              'File has not been read yet. Read it first before writing to it.',
+            action: 'before writing to it',
+          })
       return {
         result: false,
-        message:
-          'File has not been read yet. Read it first before writing to it.',
+        message,
         errorCode: 2,
       }
     }

@@ -38,6 +38,7 @@ import {
   getFileModificationTimeAsync,
   suggestPathUnderCwd,
 } from '../../utils/file.js'
+import { recordFileRead } from '../../utils/readHistory.js'
 import { logFileOperation } from '../../utils/fileOperationAnalytics.js'
 import { formatFileSize } from '../../utils/format.js'
 import { getFsImplementation } from '../../utils/fsOperations.js'
@@ -891,6 +892,7 @@ async function callInner(
       offset,
       limit,
     })
+    recordFileRead(fullFilePath, context.agentId)
     context.nestedMemoryAttachmentTriggers?.add(fullFilePath)
 
     const data = {
@@ -1098,6 +1100,7 @@ async function callInner(
         limit: undefined,
         isPartialView: true,
       })
+      recordFileRead(fullFilePath, context.agentId)
       context.nestedMemoryAttachmentTriggers?.add(fullFilePath)
       for (const listener of fileReadListeners.slice()) {
         listener(resolvedFilePath, fullRead.content)
@@ -1147,6 +1150,7 @@ async function callInner(
     offset,
     limit,
   })
+  recordFileRead(fullFilePath, context.agentId)
   context.nestedMemoryAttachmentTriggers?.add(fullFilePath)
 
   // Snapshot before iterating — a listener that unsubscribes mid-callback

@@ -56,6 +56,7 @@ import {
   FILE_EDIT_TOOL_NAME,
   FILE_UNEXPECTEDLY_MODIFIED_ERROR,
 } from './constants.js'
+import { partialViewRefusal, unreadFileRefusal } from '../../utils/readHistory.js'
 import { getEditToolDescription } from './prompt.js'
 import {
   type FileEditInput,
@@ -287,11 +288,17 @@ export const FileEditTool = buildTool({
 
     const readTimestamp = toolUseContext.readFileState.get(fullFilePath)
     if (!readTimestamp || readTimestamp.isPartialView) {
+      const message = readTimestamp?.isPartialView
+        ? partialViewRefusal('before editing it')
+        : unreadFileRefusal(fullFilePath, toolUseContext.agentId, {
+            neverRead:
+              'File has not been read yet (or was evicted from the read cache after reading many files). Read it first before writing to it.',
+            action: 'before editing it',
+          })
       return {
         result: false,
         behavior: 'ask',
-        message:
-          'File has not been read yet (or was evicted from the read cache after reading many files). Read it first before writing to it.',
+        message,
         meta: {
           isFilePathAbsolute: String(isAbsolute(file_path)),
         },

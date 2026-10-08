@@ -16,6 +16,7 @@ import { readFileSyncWithMetadata } from '../../utils/fileRead.js'
 import { safeParseJSON } from '../../utils/json.js'
 import { lazySchema } from '../../utils/lazySchema.js'
 import { findNotebookCellIndex, parseCellId } from '../../utils/notebook.js'
+import { unreadFileRefusal } from '../../utils/readHistory.js'
 import { checkWritePermissionForTool } from '../../utils/permissions/filesystem.js'
 import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js'
 import { jsonParse, jsonStringify } from '../../utils/slowOperations.js'
@@ -234,8 +235,11 @@ export const NotebookEditTool = buildTool({
     if (!readTimestamp) {
       return {
         result: false,
-        message:
-          'File has not been read yet. Read it first before writing to it.',
+        message: unreadFileRefusal(fullPath, toolUseContext.agentId, {
+          neverRead:
+            'File has not been read yet. Read it first before writing to it.',
+          action: 'before editing it',
+        }),
         errorCode: 9,
       }
     }

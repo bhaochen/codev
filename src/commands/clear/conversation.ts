@@ -3,6 +3,7 @@
  * This module has heavier dependencies and should be lazy-loaded when possible.
  */
 import { feature } from 'bun:bundle'
+import { resetReadHistory } from '../../utils/readHistory.js'
 import { randomUUID, type UUID } from 'crypto'
 import {
   getLastMainRequestId,
@@ -129,6 +130,7 @@ export async function clearConversation({
 
   setCwd(getOriginalCwd())
   readFileState.clear()
+  resetReadHistory()
   discoveredSkillNames?.clear()
   loadedNestedMemoryPaths?.clear()
 
