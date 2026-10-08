@@ -7,6 +7,7 @@ import { removeSandboxViolationTags } from 'src/utils/sandbox/sandbox-ui-utils.j
 import { Box, Text } from '../ink.js';
 import { useShortcutDisplay } from '../keybindings/useShortcutDisplay.js';
 import { countCharInString } from '../utils/stringUtils.js';
+import { isToolInputValidationError } from '../utils/toolValidationError.js';
 import { MessageResponse } from './MessageResponse.js';
 const MAX_RENDERED_LINES = 10;
 type Props = {
@@ -36,7 +37,7 @@ export function FallbackToolUseErrorMessage(t0) {
       const withoutSandboxViolations = removeSandboxViolationTags(extractedError);
       const withoutErrorTags = withoutSandboxViolations.replace(/<\/?error>/g, "");
       const trimmed = withoutErrorTags.trim();
-      if (!verbose && trimmed.includes("InputValidationError: ")) {
+      if (!verbose && isToolInputValidationError(trimmed)) {
         error = "Invalid tool parameters";
       } else {
         if (trimmed.startsWith("Error: ") || trimmed.startsWith("Cancelled: ")) {

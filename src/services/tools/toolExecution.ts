@@ -104,6 +104,7 @@ import {
   formatZodValidationError,
 } from '../../utils/toolErrors.js'
 import { guardToolInput, MAX_RETRIES } from './toolCallGuard.js'
+import { TOOL_INPUT_VALIDATION_ERROR_PREFIX } from '../../utils/toolValidationError.js'
 import {
   processPreMappedToolResultBlock,
   processToolResultBlock,
@@ -699,12 +700,12 @@ async function checkPermissionsAndCallTool(
           content: [
             {
               type: 'tool_result',
-              content: `<tool_use_error>InputValidationError: ${errorContent}</tool_use_error>`,
+              content: `<tool_use_error>${TOOL_INPUT_VALIDATION_ERROR_PREFIX}${errorContent}</tool_use_error>`,
               is_error: true,
               tool_use_id: toolUseID,
             },
           ],
-          toolUseResult: `InputValidationError: ${guard.issuesMessage}`,
+          toolUseResult: `${TOOL_INPUT_VALIDATION_ERROR_PREFIX}${guard.issuesMessage}`,
           sourceToolAssistantUUID: assistantMessage.uuid as UUID,
         }),
       },
