@@ -58,6 +58,7 @@ import {
   applyGeminiOpenRouterCacheAnchor,
   isGeminiOnOpenRouter,
 } from '../protocols/openrouterGeminiCache.js'
+import { freezeOpenRouterTools } from '../protocols/openrouterToolFreeze.js'
 import { providerModelSupportsImages } from '../models/visionSupport.js'
 import { sanitizeToolCallAdjacency } from '../protocols/sanitizeToolAdjacency.js'
 
@@ -231,6 +232,16 @@ export async function* queryOpenAIChat(
         }))
         effectiveTools = [...openaiTools, ...injected]
       }
+    }
+    // OpenRouter prefix cache: hold tool order + descriptions stable for this
+    // conversation so a reconnecting MCP server or a reordered list cannot
+    // cold-start the cached prefix. Availability/schema stay authoritative.
+    if (route.provider === 'openrouter') {
+      const lineage = context.agentId ?? context.querySource ?? 'main'
+      effectiveTools = freezeOpenRouterTools(
+        `or-tools:${model.toLowerCase()}:${getSessionId() ?? 'no-session'}:${lineage}`,
+        effectiveTools,
+      )
     }
     logForDebugging(`[OpenAIChat] provider=${route.provider} model=${model} endpoint=${endpoint} tools=${effectiveTools.length} thinking=${providerEnableThinking ? 'on' : 'off'}`)
     const body = buildOpenAIChatBody({
