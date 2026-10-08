@@ -87,6 +87,7 @@ import type { APIError } from '@anthropic-ai/sdk'
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
 import { anthropicBlockToAgent } from '../types/anthropicAdapter.js'
 import { adaptEditBlockToolUse } from '../services/llm/protocols/editBlockTool.js'
+import { stripObservableBackfill } from './observableInput.js'
 import type {
   AgentContentBlock,
   AgentRedactedThinkingBlock,
@@ -2234,11 +2235,17 @@ export function normalizeMessagesForAPI(
                   const tool = tools.find(t =>
                     toolMatchesName(t, block.name as string),
                   )
-                  const normalizedInput = tool
-                    ? normalizeToolInputForAPI(
+                  // Drop observer-only fields the model never wrote before
+                  // normalizing, so a backfilled clone cannot change the bytes
+                  // of an already-cached turn.
+                  const modelInput = tool
+                    ? stripObservableBackfill(
                         tool,
                         block.input as Record<string, unknown>,
                       )
+                    : (block.input as Record<string, unknown>)
+                  const normalizedInput = tool
+                    ? normalizeToolInputForAPI(tool, modelInput)
                     : block.input
                   const canonicalName = tool?.name ?? block.name
 
