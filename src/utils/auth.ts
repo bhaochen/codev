@@ -1,6 +1,6 @@
 import chalk from 'chalk'
 import { exec } from 'child_process'
-import { execa } from 'execa'
+import { execa, execaSync } from 'execa'
 import { mkdir, readFile, stat } from 'fs/promises'
 import memoize from 'lodash-es/memoize.js'
 import { homedir } from 'os'
@@ -1514,9 +1514,21 @@ export const getApiKeyFromConfigOrMacOSKeychain = memoize(
       } else {
         const storageServiceName = getMacOsKeychainStorageServiceName()
         try {
-          const result = execSyncWithDefaults_DEPRECATED(
-            `security find-generic-password -a $USER -w -s "${storageServiceName}"`,
+          // Argv form (no shell): `$USER` and the service name must not be able
+          // to inject shell metacharacters.
+          const { stdout, exitCode } = execaSync(
+            'security',
+            [
+              'find-generic-password',
+              '-a',
+              getUsername(),
+              '-w',
+              '-s',
+              storageServiceName,
+            ],
+            { reject: false, stdio: ['ignore', 'pipe', 'ignore'] },
           )
+          const result = exitCode === 0 ? stdout.trim() : ''
           if (result) {
             return { key: result, source: '/login managed key' }
           }
