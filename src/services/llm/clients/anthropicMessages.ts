@@ -2790,7 +2790,7 @@ export async function* queryAnthropicMessages(
         })
       }
 
-      if (streamingError instanceof APIUserAbortError) {
+      if (isAbortError(streamingError)) {
         // Check if the abort signal was triggered by the user (ESC key)
         // If the signal is aborted, it's a user-initiated abort
         // If not, it's likely a timeout from the SDK
@@ -3102,7 +3102,7 @@ export async function* queryAnthropicMessages(
           previousRequestId,
         })
 
-        if (error instanceof APIUserAbortError) {
+        if (isAbortError(error)) {
           releaseStreamResources()
           return
         }
@@ -3160,7 +3160,7 @@ export async function* queryAnthropicMessages(
 
       // Don't yield an assistant error message for user aborts
       // The interruption message is handled in query.ts
-      if (error instanceof APIUserAbortError) {
+      if (isAbortError(error)) {
         releaseStreamResources()
         return
       }
