@@ -304,6 +304,9 @@ export async function* queryOpenAIChat(
     // no-capacity that way) is retried; once any event has been yielded,
     // replaying would duplicate content, so the error surfaces instead.
     let published = false
+    // Whether the stream produced any protocol event at all; a 200 with an
+    // empty/HTML body yields none and must not masquerade as a token overflow.
+    let sawMessageStart = false
     let capacityWaits = 0
     let waitedMs = 0
     let recoveryUsed = false
@@ -348,6 +351,7 @@ export async function* queryOpenAIChat(
       if (!response.body) throw new Error('Upstream response missing body')
       partialMessage = null
       stopReason = null
+      sawMessageStart = false
       usage = { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
       newMessages = []
       pendingToolMessages = []
@@ -363,6 +367,7 @@ export async function* queryOpenAIChat(
       for await (const event of adaptedStream) {
         switch (event.type) {
           case 'message_start': {
+            sawMessageStart = true
             partialMessage = event.message
             ttftMs = Date.now() - start
             if (event.message.usage) usage = { ...usage, ...(event.message.usage as unknown as typeof usage) }
@@ -447,6 +452,11 @@ export async function* queryOpenAIChat(
         }
         published = true
         yield { type: 'stream_event', event, ...(event.type === 'message_start' ? { ttftMs } : undefined) } as unknown as StreamEvent
+      }
+      if (!sawMessageStart) {
+        throw new Error(
+          `Upstream ${route.provider} returned an empty or non-SSE response body`,
+        )
       }
       // No message_delta (stream ended without a finish reason): flush anyway.
       yield* flushPendingToolMessages()

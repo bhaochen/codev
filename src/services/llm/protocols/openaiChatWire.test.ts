@@ -1386,6 +1386,25 @@ describe('queryOpenAIChat integration', () => {
     expect(toolIds).toEqual(['a', 'b'])
   })
 
+  test('a 200 with an empty/non-SSE body throws instead of faking max_tokens', async () => {
+    const { queryOpenAIChat } = await import('../clients/openaiChat.js')
+    const fetchOverride = async (): Promise<Response> =>
+      new Response('<html>gateway error</html>', {
+        status: 200,
+        headers: { 'Content-Type': 'text/html' },
+      })
+    const req = makeRequest({
+      messages: [wrapperUser([{ type: 'text', text: 'hi' }])],
+      systemPrompt: asSystemPrompt(['sys']),
+      context: { ...makeRequest().context, fetchOverride: fetchOverride as never },
+    })
+    const seen: string[] = []
+    for await (const raw of queryOpenAIChat(route, req)) {
+      seen.push(JSON.stringify(raw))
+    }
+    expect(seen.join('\n')).toContain('empty or non-SSE')
+  })
+
   test('retries a transient HTTP response before consuming the stream', async () => {
     const { queryOpenAIChat } = await import('../clients/openaiChat.js')
     let requests = 0

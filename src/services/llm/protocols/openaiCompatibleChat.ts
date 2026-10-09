@@ -148,11 +148,13 @@ export async function* queryOpenAICompatibleChat(
     }
     if (!response.body) throw new Error('Upstream response missing body')
     const adaptedStream = adaptOpenAIChatSSE(detectUpstreamFailures(parseOpenAIChunksFromSSE(response.body) as AsyncIterable<Record<string, unknown>>) as AsyncIterable<OpenAIChatWireChunk>, model, { includeCacheWriteTokens: false })
+    let sawMessageStart = false
     const newMessages: AssistantMessage[] = []
     const contentBlocks: Record<number, Record<string, unknown>> = {}
     for await (const event of adaptedStream) {
       switch (event.type) {
         case 'message_start': {
+          sawMessageStart = true
           partialMessage = event.message
           ttftMs = Date.now() - start
           if (event.message.usage) usage = { ...usage, ...(event.message.usage as unknown as typeof usage) }
@@ -212,6 +214,11 @@ export async function* queryOpenAICompatibleChat(
         case 'message_stop': break
       }
       yield { type: 'stream_event', event, ...(event.type === 'message_start' ? { ttftMs } : undefined) } as unknown as StreamEvent
+    }
+    if (!sawMessageStart) {
+      throw new Error(
+        `Upstream ${route.provider} returned an empty or non-SSE response body`,
+      )
     }
     const lastMsg = newMessages.at(-1) as
       | (AssistantMessage & {
