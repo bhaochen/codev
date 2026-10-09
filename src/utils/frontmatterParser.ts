@@ -120,7 +120,11 @@ function quoteProblematicValues(frontmatterText: string): string {
   return result.join('\n')
 }
 
-export const FRONTMATTER_REGEX = /^---\s*\n([\s\S]*?)---\s*\n?/
+// The opening and closing `---` must each occupy their own line; a `---`
+// inside a frontmatter value (a description, a multiline string) must not be
+// mistaken for the closer.
+export const FRONTMATTER_REGEX =
+  /^---[^\S\n]*\r?\n([\s\S]*?)\r?\n---[^\S\n]*(?:\r?\n|$)/
 
 /**
  * Parses markdown content to extract frontmatter and content
@@ -131,18 +135,23 @@ export function parseFrontmatter(
   markdown: string,
   sourcePath?: string,
 ): ParsedMarkdown {
-  const match = markdown.match(FRONTMATTER_REGEX)
+  // A UTF-8 BOM (common from Windows editors) would defeat the `^---` anchor
+  // and inject the YAML verbatim as instructions; drop it first.
+  const source =
+    markdown.charCodeAt(0) === 0xfeff ? markdown.slice(1) : markdown
+
+  const match = source.match(FRONTMATTER_REGEX)
 
   if (!match) {
     // No frontmatter found
     return {
       frontmatter: {},
-      content: markdown,
+      content: source,
     }
   }
 
   const frontmatterText = match[1] || ''
-  const content = markdown.slice(match[0].length)
+  const content = source.slice(match[0].length)
 
   let frontmatter: FrontmatterData = {}
   try {
