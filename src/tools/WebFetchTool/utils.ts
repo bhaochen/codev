@@ -1,3 +1,4 @@
+import { lookup } from 'node:dns/promises'
 import { LRUCache } from 'lru-cache'
 import { isIP } from 'node:net'
 import {
@@ -257,20 +258,16 @@ export function validateURL(url: string): boolean {
   return isPublicFetchHost(parsed.hostname)
 }
 
-function isPublicFetchHost(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '')
-  if (
-    !host ||
-    host === 'localhost' ||
-    host.endsWith('.localhost') ||
-    host.endsWith('.local') ||
-    host.endsWith('.internal')
-  ) {
-    return false
-  }
+function normalizeHost(hostname: string): string {
+  return hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '')
+}
 
+/**
+ * True when `host` (an IP literal) is a public, routable address. Used both for
+ * literal hosts and for every address a hostname resolves to.
+ */
+export function isPublicAddress(host: string): boolean {
   const ipVersion = isIP(host)
-  if (ipVersion === 0) return host.includes('.')
   if (ipVersion === 4) {
     const octets = host.split('.').map(Number)
     const [a, b, c] = octets
@@ -293,8 +290,7 @@ function isPublicFetchHost(hostname: string): boolean {
     )
   }
 
-  const normalized = host.toLowerCase()
-  const address = parseIPv6(normalized)
+  const address = parseIPv6(host.toLowerCase())
   if (address === null || (address >> 125n) !== 1n) return false
   const reservedPrefixes: readonly [bigint, number][] = [
     [0x20010000000000000000000000000000n, 23],
@@ -306,6 +302,22 @@ function isPublicFetchHost(hostname: string): boolean {
     const shift = BigInt(128 - bits)
     return (address >> shift) === (prefix >> shift)
   })
+}
+
+function isPublicFetchHost(hostname: string): boolean {
+  const host = normalizeHost(hostname)
+  if (
+    !host ||
+    host === 'localhost' ||
+    host.endsWith('.localhost') ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal')
+  ) {
+    return false
+  }
+
+  if (isIP(host) === 0) return host.includes('.')
+  return isPublicAddress(host)
 }
 
 function parseIPv6(hostname: string): bigint | null {
@@ -423,6 +435,47 @@ export class WebFetchHttpError extends Error {
   }
 }
 
+type LookupAll = (host: string) => Promise<Array<{ address: string }>>
+
+/**
+ * True when `hostname` is a literal public IP, or a domain whose DNS records
+ * ALL resolve to public addresses. Blocks the hostname SSRF where a friendly
+ * name points at 127.0.0.1 / 169.254.169.254 / 10.x. `resolve` is injectable
+ * for tests.
+ */
+export async function hostResolvesToPublicOnly(
+  hostname: string,
+  resolve: LookupAll = h => lookup(h, { all: true }),
+): Promise<boolean> {
+  const host = normalizeHost(hostname)
+  if (isIP(host) !== 0) return isPublicAddress(host)
+  if (!isPublicFetchHost(host)) return false
+  let addresses: Array<{ address: string }>
+  try {
+    addresses = await resolve(host)
+  } catch {
+    return false
+  }
+  if (addresses.length === 0) return false
+  return addresses.every(
+    entry => isIP(entry.address) !== 0 && isPublicAddress(entry.address),
+  )
+}
+
+/** Throw when `url`'s host is not (or does not resolve only to) a public IP. */
+async function assertPublicFetchUrl(url: string): Promise<void> {
+  // Escape hatch for tests / offline runs that mock fetch; production leaves
+  // this unset and always resolves.
+  const skip = process.env.CODEV_WEBFETCH_SKIP_DNS_CHECK
+  if (skip === '1' || skip === 'true') return
+  const hostname = new URL(url).hostname
+  if (!(await hostResolvesToPublicOnly(hostname))) {
+    throw new Error(
+      `Refusing to fetch ${hostname}: it is not a public address`,
+    )
+  }
+}
+
 export async function getWithPermittedRedirects(
   url: string,
   signal: AbortSignal,
@@ -439,6 +492,10 @@ export async function getWithPermittedRedirects(
     const finalUserAgent = userAgent !== undefined && userAgent !== null
       ? userAgent
       : getWebFetchUserAgent()
+
+    // Validate the resolved address (not just the hostname string) before we
+    // connect, and again for every redirect.
+    await assertPublicFetchUrl(url)
 
     const response = await fetchWithTimeout(url, {
       signal,

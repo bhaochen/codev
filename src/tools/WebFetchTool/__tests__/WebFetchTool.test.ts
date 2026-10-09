@@ -10,6 +10,10 @@ if (typeof (globalThis as Record<string, unknown>).MACRO === 'undefined') {
   }
 }
 
+// The fetch used below is mocked, so hostnames like `*.test` do not resolve;
+// skip the real-DNS SSRF guard for this suite.
+process.env.CODEV_WEBFETCH_SKIP_DNS_CHECK = '1'
+
 const originalFetch = globalThis.fetch
 
 afterEach(() => {
