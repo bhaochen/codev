@@ -7,8 +7,11 @@ import { buildTool, type ToolDef } from '../../Tool.js'
 import { Text } from '../../ink.js'
 import { openBrowser, openPath } from '../../utils/browser.js'
 import { resolveLocalFileTarget } from '../../utils/fileUrls.js'
+import { hostResolvesToPublicOnly } from '../WebFetchTool/utils.js'
 import { lazySchema } from '../../utils/lazySchema.js'
 import { WEB_BROWSER_TOOL_NAME } from './constants.js'
+
+const MAX_SNAPSHOT_BYTES = 5_000_000
 
 const DESCRIPTION = 'Open an http(s) URL or local file, or fetch a compact HTML snapshot.'
 const PROMPT = `Use this tool for browser-adjacent verification.
@@ -78,7 +81,21 @@ export const WebBrowserTool = buildTool({
     }
     let html: string; let status = 200; let ok = true
     if (target.kind === 'file') html = readFileSync(target.path, 'utf8')
-    else { const response = await fetch(target.url, { signal: ctx.abortController.signal }); html = await response.text(); status = response.status; ok = response.ok }
+    else {
+      // Same SSRF guard as WebFetch: resolve the host and refuse private targets.
+      const host = new URL(target.url).hostname
+      if (!(await hostResolvesToPublicOnly(host))) {
+        throw new Error(`Refusing to snapshot ${host}: it is not a public address`)
+      }
+      const response = await fetch(target.url, { signal: ctx.abortController.signal })
+      const declared = Number(response.headers.get('content-length'))
+      if (Number.isFinite(declared) && declared > MAX_SNAPSHOT_BYTES) {
+        throw new Error('Snapshot response is too large')
+      }
+      html = await response.text()
+      if (html.length > MAX_SNAPSHOT_BYTES) html = html.slice(0, MAX_SNAPSHOT_BYTES)
+      status = response.status; ok = response.ok
+    }
     const base = new URL(target.url)
     const links = [...html.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)].slice(0, 20).flatMap(match => {
       try { return [{ text: clean(match[2] ?? '') || match[1]!, href: new URL(match[1]!, base).toString() }] } catch { return [] }
