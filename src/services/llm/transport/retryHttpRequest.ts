@@ -27,10 +27,21 @@ function getRetryAfterMs(response: Response): number | undefined {
 }
 
 function isRetryableNetworkError(error: unknown): boolean {
-  if (error instanceof TypeError) return true
   if (!(error instanceof Error)) return false
-  const code = (error as NodeJS.ErrnoException).code
-  return code !== undefined && RETRYABLE_ERROR_CODES.has(code)
+  const cause = (error as { cause?: unknown }).cause
+  const code =
+    (error as NodeJS.ErrnoException).code ??
+    (cause && typeof cause === 'object'
+      ? (cause as NodeJS.ErrnoException).code
+      : undefined)
+  if (code !== undefined && RETRYABLE_ERROR_CODES.has(code)) return true
+  // A fetch failure surfaces as TypeError("fetch failed") with the real errno
+  // in `cause`. Only retry that shape — a bare TypeError is usually a
+  // programmer error (bad URL/init) that retrying cannot fix.
+  if (error instanceof TypeError) {
+    return cause instanceof Error || /fetch failed|network/i.test(error.message)
+  }
+  return false
 }
 
 /**

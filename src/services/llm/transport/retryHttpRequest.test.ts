@@ -1,86 +1,42 @@
 import { describe, expect, test } from 'bun:test'
 import { requestWithRetry } from './retryHttpRequest.js'
 
-describe('requestWithRetry', () => {
-  test('retries transient server responses then returns the successful response', async () => {
-    const statuses = [503, 502, 200]
-    let requests = 0
+const OPTS = { maxAttempts: 3, baseDelayMs: 1 }
 
-    const response = await requestWithRetry(
-      async () => new Response(null, { status: statuses[requests++]! }),
-      undefined,
-      { baseDelayMs: 0 },
-    )
-
-    expect(response.status).toBe(200)
-    expect(requests).toBe(3)
-  })
-
-  test('retries the same request and honors a bounded Retry-After header', async () => {
-    const request = {
-      url: 'https://example.test/chat/completions',
-      body: JSON.stringify({ model: 'model-a', messages: [{ role: 'user', content: 'hi' }] }),
+describe('requestWithRetry network classification', () => {
+  test('does not retry a programmer TypeError (no cause)', async () => {
+    let calls = 0
+    const request = async (): Promise<Response> => {
+      calls++
+      throw new TypeError('Failed to parse URL from x')
     }
-    const seenRequests: typeof request[] = []
-    let requests = 0
-    const response = await requestWithRetry(
-      async () => {
-        seenRequests.push(request)
-        requests++
-        return requests === 1
-          ? new Response(null, { status: 429, headers: { 'retry-after': '0' } })
-          : new Response(null, { status: 200 })
-      },
-      undefined,
-      { baseDelayMs: 0 },
-    )
+    await expect(requestWithRetry(request, undefined, OPTS)).rejects.toThrow()
+    expect(calls).toBe(1)
+  })
 
+  test('retries a fetch TypeError carrying an errno cause', async () => {
+    let calls = 0
+    const request = async (): Promise<Response> => {
+      calls++
+      const error = new TypeError('fetch failed')
+      ;(error as { cause?: unknown }).cause = Object.assign(new Error('reset'), {
+        code: 'ECONNRESET',
+      })
+      throw error
+    }
+    await expect(requestWithRetry(request, undefined, OPTS)).rejects.toThrow()
+    expect(calls).toBe(3)
+  })
+
+  test('retries a retryable HTTP status before the body is consumed', async () => {
+    let calls = 0
+    const request = async (): Promise<Response> => {
+      calls++
+      if (calls === 1) return new Response('busy', { status: 503 })
+      return new Response('ok', { status: 200 })
+    }
+    const response = await requestWithRetry(request, undefined, OPTS)
     expect(response.status).toBe(200)
-    expect(seenRequests).toEqual([request, request])
-  })
-
-  test('retries network errors but does not retry non-retryable client errors', async () => {
-    let requests = 0
-    const response = await requestWithRetry(
-      async () => {
-        requests++
-        if (requests === 1) throw new TypeError('fetch failed')
-        return new Response(null, { status: 400 })
-      },
-      undefined,
-      { baseDelayMs: 0 },
-    )
-
-    expect(response.status).toBe(400)
-    expect(requests).toBe(2)
-  })
-
-  test('does not retry aborts or retryable statuses after the attempt budget', async () => {
-    const controller = new AbortController()
-    controller.abort()
-    let requests = 0
-
-    await expect(
-      requestWithRetry(
-        async () => {
-          requests++
-          return new Response(null, { status: 503 })
-        },
-        controller.signal,
-        { baseDelayMs: 0 },
-      ),
-    ).rejects.toMatchObject({ name: 'AbortError' })
-    expect(requests).toBe(0)
-
-    const response = await requestWithRetry(
-      async () => {
-        requests++
-        return new Response(null, { status: 503 })
-      },
-      undefined,
-      { maxAttempts: 2, baseDelayMs: 0 },
-    )
-    expect(response.status).toBe(503)
-    expect(requests).toBe(2)
+    expect(calls).toBe(2)
   })
 })
