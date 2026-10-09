@@ -112,7 +112,13 @@ export function wrapChannelMessage(
     .filter(([k]) => SAFE_META_KEY.test(k))
     .map(([k, v]) => ` ${k}="${escapeXmlAttr(v)}"`)
     .join('')
-  return `<${CHANNEL_TAG} source="${escapeXmlAttr(serverName)}"${attrs}>\n${content}\n</${CHANNEL_TAG}>`
+  // A channel server controls `content`, so a literal closing tag in it could
+  // break out of the provenance boundary. Neutralize the tag's angle bracket.
+  const safeContent = content.replace(
+    new RegExp(`<\\/?${CHANNEL_TAG}\\b`, 'gi'),
+    match => `&lt;${match.slice(1)}`,
+  )
+  return `<${CHANNEL_TAG} source="${escapeXmlAttr(serverName)}"${attrs}>\n${safeContent}\n</${CHANNEL_TAG}>`
 }
 
 /**
