@@ -69,6 +69,10 @@ import { createOpencodeId, getOpencodeProjectId, getOpencodeUserAgent } from '..
 export type OpenAIResponsesUsage = {
   input_tokens: number
   output_tokens: number
+  /** Normalized cache fields (cached_tokens split out of input_tokens). */
+  cache_creation_input_tokens?: number
+  cache_read_input_tokens?: number
+  reasoning_tokens?: number
   input_tokens_details?: {
     cached_tokens?: number
     text_tokens?: number
@@ -671,7 +675,28 @@ export async function* adaptOpenAIResponsesSSE(
       openBlockIndexes.delete(index)
     }
     const u = extractUsage(parsed)
-    if (u) usage = u
+    if (u) {
+      // Responses `input_tokens` is the total (cache-inclusive); split out the
+      // cached subset so cost/usage match the normalized shape (input_tokens
+      // excludes cache reads, mirroring normalizeOpenAIChatUsage).
+      const totalInput = Math.max(0, u.input_tokens)
+      const cacheRead = Math.min(
+        Math.max(0, u.input_tokens_details?.cached_tokens ?? 0),
+        totalInput,
+      )
+      usage = {
+        input_tokens: totalInput - cacheRead,
+        output_tokens: u.output_tokens,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: cacheRead,
+        ...(u.output_tokens_details?.reasoning_tokens !== undefined
+          ? { reasoning_tokens: u.output_tokens_details.reasoning_tokens }
+          : {}),
+        ...(u.output_tokens_details !== undefined
+          ? { output_tokens_details: u.output_tokens_details }
+          : {}),
+      }
+    }
     const finalStatus = status ?? 'completed'
     const stopReason = finalStatus === 'incomplete' ? 'max_tokens' : 'end_turn'
     const usageParts: OpenAIResponsesStreamEvent & { type: 'message_delta' } = {

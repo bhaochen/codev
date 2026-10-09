@@ -295,6 +295,20 @@ describe('adaptOpenAIResponsesSSE', () => {
     expect(delta.usage.output_tokens).toBe(1000)
   })
 
+  test('cached input tokens are split out of input_tokens', async () => {
+    const events = await collectEvents(
+      textDeltaChunks(
+        ['x'],
+        '{"input_tokens":10,"output_tokens":2,"input_tokens_details":{"cached_tokens":8}}',
+      ),
+    )
+    const delta = events.find(e => e.type === 'message_delta')!
+    if (delta.type !== 'message_delta') throw new Error('expected message_delta')
+    expect(delta.usage.cache_read_input_tokens).toBe(8)
+    expect(delta.usage.input_tokens).toBe(2)
+    expect(delta.usage.output_tokens).toBe(2)
+  })
+
   test('usage includes reasoning_tokens from output_tokens_details', async () => {
     const events = await collectEvents(
       textDeltaChunks(['x'], '{"input_tokens":7,"output_tokens":9,"output_tokens_details":{"reasoning_tokens":5}}'),
