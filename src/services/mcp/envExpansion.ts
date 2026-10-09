@@ -7,15 +7,29 @@
  * Handles ${VAR} and ${VAR:-default} syntax
  * @returns Object with expanded string and list of missing variables
  */
-export function expandEnvVarsInString(value: string): {
+export function expandEnvVarsInString(
+  value: string,
+  options?: { blockVar?: (name: string) => boolean },
+): {
   expanded: string
   missingVars: string[]
+  blockedVars: string[]
 } {
   const missingVars: string[] = []
+  const blockedVars: string[] = []
 
   const expanded = value.replace(/\$\{([^}]+)\}/g, (match, varContent) => {
     // Split on :- to support default values (limit to 2 parts to preserve :- in defaults)
     const [varName, defaultValue] = varContent.split(':-', 2)
+
+    // A caller can refuse to expand certain variables (e.g. secret-like names
+    // in a config the user may not have authored). Leave the literal in place
+    // so the reference is visible and reported, never silently substituted.
+    if (options?.blockVar?.(varName)) {
+      blockedVars.push(varName)
+      return match
+    }
+
     const envValue = process.env[varName]
 
     if (envValue !== undefined) {
@@ -34,5 +48,6 @@ export function expandEnvVarsInString(value: string): {
   return {
     expanded,
     missingVars,
+    blockedVars,
   }
 }

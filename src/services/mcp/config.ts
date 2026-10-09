@@ -553,15 +553,37 @@ export function filterMcpServersByPolicy<T>(configs: Record<string, T>): {
 /**
  * Internal utility: Expands environment variables in an MCP server config
  */
-function expandEnvVars(config: McpServerConfig): {
+/**
+ * Names that look like credentials. In a project-scoped config (a checked-in
+ * `.mcp.json` from a repository the user did not necessarily author), these
+ * must never be interpolated into a remote `url`/`headers` — an attacker-picked
+ * host would then receive the secret. Legitimate use in user/enterprise configs
+ * (which the user authored) is unaffected.
+ */
+const SECRET_VAR_NAME_PATTERN =
+  /(token|key|secret|password|passwd|credential|auth|session|cookie|private|cert)/i
+
+function expandEnvVars(
+  config: McpServerConfig,
+  opts: { blockSecrets: boolean },
+): {
   expanded: McpServerConfig
   missingVars: string[]
+  blockedVars: string[]
 } {
   const missingVars: string[] = []
+  const blockedVars: string[] = []
 
-  function expandString(str: string): string {
-    const { expanded, missingVars: vars } = expandEnvVarsInString(str)
+  function expandString(str: string, blockSecrets = false): string {
+    const { expanded, missingVars: vars, blockedVars: blocked } =
+      expandEnvVarsInString(
+        str,
+        blockSecrets
+          ? { blockVar: name => SECRET_VAR_NAME_PATTERN.test(name) }
+          : undefined,
+      )
     missingVars.push(...vars)
+    blockedVars.push(...blocked)
     return expanded
   }
 
@@ -574,9 +596,9 @@ function expandEnvVars(config: McpServerConfig): {
       expanded = {
         ...stdioConfig,
         command: expandString(stdioConfig.command),
-        args: stdioConfig.args.map(expandString),
+        args: stdioConfig.args.map(a => expandString(a)),
         env: stdioConfig.env
-          ? mapValues(stdioConfig.env, expandString)
+          ? mapValues(stdioConfig.env, v => expandString(v))
           : undefined,
       }
       break
@@ -590,9 +612,9 @@ function expandEnvVars(config: McpServerConfig): {
         | McpWebSocketServerConfig
       expanded = {
         ...remoteConfig,
-        url: expandString(remoteConfig.url),
+        url: expandString(remoteConfig.url, opts.blockSecrets),
         headers: remoteConfig.headers
-          ? mapValues(remoteConfig.headers, expandString)
+          ? mapValues(remoteConfig.headers, v => expandString(v, opts.blockSecrets))
           : undefined,
       }
       break
@@ -612,6 +634,7 @@ function expandEnvVars(config: McpServerConfig): {
   return {
     expanded,
     missingVars: [...new Set(missingVars)],
+    blockedVars: [...new Set(blockedVars)],
   }
 }
 
@@ -1328,7 +1351,11 @@ export function parseMcpConfig(params: {
     let configToCheck = config
 
     if (expandVars) {
-      const { expanded, missingVars } = expandEnvVars(config)
+      const { expanded, missingVars, blockedVars } = expandEnvVars(config, {
+        // Only an untrusted, checked-in project config is blocked from
+        // interpolating secret-like variables into a remote url/headers.
+        blockSecrets: scope === 'project',
+      })
 
       if (missingVars.length > 0) {
         errors.push({
@@ -1336,6 +1363,20 @@ export function parseMcpConfig(params: {
           path: `mcpServers.${name}`,
           message: `Missing environment variables: ${missingVars.join(', ')}`,
           suggestion: `Set the following environment variables: ${missingVars.join(', ')}`,
+          mcpErrorMetadata: {
+            scope,
+            serverName: name,
+            severity: 'warning',
+          },
+        })
+      }
+
+      if (blockedVars.length > 0) {
+        errors.push({
+          ...(filePath && { file: filePath }),
+          path: `mcpServers.${name}`,
+          message: `Refused to expand secret-like environment variables in a project MCP server URL/headers: ${blockedVars.join(', ')}`,
+          suggestion: `Remove the ${blockedVars.join(', ')} reference from the project config, or define the server in user/enterprise scope.`,
           mcpErrorMetadata: {
             scope,
             serverName: name,
