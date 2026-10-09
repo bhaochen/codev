@@ -1,5 +1,6 @@
 import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
 import { checkHasTrustDialogAccepted } from '../../utils/config.js'
+import { isEnvTruthy } from '../../utils/envUtils.js'
 import { logAntError } from '../../utils/debug.js'
 import { errorMessage } from '../../utils/errors.js'
 import { execFileNoThrowWithCwd } from '../../utils/execFileNoThrow.js'
@@ -37,12 +38,16 @@ export async function getMcpHeadersFromHelper(
     return null
   }
 
-  // Security check for project/local settings
-  // Skip trust check in non-interactive mode (e.g., CI/CD, automation)
+  // Security check for project/local settings. The helper runs a shell command
+  // from a repository the user may not have authored, so trust is required even
+  // in non-interactive mode — CI can opt in explicitly.
+  const allowUntrustedNonInteractive =
+    getIsNonInteractiveSession() &&
+    isEnvTruthy(process.env.CLAUDE_CODE_MCP_ALLOW_PROJECT_HEADERS_HELPER)
   if (
     'scope' in config &&
     isMcpServerFromProjectOrLocalSettings(config as ScopedMcpServerConfig) &&
-    !getIsNonInteractiveSession()
+    !allowUntrustedNonInteractive
   ) {
     // Check if trust has been established for this project
     const hasTrust = checkHasTrustDialogAccepted()
