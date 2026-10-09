@@ -57,6 +57,7 @@ import { getAgentContext } from '../../utils/agentContext.js'
 import { getCwd } from '../../utils/cwd.js'
 import { lazySchema } from '../../utils/lazySchema.js'
 import { BROWSER_TOOL_NAME } from './constants.js'
+import { getBrowserContextManager } from '../../services/browser/browserContextCompaction.js'
 
 const DESCRIPTION =
   'Drive a real Chrome/Edge browser: read a page the cheap way (HTTP first, browser only when needed), observe numbered elements, click, fill, type, drag, upload, run JS, measure what actually rendered, extract structured data with provenance, watch for console/network errors, record and replay flows, screenshot, let the user point at the element they mean, and manage tabs. Every action reports what it actually changed. One tool, one action per call.'
@@ -1450,6 +1451,11 @@ async function runAction(
     },
   )
   if (result.ok) recordActionAsStep(input, targetElement, targetSiblings)
+
+  // Browser context compaction: record action for potential summarization
+  const browserContextManager = getBrowserContextManager()
+  const stepNumber = session.currentStep()
+  browserContextManager.recordBrowserAction(result, stepNumber)
   // "Nothing happened" is more useful with a cause attached.
   const noEffectNotes: string[] = []
   if (effect.noop && input.ref !== undefined) {
