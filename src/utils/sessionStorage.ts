@@ -11,6 +11,7 @@ import {
   mkdir,
   readdir,
   readFile,
+  rename,
   stat,
   unlink,
   writeFile,
@@ -289,13 +290,27 @@ export type AgentMetadata = {
  * Also stores the worktreePath when the agent was spawned with worktree
  * isolation, enabling resume to restore the correct cwd.
  */
+/**
+ * Write a small JSON sidecar atomically (temp + rename) so a kill mid-write
+ * cannot leave a truncated file that breaks the next read.
+ */
+async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
+  await mkdir(dirname(path), { recursive: true })
+  const tmp = `${path}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`
+  try {
+    await writeFile(tmp, JSON.stringify(value))
+    await rename(tmp, path)
+  } catch (e) {
+    await unlink(tmp).catch(() => {})
+    throw e
+  }
+}
+
 export async function writeAgentMetadata(
   agentId: AgentId,
   metadata: AgentMetadata,
 ): Promise<void> {
-  const path = getAgentMetadataPath(agentId)
-  await mkdir(dirname(path), { recursive: true })
-  await writeFile(path, JSON.stringify(metadata))
+  await writeJsonAtomic(getAgentMetadataPath(agentId), metadata)
 }
 
 export async function readAgentMetadata(
@@ -304,7 +319,13 @@ export async function readAgentMetadata(
   const path = getAgentMetadataPath(agentId)
   try {
     const raw = await readFile(path, 'utf-8')
-    return JSON.parse(raw) as AgentMetadata
+    // Metadata is optional: a corrupt/partial file degrades to "absent" rather
+    // than crashing resume.
+    try {
+      return JSON.parse(raw) as AgentMetadata
+    } catch {
+      return null
+    }
   } catch (e) {
     if (isFsInaccessible(e)) return null
     throw e
@@ -347,9 +368,7 @@ export async function writeRemoteAgentMetadata(
   taskId: string,
   metadata: RemoteAgentMetadata,
 ): Promise<void> {
-  const path = getRemoteAgentMetadataPath(taskId)
-  await mkdir(dirname(path), { recursive: true })
-  await writeFile(path, JSON.stringify(metadata))
+  await writeJsonAtomic(getRemoteAgentMetadataPath(taskId), metadata)
 }
 
 export async function readRemoteAgentMetadata(
@@ -358,7 +377,11 @@ export async function readRemoteAgentMetadata(
   const path = getRemoteAgentMetadataPath(taskId)
   try {
     const raw = await readFile(path, 'utf-8')
-    return JSON.parse(raw) as RemoteAgentMetadata
+    try {
+      return JSON.parse(raw) as RemoteAgentMetadata
+    } catch {
+      return null
+    }
   } catch (e) {
     if (isFsInaccessible(e)) return null
     throw e
