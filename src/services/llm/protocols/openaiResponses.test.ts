@@ -612,3 +612,12 @@ describe('openaiResponses native-only invariant', () => {
     expect(source).toContain("@anthropic-ai/sdk/error'")
   })
 })
+
+describe('adaptOpenAIResponsesSSE failure handling', () => {
+  test('response.failed throws instead of settling as end_turn', async () => {
+    const chunks = [
+      'event: response.failed\ndata: {"type":"response.failed","response":{"status":"failed","error":{"message":"boom","code":"server_error"}}}\n\n',
+    ]
+    await expect(collectEvents(chunks)).rejects.toThrow(/boom/)
+  })
+})

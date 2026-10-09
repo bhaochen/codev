@@ -934,13 +934,26 @@ export async function* adaptOpenAIResponsesSSE(
       }
 
       case 'response.completed':
-      case 'response.incomplete':
-      case 'response.failed': {
+      case 'response.incomplete': {
         const responseObj = (parsed as { response?: Record<string, unknown> }).response
         status = (parsed.status as string | undefined) ?? (responseObj?.status as string | undefined)
         if (responseObj?.id) responseId = responseObj.id as string
         for (const e of finish(parsed)) yield e as never
         return
+      }
+
+      case 'response.failed': {
+        // A failed generation is not a finished turn: surface the provider's
+        // reason instead of settling as end_turn with empty/partial content.
+        const responseObj = (parsed as { response?: Record<string, unknown> }).response
+        const errorObj = responseObj?.error as
+          | { message?: unknown; code?: unknown; type?: unknown }
+          | undefined
+        const message =
+          typeof errorObj?.message === 'string' && errorObj.message.length > 0
+            ? errorObj.message
+            : 'The provider failed to complete the response.'
+        throw new Error(`OpenAI Responses provider error: ${message}`)
       }
 
       default:
