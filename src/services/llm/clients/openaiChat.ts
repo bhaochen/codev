@@ -334,7 +334,9 @@ export async function* queryOpenAIChat(
         logForDebugging(`[OpenAIChat] free model ${model} 500, fallback to big-pickle`)
         ;(body as { model?: string }).model = 'big-pickle'
         model = 'big-pickle'
-        response = await sendRequest(attemptBody)
+        // Rebuild so the fallback model actually reaches the wire: attemptBody
+        // was captured above and, in recovery mode, is a pre-mutation copy.
+        response = await sendRequest(recovery ? buildRecoveryBody() : body)
         if (response.ok) {
           logForDebugging(`[OpenAIChat] free-tier fallback succeeded with ${model}`)
         }
