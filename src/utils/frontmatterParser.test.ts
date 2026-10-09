@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { parseFrontmatter } from './frontmatterParser.js'
+import { parseFrontmatter, splitPathInFrontmatter } from './frontmatterParser.js'
 
 describe('parseFrontmatter', () => {
   test('parses frontmatter and returns the body', () => {
@@ -35,5 +35,26 @@ describe('parseFrontmatter', () => {
       content: 'just text',
     })
     expect(parseFrontmatter('\uFEFFplain').content).toBe('plain')
+  })
+})
+
+describe('splitPathInFrontmatter brace expansion', () => {
+  test('expands simple brace groups', () => {
+    expect(splitPathInFrontmatter('{a,b}/{c,d}')).toEqual([
+      'a/c',
+      'a/d',
+      'b/c',
+      'b/d',
+    ])
+    expect(splitPathInFrontmatter('src/*.{ts,tsx}')).toEqual([
+      'src/*.ts',
+      'src/*.tsx',
+    ])
+  })
+
+  test('pathological brace input stays bounded', () => {
+    const out = splitPathInFrontmatter('{a,b}'.repeat(20))
+    expect(out.length).toBeGreaterThan(0)
+    expect(out.length).toBeLessThanOrEqual(512)
   })
 })

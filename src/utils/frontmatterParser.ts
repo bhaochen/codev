@@ -246,32 +246,32 @@ export function splitPathInFrontmatter(input: string | string[]): string[] {
  * expandBraces("src/*.{ts,tsx}") // returns ["src/*.ts", "src/*.tsx"]
  * expandBraces("{a,b}/{c,d}") // returns ["a/c", "a/d", "b/c", "b/d"]
  */
+const MAX_BRACE_EXPANSIONS = 512
+const MAX_BRACE_DEPTH = 8
+
 function expandBraces(pattern: string): string[] {
-  // Find the first brace group
-  const braceMatch = pattern.match(/^([^{]*)\{([^}]+)\}(.*)$/)
-
-  if (!braceMatch) {
-    // No braces found, return pattern as-is
-    return [pattern]
+  // Bounded breadth-first expansion. The previous recursive form multiplied
+  // per brace group, so a committed rule glob like `{a,b}{a,b}{a,b}...` could
+  // produce 2^n strings and exhaust memory at startup.
+  const results: string[] = []
+  const queue: Array<{ pattern: string; depth: number }> = [
+    { pattern, depth: 0 },
+  ]
+  while (queue.length > 0 && results.length < MAX_BRACE_EXPANSIONS) {
+    const { pattern: current, depth } = queue.shift()!
+    const braceMatch = current.match(/^([^{]*)\{([^}]+)\}(.*)$/)
+    if (!braceMatch || depth >= MAX_BRACE_DEPTH) {
+      results.push(current)
+      continue
+    }
+    const prefix = braceMatch[1] || ''
+    const alternatives = braceMatch[2] || ''
+    const suffix = braceMatch[3] || ''
+    for (const part of alternatives.split(',').map(alt => alt.trim())) {
+      queue.push({ pattern: prefix + part + suffix, depth: depth + 1 })
+    }
   }
-
-  const prefix = braceMatch[1] || ''
-  const alternatives = braceMatch[2] || ''
-  const suffix = braceMatch[3] || ''
-
-  // Split alternatives by comma and expand each one
-  const parts = alternatives.split(',').map(alt => alt.trim())
-
-  // Recursively expand remaining braces in suffix
-  const expanded: string[] = []
-  for (const part of parts) {
-    const combined = prefix + part + suffix
-    // Recursively handle additional brace groups
-    const furtherExpanded = expandBraces(combined)
-    expanded.push(...furtherExpanded)
-  }
-
-  return expanded
+  return results.length > 0 ? results : [pattern]
 }
 
 /**
