@@ -655,15 +655,20 @@ class Project {
     if (this.flushTimer) {
       return
     }
-    this.flushTimer = setTimeout(async () => {
+    this.flushTimer = setTimeout(() => {
       this.flushTimer = null
-      this.activeDrain = this.drainWriteQueue()
-      await this.activeDrain
-      this.activeDrain = null
-      // If more items arrived during drain, schedule again
-      if (this.writeQueues.size > 0) {
-        this.scheduleDrain()
-      }
+      // Chain onto any in-flight drain rather than starting a second one:
+      // two concurrent drainWriteQueue passes can reorder appends to the same
+      // file, and clearing activeDrain early let flush() return before writes
+      // landed. activeDrain stays the tail of a serialized chain.
+      const start = this.activeDrain ?? Promise.resolve()
+      this.activeDrain = start.then(() => this.drainWriteQueue())
+      void this.activeDrain.then(() => {
+        // If more items arrived during the drain, schedule again
+        if (this.writeQueues.size > 0) {
+          this.scheduleDrain()
+        }
+      })
     }, this.FLUSH_INTERVAL_MS)
   }
 
