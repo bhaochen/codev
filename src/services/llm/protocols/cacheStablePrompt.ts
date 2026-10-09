@@ -112,7 +112,14 @@ export function freezeSessionVolatileText(
   volatileText: string,
 ): string {
   const existing = volatileBySession.get(cacheKey)
-  if (existing !== undefined) return existing
+  if (existing !== undefined) {
+    // Re-insert so the size bound evicts the least-recently-used session, not
+    // the oldest-created one — evicting an active session would cold-start its
+    // cached prefix on the next turn.
+    volatileBySession.delete(cacheKey)
+    volatileBySession.set(cacheKey, existing)
+    return existing
+  }
   if (!volatileText) return ''
 
   volatileBySession.set(cacheKey, volatileText)
