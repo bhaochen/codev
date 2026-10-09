@@ -53,6 +53,11 @@ import {
   type StateExplanation,
   type StealthPlatform,
 } from "./pageScripts.js";
+import { WatchdogManager } from "./watchdogs/watchdog.js";
+import { SecurityWatchdog } from "./watchdogs/securityWatchdog.js";
+import { PermissionsWatchdog } from "./watchdogs/permissionsWatchdog.js";
+import { DownloadsWatchdog } from "./watchdogs/downloadsWatchdog.js";
+import { StorageWatchdog } from "./watchdogs/storageWatchdog.js";
 
 export interface TabInfo {
   index: number;
@@ -674,6 +679,8 @@ class BrowserSessionService {
   private failureStreak = new Map<string, number>();
   /** No window anyone could point in: launched headless, or attached to a headless browser. */
   private headless = false;
+  /** Watchdog 管理器 - 处理横切关注点 (安全、权限、下载、存储等) */
+  private watchdogManager?: WatchdogManager;
   /**
    * Where the last read of a tab ended and the text that ended it, so reading
    * on from there can re-find its place if the page shifted in between.
@@ -1059,6 +1066,7 @@ class BrowserSessionService {
       await this.prepareStealth();
       await this.ensureActiveTarget();
       await this.startTabActivityTracking();
+      this.initWatchdogs();
       return {
         launched: "attached",
         note: `Attached to the already-running browser on port ${connectPort} (its real profile and logins).`,
@@ -1078,6 +1086,7 @@ class BrowserSessionService {
     await this.prepareStealth();
     await this.ensureActiveTarget();
     await this.startTabActivityTracking();
+    this.initWatchdogs();
     return {
       launched: "spawned",
       note: `Launched ${launched.executable}${headless ? " (headless)" : ""} with an isolated automation profile.`,
@@ -1114,6 +1123,56 @@ class BrowserSessionService {
         })
         .catch(() => undefined);
     }
+  }
+
+  /** 初始化 Watchdog 系统 */
+  private initWatchdogs(): void {
+    if (this.watchdogManager) return; // Already initialized
+
+    this.watchdogManager = new WatchdogManager(this);
+
+    // SecurityWatchdog - 域名访问控制
+    this.watchdogManager.register(new SecurityWatchdog(
+      this.watchdogManager.getBus(),
+      this,
+      {
+        allowedDomains: process.env.CODEV_BROWSER_ALLOWED_DOMAINS?.split(",").filter(Boolean),
+        prohibitedDomains: process.env.CODEV_BROWSER_PROHIBITED_DOMAINS?.split(",").filter(Boolean),
+        blockIPAddresses: !isEnvTruthy(process.env.CODEV_BROWSER_ALLOW_IP),
+      }
+    ));
+
+    // PermissionsWatchdog - 自动授权
+    this.watchdogManager.register(new PermissionsWatchdog(
+      this.watchdogManager.getBus(),
+      this,
+      {
+        autoAccept: !isEnvTruthy(process.env.CODEV_BROWSER_DISMISS_PERMISSIONS),
+      }
+    ));
+
+    // DownloadsWatchdog - 下载监控
+    this.watchdogManager.register(new DownloadsWatchdog(
+      this.watchdogManager.getBus(),
+      this,
+      {
+        downloadDir: this.downloadDir,
+        autoAccept: true,
+      }
+    ));
+
+    // StorageWatchdog - 存储持久化
+    this.watchdogManager.register(new StorageWatchdog(
+      this.watchdogManager.getBus(),
+      this,
+      {
+        storagePath: process.env.CODEV_BROWSER_STORAGE_PATH,
+        autoSaveIntervalMs: 30_000,
+      }
+    ));
+
+    // 挂载所有
+    this.watchdogManager.attachAll();
   }
 
   async listTabs(): Promise<TabInfo[]> {
@@ -3030,6 +3089,12 @@ class BrowserSessionService {
       if (this.client === client) this.resetState();
     });
 
+    // 发布浏览器连接事件给 watchdogs
+    this.watchdogManager?.getBus().emitEvent({
+      type: "browser:connected",
+      cdpUrl: "connected",
+    });
+
     const targetOf = (sessionId?: string): string | undefined =>
       sessionId ? this.sessionToTarget.get(sessionId) : undefined;
     client.on(
@@ -3350,6 +3415,9 @@ class BrowserSessionService {
     this.headless = false;
     this.lastRead = undefined;
     this.watchCursor = 0;
+    // Detach watchdogs
+    this.watchdogManager?.detachAll();
+    this.watchdogManager = undefined;
     this.actionChain = Promise.resolve();
   }
 }
