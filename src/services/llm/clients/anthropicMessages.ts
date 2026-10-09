@@ -2061,7 +2061,13 @@ export async function* queryAnthropicMessages(
 
           if (!response.ok) {
             const errorText = await response.text().catch(() => '')
-            throw new Error(`Upstream Anthropic failed (${response.status}): ${errorText}`)
+            // Carry the status so the retry classifier below (and callers) can
+            // recognize 429/503/529 — a bare Error would make retry dead code.
+            const httpError = new Error(
+              `Upstream Anthropic failed (${response.status}): ${errorText}`,
+            ) as Error & { status?: number }
+            httpError.status = response.status
+            throw httpError
           }
 
           if (!response.body) {
@@ -2087,13 +2093,21 @@ export async function* queryAnthropicMessages(
         } catch (error) {
           if (isAbortError(error)) throw error
 
-          // Check if we should retry
+          // Check if we should retry. The native fetch path carries an HTTP
+          // `status`; raw network failures surface as an errno `code` (there is
+          // no SDK error name on this path).
+          const status = (error as { status?: number }).status
+          const code = (error as { code?: string }).code
           const retryable = error instanceof Error && (
             error.name === 'APIConnectionTimeoutError' ||
             error.name === 'APIConnectionError' ||
-            (error as any).status === 529 ||
-            (error as any).status === 503 ||
-            (error as any).status === 429
+            status === 529 ||
+            status === 503 ||
+            status === 429 ||
+            (code !== undefined &&
+              ['ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED', 'EAI_AGAIN'].includes(
+                code,
+              ))
           )
 
           if (retryable && attemptNumber < 3) {
