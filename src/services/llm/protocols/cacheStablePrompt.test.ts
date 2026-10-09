@@ -44,6 +44,34 @@ describe('splitSystemPromptForCache', () => {
   })
 })
 
+describe('volatile freeze isolation by lineage', () => {
+  test('subagents do not share the main agent frozen tail', () => {
+    const sys = (vol: string) => `rules\n${BOUNDARY}\n${vol}`
+    const base = { lane: 'openrouter', model: 'm', sessionId: 's1' }
+    const main = applyCacheStableSystemPrompt(
+      [{ role: 'system', content: sys('git: clean') }],
+      sys('git: clean'),
+      { ...base, lineage: 'main' },
+    )
+    const agent = applyCacheStableSystemPrompt(
+      [{ role: 'system', content: sys('git: dirty') }],
+      sys('git: dirty'),
+      { ...base, lineage: 'agent-1' },
+    )
+    // The agent keeps its own tail, not the main agent's frozen one.
+    expect(JSON.stringify(main)).toContain('git: clean')
+    expect(JSON.stringify(agent)).toContain('git: dirty')
+    // Same lineage still replays its first frozen value.
+    const mainAgain = applyCacheStableSystemPrompt(
+      [{ role: 'system', content: sys('git: changed') }],
+      sys('git: changed'),
+      { ...base, lineage: 'main' },
+    )
+    expect(JSON.stringify(mainAgain)).toContain('git: clean')
+    expect(JSON.stringify(mainAgain)).not.toContain('git: changed')
+  })
+})
+
 describe('frozen volatile context', () => {
   test('the first non-empty value is pinned for the session', () => {
     expect(freezeSessionVolatileText('k', '')).toBe('')

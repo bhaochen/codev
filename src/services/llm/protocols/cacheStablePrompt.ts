@@ -131,8 +131,9 @@ export function volatileFreezeKey(
   lane: string,
   model: string,
   sessionId: string | undefined,
+  lineage: string | undefined,
 ): string {
-  return `${lane}:${model.toLowerCase()}:${sessionId?.trim() || 'no-session'}`
+  return `${lane}:${model.toLowerCase()}:${sessionId?.trim() || 'no-session'}:${lineage ?? 'main'}`
 }
 
 /**
@@ -180,12 +181,24 @@ export function providerUsesOpenAIChatBoundary(
 export function applyCacheStableSystemPrompt(
   messages: OpenAIChatMessage[],
   systemText: string,
-  options: { lane: string; model: string; sessionId?: string },
+  options: {
+    lane: string
+    model: string
+    sessionId?: string
+    /** Agent / query-source lineage; subagents must not share the main agent's
+     * frozen volatile tail (their system prompt differs). */
+    lineage?: string
+  },
 ): OpenAIChatMessage[] {
   const { stable, volatile } = splitSystemPromptForCache(systemText)
   const out = stable === systemText ? messages : replaceSystemMessage(messages, stable)
   const frozen = freezeSessionVolatileText(
-    volatileFreezeKey(options.lane, options.model, options.sessionId),
+    volatileFreezeKey(
+      options.lane,
+      options.model,
+      options.sessionId,
+      options.lineage,
+    ),
     volatile,
   ).trim()
   if (!frozen) return out

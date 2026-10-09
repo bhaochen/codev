@@ -138,6 +138,9 @@ export async function* queryOpenAIChat(
           lane: route.provider,
           model,
           sessionId: getSessionId(),
+          // Isolate each agent/subagent: they share the session id but not the
+          // system prompt, so a shared freeze would leak one's volatile tail.
+          lineage: context.agentId ?? context.querySource ?? 'main',
         })
       } else if (systemText.includes(SYSTEM_PROMPT_DYNAMIC_BOUNDARY)) {
         openaiMessages = agentMessagesToOpenAIChatMessages(
