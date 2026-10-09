@@ -914,7 +914,10 @@ export async function* adaptOpenAIChatSSE(
             detail[key] == null ||
             previous[key] === detail[key],
         )
-      if (field && previous) {
+      // Only adjacent fragments of the same logical block may combine. A
+      // different type/index must start a new entry, or Object.assign would
+      // corrupt the previous entry (stale keys plus a changed type).
+      if (field && previous && sameBlock) {
         const joined =
           String(previous[field] ?? '') + String(detail[field] ?? '')
         Object.assign(previous, detail, { [field]: joined })

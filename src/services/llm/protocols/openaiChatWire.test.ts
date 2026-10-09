@@ -742,6 +742,30 @@ describe('adaptOpenAIChatSSE', () => {
     ])
   })
 
+  test('reasoning_details of different types do not merge into one another', async () => {
+    const events = await collectEvents([
+      chatDelta('chat.completion.chunk', {
+        id: 'c',
+        choices: [{ delta: { reasoning_details: [{ type: 'reasoning.summary', index: 0, summary: 'sum' }] }, index: 0 }],
+      }),
+      chatDelta('chat.completion.chunk', {
+        id: 'c',
+        choices: [{ delta: { reasoning_details: [{ type: 'reasoning.text', index: 0, text: 'body' }] }, index: 0 }],
+      }),
+      ...textChunks(['answer'], 'stop'),
+    ])
+    const details = events.flatMap(e =>
+      e.type === 'content_block_delta' && e.delta.type === 'reasoning_details_delta'
+        ? [e.delta.reasoning_details]
+        : [],
+    )
+    expect(details).toHaveLength(1)
+    expect(details[0]).toEqual([
+      { type: 'reasoning.summary', index: 0, summary: 'sum' },
+      { type: 'reasoning.text', index: 0, text: 'body' },
+    ])
+  })
+
   test('encrypted-only reasoning_details still open a carrier thinking block', async () => {
     const events = await collectEvents([
       chatDelta('chat.completion.chunk', {
