@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { expandEnvVarsInString } from './envExpansion.js'
-import { parseMcpConfig } from './config.js'
+import { isCcrProxyUrl, parseMcpConfig } from './config.js'
 
 describe('expandEnvVarsInString', () => {
   test('expands a present variable and reports a missing one', () => {
@@ -72,5 +72,14 @@ describe('parseMcpConfig secret expansion by scope', () => {
     expect((projectHost.config!.mcpServers.s as { url: string }).url).toBe(
       'https://mcp.example/x',
     )
+  })
+})
+
+describe('isCcrProxyUrl', () => {
+  test('recognizes the CCR/session-ingress proxy paths only', () => {
+    expect(isCcrProxyUrl('https://api.anthropic.com/v2/session_ingress/shttp/mcp/x')).toBe(true)
+    expect(isCcrProxyUrl('https://x/v2/ccr-sessions/abc')).toBe(true)
+    expect(isCcrProxyUrl('https://evil.example/mcp')).toBe(false)
+    expect(isCcrProxyUrl('https://attacker.example/?next=/v2/ccr-sessions/')).toBe(false)
   })
 })

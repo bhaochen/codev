@@ -179,8 +179,24 @@ const CCR_PROXY_PATH_MARKERS = [
  * signature-based dedup match a plugin's raw vendor URL against a connector's
  * rewritten proxy URL when both point at the same MCP server.
  */
+/**
+ * True when `url` routes through the CCR/session-ingress SHTTP proxy.
+ *
+ * Matches the URL *path* only: a third-party URL that merely carries the marker
+ * in a query value (`?next=/v2/ccr-sessions/`) must not be treated as the
+ * trusted proxy, or it would still be handed the session credential.
+ */
+export function isCcrProxyUrl(url: string): boolean {
+  try {
+    const pathname = new URL(url).pathname
+    return CCR_PROXY_PATH_MARKERS.some(m => pathname.includes(m))
+  } catch {
+    return false
+  }
+}
+
 export function unwrapCcrProxyUrl(url: string): string {
-  if (!CCR_PROXY_PATH_MARKERS.some(m => url.includes(m))) {
+  if (!isCcrProxyUrl(url)) {
     return url
   }
   try {

@@ -133,7 +133,7 @@ import {
   wrapFetchWithStepUpDetection,
 } from './auth.js'
 import { markClaudeAiMcpConnected } from './claudeai.js'
-import { getAllMcpConfigs, isMcpServerDisabled } from './config.js'
+import { getAllMcpConfigs, isCcrProxyUrl, isMcpServerDisabled } from './config.js'
 import { getMcpServerHeaders } from './headersHelper.js'
 import { SdkControlClientTransport } from './SdkControlTransport.js'
 import type {
@@ -745,11 +745,15 @@ export const connectToServer = memoize(
         const combinedHeaders = await getMcpServerHeaders(name, serverRef)
 
         const tlsOptions = getWebSocketTLSOptions()
+        // The session ingress token is a powerful remote-session credential:
+        // only hand it to the CCR/session-ingress proxy, never to an arbitrary
+        // third-party WebSocket MCP server.
         const wsHeaders = {
           'User-Agent': getMCPUserAgent(),
-          ...(sessionIngressToken && {
-            Authorization: `Bearer ${sessionIngressToken}`,
-          }),
+          ...(sessionIngressToken &&
+            isCcrProxyUrl(serverRef.url) && {
+              Authorization: `Bearer ${sessionIngressToken}`,
+            }),
           ...combinedHeaders,
         }
 
@@ -834,8 +838,11 @@ export const connectToServer = memoize(
             ...proxyOptions,
             headers: {
               'User-Agent': getMCPUserAgent(),
+              // Only the CCR/session-ingress proxy may receive the session
+              // ingress token; a third-party HTTP MCP server must not.
               ...(sessionIngressToken &&
-                !hasOAuthTokens && {
+                !hasOAuthTokens &&
+                isCcrProxyUrl(serverRef.url) && {
                   Authorization: `Bearer ${sessionIngressToken}`,
                 }),
               ...combinedHeaders,
