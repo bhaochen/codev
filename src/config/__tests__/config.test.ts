@@ -6,8 +6,11 @@ describe("配置读取测试", () => {
   test("应该能从 ~/.claude/settings.json 读取到 JINA_API_KEY", () => {
     const apiKey = getGlobalConfig();
     
-    // 打印出来看看，确认是否拿到了
-    console.log("读取到的 API Key:", apiKey);
+    // 不要打印密钥本身：只打印是否读到与长度，避免密钥泄漏到日志/CI。
+    console.log(
+      "读取到的 API Key:",
+      typeof apiKey === "string" ? `是 (${apiKey.length} chars)` : "否",
+    );
     
     // 断言检查
     expect(apiKey).not.toBeNull();
