@@ -1,7 +1,6 @@
 import { execaSync } from 'execa'
 import { logForDebugging } from '../debug.js'
 import { execFileNoThrow } from '../execFileNoThrow.js'
-import { execSyncWithDefaults_DEPRECATED } from '../execFileNoThrowPortable.js'
 import { jsonParse, jsonStringify } from '../slowOperations.js'
 import {
   CREDENTIALS_SERVICE_SUFFIX,
@@ -36,9 +35,14 @@ export const macOsKeychainStorage = {
         CREDENTIALS_SERVICE_SUFFIX,
       )
       const username = getUsername()
-      const result = execSyncWithDefaults_DEPRECATED(
-        `security find-generic-password -a "${username}" -w -s "${storageServiceName}"`,
+      // Argv form (no shell): a crafted USER / service name must not be able
+      // to inject shell metacharacters.
+      const { stdout, exitCode } = execaSync(
+        'security',
+        ['find-generic-password', '-a', username, '-w', '-s', storageServiceName],
+        { reject: false, stdio: ['ignore', 'pipe', 'ignore'] },
       )
+      const result = exitCode === 0 ? stdout.trim() : ''
       if (result) {
         const data = jsonParse(result)
         keychainCacheState.cache = { data, cachedAt: Date.now() }
@@ -165,10 +169,12 @@ export const macOsKeychainStorage = {
         CREDENTIALS_SERVICE_SUFFIX,
       )
       const username = getUsername()
-      execSyncWithDefaults_DEPRECATED(
-        `security delete-generic-password -a "${username}" -s "${storageServiceName}"`,
+      const { exitCode } = execaSync(
+        'security',
+        ['delete-generic-password', '-a', username, '-s', storageServiceName],
+        { reject: false, stdio: 'ignore' },
       )
-      return true
+      return exitCode === 0
     } catch (_e) {
       return false
     }
