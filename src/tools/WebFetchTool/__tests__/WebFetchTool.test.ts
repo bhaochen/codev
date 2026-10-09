@@ -1,6 +1,6 @@
 import { test, expect, describe, afterEach } from 'bun:test'
 import { WebFetchTool } from '../WebFetchTool'
-import { clearWebFetchCache, getURLMarkdownContent } from '../utils'
+import { clearWebFetchCache, getURLMarkdownContent, UNTRUSTED_BANNER } from '../utils'
 import type { ToolUseContext } from '../../../Tool.js'
 // Define MACRO for test environment to avoid "MACRO is not defined" errors
 if (typeof (globalThis as Record<string, unknown>).MACRO === 'undefined') {
@@ -387,5 +387,35 @@ describe('WebFetchTool', () => {
         expect(result.redirectUrl).toBe('https://outside.test/page')
       }
     })
+  })
+})
+
+describe('WebFetch untrusted banner', () => {
+  test('plain text and JSON responses are flagged as external content', async () => {
+    globalThis.fetch = (async () =>
+      new Response('hello from the page', {
+        headers: { 'content-type': 'text/plain' },
+      })) as unknown as typeof fetch
+    const textResult = await getURLMarkdownContent(
+      'https://fetch-tool.test/plain',
+      new AbortController(),
+    )
+    if ('content' in textResult) {
+      expect(textResult.content).toContain(UNTRUSTED_BANNER)
+      expect(textResult.content).toContain('hello from the page')
+    }
+
+    clearWebFetchCache()
+    globalThis.fetch = (async () =>
+      new Response('{"a":1}', {
+        headers: { 'content-type': 'application/json' },
+      })) as unknown as typeof fetch
+    const jsonResult = await getURLMarkdownContent(
+      'https://fetch-tool.test/json',
+      new AbortController(),
+    )
+    if ('content' in jsonResult) {
+      expect(jsonResult.content).toContain(UNTRUSTED_BANNER)
+    }
   })
 })

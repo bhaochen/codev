@@ -611,10 +611,11 @@ async function localFetch(
   if (!response.ok) {
     const body = await readResponseBody(response)
     const detail = normalizeText(body.toString('utf8')).slice(0, 2_000)
+    // The body is attacker-controlled; flag it before it reaches the model.
     throw new WebFetchHttpError(
       code,
       codeText,
-      `WebFetch returned HTTP ${code} ${codeText}${detail ? `: ${detail}` : ''}`,
+      `WebFetch returned HTTP ${code} ${codeText}${detail ? `: ${UNTRUSTED_BANNER} ${detail}` : ''}`,
     )
   }
 
@@ -676,7 +677,7 @@ async function localFetch(
       jsonText = sourceText
     }
     return {
-      content: jsonText,
+      content: `${UNTRUSTED_BANNER}\n\n${jsonText}`,
       contentType: 'application/json',
       code,
       codeText,
@@ -685,7 +686,7 @@ async function localFetch(
   }
 
   return {
-    content: normalizeText(sourceText).slice(0, MAX_MARKDOWN_LENGTH),
+    content: `${UNTRUSTED_BANNER}\n\n${normalizeText(sourceText).slice(0, MAX_MARKDOWN_LENGTH)}`,
     contentType,
     code,
     codeText,
