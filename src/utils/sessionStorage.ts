@@ -3216,6 +3216,7 @@ const METADATA_TYPE_MARKERS = [
   '"type":"worktree-state"',
   '"type":"pr-link"',
   '"type":"goal"',
+  '"type":"goal-state"',
 ]
 const METADATA_MARKER_BUFS = METADATA_TYPE_MARKERS.map(m => Buffer.from(m))
 // Longest marker is 22 bytes; +1 for leading `{` = 23.
@@ -3707,6 +3708,8 @@ export async function loadTranscriptFile(
           prNumbers.set(entry.sessionId, entry.prNumber)
           prUrls.set(entry.sessionId, entry.prUrl)
           prRepositories.set(entry.sessionId, entry.prRepository)
+        } else if (entry.type === 'goal-state' && entry.sessionId) {
+          goalStore = entry
         } else if (entry.type === 'goal' && entry.sessionId) {
           goalStore =
             entry.id === '__cleared__'
