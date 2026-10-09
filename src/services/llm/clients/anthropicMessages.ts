@@ -25,6 +25,7 @@ import type {
 } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
 import type { TextBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
 import type { Stream } from '@anthropic-ai/sdk/streaming.mjs'
+import { setTimeout as sleep } from 'node:timers/promises'
 import { randomUUID } from 'crypto'
 import { agentBlockToAnthropic } from '../../../types/anthropicAdapter.js'
 import { httpRequest } from '../transport/http.js'
@@ -2112,7 +2113,9 @@ export async function* queryAnthropicMessages(
 
           if (retryable && attemptNumber < 3) {
             const delay = Math.min(1000 * 2 ** (attemptNumber - 1), 30000)
-            await new Promise(r => setTimeout(r, delay))
+            // Abortable: a user abort during backoff must not stall for up to
+            // 30s before it surfaces.
+            await sleep(delay, undefined, { signal })
             continue
           }
           throw error
