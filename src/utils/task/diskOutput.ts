@@ -179,10 +179,13 @@ export class DiskTaskOutput {
     // This code is extremely precise.
     // You **must not** add an await here!! That will cause memory to balloon as the queue grows.
     // It's okay to add an `await` to the caller of this method (e.g. #drainAllChunks) because that won't cause Buffer[] to be kept alive in memory.
-    return this.#fileHandle!.appendFile(
-      // This variable needs to get GC'd ASAP.
-      this.#queueToBuffers(),
-    )
+    // #queueToBuffers() splices the queue out, so if the write fails the
+    // already-removed data must be put back or it is lost silently.
+    const buffer = this.#queueToBuffers()
+    return this.#fileHandle!.appendFile(buffer).catch(error => {
+      this.#queue.unshift(buffer.toString('utf8'))
+      throw error
+    })
   }
 
   /** Keep this in a separate method so that GC doesn't keep it alive for any longer than it should. */
