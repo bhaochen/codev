@@ -1896,9 +1896,12 @@ function PromptInput({
     if (fullScreenDraft) {
       return;
     }
-    // ctrl+shift+o opens the full-screen draft view. Plain ctrl+o is left
-    // alone so the global transcript expand/collapse keeps working.
-    if (key.ctrl && key.shift && char.toLowerCase() === 'o') {
+    // Open the full-screen draft view:
+    //  - ctrl+o when there is a draft to read (empty input keeps ctrl+o as the
+    //    global transcript toggle below);
+    //  - ctrl+shift+o always, for terminals (kitty/modifyOtherKeys) that report
+    //    the shift modifier — legacy terminals deliver it as plain ctrl+o.
+    if (key.ctrl && char.toLowerCase() === 'o' && (key.shift || input.length > 0)) {
       setFullScreenDraft(true);
       event.stopImmediatePropagation();
       return;
