@@ -133,6 +133,12 @@ FLOWS (stop paying for the same login twice):
 - flow { mode: "save", name: "login" } writes them to .codev/flows/<name>.json. { mode: "run", name: "login" } replays them with no further calls from you and stops at the first step that no longer matches, naming that step. { mode: "list" }, { mode: "delete", name }, { mode: "clear" } (drop the recording and start fresh).
 - Replay is also the cheapest UI regression test you have: if a flow that worked yesterday diverges today, the step it names is what changed.
 
+RECORDING (capture browser actions as video):
+- record { recordMode: "start" } begins capturing the current tab. record { recordMode: "stop" } ends it.
+- record { recordMode: "export", recordFormat: "html" } generates a self-contained HTML player (no dependencies).
+- record { recordMode: "export", recordFormat: "gif" } or "mp4" uses ffmpeg if available.
+- Recordings are saved to ~/.codev/browser-recordings/.
+
 TABS: tabs (list) / new_tab { url? } / switch_tab { tabIndex } / close_tab { tabIndex? }. A click that opens a new tab switches to it automatically.
 close — shut the browser down when the task is finished.
 
@@ -194,6 +200,7 @@ const ACTIONS = [
   'back',
   'forward',
   'reload',
+  'record',
   'close',
 ] as const
 
@@ -410,6 +417,18 @@ const inputSchema = lazySchema(() =>
       .boolean()
       .optional()
       .describe('For open: run without a visible window. Default false.'),
+    recordMode: z
+      .enum(['start', 'stop', 'export'])
+      .optional()
+      .describe('For record: what to do. Default start.'),
+    recordFormat: z
+      .enum(['gif', 'mp4', 'html'])
+      .optional()
+      .describe('For record export: output format. Default html.'),
+    recordPath: z
+      .string()
+      .optional()
+      .describe('For record export: output file path.'),
   }),
 )
 type InputSchema = ReturnType<typeof inputSchema>
@@ -1149,6 +1168,70 @@ async function runActionInner(
     }
     case 'flow':
       return runFlow(input, context)
+    case 'record': {
+      const { getBrowserRecorder } = await import('../../services/browser/recording.js')
+      const recorder = getBrowserRecorder()
+      const mode = input.recordMode ?? 'start'
+
+      if (mode === 'start') {
+        if (recorder.isRecording()) {
+          return errorOutput('record', 'Recording already in progress.')
+        }
+        const targetId = session.activeTargetId
+        if (!targetId) {
+          return errorOutput('record', 'No active tab to record.')
+        }
+        await recorder.start(session, targetId)
+        return {
+          action: 'record',
+          ok: true,
+          message: 'Recording started. Use { "action": "record", "recordMode": "stop" } to stop.',
+          warnings: [],
+        }
+      }
+
+      if (mode === 'stop') {
+        if (!recorder.isRecording()) {
+          return errorOutput('record', 'No recording in progress.')
+        }
+        const recordingId = await recorder.stop()
+        if (!recordingId) {
+          return errorOutput('record', 'Recording stopped but no frames captured.')
+        }
+        return {
+          action: 'record',
+          ok: true,
+          message: `Recording stopped. ID: ${recordingId}. Use export to create a video.`,
+          detailText: `Recording saved to ~/.codev/browser-recordings/${recordingId}.json`,
+          warnings: [],
+        }
+      }
+
+      // export mode
+      const recordingId = input.recordPath // reuse recordPath as recordingId for export
+      if (!recordingId) {
+        return errorOutput('record', 'Missing recording ID for export.')
+      }
+      const format = input.recordFormat ?? 'html'
+      let outputPath: string | null = null
+      if (format === 'gif') {
+        outputPath = await recorder.exportToGif(recordingId)
+      } else if (format === 'mp4') {
+        outputPath = await recorder.exportToMp4(recordingId)
+      } else {
+        outputPath = await recorder.generateHtmlPlayer(recordingId)
+      }
+      if (!outputPath) {
+        return errorOutput('record', `Export failed. ${format === 'html' ? 'HTML player' : 'ffmpeg'} may not be available.`)
+      }
+      return {
+        action: 'record',
+        ok: true,
+        message: `Exported recording to ${outputPath}`,
+        savedPath: outputPath,
+        warnings: [],
+      }
+    }
     case 'click': {
       const outcome = await session.click(
         {
