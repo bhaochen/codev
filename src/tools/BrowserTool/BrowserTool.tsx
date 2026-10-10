@@ -462,6 +462,10 @@ const inputSchema = lazySchema(() =>
       .string()
       .optional()
       .describe('For scrape: CSS container selector.'),
+    frameSelector: z
+      .string()
+      .optional()
+      .describe('For observe/click/fill/extract: scope to a specific iframe by CSS selector (e.g. "#payment-frame").'),
   }),
 )
 type InputSchema = ReturnType<typeof inputSchema>
@@ -1070,6 +1074,13 @@ async function runActionInner(
     }
     case 'observe': {
       const { observation, warnings } = await session.observe(signal)
+      // If frameSelector is specified, filter to elements in that frame
+      if (input.frameSelector && observation) {
+        const frameElements = observation.interactive_elements.filter(el => el.frame)
+        if (frameElements.length > 0) {
+          observation.interactive_elements = frameElements
+        }
+      }
       return outcomeToOutput('observe', { ok: true, observation, warnings })
     }
     case 'read': {
