@@ -70,6 +70,10 @@ const MUTATING_ACTIONS = new Set([
   "reload",
   "get",
   "flow",
+  "smartClick",
+  "smartFill",
+  "waitAndClick",
+  "scrape",
 ]);
 
 export function isMutatingAction(action: string): boolean {

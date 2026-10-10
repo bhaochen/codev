@@ -139,6 +139,12 @@ RECORDING (capture browser actions as video):
 - record { recordMode: "export", recordFormat: "gif" } or "mp4" uses ffmpeg if available.
 - Recordings are saved to ~/.codev/browser-recordings/.
 
+COMPOUND ACTIONS (reduce LLM turns for common patterns):
+- smartClick { ref|text, smartWait?: "navigation"|"networkIdle"|"selector"|"text" } — click + wait + fresh observation. Use instead of click+observe.
+- smartFill { ref, value } — fill + verify + fresh observation. Use instead of fill+observe.
+- waitAndClick { ref|text, smartSelector?: string, smartText?: string } — wait for element/text + click + fresh observation.
+- scrape { scrapeFields: { name: "selector" }, scrapeContainer?: string } — extract multiple fields in one call.
+
 TABS: tabs (list) / new_tab { url? } / switch_tab { tabIndex } / close_tab { tabIndex? }. A click that opens a new tab switches to it automatically.
 close — shut the browser down when the task is finished.
 
@@ -201,6 +207,11 @@ const ACTIONS = [
   'forward',
   'reload',
   'record',
+  // Compound actions (reduce LLM turns)
+  'smartClick',
+  'smartFill',
+  'waitAndClick',
+  'scrape',
   'close',
 ] as const
 
@@ -429,6 +440,27 @@ const inputSchema = lazySchema(() =>
       .string()
       .optional()
       .describe('For record export: output file path.'),
+    // Compound action params
+    smartWait: z
+      .enum(['navigation', 'networkIdle', 'selector', 'text'])
+      .optional()
+      .describe('For smartClick/waitAndClick: what to wait for after click.'),
+    smartSelector: z
+      .string()
+      .optional()
+      .describe('For waitAndClick/smartWait=selector: CSS selector to wait for.'),
+    smartText: z
+      .string()
+      .optional()
+      .describe('For waitAndClick/smartWait=text: text to wait for.'),
+    scrapeFields: z
+      .record(z.string(), z.string())
+      .optional()
+      .describe('For scrape: { name: "selector" } pairs.'),
+    scrapeContainer: z
+      .string()
+      .optional()
+      .describe('For scrape: CSS container selector.'),
   }),
 )
 type InputSchema = ReturnType<typeof inputSchema>
@@ -1230,6 +1262,85 @@ async function runActionInner(
         message: `Exported recording to ${outputPath}`,
         savedPath: outputPath,
         warnings: [],
+      }
+    }
+    case 'smartClick': {
+      // Compound: click + wait for stability + return fresh observation
+      const outcome = await session.click(
+        { ref: input.ref, text: input.text, nth: input.nth },
+        signal,
+      )
+      if (!outcome.ok) return outcomeToOutput('smartClick', outcome)
+
+      // Wait for specified condition
+      const waitMode = input.smartWait ?? 'networkIdle'
+      if (waitMode === 'selector' && input.smartSelector) {
+        await session.waitAction({ selector: input.smartSelector, timeoutMs: 10_000 }, signal)
+      } else if (waitMode === 'text' && input.smartText) {
+        await session.waitAction({ text: input.smartText, timeoutMs: 10_000 }, signal)
+      } else if (waitMode === 'navigation') {
+        await session.waitForSettle(signal, { maxMs: 5_000 })
+      } else {
+        await session.waitForSettle(signal)
+      }
+
+      const { observation, warnings } = await session.observe(signal)
+      return outcomeToOutput('smartClick', { ok: true, observation, warnings })
+    }
+    case 'smartFill': {
+      // Compound: fill + verify + return fresh observation
+      const outcome = await session.fill(input.ref!, input.value!, signal)
+      if (!outcome.ok) return outcomeToOutput('smartFill', outcome)
+
+      // Verify the fill worked
+      const { observation, warnings } = await session.observe(signal)
+      const filled = observation?.interactive_elements.find(el => el.id === input.ref)
+      const verified = filled?.value === input.value
+
+      return {
+        ...outcomeToOutput('smartFill', { ok: true, observation, warnings }),
+        message: verified
+          ? `Filled @${input.ref} with "${input.value}" and verified.`
+          : `Filled @${input.ref} but verification shows different value.`,
+      }
+    }
+    case 'waitAndClick': {
+      // Compound: wait for condition + click + return fresh observation
+      if (input.smartSelector) {
+        await session.waitAction({ selector: input.smartSelector, timeoutMs: 15_000 }, signal)
+      } else if (input.smartText) {
+        await session.waitAction({ text: input.smartText, timeoutMs: 15_000 }, signal)
+      }
+
+      const outcome = await session.click(
+        { ref: input.ref, text: input.text, nth: input.nth },
+        signal,
+      )
+      if (!outcome.ok) return outcomeToOutput('waitAndClick', outcome)
+
+      await session.waitForSettle(signal)
+      const { observation, warnings } = await session.observe(signal)
+      return outcomeToOutput('waitAndClick', { ok: true, observation, warnings })
+    }
+    case 'scrape': {
+      // Compound: extract multiple fields + return structured data
+      const fields = input.scrapeFields ?? {}
+      const extracted = await session.extractData({
+        container: input.scrapeContainer,
+        fields,
+        limit: 50,
+      })
+      if (!extracted.ok) {
+        return errorOutput('scrape', extracted.error ?? 'Scrape failed.')
+      }
+      return {
+        action: 'scrape',
+        ok: true,
+        message: `Scraped ${extracted.rows.length} row(s) with ${Object.keys(fields).length} field(s).`,
+        url: extracted.url,
+        title: extracted.title,
+        detailText: formatExtract(extracted, Object.keys(fields)),
+        warnings: session.drainSessionNotes(),
       }
     }
     case 'click': {
