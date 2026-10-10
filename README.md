@@ -329,3 +329,33 @@ in the terminal:
     <td><img src="assets/browser_python_kernel.png"></td>
   </tr>
 </table>
+
+### Linux/Hyprland Desktop Automation (Computer-Use)
+
+Codev 现已内置原生 Linux/Hyprland 桌面自动化，无需外部 MCP 服务器：
+
+**依赖安装 (Arch Linux)**
+```bash
+pacman -S grim slurp ydotool wl-clipboard
+systemctl --user enable --now ydotoold
+```
+
+**环境变量** (Hyprland 自动检测，如需手动指定)
+```bash
+export HYPRLAND_INSTANCE_SIGNATURE=<your-signature>
+export WAYLAND_DISPLAY=wayland-1
+```
+
+**能力**
+- `screenshot` / `observe` / `click` / `type` / `key` / `scroll` / `drag` — 完整桌面交互
+- `listWindows` / `focusWindow` / `moveActive` / `resizeActive` / `switchWorkspace` / `moveToWorkspace` / `toggleFloating` / `toggleFullscreen` / `pinActive` — 窗口管理
+- `launchApp` / `listApps` / `listRunningApps` / `getFrontmostApp` — 应用管理
+- `getDisplays` / `getClipboard` / `setClipboard` / `checkPermissions` — 显示/剪贴板/权限
+- `listRunningApps` / `getFrontmostApp` — 运行中应用
+
+**架构亮点**
+- **原生 Wayland**：`grim` + `slurp` 截图，`ydotool`/`wtype` 输入，`hyprctl` 窗口管理
+- **模块级 `hyprctlJson`**：避免闭包被 minify 剥离导致 JSON 解析失败
+- **grim 截图**：临时文件写入，避免 stdout 传输问题
+- **平台自动检测**：macOS 走原生 Swift，Linux/Hyprland 走 grim/hyprctl/ydotool，统一 `ComputerExecutor` 接口
+- **Watchdog 架构**：Security/Downloads/Storage/Permissions 模块化横切关注点
