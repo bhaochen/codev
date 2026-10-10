@@ -1896,12 +1896,10 @@ function PromptInput({
     if (fullScreenDraft) {
       return;
     }
-    // Open the full-screen draft view:
-    //  - ctrl+o when there is a draft to read (empty input keeps ctrl+o as the
-    //    global transcript toggle below);
-    //  - ctrl+shift+o always, for terminals (kitty/modifyOtherKeys) that report
-    //    the shift modifier — legacy terminals deliver it as plain ctrl+o.
-    if (key.ctrl && char.toLowerCase() === 'o' && (key.shift || input.length > 0)) {
+    // ctrl+e opens the full-screen draft view (ctrl+o stays the global
+    // transcript toggle; ctrl+shift+o is taken by the teammate preview and is
+    // only reported by kitty-protocol terminals).
+    if (key.ctrl && char.toLowerCase() === 'e' && input.length > 0) {
       setFullScreenDraft(true);
       event.stopImmediatePropagation();
       return;
@@ -2164,8 +2162,12 @@ function PromptInput({
   // Must be called before early returns below to satisfy rules-of-hooks.
   // Memoized so the portal useEffect doesn't churn on every PromptInput render.
   const autoModeOptInDialog = useMemo(() => feature('TRANSCRIPT_CLASSIFIER') && showAutoModeOptIn ? <AutoModeOptInDialog onAccept={handleAutoModeOptInAccept} onDecline={handleAutoModeOptInDecline} /> : null, [showAutoModeOptIn, handleAutoModeOptInAccept, handleAutoModeOptInDecline]);
-  useSetPromptOverlayDialog(isFullscreenEnvEnabled() ? autoModeOptInDialog : null);
-  if (fullScreenDraft) {
+  const fullScreenDraftNode = useMemo(() => fullScreenDraft ? <FullScreenDraft value={input} pastedContents={pastedContents} onDone={() => setFullScreenDraft(false)} /> : null, [fullScreenDraft, input, pastedContents]);
+  // In fullscreen the prompt sits in a clipped bottom slot, so the draft must
+  // escape it via the overlay portal or it renders empty. Other environments
+  // render it inline below.
+  useSetPromptOverlayDialog(isFullscreenEnvEnabled() ? fullScreenDraftNode ?? autoModeOptInDialog : null);
+  if (fullScreenDraft && !isFullscreenEnvEnabled()) {
     return <FullScreenDraft value={input} pastedContents={pastedContents} onDone={() => setFullScreenDraft(false)} />;
   }
   if (showBashesDialog) {

@@ -8,7 +8,7 @@ import { Box, Text, useInput } from '../../ink.js'
 type Props = {
   /** The raw draft (may contain [Pasted text #N ...] placeholders). */
   value: string
-  pastedContents: Record<number, PastedContent>
+  pastedContents?: Record<number, PastedContent>
   /** Close the full-screen view (draft is preserved). */
   onDone: () => void
 }
@@ -27,13 +27,19 @@ const GUTTER = 6
  * blocks expanded to their real content — with line numbers and scroll.
  *
  * It is a viewer: editing continues in the normal input box after closing
- * (Ctrl+O or Esc).
+ * (Ctrl+E or Esc).
  */
-export function FullScreenDraft({ value, pastedContents, onDone }: Props) {
+export function FullScreenDraft({ value, pastedContents = {}, onDone }: Props) {
+  // Defensive: a bad/absent store must never blank the whole view.
+  let expanded = value
+  try {
+    expanded = expandPastedTextRefs(value, pastedContents)
+  } catch {
+    expanded = value
+  }
   useRegisterOverlay('fullscreen-draft')
   const { rows, columns } = useTerminalSize()
 
-  const expanded = expandPastedTextRefs(value, pastedContents)
   const lines = expanded.split('\n')
   const visibleRows = Math.max(1, rows - CHROME_ROWS)
   const maxScroll = Math.max(0, lines.length - visibleRows)
@@ -47,7 +53,7 @@ export function FullScreenDraft({ value, pastedContents, onDone }: Props) {
     // Modal: consume every key so nothing leaks to the underlying input box or
     // to global shortcuts (e.g. the ctrl+o transcript toggle).
     event.stopImmediatePropagation()
-    if (key.escape || (key.ctrl && char.toLowerCase() === 'o')) {
+    if (key.escape || (key.ctrl && char.toLowerCase() === 'e')) {
       onDone()
       return
     }
@@ -98,7 +104,7 @@ export function FullScreenDraft({ value, pastedContents, onDone }: Props) {
           {maxScroll > 0
             ? '↑/↓ pageup/pagedown scroll · '
             : ''}
-          ctrl+o or esc to close
+          ctrl+e or esc to close
         </Text>
       </Box>
     </Box>
