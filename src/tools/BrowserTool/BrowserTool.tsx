@@ -145,6 +145,9 @@ COMPOUND ACTIONS (reduce LLM turns for common patterns):
 - waitAndClick { ref|text, smartSelector?: string, smartText?: string } — wait for element/text + click + fresh observation.
 - scrape { scrapeFields: { name: "selector" }, scrapeContainer?: string } — extract multiple fields in one call.
 
+CAPTCHA HANDLING:
+- captcha — detect and wait for CAPTCHA (reCAPTCHA, hCaptcha, Cloudflare) to be solved. Polls every 2s, times out after 2min.
+
 TABS: tabs (list) / new_tab { url? } / switch_tab { tabIndex } / close_tab { tabIndex? }. A click that opens a new tab switches to it automatically.
 close — shut the browser down when the task is finished.
 
@@ -208,6 +211,7 @@ const ACTIONS = [
   'reload',
   'record',
   'har',
+  'captcha',
   // Compound actions (reduce LLM turns)
   'smartClick',
   'smartFill',
@@ -1293,6 +1297,39 @@ async function runActionInner(
         message: `Exported ${entries.length} network entries to HAR.`,
         savedPath: outputPath,
         warnings: [],
+      }
+    }
+    case 'captcha': {
+      const { getCaptchaHandler } = await import('../../services/browser/captchaHandler.js')
+      const handler = getCaptchaHandler()
+
+      // Detect CAPTCHA
+      const detection = await handler.detect(session)
+      if (!detection.detected) {
+        return {
+          action: 'captcha',
+          ok: true,
+          message: 'No CAPTCHA detected on the current page.',
+          warnings: [],
+        }
+      }
+
+      // Wait for CAPTCHA to be solved
+      const solved = await handler.waitForCaptcha(session)
+      if (!solved) {
+        return errorOutput('captcha', 'CAPTCHA wait timed out. The user may not have solved it.')
+      }
+
+      // Return fresh observation after CAPTCHA
+      const { observation, warnings } = await session.observe(signal)
+      return {
+        action: 'captcha',
+        ok: true,
+        message: `CAPTCHA (${detection.type ?? 'unknown'}) was solved.`,
+        url: observation?.url,
+        title: observation?.title,
+        elementsText: observation ? formatElements(observation) : undefined,
+        warnings,
       }
     }
     case 'smartClick': {
