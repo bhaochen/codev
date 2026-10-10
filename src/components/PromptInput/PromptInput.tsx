@@ -2162,13 +2162,15 @@ function PromptInput({
   // Must be called before early returns below to satisfy rules-of-hooks.
   // Memoized so the portal useEffect doesn't churn on every PromptInput render.
   const autoModeOptInDialog = useMemo(() => feature('TRANSCRIPT_CLASSIFIER') && showAutoModeOptIn ? <AutoModeOptInDialog onAccept={handleAutoModeOptInAccept} onDecline={handleAutoModeOptInDecline} /> : null, [showAutoModeOptIn, handleAutoModeOptInAccept, handleAutoModeOptInDecline]);
-  const fullScreenDraftNode = useMemo(() => fullScreenDraft ? <FullScreenDraft value={input} pastedContents={pastedContents} onDone={() => setFullScreenDraft(false)} /> : null, [fullScreenDraft, input, pastedContents]);
+  const fullScreenDraftNode = useMemo(() => fullScreenDraft ? <FullScreenDraft value={input} pastedContents={pastedContents} onChange={trackAndSetInput} onDone={() => setFullScreenDraft(false)} /> : null, [fullScreenDraft, input, pastedContents, trackAndSetInput]);
   // In fullscreen the prompt sits in a clipped bottom slot, so the draft must
   // escape it via the overlay portal or it renders empty. Other environments
   // render it inline below.
   useSetPromptOverlayDialog(isFullscreenEnvEnabled() ? fullScreenDraftNode ?? autoModeOptInDialog : null);
-  if (fullScreenDraft && !isFullscreenEnvEnabled()) {
-    return <FullScreenDraft value={input} pastedContents={pastedContents} onDone={() => setFullScreenDraft(false)} />;
+  if (fullScreenDraft) {
+    // Fullscreen: leave the prompt slot empty so its footer (auto mode) cannot
+    // show through the portaled editor floating above it.
+    return isFullscreenEnvEnabled() ? <Box /> : fullScreenDraftNode;
   }
   if (showBashesDialog) {
     return <BackgroundTasksDialog onDone={() => setShowBashesDialog(false)} toolUseContext={getToolUseContext(messages, [], new AbortController(), mainLoopModel)} initialDetailTaskId={typeof showBashesDialog === 'string' ? showBashesDialog : undefined} />;
