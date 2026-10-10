@@ -1896,10 +1896,9 @@ function PromptInput({
     if (fullScreenDraft) {
       return;
     }
-    // ctrl+o opens the full-screen draft view when there is something to read.
-    // With an empty input it falls through to the global transcript toggle,
-    // so that shortcut keeps working from a fresh prompt.
-    if (key.ctrl && char === 'o' && input.length > 0) {
+    // ctrl+shift+o opens the full-screen draft view. Plain ctrl+o is left
+    // alone so the global transcript expand/collapse keeps working.
+    if (key.ctrl && key.shift && char.toLowerCase() === 'o') {
       setFullScreenDraft(true);
       event.stopImmediatePropagation();
       return;

@@ -47,7 +47,7 @@ export function FullScreenDraft({ value, pastedContents, onDone }: Props) {
     // Modal: consume every key so nothing leaks to the underlying input box or
     // to global shortcuts (e.g. the ctrl+o transcript toggle).
     event.stopImmediatePropagation()
-    if (key.escape || (key.ctrl && char === 'o')) {
+    if (key.escape || (key.ctrl && key.shift && char.toLowerCase() === 'o')) {
       onDone()
       return
     }
@@ -98,7 +98,7 @@ export function FullScreenDraft({ value, pastedContents, onDone }: Props) {
           {maxScroll > 0
             ? '↑/↓ pageup/pagedown scroll · '
             : ''}
-          ctrl+o or esc to close
+          ctrl+shift+o or esc to close
         </Text>
       </Box>
     </Box>
