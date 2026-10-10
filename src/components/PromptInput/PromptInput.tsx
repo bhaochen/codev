@@ -15,6 +15,7 @@ import stripAnsi from 'strip-ansi';
 import { companionReservedColumns } from '../../buddy/CompanionSprite.js';
 import { findBuddyTriggerPositions, useBuddyNotification } from '../../buddy/useBuddyNotification.js';
 import { FastModePicker } from '../../commands/fast/fast.js';
+import { FullScreenDraft } from './FullScreenDraft.js';
 import { isUltrareviewEnabled } from '../../commands/review/ultrareviewEnabled.js';
 import { getNativeCSIuTerminalDisplayName } from '../../commands/terminalSetup/terminalSetup.js';
 import { type Command, hasCommand } from '../../commands.js';
@@ -404,6 +405,7 @@ function PromptInput({
   const [isPasting, setIsPasting] = useState(false);
   const [isExternalEditorActive, setIsExternalEditorActive] = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
+  const [fullScreenDraft, setFullScreenDraft] = useState(false);
   const [showQuickOpen, setShowQuickOpen] = useState(false);
   const [showGlobalSearch, setShowGlobalSearch] = useState(false);
   const [showHistoryPicker, setShowHistoryPicker] = useState(false);
@@ -1889,7 +1891,20 @@ function PromptInput({
     context: 'Footer',
     isActive: !!footerItemSelected && !isModalOverlayActive
   });
-  useInput((char, key) => {
+  useInput((char, key, event) => {
+    // While the full-screen draft view is open it owns every key.
+    if (fullScreenDraft) {
+      return;
+    }
+    // ctrl+o opens the full-screen draft view when there is something to read.
+    // With an empty input it falls through to the global transcript toggle,
+    // so that shortcut keeps working from a fresh prompt.
+    if (key.ctrl && char === 'o' && input.length > 0) {
+      setFullScreenDraft(true);
+      event.stopImmediatePropagation();
+      return;
+    }
+
     // Skip all input handling when a full-screen dialog is open. These dialogs
     // render via early return, but hooks run unconditionally — so without this
     // guard, Escape inside a dialog leaks to the double-press message-selector.
@@ -2148,6 +2163,9 @@ function PromptInput({
   // Memoized so the portal useEffect doesn't churn on every PromptInput render.
   const autoModeOptInDialog = useMemo(() => feature('TRANSCRIPT_CLASSIFIER') && showAutoModeOptIn ? <AutoModeOptInDialog onAccept={handleAutoModeOptInAccept} onDecline={handleAutoModeOptInDecline} /> : null, [showAutoModeOptIn, handleAutoModeOptInAccept, handleAutoModeOptInDecline]);
   useSetPromptOverlayDialog(isFullscreenEnvEnabled() ? autoModeOptInDialog : null);
+  if (fullScreenDraft) {
+    return <FullScreenDraft value={input} pastedContents={pastedContents} onDone={() => setFullScreenDraft(false)} />;
+  }
   if (showBashesDialog) {
     return <BackgroundTasksDialog onDone={() => setShowBashesDialog(false)} toolUseContext={getToolUseContext(messages, [], new AbortController(), mainLoopModel)} initialDetailTaskId={typeof showBashesDialog === 'string' ? showBashesDialog : undefined} />;
   }
