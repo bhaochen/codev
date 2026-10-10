@@ -20,28 +20,9 @@ import { mkdirSync, writeFileSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 
-// Dry-run mode support (like hypruse)
-// Dry-run mode support (like hypruse)
-let dryRunMode = false;
+// Held button tracking for SIGTERM cleanup (like hypruse release_held)
 let heldButton: string | null = null;
 
-export function setDryRunMode(enabled: boolean): void {
-  dryRunMode = enabled;
-}
-
-export function isDryRunMode(): boolean {
-  return dryRunMode;
-}
-
-function refuseIfDry(action: string): void {
-  if (dryRunMode) {
-    throw new Error(`Dry-run mode: ${action} would be executed but dry-run is enabled`);
-  }
-}
-
-/**
- * Track held button for SIGTERM cleanup (like hypruse release_held)
- */
 function setHeldButton(button: string | null): void {
   heldButton = button;
 }
@@ -51,7 +32,7 @@ function getHeldButton(): string | null {
 }
 
 /**
- * Release held button on shutdown (SIGTERM cleanup like hypruse)
+ * Release held button on shutdown (SIGTERM cleanup like hypruse release_held)
  * Registered via process.on('SIGTERM')
  */
 async function releaseHeldButton(): Promise<void> {
@@ -338,7 +319,6 @@ async function createLinuxExecutor(): Promise<LinuxExecutor> {
 
     // Core input
     async click(x, y, options?) {
-      refuseIfDry('click');
       await ydotool(['mousemove', '--', String(Math.round(x)), String(Math.round(y))])
       await sleep(50)
       const button = options?.button ?? 'left'
@@ -351,7 +331,6 @@ async function createLinuxExecutor(): Promise<LinuxExecutor> {
     },
 
     async type(text, options?) {
-      refuseIfDry('type');
       // On named seats, keyboard input must go through wtype, not ydotool
       // (ydotool types into human's seat on named seats)
       if (await onNamedSeatForKeyboard()) {
@@ -364,7 +343,6 @@ async function createLinuxExecutor(): Promise<LinuxExecutor> {
     },
 
     async key(sequence, options?) {
-      refuseIfDry('key');
       // On named seats, use wtype instead of ydotool
       if (await onNamedSeatForKeyboard()) {
         // TODO: implement wtype-based key combo
@@ -376,7 +354,6 @@ async function createLinuxExecutor(): Promise<LinuxExecutor> {
     },
 
     async scroll(x, y, options?) {
-      refuseIfDry('scroll');
       const direction = options?.direction ?? 'down'
       const amount = options?.amount ?? 3
       await ydotool(['mousemove', '--', String(Math.round(x)), String(Math.round(y))])
@@ -389,12 +366,10 @@ async function createLinuxExecutor(): Promise<LinuxExecutor> {
     },
 
     async moveMouse(x, y) {
-      refuseIfDry('moveMouse');
       await ydotool(['mousemove', '--', String(Math.round(x)), String(Math.round(y))])
     },
 
     async drag(x1, y1, x2, y2) {
-      refuseIfDry('drag');
       // Track held button for SIGTERM cleanup (like hypruse)
       setHeldButton('left');
       try {
