@@ -20,7 +20,7 @@ import {
   SandboxRuntimeConfigSchema,
   SandboxViolationStore,
 } from '@anthropic-ai/sandbox-runtime'
-import { rmSync, statSync } from 'fs'
+import { lstatSync, rmSync, statSync, unlinkSync } from 'fs'
 import { readFile } from 'fs/promises'
 import { memoize } from 'lodash-es'
 import { join, resolve, sep } from 'path'
@@ -404,8 +404,17 @@ const bareGitRepoScrubPaths: string[] = []
 function scrubBareGitRepoFiles(): void {
   for (const p of bareGitRepoScrubPaths) {
     try {
+      // Never follow a link: a sandboxed command could plant `<cwd>/objects`
+      // as a symlink/junction to a victim directory, and a recursive rm would
+      // delete the target. Unlink the link itself; only recurse a real path.
       // eslint-disable-next-line custom-rules/no-sync-fs -- cleanupAfterCommand must be sync (Shell.ts:367)
-      rmSync(p, { recursive: true })
+      if (lstatSync(p).isSymbolicLink()) {
+        // eslint-disable-next-line custom-rules/no-sync-fs
+        unlinkSync(p)
+      } else {
+        // eslint-disable-next-line custom-rules/no-sync-fs
+        rmSync(p, { recursive: true })
+      }
       logForDebugging(`[Sandbox] scrubbed planted bare-repo file: ${p}`)
     } catch {
       // ENOENT is the expected common case — nothing was planted
