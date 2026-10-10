@@ -3,6 +3,7 @@ import type { PastedContent } from '../../utils/config.js'
 import { expandPastedTextRefs } from '../../history.js'
 import { useTerminalSize } from '../../hooks/useTerminalSize.js'
 import { useRegisterOverlay } from '../../context/overlayContext.js'
+import { useDeclaredCursor } from '../../ink/hooks/use-declared-cursor.js'
 import { Box, Text, useInput } from '../../ink.js'
 
 type Props = {
@@ -92,6 +93,15 @@ export function FullScreenDraft({
     return nl === -1 ? text.length : nl
   }
 
+  // Park the terminal's real cursor (the same one the inline input shows) at
+  // the caret: row within the visible window, column after the gutter.
+  const caretColumn = Math.min(cursor - lineStart(cursorLine), contentWidth)
+  const cursorRef = useDeclaredCursor({
+    line: Math.max(0, cursorLine - top),
+    column: numberWidth + 3 + caretColumn,
+    active: true,
+  })
+
   useInput((char, key, event) => {
     // Modal: consume every key so nothing leaks to the underlying prompt or to
     // global shortcuts (e.g. the ctrl+o transcript toggle).
@@ -168,19 +178,16 @@ export function FullScreenDraft({
           {'  '}· ctrl+e or esc to save & close
         </Text>
       </Box>
-      <Box flexDirection="column" flexGrow={1}>
+      <Box ref={cursorRef} flexDirection="column" flexGrow={1}>
         {visibleLines.map((line, i) => {
           const lineNo = top + i + 1
-          const isCaretLine = top + i === cursorLine
           const truncated = line.length > contentWidth
           return (
             <Box key={lineNo}>
               <Text dimColor>
                 {String(lineNo).padStart(numberWidth)} │{' '}
               </Text>
-              <Text {...(isCaretLine ? { color: 'suggestion' as const } : {})}>
-                {truncated ? line.slice(0, contentWidth) : line}
-              </Text>
+              <Text>{truncated ? line.slice(0, contentWidth) : line}</Text>
               {truncated && (
                 <Text dimColor>{` …+${line.length - contentWidth}`}</Text>
               )}
