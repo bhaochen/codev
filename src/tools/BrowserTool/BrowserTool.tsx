@@ -207,6 +207,7 @@ const ACTIONS = [
   'forward',
   'reload',
   'record',
+  'har',
   // Compound actions (reduce LLM turns)
   'smartClick',
   'smartFill',
@@ -1260,6 +1261,25 @@ async function runActionInner(
         action: 'record',
         ok: true,
         message: `Exported recording to ${outputPath}`,
+        savedPath: outputPath,
+        warnings: [],
+      }
+    }
+    case 'har': {
+      const { getHarRecorder } = await import('../../services/browser/harRecorder.js')
+      const recorder = getHarRecorder()
+      const entries = session.getNetworkEntries()
+      const outputPath = await recorder.export(entries, {
+        url: session.getLastKnownUrl(),
+        title: session.getActiveTab()?.title,
+      })
+      if (!outputPath) {
+        return errorOutput('har', 'No network entries to export.')
+      }
+      return {
+        action: 'har',
+        ok: true,
+        message: `Exported ${entries.length} network entries to HAR.`,
         savedPath: outputPath,
         warnings: [],
       }

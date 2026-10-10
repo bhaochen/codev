@@ -2046,6 +2046,12 @@ class BrowserSessionService {
     };
   }
 
+  /** Returns the captured network entries for the active tab (for HAR export). */
+  getNetworkEntries(): NetworkEntry[] {
+    const targetId = this.activeTargetId;
+    return (targetId && this.networkBuf.get(targetId)) || [];
+  }
+
   private async describeBodies(
     targetId: string,
     shown: NetworkEntry[],
