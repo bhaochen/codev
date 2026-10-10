@@ -52,6 +52,7 @@ type Binding = {
  * Tests will need to either inject the cache or run serially.
  */
 let binding: Binding | undefined;
+let bindingPromise: Promise<Binding> | undefined;
 let currentToolUseContext: ToolUseContext | undefined;
 function tuc(): ToolUseContext {
   // Safe: `binding` is only populated when `currentToolUseContext` is set.
@@ -61,6 +62,23 @@ function tuc(): ToolUseContext {
 function formatLockHeld(holder: string): string {
   return `Computer use is in use by another Claude session (${holder.slice(0, 8)}…). Wait for that session to finish or run /exit there.`;
 }
+
+async function getBinding(): Promise<Binding> {
+  if (binding) return binding;
+  if (!bindingPromise) {
+    bindingPromise = (async () => {
+      const ctx = buildSessionContext();
+      const adapter = await getComputerUseHostAdapter();
+      return {
+        ctx,
+        dispatch: bindSessionContext(adapter, getChicagoCoordinateMode(), ctx) as unknown as (name: string, args: unknown) => Promise<CuDispatchResult>
+      };
+    })();
+  }
+  binding = await bindingPromise;
+  return binding;
+}
+
 export function buildSessionContext(): ComputerUseSessionContext {
   return {
     // ── Read state fresh via the per-call ref ─────────────────────────────
@@ -232,14 +250,8 @@ export function buildSessionContext(): ComputerUseSessionContext {
     formatLockHeldMessage: formatLockHeld
   };
 }
-function getOrBind(): Binding {
-  if (binding) return binding;
-  const ctx = buildSessionContext();
-  binding = {
-    ctx,
-    dispatch: bindSessionContext(getComputerUseHostAdapter(), getChicagoCoordinateMode(), ctx) as unknown as (name: string, args: unknown) => Promise<CuDispatchResult>
-  };
-  return binding;
+function getOrBind(): Promise<Binding> {
+  return getOrBind();
 }
 
 /**
@@ -255,7 +267,7 @@ export function getComputerUseMCPToolOverrides(toolName: string): ComputerUseMCP
     currentToolUseContext = context;
     const {
       dispatch
-    } = getOrBind();
+    } = await getBinding();
     const {
       telemetry,
       ...result

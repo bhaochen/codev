@@ -23,7 +23,7 @@ const APP_ENUM_TIMEOUT_MS = 1000
  * happens at call time regardless; the model just doesn't get hints.
  */
 async function tryGetInstalledAppNames(): Promise<string[] | undefined> {
-  const adapter = getComputerUseHostAdapter()
+  const adapter = await getComputerUseHostAdapter()
   const enumP = adapter.executor.listInstalledApps()
   let timer: ReturnType<typeof setTimeout> | undefined
   const timeoutP = new Promise<undefined>(resolve => {
@@ -60,7 +60,7 @@ async function tryGetInstalledAppNames(): Promise<string[] | undefined> {
 export async function createComputerUseMcpServerForCli(): Promise<
   ReturnType<typeof createComputerUseMcpServer>
 > {
-  const adapter = getComputerUseHostAdapter()
+  const adapter = await getComputerUseHostAdapter()
   const coordinateMode = getChicagoCoordinateMode()
   const server = createComputerUseMcpServer(adapter, coordinateMode)
 

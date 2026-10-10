@@ -49,7 +49,7 @@ export function getLinuxComputerUseHostAdapter(): ComputerUseHostAdapter {
     )
   }
 
-  const executor = getLinuxExecutor()
+  const executor = await getLinuxExecutor()
 
   cached = {
     serverName: COMPUTER_USE_MCP_SERVER_NAME,

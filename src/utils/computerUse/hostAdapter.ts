@@ -42,12 +42,12 @@ let cached: ComputerUseHostAdapter | undefined
  * - Linux/Hyprland: uses grim, hyprctl, ydotool/wtype
  * - Other: throws
  */
-export function getComputerUseHostAdapter(): ComputerUseHostAdapter {
+export async function getComputerUseHostAdapter(): Promise<ComputerUseHostAdapter> {
   if (cached) return cached
 
   // Linux/Hyprland
   if (isLinuxDesktopAvailable() || isHyprland()) {
-    cached = getLinuxComputerUseHostAdapter()
+    cached = await getLinuxComputerUseHostAdapter()
     return cached
   }
 
