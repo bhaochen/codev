@@ -1,9 +1,10 @@
+import { existsSync } from 'fs'
 import memoize from 'lodash-es/memoize.js'
 import * as path from 'path'
 import * as pathWin32 from 'path/win32'
+import { execaSync } from 'execa'
 import { getCwd } from './cwd.js'
 import { logForDebugging } from './debug.js'
-import { execSync_DEPRECATED } from './execSyncWrapper.js'
 import { memoizeWithLRU } from './memoize.js'
 import { getPlatform } from './platform.js'
 
@@ -13,12 +14,9 @@ import { getPlatform } from './platform.js'
  * @returns true if the path exists, false otherwise
  */
 function checkPathExists(path: string): boolean {
-  try {
-    execSync_DEPRECATED(`dir "${path}"`, { stdio: 'pipe' })
-    return true
-  } catch {
-    return false
-  }
+  // No shell: a path containing a quote or cmd metacharacter must not run as
+  // a command, and `dir` was only ever testing existence.
+  return existsSync(path)
 }
 
 /**
@@ -44,12 +42,14 @@ function findExecutable(executable: string): string | null {
     }
   }
 
-  // Fall back to where.exe
+  // Fall back to where.exe (argv, no shell).
   try {
-    const result = execSync_DEPRECATED(`where.exe ${executable}`, {
-      stdio: 'pipe',
-      encoding: 'utf8',
-    }).trim()
+    const where = execaSync('where.exe', [executable], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+      reject: false,
+    })
+    if (where.exitCode !== 0) return null
+    const result = where.stdout.trim()
 
     // SECURITY: Filter out any results from the current directory
     // to prevent executing malicious git.bat/cmd/exe files
