@@ -181,13 +181,26 @@ export function FullScreenDraft({
       <Box ref={cursorRef} flexDirection="column" flexGrow={1}>
         {visibleLines.map((line, i) => {
           const lineNo = top + i + 1
+          const isCaretRow = top + i === cursorLine
           const truncated = line.length > contentWidth
+          const shown = truncated ? line.slice(0, contentWidth) : line
+          // Same cursor as the inline input: the character under the caret is
+          // drawn inverse (a space when the caret is at end of line).
+          const col = isCaretRow ? Math.min(caretColumn, shown.length) : -1
           return (
             <Box key={lineNo}>
               <Text dimColor>
                 {String(lineNo).padStart(numberWidth)} │{' '}
               </Text>
-              <Text>{truncated ? line.slice(0, contentWidth) : line}</Text>
+              {isCaretRow ? (
+                <Text>
+                  {shown.slice(0, col)}
+                  <Text inverse={true}>{shown[col] ?? ' '}</Text>
+                  {shown.slice(col + 1)}
+                </Text>
+              ) : (
+                <Text>{shown}</Text>
+              )}
               {truncated && (
                 <Text dimColor>{` …+${line.length - contentWidth}`}</Text>
               )}
