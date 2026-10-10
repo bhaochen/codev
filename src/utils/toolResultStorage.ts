@@ -124,7 +124,9 @@ export function getToolResultPath(id: string, isJson: boolean): string {
  */
 export async function ensureToolResultsDir(): Promise<void> {
   try {
-    await mkdir(getToolResultsDir(), { recursive: true })
+    // Private (owner-only) dir + files: tool output can contain file contents
+    // or environment values, so it must not be world-readable.
+    await mkdir(getToolResultsDir(), { recursive: true, mode: 0o700 })
   } catch {
     // Directory may already exist
   }
@@ -162,7 +164,11 @@ export async function persistToolResult(
   // the same content on every API turn when microcompact replays the
   // original messages. Use 'wx' instead of a stat-then-write race.
   try {
-    await writeFile(filepath, contentStr, { encoding: 'utf-8', flag: 'wx' })
+    await writeFile(filepath, contentStr, {
+      encoding: 'utf-8',
+      flag: 'wx',
+      mode: 0o600,
+    })
     logForDebugging(
       `Persisted tool result to ${filepath} (${formatFileSize(contentStr.length)})`,
     )
