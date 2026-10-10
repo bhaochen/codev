@@ -7,6 +7,20 @@ import type { ScopedMcpServerConfig } from '../../services/mcp/types.js'
 import { isInBundledMode } from '../bundledMode.js'
 import { CLI_CU_CAPABILITIES, COMPUTER_USE_MCP_SERVER_NAME } from './common.js'
 import { getChicagoCoordinateMode } from './gates.js'
+import { isLinuxDesktopAvailable, isHyprland } from './linuxExecutor.js'
+
+// Platform-specific capabilities
+const LINUX_CU_CAPABILITIES = {
+  screenshotFiltering: 'native' as const,
+  platform: 'linux' as const,
+}
+
+function getPlatformCapabilities() {
+  if (isLinuxDesktopAvailable() || isHyprland()) {
+    return LINUX_CU_CAPABILITIES
+  }
+  return CLI_CU_CAPABILITIES
+}
 
 /**
  * Build the dynamic MCP config + allowed tool names. Mirror of
@@ -24,8 +38,9 @@ export function setupComputerUseMCP(): {
   mcpConfig: Record<string, ScopedMcpServerConfig>
   allowedTools: string[]
 } {
+  const capabilities = getPlatformCapabilities()
   const allowedTools = buildComputerUseTools(
-    CLI_CU_CAPABILITIES,
+    capabilities,
     getChicagoCoordinateMode(),
   ).map(t => buildMcpToolName(COMPUTER_USE_MCP_SERVER_NAME, t.name))
 
