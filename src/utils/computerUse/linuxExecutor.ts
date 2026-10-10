@@ -20,6 +20,77 @@ import { mkdirSync, writeFileSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 
+// Dry-run mode support (like hypruse)
+// Dry-run mode support (like hypruse)
+let dryRunMode = false;
+let heldButton: string | null = null;
+
+export function setDryRunMode(enabled: boolean): void {
+  dryRunMode = enabled;
+}
+
+export function isDryRunMode(): boolean {
+  return dryRunMode;
+}
+
+function refuseIfDry(action: string): void {
+  if (dryRunMode) {
+    throw new Error(`Dry-run mode: ${action} would be executed but dry-run is enabled`);
+  }
+}
+
+/**
+ * Track held button for SIGTERM cleanup (like hypruse release_held)
+ */
+function setHeldButton(button: string | null): void {
+  heldButton = button;
+}
+
+function getHeldButton(): string | null {
+  return heldButton;
+}
+
+/**
+ * Release held button on shutdown (SIGTERM cleanup like hypruse)
+ * Registered via process.on('SIGTERM')
+ */
+async function releaseHeldButton(): Promise<void> {
+  if (heldButton) {
+    try {
+      await ydotool(['click', '0']); // release
+    } catch {
+      // ignore
+    }
+    heldButton = null;
+  }
+}
+
+// Register SIGTERM handler
+if (typeof process !== 'undefined') {
+  process.on('SIGTERM', () => {
+    releaseHeldButton();
+  });
+}
+
+/**
+ * Check if we're on a named seat (hypruse concept)
+ * On named seats, input must go through wire protocol, not ydotool
+ */
+export function onNamedSeat(): boolean {
+  // For now, always return false (we don't support named seats yet)
+  // In the future, could check HYPRLAND_INSTANCE_SIGNATURE for named seat
+  return false;
+}
+
+/**
+ * Check if we're on a named seat (for keyboard input)
+ * On named seats, keyboard input must go through wire protocol (wtype)
+ * not ydotool, because ydotool types into the human's seat
+ */
+export async function onNamedSeatForKeyboard(): Promise<boolean> {
+  return false; // Not implemented yet
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────────────
 
 /** Coordinates from xdotool-style (logical) or physical pixels */
@@ -267,6 +338,7 @@ async function createLinuxExecutor(): Promise<LinuxExecutor> {
 
     // Core input
     async click(x, y, options?) {
+      refuseIfDry('click');
       await ydotool(['mousemove', '--', String(Math.round(x)), String(Math.round(y))])
       await sleep(50)
       const button = options?.button ?? 'left'
@@ -279,18 +351,32 @@ async function createLinuxExecutor(): Promise<LinuxExecutor> {
     },
 
     async type(text, options?) {
+      refuseIfDry('type');
+      // On named seats, keyboard input must go through wtype, not ydotool
+      // (ydotool types into human's seat on named seats)
+      if (await onNamedSeatForKeyboard()) {
+        // TODO: implement wtype-based typing
+        // For now, fall through to ydotool
+      }
       const delay = options?.delay ?? 12
       await ydotool(['type', '--', text])
       await sleep(delay)
     },
 
     async key(sequence, options?) {
+      refuseIfDry('key');
+      // On named seats, use wtype instead of ydotool
+      if (await onNamedSeatForKeyboard()) {
+        // TODO: implement wtype-based key combo
+        // For now, fall through to ydotool
+      }
       const delay = options?.delay ?? 50
       await sendKey(sequence)
       await sleep(delay)
     },
 
     async scroll(x, y, options?) {
+      refuseIfDry('scroll');
       const direction = options?.direction ?? 'down'
       const amount = options?.amount ?? 3
       await ydotool(['mousemove', '--', String(Math.round(x)), String(Math.round(y))])
@@ -303,17 +389,25 @@ async function createLinuxExecutor(): Promise<LinuxExecutor> {
     },
 
     async moveMouse(x, y) {
+      refuseIfDry('moveMouse');
       await ydotool(['mousemove', '--', String(Math.round(x)), String(Math.round(y))])
     },
 
     async drag(x1, y1, x2, y2) {
-      await ydotool(['mousemove', '--', String(Math.round(x1)), String(Math.round(y1))])
-      await sleep(100)
-      await ydotool(['click', '1']) // left down
-      await sleep(100)
-      await ydotool(['mousemove', '--', String(Math.round(x2)), String(Math.round(y2))])
-      await sleep(100)
-      await ydotool(['click', '0']) // release
+      refuseIfDry('drag');
+      // Track held button for SIGTERM cleanup (like hypruse)
+      setHeldButton('left');
+      try {
+        await ydotool(['mousemove', '--', String(Math.round(x1)), String(Math.round(y1))])
+        await sleep(100)
+        await ydotool(['click', '1']) // left down
+        await sleep(100)
+        await ydotool(['mousemove', '--', String(Math.round(x2)), String(Math.round(y2))])
+        await sleep(100)
+        await ydotool(['click', '0']) // release
+      } finally {
+        setHeldButton(null);
+      }
     },
 
     // Screenshots
