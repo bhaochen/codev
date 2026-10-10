@@ -199,7 +199,10 @@ export function buildLargeToolResultMessage(
   result: PersistedToolResult,
 ): string {
   let message = `${PERSISTED_OUTPUT_TAG}\n`
-  message += `Output too large (${formatFileSize(result.originalSize)}). Full output saved to: ${result.filepath}\n\n`
+  message += `Output too large (${formatFileSize(result.originalSize)}). Full output saved to: ${result.filepath}\n`
+  // Retrieval guidance: the file is deterministic and never rewritten, so a
+  // literal search is safe and cheaper than guessing offsets.
+  message += `To retrieve more: Read it with a "query" (literal substring search) or with offset/limit line ranges.\n\n`
   message += `Preview (first ${formatFileSize(PREVIEW_SIZE_BYTES)}):\n`
   message += result.preview
   message += result.hasMore ? '\n...\n' : '\n'
