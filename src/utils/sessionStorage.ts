@@ -1469,6 +1469,9 @@ export async function recordTranscript(
   allMessages?: readonly Message[],
 ): Promise<UUID | null> {
   const cleanedMessages = cleanMessagesForLogging(messages, allMessages)
+  // RTK: Compress tool results before persistence (saves tokens in model context)
+  const { rtkCompressMessages } = await import('../services/rtk/RTKIntegration.js')
+  const compressedMessages = rtkCompressMessages(cleanedMessages) as typeof cleanedMessages
   const sessionId = getSessionId() as UUID
   const messageSet = await getSessionMessages(sessionId)
   const newMessages: typeof cleanedMessages = []
