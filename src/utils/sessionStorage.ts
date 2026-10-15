@@ -4,7 +4,7 @@ import type { Dirent } from 'fs'
 // Sync fs primitives for readFileTailSync — separate from fs/promises
 // imports above. Named (not wildcard) per CLAUDE.md style; no collisions
 // with the async-suffixed names.
-import { closeSync, fstatSync, openSync, readSync } from 'fs'
+import { closeSync, fstatSync, openSync, readSync, realpathSync } from 'fs'
 import {
   appendFile as fsAppendFile,
   open as fsOpen,
@@ -99,6 +99,8 @@ import { shouldSkipSessionPersistence } from './sessionPersistence.js'
 // Phase A shadow writer: mirrors successful JSONL appends into SQLite.
 // shadowWriter imports the db layer dynamically, so this edge stays acyclic.
 import { shadowAppendBatch } from '../services/db/shadowWriter.js'
+// Type-only (erased at runtime) — no module cycle.
+import type { SessionStore } from '../services/db/SessionStore.js'
 
 // Cache MACRO.VERSION at module level to work around bun --define bug in async contexts
 // See: https://github.com/oven-sh/bun/issues/26168
@@ -466,12 +468,17 @@ export function isCustomTitleEnabled(): boolean {
 
 // Memoized: called 12+ times per turn via hooks.ts createBaseHookInput
 // (PostToolUse path, 5×/turn) + various save* functions. Input is a cwd
-// string; homedir/env/regex are all session-invariant so the result is
-// stable for a given input. Worktree switches just change the key — no
-// cache clear needed.
-export const getProjectDir = memoize((projectDir: string): string => {
-  return join(getProjectsDir(), sanitizePath(projectDir))
-})
+// string; the project root is `getProjectsDir()/<sanitized cwd>`, so the
+// memo key includes the projects dir: env/homedir are session-invariant in
+// production, but tests (and some embedded callers) rotate CLAUDE_CONFIG_DIR
+// within one process — keying on cwd alone would then serve paths under a
+// previous config home. Worktree switches just change the key.
+export const getProjectDir = memoize(
+  (projectDir: string): string => {
+    return join(getProjectsDir(), sanitizePath(projectDir))
+  },
+  (projectDir: string) => `${getProjectsDir()}\u0000${projectDir}`,
+)
 
 let project: Project | null = null
 let cleanupRegistered = false
@@ -4960,6 +4967,69 @@ async function readLiteMetadata(
 }
 
 /**
+ * DB-first listing metadata (Phase C1): serve what readLiteMetadata would
+ * scrape from the JSONL head/tail straight from the session row — one indexed
+ * SELECT instead of two 64KB file reads. Returns null (caller falls back to
+ * the file scan) whenever the row is not provably current:
+ *   - no row / no sync info for this session,
+ *   - sync info does not match the live file (path + size + mtime),
+ *   - no lastPrompt AND no title (legacy sessions where the file path would
+ *     still scrape a first prompt from the head window).
+ */
+export async function readLiteMetadataFromDb(
+  store: SessionStore,
+  sessionId: string,
+  filePath: string,
+  fileSize: number,
+  modifiedMs: number,
+): Promise<LiteMetadata | null> {
+  try {
+    const sync = store.getSyncInfo(sessionId)
+    if (!sync) return null
+    if (sync.size !== fileSize) return null
+    if (sync.mtime !== Math.trunc(modifiedMs)) return null
+    if (sync.path !== realpathSync(filePath)) return null
+
+    const row = store.getSession(sessionId)
+    if (!row) return null
+
+    const meta = (row.metadata ?? {}) as Record<string, unknown>
+    const lastPrompt = typeof meta.lastPrompt === 'string' ? meta.lastPrompt : ''
+    // File precedence: ANY customTitle wins over aiTitle, regardless of order.
+    const customTitle =
+      (typeof meta.customTitle === 'string' ? meta.customTitle : undefined) ??
+      (typeof meta.aiTitle === 'string' ? meta.aiTitle : undefined)
+
+    // Without a lastPrompt the file path would scrape the first prompt from
+    // the head window (which we deliberately do not store) — always defer to
+    // the file for those (legacy) sessions.
+    if (!lastPrompt) return null
+
+    return {
+      firstPrompt: lastPrompt,
+      gitBranch: typeof meta.gitBranch === 'string' ? meta.gitBranch : undefined,
+      isSidechain: meta.isSidechain === true,
+      projectPath:
+        typeof meta.projectPath === 'string' ? meta.projectPath : undefined,
+      teamName: typeof meta.teamName === 'string' ? meta.teamName : undefined,
+      customTitle,
+      summary: typeof meta.summary === 'string' ? meta.summary : undefined,
+      // row.tag is runtime null for sessions without a tag; normalize to
+      // undefined so the DB path matches readLiteMetadata's file semantics.
+      tag: (typeof meta.tag === 'string' ? meta.tag : undefined) ?? row.tag ?? undefined,
+      agentSetting:
+        typeof meta.agentSetting === 'string' ? meta.agentSetting : undefined,
+      prNumber: typeof meta.prNumber === 'number' ? meta.prNumber : undefined,
+      prUrl: typeof meta.prUrl === 'string' ? meta.prUrl : undefined,
+      prRepository:
+        typeof meta.prRepository === 'string' ? meta.prRepository : undefined,
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
  * Scans a chunk of text for the first meaningful user prompt.
  */
 function extractFirstPromptFromChunk(chunk: string): string {
@@ -5173,7 +5243,26 @@ async function enrichLog(
 ): Promise<LogOption | null> {
   if (!log.isLite || !log.fullPath) return log
 
-  const meta = await readLiteMetadata(log.fullPath, log.fileSize ?? 0, readBuf)
+  // Phase C1: DB-first listing metadata. Falls back to the file tail/head
+  // scan whenever the row is missing or not provably current for this file.
+  let meta: LiteMetadata | null = null
+  if (shouldUseTranscriptCache()) {
+    try {
+      const { getSessionStore } = await import('../services/db/SessionStore.js')
+      meta = await readLiteMetadataFromDb(
+        getSessionStore(),
+        log.sessionId,
+        log.fullPath,
+        log.fileSize ?? 0,
+        log.modified?.getTime() ?? 0,
+      )
+    } catch {
+      meta = null
+    }
+  }
+  if (!meta) {
+    meta = await readLiteMetadata(log.fullPath, log.fileSize ?? 0, readBuf)
+  }
 
   const enriched: LogOption = {
     ...log,

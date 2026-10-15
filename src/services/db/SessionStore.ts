@@ -23,6 +23,7 @@ import type { TranscriptShape } from '../../utils/sessionStorage.js'
 import { openDatabaseSync } from './driver.js'
 import type { SqliteDatabase, SqlValue } from './driver.js'
 import { runMigrations } from './migrations/index.js'
+import { extractListingMeta, mergeListingMeta, type ListingMeta } from './listingProjection.js'
 
 // ============================================================================
 // Types
@@ -448,21 +449,13 @@ export class SessionStore {
     entries: Entry[],
     preBoundaryMeta: Entry[] = [],
   ): number {
-    // Project listing metadata, LAST-wins across [pre-boundary meta, main] —
-    // the same order and precedence the reducer's two passes apply (metadata
-    // pass first, main pass overwrites), so the sessions row shows the same
-    // effective title/tag/agent the transcript shape resolves to. Prior
-    // first-wins semantics showed the ORIGINAL title even after a rename.
-    let title: string | undefined
-    let tag: string | undefined
-    let agentName: string | undefined
-    let agentColor: string | undefined
-    for (const entry of [...preBoundaryMeta, ...entries]) {
-      if (entry.type === 'custom-title') title = (entry as { customTitle?: string }).customTitle
-      if (entry.type === 'tag') tag = (entry as { tag?: string }).tag
-      if (entry.type === 'agent-name') agentName = (entry as { agentName?: string }).agentName
-      if (entry.type === 'agent-color') agentColor = (entry as { agentColor?: string }).agentColor
-    }
+    // Project listing metadata over [pre-boundary meta, main] — the same
+    // order the reducer's two passes apply (metadata pass first, main
+    // overwrites). Column projections (title/tag/agent) keep their prior
+    // last-wins semantics; the rest lands in metadata_json so the picker can
+    // serve enriched listings without reading the JSONL head/tail.
+    const all = [...preBoundaryMeta, ...entries]
+    const listing = extractListingMeta(all)
     const firstOfAll = preBoundaryMeta[0] ?? entries[0]
     const firstTimestamp = (firstOfAll as { timestamp?: string } | undefined)?.timestamp
     const parsed = firstTimestamp ? new Date(firstTimestamp).getTime() : NaN
@@ -472,10 +465,44 @@ export class SessionStore {
 
     this.db.run('DELETE FROM messages WHERE session_id = ?', [sessionId])
     this.db.run('DELETE FROM sessions WHERE id = ?', [sessionId])
-    this.createSession({ id: sessionId, projectDir, title, tag, agentName, agentColor, createdAt, updatedAt: now })
+    this.createSession({
+      id: sessionId,
+      projectDir,
+      title: listing.customTitle,
+      tag: listing.tag,
+      agentName: listing.agentName,
+      agentColor: listing.agentColor,
+      createdAt,
+      updatedAt: now,
+      metadata: listing as Record<string, unknown>,
+    })
     if (preBoundaryMeta.length > 0) this.appendMessages(sessionId, preBoundaryMeta, 'meta')
     if (entries.length > 0) this.appendMessages(sessionId, entries, 'main')
     return entries.length + preBoundaryMeta.length
+  }
+
+  /**
+   * Incremental listing-metadata update for the shadow writer's fast path.
+   * Merges the batch's listing projection into the session row (last-wins,
+   * first-wins for head-semantics fields) and keeps the title/tag/agent
+   * columns in step. Called in the same transaction as the message appends.
+   */
+  mergeSessionListingMeta(sessionId: string, entries: readonly Entry[]): void {
+    if (entries.length === 0) return
+    const row = this.getSession(sessionId)
+    if (!row) return
+    const patch = extractListingMeta(entries)
+    const existing = (row.metadata ?? {}) as ListingMeta
+    const merged = mergeListingMeta(existing, patch)
+
+    const updates: Parameters<SessionStore['updateSession']>[1] = {
+      metadata: merged as Record<string, unknown>,
+    }
+    if (patch.customTitle !== undefined) updates.title = patch.customTitle
+    if (patch.tag !== undefined) updates.tag = patch.tag
+    if (patch.agentName !== undefined) updates.agentName = patch.agentName
+    if (patch.agentColor !== undefined) updates.agentColor = patch.agentColor
+    this.updateSession(sessionId, updates)
   }
 
   // =========================================================================
@@ -582,4 +609,20 @@ export function getSessionStore(): SessionStore {
     instance = SessionStore.open()
   }
   return instance
+}
+
+/**
+ * Test-only: drop the singleton so the next getSessionStore() re-opens with
+ * the current environment (tests that redirect CLAUDE_CONFIG_DIR per test
+ * would otherwise keep the first test's database).
+ */
+export function __resetSessionStoreForTests(): void {
+  if (instance) {
+    try {
+      instance.close()
+    } catch {
+      // already closed
+    }
+    instance = null
+  }
 }

@@ -334,6 +334,10 @@ function tryIncremental(
 
     store.transaction(() => {
       store.appendMessages(sessionId, entries, 'main')
+      // Keep the picker's listing metadata current in the same transaction
+      // (lastPrompt/title/tag/gitBranch/... — what readLiteMetadata would
+      // scrape from the file tail).
+      store.mergeSessionListingMeta(sessionId, entries)
     })
     store.setSyncInfo(sessionId, stat.size, Math.trunc(stat.mtimeMs), resolved)
     st.expectedSize = stat.size
