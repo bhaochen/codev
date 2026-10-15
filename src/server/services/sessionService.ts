@@ -13,6 +13,9 @@ import { sanitizePath as sanitizePortablePath } from '../../utils/sessionStorage
 import type { FileHistorySnapshot } from '../../utils/fileHistory.js'
 import { findCanonicalGitRoot } from '../../utils/git.js'
 import { calculateUSDCost, MODEL_COSTS } from '../../utils/modelCost.js'
+import type { Entry } from '../../types/logs.js'
+// Phase A shadow writer: mirrors this bypass append into the SQLite mirror.
+import { shadowAppendBatch } from '../../services/db/shadowWriter.js'
 import {
   calculateCurrentContextTokenTotal,
   MODEL_CONTEXT_WINDOW_DEFAULT,
@@ -282,6 +285,8 @@ export class SessionService {
   private async appendJsonlEntry(filePath: string, entry: Record<string, unknown>): Promise<void> {
     const line = JSON.stringify(entry) + '\n'
     await fs.appendFile(filePath, line, 'utf-8')
+    // Phase A: mirror the successful append into the SQLite shadow.
+    shadowAppendBatch(filePath, [entry as unknown as Entry], Buffer.byteLength(line))
   }
 
   private resolveWorkDirFromEntries(

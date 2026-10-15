@@ -12,7 +12,7 @@ import {
 } from '../../state/AppStateStore.js'
 import { commandHasAnyCd } from '../../tools/BashTool/bashPermissions.js'
 import { checkReadOnlyConstraints } from '../../tools/BashTool/readOnlyValidation.js'
-import type { SpeculationAcceptMessage } from '../../types/logs.js'
+import type { Entry, SpeculationAcceptMessage } from '../../types/logs.js'
 import type { AgentContentBlock } from '../../types/agentMessage.js'
 import type { Message } from '../../types/message.js'
 import { createChildAbortController } from '../../utils/abortController.js'
@@ -20,6 +20,8 @@ import { count } from '../../utils/array.js'
 import { getGlobalConfig } from '../../utils/config.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { errorMessage } from '../../utils/errors.js'
+// Phase A shadow writer: mirrors this bypass append into the SQLite mirror.
+import { shadowAppendBatch } from '../db/shadowWriter.js'
 import {
   type FileStateCache,
   mergeFileStateCaches,
@@ -790,13 +792,20 @@ export async function acceptSpeculation(
       timestamp: new Date().toISOString(),
       timeSavedMs,
     }
-    void appendFile(getTranscriptPath(), jsonStringify(entry) + '\n', {
+    const transcriptPath = getTranscriptPath()
+    const line = jsonStringify(entry) + '\n'
+    void appendFile(transcriptPath, line, {
       mode: 0o600,
-    }).catch(() => {
-      logForDebugging(
-        '[Speculation] Failed to write speculation-accept to transcript',
-      )
     })
+      .then(() => {
+        // Phase A: mirror the successful append into the SQLite shadow.
+        shadowAppendBatch(transcriptPath, [entry as unknown as Entry], Buffer.byteLength(line))
+      })
+      .catch(() => {
+        logForDebugging(
+          '[Speculation] Failed to write speculation-accept to transcript',
+        )
+      })
   }
 
   return { messages, boundary, timeSavedMs }

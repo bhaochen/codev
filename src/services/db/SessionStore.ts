@@ -321,6 +321,19 @@ export class SessionStore {
     }
   }
 
+  /**
+   * uuid of a session's last row (by seq), or null when the session has no
+   * rows. The shadow writer uses this as an optimistic-lock token: if the
+   * last row is not the one this writer left, another writer (or a reader's
+   * resync) touched the session and incremental appends must not proceed.
+   */
+  getLastMessageUuid(sessionId: string): string | null {
+    const row = this.db
+      .query('SELECT uuid FROM messages WHERE session_id = ? ORDER BY seq DESC LIMIT 1')
+      .get(sessionId) as { uuid: string } | null
+    return row?.uuid ?? null
+  }
+
   // =========================================================================
   // Transcript Store (SQLite-backed, shared reducer)
   // =========================================================================

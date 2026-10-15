@@ -28,7 +28,6 @@ import {
   getPromptId,
   getSessionId,
   getSessionProjectDir,
-  isSessionPersistenceDisabled,
   switchSession,
 } from '../bootstrap/state.js'
 import { builtInCommandNames } from '../commands.js'
@@ -91,10 +90,15 @@ import {
   readTranscriptForLoad,
   SKIP_PRECOMPACT_THRESHOLD,
 } from './sessionStoragePortable.js'
-import { getSettings_DEPRECATED } from './settings/settings.js'
 import { jsonParse, jsonStringify } from './slowOperations.js'
 import type { ContentReplacementRecord } from './toolResultStorage.js'
 import { validateUuid } from './uuid.js'
+// Persistence gate lives in its own module so the db layer (shadow writer,
+// cache) can share it without a static import cycle back into this file.
+import { shouldSkipSessionPersistence } from './sessionPersistence.js'
+// Phase A shadow writer: mirrors successful JSONL appends into SQLite.
+// shadowWriter imports the db layer dynamically, so this edge stays acyclic.
+import { shadowAppendBatch } from '../services/db/shadowWriter.js'
 
 // Cache MACRO.VERSION at module level to work around bun --define bug in async contexts
 // See: https://github.com/oven-sh/bun/issues/26168
@@ -561,25 +565,6 @@ export function setRemoteIngressUrlForTesting(url: string): void {
 
 const REMOTE_FLUSH_INTERVAL_MS = 10
 
-/**
- * True when test env / cleanupPeriodDays=0 / --no-session-persistence /
- * CLAUDE_CODE_SKIP_PROMPT_HISTORY should suppress all transcript persistence.
- * Shared by the Project write guards (appendEntry / materializeSessionFile)
- * and the SQLite read-through cache gate (a cache of session data IS
- * persistence, so a disabled-persistence run must not write one either).
- */
-function shouldSkipSessionPersistence(): boolean {
-  const allowTestPersistence = isEnvTruthy(
-    process.env.TEST_ENABLE_SESSION_PERSISTENCE,
-  )
-  return (
-    (getNodeEnv() === 'test' && !allowTestPersistence) ||
-    getSettings_DEPRECATED()?.cleanupPeriodDays === 0 ||
-    isSessionPersistenceDisabled() ||
-    isEnvTruthy(process.env.CLAUDE_CODE_SKIP_PROMPT_HISTORY)
-  )
-}
-
 class Project {
   // Minimal cache for current session only (not all sessions)
   currentSessionTag: string | undefined
@@ -710,6 +695,7 @@ class Project {
       const batch = queue.splice(0)
 
       let content = ''
+      let chunkEntries: Entry[] = []
       const resolvers: Array<() => void> = []
 
       for (const { entry, resolve } of batch) {
@@ -718,19 +704,25 @@ class Project {
         if (content.length + line.length >= this.MAX_CHUNK_BYTES) {
           // Flush chunk and resolve its entries before starting a new one
           await this.appendToFile(filePath, content)
+          // Phase A: mirror the exact bytes just appended into SQLite.
+          shadowAppendBatch(filePath, chunkEntries, Buffer.byteLength(content))
           for (const r of resolvers) {
             r()
           }
           resolvers.length = 0
           content = ''
+          chunkEntries = []
         }
 
         content += line
+        chunkEntries.push(entry)
         resolvers.push(resolve)
       }
 
       if (content.length > 0) {
         await this.appendToFile(filePath, content)
+        // Phase A: mirror the exact bytes just appended into SQLite.
+        shadowAppendBatch(filePath, chunkEntries, Buffer.byteLength(content))
         for (const r of resolvers) {
           r()
         }
@@ -2640,6 +2632,8 @@ export async function fetchLogs(limit?: number): Promise<LogOption[]> {
 
 /**
  * Append an entry to a session file. Creates the parent dir if missing.
+ * Phase A: a successful append is also mirrored into the SQLite shadow
+ * (best-effort — the JSONL write never depends on it).
  */
 /* eslint-disable custom-rules/no-sync-fs -- sync callers (exit cleanup, materialize) */
 function appendEntryToFile(
@@ -2654,6 +2648,7 @@ function appendEntryToFile(
     fs.mkdirSync(dirname(fullPath), { mode: 0o700 })
     fs.appendFileSync(fullPath, line, { mode: 0o600 })
   }
+  shadowAppendBatch(fullPath, [entry as Entry], Buffer.byteLength(line))
 }
 
 /**
