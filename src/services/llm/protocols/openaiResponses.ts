@@ -60,7 +60,7 @@ import {
   updateOpenAIUsage,
 } from '../utils/openaiShared.js'
 import { resolveAuth } from '../auth/resolveAuth.js'
-import { createOpencodeId, getOpencodeProjectId, getOpencodeUserAgent } from '../../api/opencodeUserAgent.js'
+import { getOpencodeAdapter } from '../adapters/index.js'
 
 // ============================================================================
 // Native OpenAI Responses wire types (local to this adapter)
@@ -1003,25 +1003,35 @@ export async function* queryOpenAIResponses(
     const cred = resolveAuth(route.provider)
     const body = await buildOpenAIResponsesBody(route, request)
     maxTokens = body.max_output_tokens ?? 0
+
+    // Opencode: the adapter owns the wire contract (v2 fingerprint).
+    // The old inline headers sent x-opencode-request (upstream rejects it
+    // with 403 FreeTierError) and omitted x-opencode-session-id, and never
+    // injected the required read/shell fingerprint tools.
+    const adapter = route.provider === 'opencode' ? getOpencodeAdapter() : undefined
+    const adapterRequest = { model, context: { ...context, model } } as any
+    if (adapter) {
+      adapter.transformRequestBody(body as unknown as Record<string, string | boolean | object>, route, adapterRequest)
+    }
+    const wireEndpoint = adapter ? adapter.getEndpoint(route, adapterRequest) : endpoint
     logForDebugging(
-      `[OpenAIResponses] provider=${route.provider} model=${model} endpoint=${endpoint} tools=${body.tools?.length ?? 0} items=${body.input.length} reasoning=${body.reasoning ? 'on' : 'off'}`,
+      `[OpenAIResponses] provider=${route.provider} model=${model} endpoint=${wireEndpoint} tools=${body.tools?.length ?? 0} items=${body.input.length} reasoning=${body.reasoning ? 'on' : 'off'}`,
     )
 
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'User-Agent': route.provider === 'opencode' ? getOpencodeUserAgent() : 'codev',
+    const headers: Record<string, string> = {}
+    if (adapter) {
+      Object.assign(headers, adapter.buildHeaders(route, adapterRequest))
+    } else {
+      headers['Content-Type'] = 'application/json'
+      headers['User-Agent'] = 'codev'
+      headers.Authorization = cred.type === 'bearer' ? `Bearer ${cred.token}` : 'Bearer public'
     }
-    if (route.provider === 'opencode') {
-      headers['x-opencode-client'] = 'cli'
-      headers['x-opencode-project'] = await getOpencodeProjectId()
-      headers['x-opencode-session'] = createOpencodeId('ses')
-      headers['x-opencode-request'] = createOpencodeId('msg')
-    }
-    if (cred.type === 'bearer') headers.Authorization = `Bearer ${cred.token}`
-    else headers.Authorization = 'Bearer public'
 
     const fetchOverride = context.fetchOverride as unknown as typeof fetch | undefined
-    const url = endpoint.includes('/responses') ? endpoint : responsesUrl(endpoint)
+    // responsesUrl expects a base (e.g. .../inference/v1), not a chat URL —
+    // the adapter's getEndpoint returns .../chat/completions; strip it first.
+    const responsesBase = wireEndpoint.replace(/\/chat\/completions$/, '').replace(/\/responses$/, '')
+    const url = responsesUrl(responsesBase)
     const response = await requestWithRetry(
       () =>
         httpRequest(
