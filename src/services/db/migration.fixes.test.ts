@@ -13,9 +13,9 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, statSync } from 'node:fs'
+import { existsSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
-import { realpathSync } from 'node:fs'
 import { SessionStore } from './SessionStore.js'
 import {
   findSessionFiles,
@@ -273,6 +273,139 @@ describe('Session Migration Regression Tests', () => {
       })
 
       expect(result.migrated).toBe(1)
+    })
+  })
+
+  describe('repair pass', () => {
+    it('re-syncs rows that have no sync info (old migration rows)', async () => {
+      const projectDir = join(projectsDir, 'repair-test')
+      mkdirSync(projectDir, { recursive: true })
+      const filePath = join(projectDir, 'stale.jsonl')
+      writeFileSync(filePath, JSON.stringify(user('v1')) + '\n')
+
+      // Simulate an old migration: rows present, NO sync info.
+      const entries = [user('v1')]
+      store.syncSession('stale', 'repair-test', entries)
+      expect(store.getSyncInfo('stale')).toBeNull()
+      expect(store.getSession('stale')?.messageCount).toBe(1)
+
+      const result = await migrateAllSessions({ projectDir: 'repair-test', _store: store })
+
+      expect(result.repaired).toBe(1)
+      expect(result.skipped).toBe(0)
+      // Now fresh: sync info recorded and stat matches.
+      expect(store.getSyncInfo('stale')).not.toBeNull()
+    })
+
+    it('re-syncs when the source file changed after the last sync', async () => {
+      const projectDir = join(projectsDir, 'changed-test')
+      mkdirSync(projectDir, { recursive: true })
+      const filePath = join(projectDir, 'grows.jsonl')
+      writeFileSync(filePath, JSON.stringify(user('one')) + '\n')
+
+      const first = await migrateAllSessions({ projectDir: 'changed-test', _store: store })
+      expect(first.migrated).toBe(1)
+
+      // File grows (append) — must be re-synced on the next pass.
+      writeFileSync(filePath, JSON.stringify(user('one')) + '\n' + JSON.stringify(user('two')) + '\n')
+
+      const second = await migrateAllSessions({ projectDir: 'changed-test', _store: store })
+      expect(second.repaired).toBe(1)
+      expect(store.getSession('grows')?.messageCount).toBe(2)
+    })
+
+    it('skips when rows are already current', async () => {
+      const projectDir = join(projectsDir, 'fresh-test')
+      mkdirSync(projectDir, { recursive: true })
+      writeFileSync(join(projectDir, 'fresh.jsonl'), JSON.stringify(user('x')) + '\n')
+
+      await migrateAllSessions({ projectDir: 'fresh-test', _store: store })
+      const second = await migrateAllSessions({ projectDir: 'fresh-test', _store: store })
+      expect(second.skipped).toBe(1)
+      expect(second.repaired).toBe(0)
+      expect(second.migrated).toBe(0)
+    })
+  })
+
+  describe('orphan pruning', () => {
+    it('prunes .jsonl-suffixed rows from the old sessionId bug', async () => {
+      const projectDir = join(projectsDir, 'prune-test')
+      mkdirSync(projectDir, { recursive: true })
+      writeFileSync(join(projectDir, 'real-session.jsonl'), JSON.stringify(user('real')) + '\n')
+
+      // Bug artifact: same content stored under a key WITH the extension.
+      // (Its source path real-session.jsonl.jsonl does not exist.)
+      store.syncSession('real-session.jsonl', 'prune-test', [user('real')])
+
+      const result = await migrateAllSessions({ projectDir: 'prune-test', _store: store })
+
+      expect(result.pruned).toBe(1)
+      expect(store.getSession('real-session.jsonl')).toBeNull()
+      // The correctly-keyed session was still migrated and kept.
+      expect(store.getSession('real-session')).not.toBeNull()
+    })
+
+    it('prunes subagent transcript rows wrongly migrated as top-level sessions', async () => {
+      const projectDir = join(projectsDir, 'subagent-prune')
+      const sessionDir = join(projectDir, 'session-abc', 'subagents')
+      mkdirSync(sessionDir, { recursive: true })
+      writeFileSync(join(projectDir, 'session-abc.jsonl'), JSON.stringify(user('main')) + '\n')
+      writeFileSync(join(sessionDir, 'agent-xyz.jsonl'), JSON.stringify(user('sub')) + '\n')
+
+      // Simulate the old bug: subagent transcript stored as a top-level session.
+      store.syncSession('agent-xyz', 'subagent-prune', [user('sub')])
+
+      const result = await migrateAllSessions({ projectDir: 'subagent-prune', _store: store })
+
+      expect(result.pruned).toBe(1)
+      expect(store.getSession('agent-xyz')).toBeNull()
+      expect(store.getSession('session-abc')).not.toBeNull()
+      // The subagent JSONL itself is untouched on disk.
+      expect(existsSync(join(sessionDir, 'agent-xyz.jsonl'))).toBe(true)
+    })
+
+    it('prunes rows for sessions whose source file was deleted', async () => {
+      const projectDir = join(projectsDir, 'deleted-test')
+      mkdirSync(projectDir, { recursive: true })
+      writeFileSync(join(projectDir, 'gone.jsonl'), JSON.stringify(user('gone')) + '\n')
+
+      await migrateAllSessions({ projectDir: 'deleted-test', _store: store })
+      expect(store.getSession('gone')).not.toBeNull()
+
+      // User deletes the source (cleanupPeriodDays); rows are unreadable garbage.
+      rmSync(join(projectDir, 'gone.jsonl'))
+
+      const result = await migrateAllSessions({ projectDir: 'deleted-test', _store: store })
+      expect(result.pruned).toBe(1)
+      expect(store.getSession('gone')).toBeNull()
+    })
+
+    it('does not prune rows whose source still exists', async () => {
+      const projectDir = join(projectsDir, 'keep-test')
+      mkdirSync(projectDir, { recursive: true })
+      writeFileSync(join(projectDir, 'keep.jsonl'), JSON.stringify(user('keep')) + '\n')
+
+      await migrateAllSessions({ projectDir: 'keep-test', _store: store })
+      const before = store.getSession('keep')
+
+      const result = await migrateAllSessions({ projectDir: 'keep-test', _store: store })
+      expect(result.pruned).toBe(0)
+      expect(store.getSession('keep')).toEqual(before)
+    })
+
+    it('can be disabled with prune: false', async () => {
+      const projectDir = join(projectsDir, 'no-prune-test')
+      mkdirSync(projectDir, { recursive: true })
+      writeFileSync(join(projectDir, 'np.jsonl'), JSON.stringify(user('np')) + '\n')
+      store.syncSession('np.jsonl', 'no-prune-test', [user('np')])
+
+      const result = await migrateAllSessions({
+        projectDir: 'no-prune-test',
+        _store: store,
+        prune: false,
+      })
+      expect(result.pruned).toBe(0)
+      expect(store.getSession('np.jsonl')).not.toBeNull()
     })
   })
 

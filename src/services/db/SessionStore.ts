@@ -20,8 +20,6 @@ import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 import type { Entry, TranscriptMessage } from '../../types/logs.js'
 import { isTranscriptMessage, buildTranscriptShape } from '../../utils/sessionStorage.js'
 import type { TranscriptShape } from '../../utils/sessionStorage.js'
-import { parseJSONL } from '../../utils/json.js'
-import { logForDebugging } from '../../utils/debug.js'
 import { openDatabaseSync } from './driver.js'
 import type { SqliteDatabase, SqlValue } from './driver.js'
 import { runMigrations } from './migrations/index.js'
@@ -79,7 +77,6 @@ export interface MessageQueryOptions {
 
 export class SessionStore {
   private readonly db: SqliteDatabase
-  private migratedSessions = new Set<string>()
 
   private constructor(db: SqliteDatabase) {
     this.db = db
@@ -469,88 +466,6 @@ export class SessionStore {
   }
 
   // =========================================================================
-  // JSONL Migration
-  // =========================================================================
-
-  /**
-   * Migrate a JSONL session file to SQLite.
-   * Reads the JSONL file, inserts all entries, and marks migration complete.
-   * The JSONL file is preserved as backup.
-   */
-  migrateFromJsonl(sessionId: string, jsonlPath: string, projectDir: string): void {
-    if (this.migratedSessions.has(sessionId)) return
-
-    logForDebugging(`Migrating session ${sessionId} from ${jsonlPath}`)
-
-    // Check if already migrated
-    const existing = this.getSession(sessionId)
-    if (existing && existing.messageCount > 0) {
-      this.migratedSessions.add(sessionId)
-      return
-    }
-
-    // Read and parse JSONL file
-    const { readFileSync } = require('node:fs') as typeof import('node:fs')
-    const content = readFileSync(jsonlPath, 'utf-8')
-    const entries = parseJSONL<Entry>(content)
-
-    if (entries.length === 0) {
-      this.migratedSessions.add(sessionId)
-      return
-    }
-
-    // Extract session metadata from entries
-    const firstTimestamp = (entries[0] as { timestamp?: string }).timestamp
-    const createdAt = firstTimestamp ? new Date(firstTimestamp).getTime() : Date.now()
-    const now = Date.now()
-
-    // Find title/tag/agent metadata
-    let title: string | undefined
-    let tag: string | undefined
-    let agentId: string | undefined
-    let agentName: string | undefined
-    let agentColor: string | undefined
-
-    for (const entry of entries) {
-      if (entry.type === 'custom-title' && !title) title = (entry as { customTitle?: string }).customTitle
-      if (entry.type === 'tag' && !tag) tag = (entry as { tag?: string }).tag
-      if (entry.type === 'agent-name' && !agentName) agentName = (entry as { agentName?: string }).agentName
-      if (entry.type === 'agent-color' && !agentColor) agentColor = (entry as { agentColor?: string }).agentColor
-    }
-
-    // Insert session
-    this.createSession({
-      id: sessionId,
-      projectDir,
-      title,
-      tag,
-      agentId,
-      agentName,
-      agentColor,
-      createdAt,
-      updatedAt: now,
-    })
-
-    // Insert messages in transaction
-    this.db.transaction(() => {
-      for (const entry of entries) {
-        if (isTranscriptMessage(entry) || entry.type === 'summary') {
-          this.appendMessage(sessionId, entry)
-        }
-      }
-    })()
-
-    // Record migration
-    this.db.run(
-      'INSERT OR REPLACE INTO migrations (id, applied_at) VALUES (?, ?)',
-      [`session_${sessionId}`, now],
-    )
-
-    this.migratedSessions.add(sessionId)
-    logForDebugging(`Migrated session ${sessionId}: ${entries.length} entries`)
-  }
-
-  // =========================================================================
   // Utility
   // =========================================================================
 
@@ -589,6 +504,23 @@ export class SessionStore {
    */
   vacuum(): void {
     this.db.exec('VACUUM;')
+  }
+
+  /**
+   * Fraction of allocated pages that are on the freelist (0..1). A delete
+   * without VACUUM leaves pages on the freelist: the file does not shrink and
+   * the space is only available for reuse. Used to decide when an automatic
+   * vacuum is worthwhile (e.g. after a large prune from an old migration bug).
+   */
+  freelistRatio(): number {
+    const pageCount = Object.values(
+      this.db.query('PRAGMA page_count').get() as { page_count: number },
+    )[0] as number
+    if (!pageCount) return 0
+    const freelist = Object.values(
+      this.db.query('PRAGMA freelist_count').get() as { freelist_count: number },
+    )[0] as number
+    return freelist / pageCount
   }
 
   /**

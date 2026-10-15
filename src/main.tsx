@@ -329,8 +329,9 @@ const CURRENT_MIGRATION_VERSION = 11
 
 // Session migration version — bump when the JSONL → SQLite migration logic
 // changes in a way that requires re-migration (e.g., schema changes).
-// Current schema is at migration 003 (role column + synced_path).
-const CURRENT_SESSION_MIGRATION_VERSION = 3
+// Currently requires migration 003 (role column + synced_path).
+// v4: repair pass (re-sync stale rows, prune orphans from old bug keys).
+const CURRENT_SESSION_MIGRATION_VERSION = 4
 
 // Session migration with progress indicator.
 // Runs JSONL → SQLite migration for all historical sessions in the BACKGROUND.
@@ -356,10 +357,12 @@ async function runSessionMigration(): Promise<void> {
     store.close()
   }
 
-  // Handle Ctrl+C and process termination gracefully
+  // Handle Ctrl+C / SIGTERM during migration: clear the spinner line and
+  // close the store. Do NOT process.exit here — main.tsx's own SIGINT handler
+  // (and the default SIGTERM behavior) owns process lifecycle; migration
+  // state is transactional and safely resumes next startup either way.
   const handleSignal = () => {
     cleanup()
-    process.exit(1)
   }
   process.on('SIGINT', handleSignal)
   process.on('SIGTERM', handleSignal)
@@ -383,12 +386,15 @@ async function runSessionMigration(): Promise<void> {
     spin()
 
     try {
-      // Single pass: discover and migrate using shared store
+      // Single pass: discover, repair, migrate, prune using shared store
       const result = await migrateAllSessions({
         verbose: false,
         vacuum: true,
         _store: store, // reuse single connection
-        onProgress: (status: 'migrated' | 'skipped' | 'failed', sessionId: string) => {
+        onProgress: (
+          _status: 'migrated' | 'repaired' | 'skipped' | 'failed',
+          _sessionId: string,
+        ) => {
           current++
         },
       })
@@ -399,7 +405,9 @@ async function runSessionMigration(): Promise<void> {
       console.log(chalk.green('Session migration complete:'))
       console.log(chalk.green(`  Total sessions: ${result.total}`))
       console.log(chalk.green(`  Migrated: ${result.migrated}`))
-      console.log(chalk.green(`  Skipped (already in DB): ${result.skipped}`))
+      console.log(chalk.green(`  Repaired: ${result.repaired}`))
+      console.log(chalk.green(`  Skipped (already fresh): ${result.skipped}`))
+      console.log(chalk.green(`  Pruned orphans: ${result.pruned}`))
       if (result.failed > 0) {
         console.log(chalk.yellow(`  Failed: ${result.failed}`))
         for (const err of result.errors) {
@@ -415,7 +423,7 @@ async function runSessionMigration(): Promise<void> {
         }))
       }
 
-      logForDebugging(`Session migration finished: ${result.migrated} migrated, ${result.skipped} skipped, ${result.failed} failed`)
+      logForDebugging(`Session migration finished: ${result.migrated} migrated, ${result.repaired} repaired, ${result.pruned} pruned, ${result.skipped} skipped, ${result.failed} failed`)
     } catch (err) {
       done = true
       process.stderr.write('\r' + ' '.repeat(80) + '\r')

@@ -82,8 +82,11 @@ if (config.sessionMigrationVersion !== CURRENT_SESSION_MIGRATION_VERSION) {
 # Dry run
 bun run src/services/db/migrateSessions.ts --dry-run
 
-# Full migration with vacuum
+# Full migration + repair + prune (+ vacuum when beneficial)
 bun run src/services/db/migrateSessions.ts --verbose --vacuum
+
+# Keep orphaned rows (skip pruning)
+bun run src/services/db/migrateSessions.ts --no-prune
 
 # Specific project
 bun run src/services/db/migrateSessions.ts --project-dir -home-yuki-Code-Agent-coding-codev
@@ -96,6 +99,41 @@ bun run src/services/db/migrateSessions.ts --project-dir -home-yuki-Code-Agent-c
 | 1 | `001-initial` | Base schema: sessions + messages + indexes |
 | 2 | `002-sync-columns` | `synced_size`, `synced_mtime` for cache freshness |
 | 3 | `003-cache-roles` | `messages.role` (main/meta), `sessions.synced_path` |
+| 4 | (logic) | Repair pass: re-sync stale rows + prune orphaned rows |
+
+### Skip / Repair / Prune Semantics
+
+A session is **skipped only when its SQLite rows are the canonical view of the
+current file**: `synced_path` matches the live realpath and
+`synced_size`/`synced_mtime` match the live stat. Anything else is handled:
+
+| Condition | Action |
+|-----------|--------|
+| No rows yet | **Migrate** |
+| Rows exist, no/stale sync info | **Repair** (re-sync via `parseTranscriptFile`) |
+| Rows current | **Skip** |
+| DB row whose top-level source JSONL is gone | **Prune** (delete row) |
+
+Orphans pruned include the two artifacts of pre-v4 bugs:
+
+- rows keyed **with** the `.jsonl` extension (old sessionId format),
+- **subagent transcripts** (`<sessionId>/subagents/agent-*.jsonl`) wrongly
+  migrated as top-level sessions — subagent JSONL files on disk are untouched.
+
+`VACUUM` runs when a pass changed data **or** when the freelist exceeds 20% of
+pages (reclaims space left behind by large prunes); vacuum failures are
+non-fatal.
+
+### Real-World Result (2,867 legacy sessions)
+
+| Phase | Sessions table | Messages table | DB size |
+|-------|---------------|----------------|---------|
+| After first bulk migration | 3,117 (incl. 2,883 orphans) | 2,267,520 | 11.2 GB |
+| After repair + prune | 243 (real top-level sessions) | 29,727 | 11.2 GB (freelist) |
+| After `VACUUM` | 243 | 29,727 | **124.8 MB** |
+
+The 11 GB → 125 MB shrink shows why pruning mattered: the bulk of the original
+2.2M rows were subagent transcripts + duplicated keys, not user sessions.
 
 ---
 
@@ -116,13 +154,21 @@ The SQLite DB is a **derived mirror** of JSONL (source of truth). On read:
 
 ## Quantitative Metrics
 
+### Storage (after v4 repair + prune + vacuum)
+
+| Metric | JSONL source | SQLite mirror | Notes |
+|--------|-------------|---------------|-------|
+| **Disk size (user sessions)** | 9.1 GB (all JSONL incl. subagents) | **124.8 MB** | Mirror excludes subagent transcripts (read from JSONL directly) |
+| **Sessions** | 243 top-level (+ ~2,600 subagent files) | 243 rows | Subagents deliberately not mirrored |
+| **Messages** | — | 29,727 rows | Reduced view (boundary/walkChain applied) |
+| **Per-message overhead** | — | +13% vs raw JSONL | Same JSON text + columns + indexes (pre-cleanup measurement) |
+
+### Performance (5,000-message session, ~17 MB JSONL)
+
 | Metric | JSONL | SQLite | Delta |
 |--------|-------|--------|-------|
-| **Disk size** | 9.1 GB | 10.3 GB | **+13%** |
-| **Sessions** | 2,867 files | 2,867 rows | — |
-| **Messages** | 2.24M lines | 2.24M rows | — |
 | **Append latency (p50)** | 25 ms | 150 ms | **6× slower** |
-| **Batch append (100)** | — | 1.5× JSONL | — |
+| **Batch append (100)** | baseline | 1.5× slower | — |
 | **Full read (all msgs)** | baseline | 3× faster | ✅ |
 | **Tail-50 read** | baseline | 55× faster | ✅ |
 | **UUID lookup (indexed)** | O(n) scan | O(log n) | **366× faster** |
