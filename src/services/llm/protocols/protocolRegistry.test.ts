@@ -33,6 +33,15 @@ describe('ProtocolRegistry runtime', () => {
     expect(isProtocolSupported('anthropic-messages')).toBe(true)
   })
 
+  test('aws-eventstream resolves to queryAWSEventStream', () => {
+    const def = getProtocolDef('aws-eventstream')
+    expect(def).toBeDefined()
+    expect(def!.handler).toBeDefined()
+    expect(def!.handler!.name).toBe('queryAWSEventStream')
+    expect(isProtocolSupported('aws-eventstream')).toBe(true)
+    expect(ProtocolRegistry['aws-eventstream'].endpointPath).toBe('/')
+  })
+
   test('gemini has no handler (unsupported)', () => {
     const def = getProtocolDef('gemini')
     expect(def).toBeDefined()
@@ -52,9 +61,10 @@ describe('ProtocolRegistry runtime', () => {
 
   test('ProtocolRegistry is sole source of truth (clients facade)', () => {
     // clients/index should not have its own map; verify via registry
-    expect(Object.keys(ProtocolRegistry).length).toBe(6)
+    expect(Object.keys(ProtocolRegistry).length).toBe(7)
     expect(ProtocolRegistry['openai-chat'].endpointPath).toBe('/chat/completions')
     expect(ProtocolRegistry['openai-responses'].endpointPath).toBe('/responses')
     expect(ProtocolRegistry['anthropic-messages'].endpointPath).toBe('/v1/messages')
+    expect(ProtocolRegistry['aws-eventstream'].endpointPath).toBe('/')
   })
 })
