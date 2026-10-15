@@ -39,6 +39,7 @@
 import { statSync, realpathSync } from 'node:fs'
 import { parseTranscriptFile, type TranscriptShape } from '../../utils/sessionStorage.js'
 import type { SessionStore } from './SessionStore.js'
+import { isDbPrimaryMode } from '../../utils/sessionPersistence.js'
 
 export async function loadTranscriptCached(
   store: SessionStore,
@@ -46,6 +47,15 @@ export async function loadTranscriptCached(
   jsonlPath: string,
   projectDir: string,
 ): Promise<TranscriptShape> {
+  // D1 (DB-primary): rows are authoritative. When the session has rows, serve
+  // them directly — the file is a best-effort export that may lag (or be
+  // missing recent entries), so the file-freshness resync below must NOT run:
+  // it would roll back DB writes from a stale file. With no rows (a session
+  // that predates DB-primary), fall through and bootstrap from the file.
+  if (isDbPrimaryMode() && store.getMessageCount(sessionId) > 0) {
+    return store.loadTranscript(sessionId)
+  }
+
   // stat first: a missing file throws here, and callers fall back to the
   // direct JSONL read (which returns the same empty shape it always did).
   const st = statSync(jsonlPath)

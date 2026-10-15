@@ -17,6 +17,15 @@ function nodeEnv(): string {
 }
 
 /**
+ * DB-primary mode (D1): SQLite is the authoritative session store; JSONL is
+ * a best-effort export for external tools. Off by default until dogfooding
+ * proves it out — see docs/architecture/session-storage-migration.md.
+ */
+export function isDbPrimaryMode(): boolean {
+  return isEnvTruthy(process.env.CODEV_DB_PRIMARY)
+}
+
+/**
  * True when test env / cleanupPeriodDays=0 / --no-session-persistence /
  * CLAUDE_CODE_SKIP_PROMPT_HISTORY should suppress all transcript persistence.
  * Shared by the Project write guards (appendEntry / materializeSessionFile)

@@ -35,7 +35,7 @@
 import { statSync, realpathSync } from 'node:fs'
 import { basename, dirname, relative } from 'node:path'
 import { getProjectsDir, SKIP_PRECOMPACT_THRESHOLD } from '../../utils/sessionStoragePortable.js'
-import { shouldSkipSessionPersistence } from '../../utils/sessionPersistence.js'
+import { isDbPrimaryMode, shouldSkipSessionPersistence } from '../../utils/sessionPersistence.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { logForDebugging } from '../../utils/debug.js'
 import type { Entry } from '../../types/logs.js'
@@ -177,7 +177,25 @@ export function flushShadowWritesSync(): void {
   }
   const store = injectedStore ?? defaultStore
   if (!store) return
+  const primary = isDbPrimaryMode()
   for (const [sessionId, st] of states) {
+    if (primary) {
+      // D1: direct row append (sync) — the exit-path contract.
+      if (st.bufferedCount === 0) continue
+      const entries = st.batches.flatMap(b => b.entries)
+      try {
+        store.transaction(() => {
+          store.ensureSession(sessionId, st.projectDir)
+          store.appendMessages(sessionId, entries, 'main')
+          store.mergeSessionListingMeta(sessionId, entries)
+        })
+        clearBuffer(st)
+      } catch {
+        // Process is exiting — nothing more we can do; the export file (if
+        // any) still holds the entries for a future repair.
+      }
+      continue
+    }
     if (st.forceResync || st.bufferedCount === 0) continue
     const entries = st.batches.flatMap(b => b.entries)
     const bytes = st.bufferedBytes
@@ -275,7 +293,28 @@ function clearBuffer(st: ShadowState): void {
 async function processState(sessionId: string, st: ShadowState): Promise<void> {
   const store = await resolveStore()
   if (!store) {
-    // Nothing we can do; drop the buffer. Rows stay stale → read repairs.
+    // D1: in primary mode the DB is the only authoritative sink — KEEP the
+    // buffer so the next flush retries (the sync seam's file copy is a
+    // best-effort export and may be all that exists for the moment).
+    if (isDbPrimaryMode()) return
+    // Shadow mode: rows stay stale → read repairs from the file.
+    clearBuffer(st)
+    st.forceResync = false
+    return
+  }
+
+  // D1 (DB-primary): direct row append — no file-anchored guards, no sync
+  // info, no resync-from-file. The file is an export handled by the write
+  // seams themselves.
+  if (isDbPrimaryMode()) {
+    const entries = st.batches.flatMap(b => b.entries)
+    if (entries.length > 0) {
+      store.transaction(() => {
+        store.ensureSession(sessionId, st.projectDir)
+        store.appendMessages(sessionId, entries, 'main')
+        store.mergeSessionListingMeta(sessionId, entries)
+      })
+    }
     clearBuffer(st)
     st.forceResync = false
     return

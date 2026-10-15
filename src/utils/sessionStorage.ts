@@ -95,10 +95,10 @@ import type { ContentReplacementRecord } from './toolResultStorage.js'
 import { validateUuid } from './uuid.js'
 // Persistence gate lives in its own module so the db layer (shadow writer,
 // cache) can share it without a static import cycle back into this file.
-import { shouldSkipSessionPersistence } from './sessionPersistence.js'
+import { isDbPrimaryMode, shouldSkipSessionPersistence } from './sessionPersistence.js'
 // Phase A shadow writer: mirrors successful JSONL appends into SQLite.
 // shadowWriter imports the db layer dynamically, so this edge stays acyclic.
-import { shadowAppendBatch } from '../services/db/shadowWriter.js'
+import { shadowAppendBatch, flushShadowWrites } from '../services/db/shadowWriter.js'
 // Type-only (erased at runtime) — no module cycle.
 import type { SessionStore } from '../services/db/SessionStore.js'
 
@@ -710,9 +710,7 @@ class Project {
 
         if (content.length + line.length >= this.MAX_CHUNK_BYTES) {
           // Flush chunk and resolve its entries before starting a new one
-          await this.appendToFile(filePath, content)
-          // Phase A: mirror the exact bytes just appended into SQLite.
-          shadowAppendBatch(filePath, chunkEntries, Buffer.byteLength(content))
+          await this.writeChunk(filePath, content, chunkEntries)
           for (const r of resolvers) {
             r()
           }
@@ -727,9 +725,7 @@ class Project {
       }
 
       if (content.length > 0) {
-        await this.appendToFile(filePath, content)
-        // Phase A: mirror the exact bytes just appended into SQLite.
-        shadowAppendBatch(filePath, chunkEntries, Buffer.byteLength(content))
+        await this.writeChunk(filePath, content, chunkEntries)
         for (const r of resolvers) {
           r()
         }
@@ -742,6 +738,35 @@ class Project {
         this.writeQueues.delete(filePath)
       }
     }
+  }
+
+  /**
+   * Write one drained chunk. Phase A order is file-first (JSONL is the source
+   * of truth, the DB mirrors). D1 (CODEV_DB_PRIMARY) flips it: rows are
+   * written AND flushed first (mandatory), the file is a best-effort export —
+   * a failed export is repaired by rewriting the file from the rows.
+   */
+  private async writeChunk(
+    filePath: string,
+    content: string,
+    chunkEntries: Entry[],
+  ): Promise<void> {
+    if (isDbPrimaryMode()) {
+      shadowAppendBatch(filePath, chunkEntries, Buffer.byteLength(content))
+      await flushShadowWrites() // DB durable before export
+      try {
+        await this.appendToFile(filePath, content)
+      } catch (err) {
+        logForDebugging(
+          `DB-primary export append failed for ${filePath}: ${String(err)}; repairing from DB`,
+        )
+        void repairExportFromDb(filePath)
+      }
+      return
+    }
+    await this.appendToFile(filePath, content)
+    // Phase A: mirror the exact bytes just appended into SQLite.
+    shadowAppendBatch(filePath, chunkEntries, Buffer.byteLength(content))
   }
 
   resetSessionFile(): void {
@@ -2638,9 +2663,35 @@ export async function fetchLogs(limit?: number): Promise<LogOption[]> {
 }
 
 /**
+ * Repair a session's export file by rewriting it from the DB rows. Used when
+ * a DB-primary export append fails — the rows already contain the entry, so
+ * a full rewrite makes the file correct again.
+ */
+async function repairExportFromDb(filePath: string): Promise<void> {
+  try {
+    const [{ exportSessionToFile }, { getSessionStore }] = await Promise.all([
+      import('../services/db/exportSession.js'),
+      import('../services/db/SessionStore.js'),
+    ])
+    const sessionId = basename(filePath, '.jsonl')
+    const result = exportSessionToFile(getSessionStore(), sessionId)
+    logForDebugging(
+      result
+        ? `Repaired export for ${sessionId} from DB rows (${result.entries} entries)`
+        : `Export repair skipped for ${sessionId}: no rows`,
+    )
+  } catch (err) {
+    logForDebugging(`Export repair failed for ${filePath}: ${String(err)}`)
+  }
+}
+
+/**
  * Append an entry to a session file. Creates the parent dir if missing.
  * Phase A: a successful append is also mirrored into the SQLite shadow
  * (best-effort — the JSONL write never depends on it).
+ * D1 (DB-primary): the DB write is buffered FIRST (made durable by the
+ * shadow flush / exit hook) and the file append becomes a best-effort
+ * export; export failures are repaired from the rows.
  */
 /* eslint-disable custom-rules/no-sync-fs -- sync callers (exit cleanup, materialize) */
 function appendEntryToFile(
@@ -2649,12 +2700,30 @@ function appendEntryToFile(
 ): void {
   const fs = getFsImplementation()
   const line = jsonStringify(entry) + '\n'
-  try {
-    fs.appendFileSync(fullPath, line, { mode: 0o600 })
-  } catch {
-    fs.mkdirSync(dirname(fullPath), { mode: 0o700 })
-    fs.appendFileSync(fullPath, line, { mode: 0o600 })
+
+  const writeToFile = (): void => {
+    try {
+      fs.appendFileSync(fullPath, line, { mode: 0o600 })
+    } catch {
+      fs.mkdirSync(dirname(fullPath), { mode: 0o700 })
+      fs.appendFileSync(fullPath, line, { mode: 0o600 })
+    }
   }
+
+  if (isDbPrimaryMode()) {
+    shadowAppendBatch(fullPath, [entry as Entry], Buffer.byteLength(line))
+    try {
+      writeToFile()
+    } catch (err) {
+      logForDebugging(
+        `DB-primary export append failed for ${fullPath}: ${String(err)}; repairing from DB`,
+      )
+      void repairExportFromDb(fullPath)
+    }
+    return
+  }
+
+  writeToFile()
   shadowAppendBatch(fullPath, [entry as Entry], Buffer.byteLength(line))
 }
 
