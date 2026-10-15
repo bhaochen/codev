@@ -17,6 +17,7 @@ import { SessionStore } from './SessionStore.js'
 import { parseJSONL } from '../../utils/json.js'
 import { isTranscriptMessage } from '../../utils/sessionStorage.js'
 import { logForDebugging } from '../../utils/debug.js'
+import type { Entry } from '../../types/logs.js'
 
 interface MigrationOptions {
   dryRun?: boolean
@@ -94,7 +95,7 @@ async function migrateSession(
 
     // Read JSONL file
     const content = await readFile(filePath, 'utf-8')
-    const entries = parseJSONL(content)
+    const entries = parseJSONL<Entry>(content)
 
     if (entries.length === 0) {
       return 'skipped'

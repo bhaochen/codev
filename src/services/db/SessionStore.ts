@@ -13,7 +13,6 @@
  * Migration: Existing JSONL files are migrated on first access.
  * The JSONL file is kept as backup until migration is verified.
  */
-import { Database } from 'bun:sqlite'
 import { mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { UUID } from 'crypto'
@@ -22,6 +21,8 @@ import type { Entry, TranscriptMessage } from '../../types/logs.js'
 import { isTranscriptMessage } from '../../utils/sessionStorage.js'
 import { parseJSONL } from '../../utils/json.js'
 import { logForDebugging } from '../../utils/debug.js'
+import { openDatabaseSync } from './driver.js'
+import type { SqliteDatabase, SqlValue } from './driver.js'
 
 // ============================================================================
 // Schema
@@ -115,21 +116,19 @@ export interface MessageQueryOptions {
 // ============================================================================
 
 export class SessionStore {
-  private readonly db: Database
+  private readonly db: SqliteDatabase
   private migratedSessions = new Set<string>()
 
-  private constructor(db: Database) {
+  private constructor(db: SqliteDatabase) {
     this.db = db
   }
 
   static open(path: string = defaultStorePath()): SessionStore {
     mkdirSync(dirname(path), { recursive: true })
-    const db = new Database(path, { create: true })
-    // WAL mode for concurrent reads during writes
-    db.exec('PRAGMA journal_mode = WAL;')
-    db.exec('PRAGMA synchronous = NORMAL;')
-    db.exec('PRAGMA busy_timeout = 5000;')
-    db.exec('PRAGMA cache_size = -64000;') // 64MB cache
+    // openDatabaseSync applies WAL/PRAGMA and picks bun:sqlite → node:sqlite.
+    // This removes the previous hard dependency on bun:sqlite so the store
+    // also works on plain Node ≥22.5.
+    const db = openDatabaseSync(path)
     db.exec(SCHEMA)
     return new SessionStore(db)
   }
@@ -172,7 +171,7 @@ export class SessionStore {
 
   updateSession(id: string, updates: Partial<Pick<SessionMeta, 'title' | 'tag' | 'agentId' | 'agentName' | 'agentColor' | 'model' | 'metadata'>>): void {
     const sets: string[] = ['updated_at = ?']
-    const params: unknown[] = [Date.now()]
+    const params: SqlValue[] = [Date.now()]
 
     if (updates.title !== undefined) { sets.push('title = ?'); params.push(updates.title) }
     if (updates.tag !== undefined) { sets.push('tag = ?'); params.push(updates.tag) }
@@ -188,7 +187,7 @@ export class SessionStore {
 
   listSessions(options: SessionListOptions = {}): SessionMeta[] {
     const clauses: string[] = []
-    const params: unknown[] = []
+    const params: SqlValue[] = []
 
     if (options.projectDir) {
       clauses.push('project_dir = ?')
@@ -258,7 +257,7 @@ export class SessionStore {
 
   getMessages(options: MessageQueryOptions): MessageRow[] {
     const clauses: string[] = ['session_id = ?']
-    const params: unknown[] = [options.sessionId]
+    const params: SqlValue[] = [options.sessionId]
 
     if (options.beforeSeq !== undefined) {
       clauses.push('seq < ?')
@@ -330,7 +329,7 @@ export class SessionStore {
     // Read and parse JSONL file
     const { readFileSync } = require('node:fs') as typeof import('node:fs')
     const content = readFileSync(jsonlPath, 'utf-8')
-    const entries = parseJSONL(content)
+    const entries = parseJSONL<Entry>(content)
 
     if (entries.length === 0) {
       this.migratedSessions.add(sessionId)
