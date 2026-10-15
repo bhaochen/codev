@@ -186,6 +186,45 @@ describe('SessionStore', () => {
       expect(store.getMessageCount('msg-test-session')).toBe(2)
     })
 
+    it('should look up a message by uuid via the index', () => {
+      const entries: Entry[] = [
+        {
+          type: 'user',
+          message: { role: 'user', content: 'Hello' },
+          uuid: 'uuid-lookup-1',
+          parentUuid: null,
+          timestamp: new Date().toISOString(),
+          sessionId: 'uuid-lookup-session',
+          cwd: '/test/project',
+          isSidechain: false,
+        },
+        {
+          type: 'assistant',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'Hi!' }] },
+          uuid: 'uuid-lookup-2',
+          parentUuid: 'uuid-lookup-1',
+          timestamp: new Date().toISOString(),
+          sessionId: 'uuid-lookup-session',
+          cwd: '/test/project',
+          isSidechain: false,
+        },
+      ]
+      store.appendMessages('uuid-lookup-session', entries)
+
+      const found = store.getMessageByUuid('uuid-lookup-2')
+      expect(found).not.toBeNull()
+      expect(found!.uuid).toBe('uuid-lookup-2')
+      expect(found!.parentUuid).toBe('uuid-lookup-1')
+      expect(found!.sessionId).toBe('uuid-lookup-session')
+      expect(found!.entryType).toBe('assistant')
+
+      // Cross-session lookup by uuid still resolves (uuid is globally indexed).
+      expect(store.getMessageByUuid('uuid-lookup-1')!.entryType).toBe('user')
+
+      // Unknown uuid returns null.
+      expect(store.getMessageByUuid('no-such-uuid')).toBeNull()
+    })
+
     it('should paginate messages', () => {
       const entries: Entry[] = Array.from({ length: 10 }, (_, i) => ({
         type: 'user' as const,
