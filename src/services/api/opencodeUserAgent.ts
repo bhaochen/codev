@@ -124,14 +124,21 @@ export function getSessionIdForRequest(
     const value = headers.get(name)
     if (value) { signal = value; break }
   }
-  if (!signal && typeof body.metadata?.session_id === 'string') signal = body.metadata.session_id
+  if (!signal) {
+    const meta = body.metadata as Record<string, unknown> | undefined
+    if (typeof meta?.session_id === 'string') signal = meta.session_id
+  }
   if (signal && isRealOpencodeSession(signal)) return signal
 
   if (!signal) {
     const messages = (body.messages ?? body.input) as unknown[]
-    const first = Array.isArray(messages)
-      ? messages.find((m: unknown) => (m as Record<string, unknown>)?.role === 'user')?.content
-      : messages
+    let first: unknown
+    if (Array.isArray(messages)) {
+      const userMsg = messages.find((m: unknown) => (m as Record<string, unknown>)?.role === 'user') as Record<string, unknown> | undefined
+      first = userMsg?.content
+    } else {
+      first = messages
+    }
     if (!first) return createSessionId()
     signal = JSON.stringify(first)
   }
@@ -202,26 +209,28 @@ export function fingerprintToolKey(name: string): string {
   return CORE_TOOLS.includes(trimmed as any) ? trimmed : ''
 }
 
-function chatFunctionOf(tool: unknown) {
+function chatFunctionOf(tool: unknown): Record<string, unknown> | null {
   const fn = (tool as Record<string, unknown>)?.function
-  return fn && typeof fn === 'object' && !Array.isArray(fn) ? fn : null
+  return fn && typeof fn === 'object' && !Array.isArray(fn) ? fn as Record<string, unknown> : null
 }
 
 function isFingerprintDefinition(tool: unknown, key: string): boolean {
-  const def = tool && (chatFunctionOf(tool) || tool)
+  const def = (tool && (chatFunctionOf(tool) || tool)) as Record<string, unknown> | null | undefined
   const want = FINGERPRINT_TOOL_DEFINITIONS[key as keyof typeof FINGERPRINT_TOOL_DEFINITIONS]
   return !!def && def.description === want.description
     && JSON.stringify(def.parameters) === JSON.stringify(want.parameters)
 }
 
 function toolNameOf(tool: unknown, protocol: 'chat' | 'responses' | 'anthropic'): string {
-  if (protocol === 'chat') return chatFunctionOf(tool)?.name ?? ''
+  if (protocol === 'chat') return chatFunctionOf(tool)?.name as string ?? ''
   return String((tool as Record<string, unknown>)?.name ?? '')
 }
 
 function withToolName(tool: unknown, name: string) {
   const fn = chatFunctionOf(tool)
-  return fn ? { ...tool, function: { ...fn, name } } : { ...tool, name }
+  return fn
+    ? { ...(tool as Record<string, unknown>), function: { ...fn, name } }
+    : { ...(tool as Record<string, unknown>), name }
 }
 
 function normalizeToolsForZen(

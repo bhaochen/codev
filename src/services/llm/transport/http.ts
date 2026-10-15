@@ -9,6 +9,8 @@ export type HttpRequest = {
   headers?: Record<string, string>
   body?: BodyInit | null
   signal?: AbortSignal
+  /** fetch redirect mode; 'error' makes redirects throw instead of following. */
+  redirect?: RequestRedirect
 }
 
 export async function httpRequest(
@@ -21,5 +23,6 @@ export async function httpRequest(
     headers: req.headers,
     body: req.body ?? null,
     signal: req.signal,
+    redirect: req.redirect,
   })
 }

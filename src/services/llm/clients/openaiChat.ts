@@ -29,14 +29,13 @@ import {
 import type { AgentId } from '../../../types/ids.js'
 import { toolToAPISchema } from '../../../utils/api.js'
 import { getOpencodeAdapter } from '../adapters/index.js'
-import { CORE_TOOLS } from '../adapters/OpenCodeAdapter.js'
+import { CORE_TOOLS, FINGERPRINT_TOOL_DEFINITIONS } from '../adapters/OpenCodeAdapter.js'
 import { calculateUSDCost } from '../../../utils/modelCost.js'
 import { addToTotalSessionCost } from '../../../cost-tracker.js'
 import { isAbortError } from '../../../utils/errors.js'
 import { resolveOpenAIMaxTokens } from '../utils/requestBody.js'
 import { formatOpenAIPromptCacheKey, updateOpenAIUsage } from '../utils/openaiShared.js'
 import { resolveAuth } from '../auth/resolveAuth.js'
-import { createRequestId, getOpencodeUserAgent } from '../../api/opencodeUserAgent.js'
 import { getNvidiaModelMaxTokens } from '../../../utils/model/nvidiaModels.js'
 import {
   adaptOpenAIChatSSE,
@@ -253,17 +252,22 @@ export async function* queryOpenAIChat(
 
         // Get body transform function
         adapterBodyTransform = (b) => {
-          adapter.transformRequestBody(b, route, adapterRequest)
+          adapter.transformRequestBody(b as Record<string, string | boolean | object>, route, adapterRequest)
         }
       } else if (isFree) {
-        // Fallback to inline logic if adapter not available
+        // Fallback when the adapter is unavailable: PR #4842 showed upstream
+        // rejects stubbed descriptions ("${name} tool (fingerprint...)") with
+        // 403 FreeTierError — inject the verbatim OpenCode definitions instead.
         const existingNames = new Set(openaiTools.map((t: any) => t.name ?? t.function?.name ?? ''))
-        const missing = FINGERPRINT_TOOLS.filter((n) => !existingNames.has(n))
+        const missing = (CORE_TOOLS as readonly string[]).filter((n) => !existingNames.has(n))
         if (missing.length > 0) {
-          const injected = missing.map((name) => ({
-            type: 'function' as const,
-            function: { name, description: `${name} tool (fingerprint for free tier)`, parameters: {} },
-          }))
+          const injected = missing.map((name) => {
+            const def = FINGERPRINT_TOOL_DEFINITIONS[name as keyof typeof FINGERPRINT_TOOL_DEFINITIONS]
+            return {
+              type: 'function' as const,
+              function: { name, description: def.description, parameters: def.parameters },
+            }
+          })
           effectiveTools = [...openaiTools, ...injected]
         }
       }
@@ -294,23 +298,27 @@ export async function* queryOpenAIChat(
     if (adapterBodyTransform) {
       adapterBodyTransform(body)
     }
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'User-Agent': route.provider === 'opencode' ? getOpencodeUserAgent() : 'codev',
-    }
-    // Merge adapter headers for OpenCode (includes session, session-id, request-id, Accept)
+    // Opencode adapter headers are the wire contract (v2 fingerprint): they
+    // own content-type/user-agent/authorization/session headers, all lowercase.
+    // Seeding this object with 'User-Agent' first would leave BOTH casings in
+    // the plain object; fetch's Headers then collapses them into "ua, ua",
+    // which upstream's anchored UA gate rejects with 403 FreeTierError.
+    const headers: Record<string, string> = {}
     if (route.provider === 'opencode') {
       Object.assign(headers, adapterHeaders)
-    } else if (route.provider === 'nvidia') {
-      headers['HTTP-Referer'] = 'https://opencode.ai/'
-      headers['X-Title'] = 'opencode'
-      headers['X-BILLING-INVOKE-ORIGIN'] = 'OpenCode'
-    } else if (route.provider === 'openrouter') {
-      headers['HTTP-Referer'] = 'https://opencode.ai/'
-      headers['X-Title'] = 'codev'
+    } else {
+      headers['Content-Type'] = 'application/json'
+      headers['User-Agent'] = 'codev'
+      if (route.provider === 'nvidia') {
+        headers['HTTP-Referer'] = 'https://opencode.ai/'
+        headers['X-Title'] = 'opencode'
+        headers['X-BILLING-INVOKE-ORIGIN'] = 'OpenCode'
+      } else if (route.provider === 'openrouter') {
+        headers['HTTP-Referer'] = 'https://opencode.ai/'
+        headers['X-Title'] = 'codev'
+      }
+      headers.Authorization = cred.type === 'bearer' ? `Bearer ${cred.token}` : 'Bearer public'
     }
-    if (cred.type === 'bearer') headers.Authorization = `Bearer ${cred.token}`
-    else headers.Authorization = 'Bearer public'
     const fetchOverride = context.fetchOverride as unknown as typeof fetch | undefined
     // Use rewritten endpoint for OpenCode free tier (inference/v1)
     const url = finalEndpoint.includes('/chat/completions') ? finalEndpoint : chatCompletionsUrlFromBase(finalEndpoint)
@@ -325,7 +333,10 @@ export async function* queryOpenAIChat(
       )
     const buildRecoveryBody = () => {
       const { stream_options: _streamOptions, ...rest } = body as unknown as Record<string, unknown>
-      return { ...rest, stream: false }
+      // OpenCode free tier rejects non-streaming requests with 403
+      // FreeTierError (#4777); keep recovery streaming there.
+      const keepStreaming = route.provider === 'opencode'
+      return { ...rest, stream: keepStreaming }
     }
     let response: Response
     // Retry only while nothing has reached the consumer: an upstream error
