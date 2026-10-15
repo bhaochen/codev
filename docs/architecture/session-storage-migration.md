@@ -101,6 +101,39 @@ bun run src/services/db/migrateSessions.ts --project-dir -home-yuki-Code-Agent-c
 | 3 | `003-cache-roles` | `messages.role` (main/meta), `sessions.synced_path` |
 | 4 | (logic) | Repair pass: re-sync stale rows + prune orphaned rows |
 
+---
+
+## JSONL → DB-Primary Roadmap
+
+Phased migration from "JSONL source of truth + SQLite cache" toward
+"SQLite source of truth + JSONL export", each phase independently shipped
+and tested:
+
+| Phase | Status | Commit | What |
+|-------|--------|--------|------|
+| A | ✅ | `510ee6c` | Shadow writer: every JSONL append mirrors into SQLite (guarded incremental + boundary/threshold full resync); write seams from the queue, sync metadata path, speculation, server |
+| C1 | ✅ | `beebf3d` | DB-first listing/picker metadata (lastPrompt/title/tag/gitBranch/…) via `listingProjection`; file scan fallback |
+| C2 | ✅ | `4c0c2db` | Server `getSessionMessages` served from rows (fresh + ≤5MB gate, file fallback) |
+| C3 | ✅ | `2ae0851` | Server session lookup (row query vs dir scan) + all transcript read call sites flipped |
+| C4 | ✅ | `3118093` | `--resume <path.jsonl>` / deep-link readers via `loadTranscriptViaCache` (exported, projects-root guarded) |
+| D0 | ✅ | `7e2ccd1` | DB→JSONL export/repair tool (`exportSession.ts`) — the self-heal prerequisite for the write flip |
+| D1 | ⬜ | — | DB-primary write mode: writes DB-mandatory + file export; read rule "rows authoritative when present"; export-on-exit repair |
+| D3 | ⬜ | — | Stop writing files by default; JSONL purely on-demand (`codev sessions export`) |
+
+**Deliberate file-only readers** (left on JSONL by design): subagent
+transcripts (not mirrored), `/insights` + `stats.ts` (batch analytics,
+keepAllLeaves / include subagent files), `findUnresolvedToolUse` (hot
+mid-session path), `sessionBranching` fork source (keepAllLeaves).
+
+**D1 design notes** (for whoever picks it up): the read-through cache treats
+the file as the sync anchor, so flipping write authority needs (1) a
+primary-mode read rule in `transcriptCache` — rows present ⇒ serve rows,
+skip the staleness resync; (2) direct row appends from the drain seam
+(bypassing the file-anchored expectedSize guards) plus an export append
+that is best-effort; (3) export-on-exit repair using `exportSession.ts` for
+sessions whose export lagged; (4) a synchronous store handle for the sync
+metadata seam.
+
 ### Skip / Repair / Prune Semantics
 
 A session is **skipped only when its SQLite rows are the canonical view of the
