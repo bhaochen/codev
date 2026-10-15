@@ -28,6 +28,7 @@ import {
 } from '../../../utils/messages.js'
 import type { AgentId } from '../../../types/ids.js'
 import { toolToAPISchema } from '../../../utils/api.js'
+import { getOpencodeAdapter } from '../adapters/index.js'
 import { calculateUSDCost } from '../../../utils/modelCost.js'
 import { addToTotalSessionCost } from '../../../cost-tracker.js'
 import { isAbortError } from '../../../utils/errors.js'
@@ -177,6 +178,11 @@ export async function* queryOpenAIChat(
         }),
     )
     let isFree = model.includes('free') || model.includes('contributor')
+    // Hardcoded fallback for known free models (in case catalog fetch hasn't completed)
+    const KNOWN_FREE_MODELS = new Set(['big-pickle', 'deepseek-v4-flash-free', 'nemotron-3-super-free'])
+    if (KNOWN_FREE_MODELS.has(model)) {
+      isFree = true
+    }
     try {
       const { getCachedOpencodeModels } = await import('../../../utils/model/opencodeModels.js')
       const list = getCachedOpencodeModels()
@@ -223,17 +229,42 @@ export async function* queryOpenAIChat(
           ? reasoningEffort
           : undefined
         : reasoningEffort
-    // Free tier opencode: ensure fingerprint tools + stream=true (#4132)
+    // Free tier opencode: use adapter for endpoint, headers, and tool injection
     let effectiveTools = openaiTools
-    if (route.provider === 'opencode' && isFree) {
-      const existingNames = new Set(openaiTools.map((t: any) => t.name ?? t.function?.name ?? ''))
-      const missing = FINGERPRINT_TOOLS.filter((n) => !existingNames.has(n))
-      if (missing.length > 0) {
-        const injected = missing.map((name) => ({
-          type: 'function' as const,
-          function: { name, description: `${name} tool (fingerprint for free tier)`, parameters: {} },
-        }))
-        effectiveTools = [...openaiTools, ...injected]
+    let finalEndpoint = endpoint
+    let adapterHeaders: Record<string, string> = {}
+
+    if (route.provider === 'opencode') {
+      const adapter = getOpencodeAdapter()
+      if (adapter) {
+        // Build a minimal request for the adapter
+        const adapterRequest = {
+          model,
+          context: {
+            ...context,
+            model,
+          },
+        } as any
+
+        // Get rewritten endpoint for free tier
+        finalEndpoint = adapter.getEndpoint(route, adapterRequest)
+
+        // Get adapter headers (includes session-id, session, request-id, etc.)
+        adapterHeaders = adapter.buildHeaders(route, adapterRequest)
+
+        // Transform body (inject real tool schemas)
+        // We'll apply this after building the body
+      } else if (isFree) {
+        // Fallback to inline logic if adapter not available
+        const existingNames = new Set(openaiTools.map((t: any) => t.name ?? t.function?.name ?? ''))
+        const missing = FINGERPRINT_TOOLS.filter((n) => !existingNames.has(n))
+        if (missing.length > 0) {
+          const injected = missing.map((name) => ({
+            type: 'function' as const,
+            function: { name, description: `${name} tool (fingerprint for free tier)`, parameters: {} },
+          }))
+          effectiveTools = [...openaiTools, ...injected]
+        }
       }
     }
     // OpenRouter prefix cache: hold tool order + descriptions stable for this
@@ -246,7 +277,7 @@ export async function* queryOpenAIChat(
         effectiveTools,
       )
     }
-    logForDebugging(`[OpenAIChat] provider=${route.provider} model=${model} endpoint=${endpoint} tools=${effectiveTools.length} thinking=${providerEnableThinking ? 'on' : 'off'}`)
+    logForDebugging(`[OpenAIChat] provider=${route.provider} model=${model} endpoint=${finalEndpoint} tools=${effectiveTools.length} thinking=${providerEnableThinking ? 'on' : 'off'}`)
     const body = buildOpenAIChatBody({
       model,
       messages: openaiMessages,
@@ -259,32 +290,38 @@ export async function* queryOpenAIChat(
       promptCacheKey,
     })
     // Free tier opencode: force stream=true, backend SSE only (#4132)
-    if (route.provider === 'opencode' && isFree) {
-      ;(body as any).stream = true
+    // Also apply adapter body transform for real tool schemas
+    if (route.provider === 'opencode') {
+      const adapter = getOpencodeAdapter()
+      if (adapter) {
+        adapter.transformRequestBody(body, route, {
+          model,
+          context: { ...context, model },
+        } as any)
+      } else if (isFree) {
+        ;(body as any).stream = true
+      }
     }
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'User-Agent': route.provider === 'opencode' ? getOpencodeUserAgent() : 'codev',
     }
-    // Provider-specific headers 按 opencode 侧 custom 定义
+    // Merge adapter headers for OpenCode (includes session-id, session, request-id, Accept)
     if (route.provider === 'opencode') {
-      headers['x-opencode-client'] = 'desktop'
-      headers['x-opencode-project'] = 'global'
-      headers['x-opencode-session'] = translateSessionId(getSessionId() || '', 'codev')
-      headers['x-opencode-request'] = createRequestId()
+      Object.assign(headers, adapterHeaders)
     } else if (route.provider === 'nvidia') {
       headers['HTTP-Referer'] = 'https://opencode.ai/'
       headers['X-Title'] = 'opencode'
       headers['X-BILLING-INVOKE-ORIGIN'] = 'OpenCode'
     } else if (route.provider === 'openrouter') {
-      // OpenRouter attributes requests by referer/title; both optional.
       headers['HTTP-Referer'] = 'https://opencode.ai/'
       headers['X-Title'] = 'codev'
     }
     if (cred.type === 'bearer') headers.Authorization = `Bearer ${cred.token}`
     else headers.Authorization = 'Bearer public'
     const fetchOverride = context.fetchOverride as unknown as typeof fetch | undefined
-    const url = endpoint.includes('/chat/completions') ? endpoint : chatCompletionsUrlFromBase(endpoint)
+    // Use rewritten endpoint for OpenCode free tier
+    const url = finalEndpoint.includes('/chat/completions') ? finalEndpoint : chatCompletionsUrlFromBase(finalEndpoint)
     const sendRequest = (requestBody: object) =>
       requestWithRetry(
         () =>
@@ -332,16 +369,38 @@ export async function* queryOpenAIChat(
     for (;;) {
       const attemptBody = recovery ? buildRecoveryBody() : body
       response = await sendRequest(attemptBody)
-      // 免费模型瞬态 500 按 opencode 策略重试并回退至 big-pickle，确保 hi 可用
-      if (!response.ok && isFree && response.status === 500 && model !== 'big-pickle') {
-        logForDebugging(`[OpenAIChat] free model ${model} 500, fallback to big-pickle`)
-        ;(body as { model?: string }).model = 'big-pickle'
-        model = 'big-pickle'
-        // Rebuild so the fallback model actually reaches the wire: attemptBody
-        // was captured above and, in recovery mode, is a pre-mutation copy.
+      // Free model transient 500: retry with fallback to migrated free models
+      const MIGRATED_FREE_MODELS = ['ling-3.1-flash-free', 'nemotron-3.5-lightning-free', 'fledge-alpha-free', 'jev-1.13-free']
+      if (!response.ok && isFree && response.status === 500 && !MIGRATED_FREE_MODELS.includes(model)) {
+        const fallbackModel = MIGRATED_FREE_MODELS.find(m => m !== model) ?? 'ling-3.1-flash-free'
+        logForDebugging(`[OpenAIChat] free model ${model} 500, fallback to ${fallbackModel}`)
+        ;(body as { model?: string }).model = fallbackModel
+        model = fallbackModel
+        const adapter = getOpencodeAdapter()
+        if (adapter) {
+          finalEndpoint = adapter.getEndpoint(route, { model, context: { ...context, model } } as any)
+        }
         response = await sendRequest(recovery ? buildRecoveryBody() : body)
         if (response.ok) {
           logForDebugging(`[OpenAIChat] free-tier fallback succeeded with ${model}`)
+        }
+      }
+      // OpenCode free tier is blocked for third-party clients (TLS fingerprinting/device attestation).
+      // If we get 403 FreeTierError, suggest alternatives and fail gracefully.
+      if (!response.ok && isFree && response.status === 403) {
+        logForDebugging(`[OpenAIChat] Free tier 403 detected, checking for FreeTierError`)
+        const text = await response.text().catch(() => '')
+        logForDebugging(`[OpenAIChat] Response text: ${text.slice(0, 200)}`)
+        if (text.includes('FreeTierError') || text.includes('free tier can only be used from within OpenCode')) {
+          throw new Error(
+            'OpenCode free tier is not available for third-party clients.\n' +
+            'This is due to OpenCode\'s client validation (device attestation/TLS fingerprinting).\n\n' +
+            'Alternatives:\n' +
+            '  • NVIDIA NIM: deepseek-ai/deepseek-v4.1-flash (provider: nvidia)\n' +
+            '  • OpenRouter: meta-llama/llama-3.3-70b-instruct:free (provider: openrouter)\n' +
+            '  • Local: Ollama models (provider: local)\n' +
+            '  • OpenCode Zen PAYG: with API key from https://opencode.ai/auth'
+          )
         }
       }
       if (!response.ok) {
