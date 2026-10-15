@@ -21,5 +21,5 @@ export function getOpencodeAdapter() {
   return registry.get('opencode') as OpenCodeAdapter | undefined
 }
 
-export { ProviderAdapter } from './ProviderAdapter.js'
+export type { ProviderAdapter } from './ProviderAdapter.js'
 export { DefaultProviderAdapter } from './ProviderAdapter.js'

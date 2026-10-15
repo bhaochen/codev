@@ -16,7 +16,14 @@ import type { ComboConfig, ComboEvent } from './ComboEngine.js'
 import type { LLMRequest } from './types.js'
 
 export class ModelRuntime {
-  private comboEngine = new ComboEngine()
+  private _comboEngine: ComboEngine | null = null
+
+  private get comboEngine(): ComboEngine {
+    if (!this._comboEngine) {
+      this._comboEngine = new ComboEngine()
+    }
+    return this._comboEngine
+  }
 
   /**
    * Generate with single-model routing (default behavior).
@@ -50,4 +57,14 @@ export class ModelRuntime {
   }
 }
 
-export const modelRuntime = new ModelRuntime()
+// Lazy singleton to avoid circular dependency issues
+let _modelRuntime: ModelRuntime | null = null
+export function getModelRuntime(): ModelRuntime {
+  if (!_modelRuntime) {
+    _modelRuntime = new ModelRuntime()
+  }
+  return _modelRuntime
+}
+
+/** @deprecated Use getModelRuntime() instead */
+export const modelRuntime = getModelRuntime()
