@@ -5067,14 +5067,19 @@ export async function readLiteMetadataFromDb(
   modifiedMs: number,
 ): Promise<LiteMetadata | null> {
   try {
-    const sync = store.getSyncInfo(sessionId)
-    if (!sync) return null
-    if (sync.size !== fileSize) return null
-    if (sync.mtime !== Math.trunc(modifiedMs)) return null
-    if (sync.path !== realpathSync(filePath)) return null
-
     const row = store.getSession(sessionId)
     if (!row) return null
+
+    // D1/D3: primary-owned rows are authoritative; the export file may lag.
+    // Otherwise the row must be provably current for the file.
+    const primaryOwned = store.isSessionPrimaryOwned(sessionId)
+    if (!primaryOwned) {
+      const sync = store.getSyncInfo(sessionId)
+      if (!sync) return null
+      if (sync.size !== fileSize) return null
+      if (sync.mtime !== Math.trunc(modifiedMs)) return null
+      if (sync.path !== realpathSync(filePath)) return null
+    }
 
     const meta = (row.metadata ?? {}) as Record<string, unknown>
     const lastPrompt = typeof meta.lastPrompt === 'string' ? meta.lastPrompt : ''

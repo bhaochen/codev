@@ -117,22 +117,40 @@ and tested:
 | C3 | ✅ | `2ae0851` | Server session lookup (row query vs dir scan) + all transcript read call sites flipped |
 | C4 | ✅ | `3118093` | `--resume <path.jsonl>` / deep-link readers via `loadTranscriptViaCache` (exported, projects-root guarded) |
 | D0 | ✅ | `7e2ccd1` | DB→JSONL export/repair tool (`exportSession.ts`) — the self-heal prerequisite for the write flip |
-| D1 | ⬜ | — | DB-primary write mode: writes DB-mandatory + file export; read rule "rows authoritative when present"; export-on-exit repair |
-| D3 | ⬜ | — | Stop writing files by default; JSONL purely on-demand (`codev sessions export`) |
+| D1 | ✅ | `f4cc239` | DB-primary write mode (`CODEV_DB_PRIMARY`): rows authoritative, export best-effort, export-failure repair |
+| C5 | ✅ | `e691253` | Forks read the source from rows in primary mode (lagging/missing export safe) |
+| D3 | ✅ | — | **Default flip**: primary mode ON by default; `CODEV_DB_PRIMARY=0` reverts to JSONL-as-truth |
+
+### DB-Primary Mode (current default)
+
+```
+CODEV_DB_PRIMARY   unset/1  → SQLite is the session store of truth (default)
+                   =0/false → legacy: JSONL source of truth + SQLite mirror
+```
+
+Behavior in primary mode:
+
+- **Reads** serve rows whenever the session is *primary-owned* (rows written by
+  the primary path, marked `metadata.__primary`) or the file is missing.
+  Unmarked rows (pre-v4 legacy) keep the freshness-gated shadow semantics and
+  self-heal by one file resync before being adopted.
+- **Writes** (drain seam): rows buffered + flushed first (mandatory), the
+  JSONL file appended after as a **best-effort export**; sync-path entries are
+  buffered first with the file written as export too.
+- **Export repair**: any failed export append triggers a full-file rewrite
+  from the rows (`exportSession`), so external file readers recover.
+- **Forks** (`/branch`, `--fork-session`) source from rows.
+
+Residual trade-offs (documented, flag-gated): an export that fails before the
+process can repair it leaves the file lagging until the next export write or a
+manual `bun run src/services/db/exportSession.ts <id>` — file-only readers
+(`/insights`, `stats`, external tools) may see the lag, while all primary
+reads serve the full rows.
 
 **Deliberate file-only readers** (left on JSONL by design): subagent
 transcripts (not mirrored), `/insights` + `stats.ts` (batch analytics,
 keepAllLeaves / include subagent files), `findUnresolvedToolUse` (hot
-mid-session path), `sessionBranching` fork source (keepAllLeaves).
-
-**D1 design notes** (for whoever picks it up): the read-through cache treats
-the file as the sync anchor, so flipping write authority needs (1) a
-primary-mode read rule in `transcriptCache` — rows present ⇒ serve rows,
-skip the staleness resync; (2) direct row appends from the drain seam
-(bypassing the file-anchored expectedSize guards) plus an export append
-that is best-effort; (3) export-on-exit repair using `exportSession.ts` for
-sessions whose export lagged; (4) a synchronous store handle for the sync
-metadata seam.
+mid-session path).
 
 ### Skip / Repair / Prune Semantics
 
@@ -352,9 +370,18 @@ await roundTrip(buildEntries())                 // 3 cases, deep-equal
 
 ## Rollback Plan
 
-JSONL remains **source of truth** until explicit flip:
-1. Disable background migration: `sessionMigrationVersion = 999` in config
-2. Delete `~/.claude/sessions/sessions.sqlite*`
-3. All reads fall back to `loadTranscriptFile()` (current behavior)
+SQLite is now the source of truth (DB-primary default), with the JSONL
+export kept current on every write path. Rollback is a flag, at any level:
 
-No data loss possible — SQLite is a rebuildable cache.
+1. **Instant, per-process**: run with `CODEV_DB_PRIMARY=0` — reads and writes
+   revert to the legacy JSONL-as-truth behavior (the mirror keeps updating).
+2. **Repair before/after rollback**: `bun run src/services/db/exportSession.ts
+   <sessionId>` (or `--all`) rewrites the JSONL files from the rows, so the
+   legacy path sees exactly the DB content.
+3. **Full return**: with the files exported and the flag off, deleting
+   `~/.claude/sessions/sessions.sqlite*` loses nothing — everything rebuilds
+   from the JSONL via the background migration.
+
+No data loss path exists in either direction: the DB is flag-guarded, the
+export files are repaired from rows on append failure, and the legacy reader
+self-heals unmarked rows by one resync.

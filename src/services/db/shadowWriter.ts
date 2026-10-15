@@ -188,6 +188,7 @@ export function flushShadowWritesSync(): void {
           store.ensureSession(sessionId, st.projectDir)
           store.appendMessages(sessionId, entries, 'main')
           store.mergeSessionListingMeta(sessionId, entries)
+          store.markSessionPrimaryOwned(sessionId)
         })
         clearBuffer(st)
       } catch {
@@ -313,6 +314,9 @@ async function processState(sessionId: string, st: ShadowState): Promise<void> {
         store.ensureSession(sessionId, st.projectDir)
         store.appendMessages(sessionId, entries, 'main')
         store.mergeSessionListingMeta(sessionId, entries)
+        // Adopt into primary-owned: reads now serve these rows without the
+        // file-freshness resync (the export may lag).
+        store.markSessionPrimaryOwned(sessionId)
       })
     }
     clearBuffer(st)

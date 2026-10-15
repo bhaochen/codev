@@ -47,13 +47,23 @@ export async function loadTranscriptCached(
   jsonlPath: string,
   projectDir: string,
 ): Promise<TranscriptShape> {
-  // D1 (DB-primary): rows are authoritative. When the session has rows, serve
-  // them directly — the file is a best-effort export that may lag (or be
-  // missing recent entries), so the file-freshness resync below must NOT run:
-  // it would roll back DB writes from a stale file. With no rows (a session
-  // that predates DB-primary), fall through and bootstrap from the file.
+  // D1/D3 (DB-primary): rows may be authoritative. Serve them without the
+  // file-freshness resync when EITHER:
+  //   - the session is primary-owned (rows written by the primary path; the
+  //     export file may lag or be recreated partial — never roll those back),
+  //   - or the file is missing entirely (rows are the only copy; the
+  //     alternative would be an empty read).
+  // Unmarked rows with the file present keep the shadow semantics below —
+  // that path also lets pre-v4 legacy rows self-heal by resyncing once.
   if (isDbPrimaryMode() && store.getMessageCount(sessionId) > 0) {
-    return store.loadTranscript(sessionId)
+    if (store.isSessionPrimaryOwned(sessionId)) {
+      return store.loadTranscript(sessionId)
+    }
+    try {
+      statSync(jsonlPath)
+    } catch {
+      return store.loadTranscript(sessionId)
+    }
   }
 
   // stat first: a missing file throws here, and callers fall back to the

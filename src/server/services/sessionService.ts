@@ -313,17 +313,36 @@ export class SessionService {
   ): Promise<RawEntry[]> {
     try {
       if (this.useDbReads()) {
-        const st = statSync(filePath)
-        if (st.size <= SKIP_PRECOMPACT_THRESHOLD) {
-          const { getSessionStore } = await import('../../services/db/SessionStore.js')
-          const store = getSessionStore()
-          const sync = store.getSyncInfo(sessionId)
-          if (
-            sync &&
-            sync.size === st.size &&
-            sync.mtime === Math.trunc(st.mtimeMs) &&
-            sync.path === realpathSync(filePath)
-          ) {
+        const { getSessionStore } = await import('../../services/db/SessionStore.js')
+        const store = getSessionStore()
+        // Primary-owned rows are authoritative regardless of the export
+        // file's state (it may lag or be missing entirely); otherwise the
+        // row must be provably current for the file, and the raw-order
+        // guarantee only holds for files without boundary truncation.
+        const primaryOwned = store.isSessionPrimaryOwned(sessionId)
+        let fileStat: ReturnType<typeof statSync> | null = null
+        try {
+          fileStat = statSync(filePath)
+        } catch {
+          fileStat = null
+        }
+        const eligible =
+          primaryOwned ||
+          (fileStat !== null && fileStat.size <= SKIP_PRECOMPACT_THRESHOLD)
+        if (eligible) {
+          let fresh = primaryOwned
+          if (!fresh && fileStat) {
+            const sync = store.getSyncInfo(sessionId)
+            const size = Number(fileStat.size)
+            const mtime = Math.trunc(Number(fileStat.mtimeMs))
+            fresh = Boolean(
+              sync &&
+                sync.size === size &&
+                sync.mtime === mtime &&
+                sync.path === realpathSync(filePath),
+            )
+          }
+          if (fresh) {
             const rows = store.getMessages({
               sessionId,
               limit: Number.MAX_SAFE_INTEGER,

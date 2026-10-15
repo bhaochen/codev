@@ -17,12 +17,20 @@ function nodeEnv(): string {
 }
 
 /**
- * DB-primary mode (D1): SQLite is the authoritative session store; JSONL is
- * a best-effort export for external tools. Off by default until dogfooding
- * proves it out — see docs/architecture/session-storage-migration.md.
+ * DB-primary mode (D3 default): SQLite is the authoritative session store;
+ * JSONL is a best-effort export for external tools. Enabled by default
+ * outside tests; set CODEV_DB_PRIMARY=0/false to fall back to the legacy
+ * JSONL-as-source-of-truth behavior. See
+ * docs/architecture/session-storage-migration.md.
  */
 export function isDbPrimaryMode(): boolean {
-  return isEnvTruthy(process.env.CODEV_DB_PRIMARY)
+  const raw = process.env.CODEV_DB_PRIMARY
+  // Empty string counts as unset (a bare `CODEV_DB_PRIMARY=` must not flip
+  // the default off).
+  if (raw !== undefined && raw !== '') return isEnvTruthy(raw)
+  // Tests opt in explicitly so the suite stays hermetic and deterministic.
+  if ((process.env.NODE_ENV || 'development') === 'test') return false
+  return true
 }
 
 /**

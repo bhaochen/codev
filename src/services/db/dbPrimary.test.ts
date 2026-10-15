@@ -286,6 +286,45 @@ describe('D1 DB-primary mode', () => {
     expect(forkedMessageUuids).toEqual([uid(1), uid(2), uid(3)])
   })
 
+  it('default/gate semantics: tests opt in, explicit 0 disables', async () => {
+    const { isDbPrimaryMode } = await import('../../utils/sessionPersistence.js')
+    // Test env default: OFF (hermetic suite).
+    delete process.env.CODEV_DB_PRIMARY
+    expect(isDbPrimaryMode()).toBe(false)
+    // Empty string counts as unset.
+    process.env.CODEV_DB_PRIMARY = ''
+    expect(isDbPrimaryMode()).toBe(false)
+    delete process.env.CODEV_DB_PRIMARY
+    // Explicit values win in every env.
+    process.env.CODEV_DB_PRIMARY = '1'
+    expect(isDbPrimaryMode()).toBe(true)
+    process.env.CODEV_DB_PRIMARY = '0'
+    expect(isDbPrimaryMode()).toBe(false)
+    process.env.CODEV_DB_PRIMARY = 'false'
+    expect(isDbPrimaryMode()).toBe(false)
+    process.env.CODEV_DB_PRIMARY = '1' // restore for afterEach semantics
+  })
+
+  it('unmarked legacy rows with the file present still self-heal from the file', async () => {
+    // Legacy-shaped row: rows exist but were never primary-written and carry
+    // no sync info (pre-v4 state, simulated).
+    store.syncSession(S1, 'proj', [user(1, null, 'v1')])
+    expect(store.isSessionPrimaryOwned(S1)).toBe(false)
+
+    // The file is ahead of the rows (the legacy source of truth).
+    writeFileSync(
+      jsonl,
+      [user(1, null, 'v1'), user(2, uid(1), 'v2')]
+        .map(e => JSON.stringify(e))
+        .join('\n') + '\n',
+    )
+
+    const shape = await loadTranscriptCached(store, S1, jsonl, 'proj')
+    // The stale path resynced from the file — no rollback, no loss.
+    expect(shape.messages.size).toBe(2)
+    expect(store.getMessageCount(S1)).toBe(2)
+  })
+
   it('flag off restores file-first ordering (shadow mirror still runs)', async () => {
     delete process.env.CODEV_DB_PRIMARY
     writeFileSync(jsonl, JSON.stringify(user(1, null, 'v1')) + '\n')

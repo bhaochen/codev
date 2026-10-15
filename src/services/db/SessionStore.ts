@@ -329,6 +329,28 @@ export class SessionStore {
   }
 
   /**
+   * D1/D3: mark the session's rows as authoritative (primary-written). While
+   * marked, reads serve the rows without the file-freshness resync — the
+   * export file may lag (or be missing) and must never roll rows back.
+   * Unmarked rows keep the shadow semantics (freshness-gated, file-anchored),
+   * which is also what lets pre-v4 legacy rows self-heal by resyncing from
+   * the file once before being adopted.
+   */
+  markSessionPrimaryOwned(sessionId: string): void {
+    const row = this.getSession(sessionId)
+    if (!row) return
+    const meta = (row.metadata ?? {}) as Record<string, unknown>
+    if (meta.__primary === true) return
+    this.updateSession(sessionId, { metadata: { ...meta, __primary: true } })
+  }
+
+  /** Whether the session's rows have been primary-written (see above). */
+  isSessionPrimaryOwned(sessionId: string): boolean {
+    const row = this.getSession(sessionId)
+    return (row?.metadata as Record<string, unknown> | undefined)?.__primary === true
+  }
+
+  /**
    * uuid of a session's last row (by seq), or null when the session has no
    * rows. The shadow writer uses this as an optimistic-lock token: if the
    * last row is not the one this writer left, another writer (or a reader's
