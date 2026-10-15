@@ -3577,54 +3577,9 @@ function walkChainBeforeParse(buf: Buffer): Buffer {
 export async function loadTranscriptFile(
   filePath: string,
   opts?: { keepAllLeaves?: boolean },
-): Promise<{
-  messages: Map<UUID, TranscriptMessage>
-  summaries: Map<UUID, string>
-  customTitles: Map<UUID, string>
-  tags: Map<UUID, string>
-  agentNames: Map<UUID, string>
-  agentColors: Map<UUID, string>
-  agentSettings: Map<UUID, string>
-  prNumbers: Map<UUID, number>
-  prUrls: Map<UUID, string>
-  prRepositories: Map<UUID, string>
-  modes: Map<UUID, string>
-  worktreeStates: Map<UUID, PersistedWorktreeSession | null>
-  fileHistorySnapshots: Map<UUID, FileHistorySnapshotMessage>
-  attributionSnapshots: Map<UUID, AttributionSnapshotMessage>
-  contentReplacements: Map<UUID, ContentReplacementRecord[]>
-  agentContentReplacements: Map<AgentId, ContentReplacementRecord[]>
-  contextCollapseCommits: ContextCollapseCommitEntry[]
-  contextCollapseSnapshot: ContextCollapseSnapshotEntry | undefined
-  leafUuids: Set<UUID>
-  /** Last-wins goal entry for this session */
-  goalStore?: GoalStateEntry
-}> {
-  const messages = new Map<UUID, TranscriptMessage>()
-  const summaries = new Map<UUID, string>()
-  const customTitles = new Map<UUID, string>()
-  const tags = new Map<UUID, string>()
-  const agentNames = new Map<UUID, string>()
-  const agentColors = new Map<UUID, string>()
-  const agentSettings = new Map<UUID, string>()
-  const prNumbers = new Map<UUID, number>()
-  const prUrls = new Map<UUID, string>()
-  const prRepositories = new Map<UUID, string>()
-  const modes = new Map<UUID, string>()
-  const worktreeStates = new Map<UUID, PersistedWorktreeSession | null>()
-  const fileHistorySnapshots = new Map<UUID, FileHistorySnapshotMessage>()
-  const attributionSnapshots = new Map<UUID, AttributionSnapshotMessage>()
-  const contentReplacements = new Map<UUID, ContentReplacementRecord[]>()
-  const agentContentReplacements = new Map<
-    AgentId,
-    ContentReplacementRecord[]
-  >()
-  // Array, not Map — commit order matters (nested collapses).
-  const contextCollapseCommits: ContextCollapseCommitEntry[] = []
-  // Last-wins — later entries supersede.
-  let contextCollapseSnapshot: ContextCollapseSnapshotEntry | undefined
-  // Last-wins — later goal-state entries supersede.
-  let goalStore: GoalStateEntry | undefined
+): Promise<TranscriptShape> {
+  let mainEntries: Entry[] = []
+  let metadataEntries: Entry[] = []
 
   try {
     // For large transcripts, avoid materializing megabytes of stale content.
@@ -3692,60 +3647,133 @@ export async function loadTranscriptFile(
     // etc.) for entries written before the compact boundary. Any overlap with
     // the post-boundary buffer is harmless — later values overwrite earlier ones.
     if (metadataLines && metadataLines.length > 0) {
-      const metaEntries = parseJSONL<Entry>(
+      metadataEntries = parseJSONL<Entry>(
         Buffer.from(metadataLines.join('\n')),
       )
-      for (const entry of metaEntries) {
-        if (entry.type === 'summary' && entry.leafUuid) {
-          summaries.set(entry.leafUuid, entry.summary)
-        } else if (entry.type === 'custom-title' && entry.sessionId) {
-          customTitles.set(entry.sessionId, entry.customTitle)
-        } else if (entry.type === 'tag' && entry.sessionId) {
-          tags.set(entry.sessionId, entry.tag)
-        } else if (entry.type === 'agent-name' && entry.sessionId) {
-          agentNames.set(entry.sessionId, entry.agentName)
-        } else if (entry.type === 'agent-color' && entry.sessionId) {
-          agentColors.set(entry.sessionId, entry.agentColor)
-        } else if (entry.type === 'agent-setting' && entry.sessionId) {
-          agentSettings.set(entry.sessionId, entry.agentSetting)
-        } else if (entry.type === 'mode' && entry.sessionId) {
-          modes.set(entry.sessionId, entry.mode)
-        } else if (entry.type === 'worktree-state' && entry.sessionId) {
-          worktreeStates.set(entry.sessionId, entry.worktreeSession)
-        } else if (entry.type === 'pr-link' && entry.sessionId) {
-          prNumbers.set(entry.sessionId, entry.prNumber)
-          prUrls.set(entry.sessionId, entry.prUrl)
-          prRepositories.set(entry.sessionId, entry.prRepository)
-        } else if (entry.type === 'goal-state' && entry.sessionId) {
-          goalStore = entry
-        } else if (entry.type === 'goal' && entry.sessionId) {
-          goalStore =
-            entry.id === '__cleared__'
-              ? undefined
-              : legacyGoalEntryToState(entry)
-        }
+    }
+
+    mainEntries = parseJSONL<Entry>(buf)
+  } catch {
+    // File doesn't exist or can't be read
+  }
+
+  return buildTranscriptShape(mainEntries, metadataEntries)
+}
+
+/**
+ * The full shape produced by transcript reduction — the return type shared by
+ * `loadTranscriptFile` (JSONL path) and `buildTranscriptShape` (source-agnostic
+ * reducer). Extracted so a SQLite-backed store can reconstruct the identical
+ * shape without re-implementing the 20-branch classification + leaf logic.
+ */
+export type TranscriptShape = {
+  messages: Map<UUID, TranscriptMessage>
+  summaries: Map<UUID, string>
+  customTitles: Map<UUID, string>
+  tags: Map<UUID, string>
+  agentNames: Map<UUID, string>
+  agentColors: Map<UUID, string>
+  agentSettings: Map<UUID, string>
+  prNumbers: Map<UUID, number>
+  prUrls: Map<UUID, string>
+  prRepositories: Map<UUID, string>
+  modes: Map<UUID, string>
+  worktreeStates: Map<UUID, PersistedWorktreeSession | null>
+  fileHistorySnapshots: Map<UUID, FileHistorySnapshotMessage>
+  attributionSnapshots: Map<UUID, AttributionSnapshotMessage>
+  contentReplacements: Map<UUID, ContentReplacementRecord[]>
+  agentContentReplacements: Map<AgentId, ContentReplacementRecord[]>
+  contextCollapseCommits: ContextCollapseCommitEntry[]
+  contextCollapseSnapshot: ContextCollapseSnapshotEntry | undefined
+  leafUuids: Set<UUID>
+  goalStore?: GoalStateEntry
+}
+
+/**
+ * Source-agnostic transcript reducer: entries → TranscriptShape.
+ *
+ * This is the semantic core factored out of `loadTranscriptFile`. Both the
+ * JSONL path (after its fd-level / boundary / walkChain file-read optimizations
+ * parse entries) and a SQLite-backed store (after reading rows in seq order)
+ * call this, so the two backends can never disagree about how an ordered list
+ * of entries reduces to the transcript shape — fidelity by construction.
+ *
+ * `metadataEntries` (pre-boundary session-scoped metadata, when the JSONL reader
+ * truncated a large file) are folded in first so later values overwrite them,
+ * exactly matching the original two-pass order. The `goal`/`__cleared__`
+ * divergence between the two passes is preserved verbatim.
+ */
+export function buildTranscriptShape(
+  mainEntries: Entry[],
+  metadataEntries: Entry[] = [],
+): TranscriptShape {
+  const messages = new Map<UUID, TranscriptMessage>()
+  const summaries = new Map<UUID, string>()
+  const customTitles = new Map<UUID, string>()
+  const tags = new Map<UUID, string>()
+  const agentNames = new Map<UUID, string>()
+  const agentColors = new Map<UUID, string>()
+  const agentSettings = new Map<UUID, string>()
+  const prNumbers = new Map<UUID, number>()
+  const prUrls = new Map<UUID, string>()
+  const prRepositories = new Map<UUID, string>()
+  const modes = new Map<UUID, string>()
+  const worktreeStates = new Map<UUID, PersistedWorktreeSession | null>()
+  const fileHistorySnapshots = new Map<UUID, FileHistorySnapshotMessage>()
+  const attributionSnapshots = new Map<UUID, AttributionSnapshotMessage>()
+  const contentReplacements = new Map<UUID, ContentReplacementRecord[]>()
+  const agentContentReplacements = new Map<AgentId, ContentReplacementRecord[]>()
+  // Array, not Map — commit order matters (nested collapses).
+  const contextCollapseCommits: ContextCollapseCommitEntry[] = []
+  // Last-wins — later entries supersede.
+  let contextCollapseSnapshot: ContextCollapseSnapshotEntry | undefined
+  // Last-wins — later goal-state entries supersede.
+  let goalStore: GoalStateEntry | undefined
+
+  try {
+    // First pass: process metadata-only entries recovered from a truncated
+    // pre-boundary range. These populate the session-scoped maps. Any overlap
+    // with the main entries is harmless — later values overwrite earlier ones.
+    for (const entry of metadataEntries) {
+      if (entry.type === 'summary' && entry.leafUuid) {
+        summaries.set(entry.leafUuid, entry.summary)
+      } else if (entry.type === 'custom-title' && entry.sessionId) {
+        customTitles.set(entry.sessionId, entry.customTitle)
+      } else if (entry.type === 'tag' && entry.sessionId) {
+        tags.set(entry.sessionId, entry.tag)
+      } else if (entry.type === 'agent-name' && entry.sessionId) {
+        agentNames.set(entry.sessionId, entry.agentName)
+      } else if (entry.type === 'agent-color' && entry.sessionId) {
+        agentColors.set(entry.sessionId, entry.agentColor)
+      } else if (entry.type === 'agent-setting' && entry.sessionId) {
+        agentSettings.set(entry.sessionId, entry.agentSetting)
+      } else if (entry.type === 'mode' && entry.sessionId) {
+        modes.set(entry.sessionId, entry.mode)
+      } else if (entry.type === 'worktree-state' && entry.sessionId) {
+        worktreeStates.set(entry.sessionId, entry.worktreeSession)
+      } else if (entry.type === 'pr-link' && entry.sessionId) {
+        prNumbers.set(entry.sessionId, entry.prNumber)
+        prUrls.set(entry.sessionId, entry.prUrl)
+        prRepositories.set(entry.sessionId, entry.prRepository)
+      } else if (entry.type === 'goal-state' && entry.sessionId) {
+        goalStore = entry
+      } else if (entry.type === 'goal' && entry.sessionId) {
+        // Legacy single-goal entry — pre-boundary pass treats __cleared__ as clear.
+        goalStore =
+          entry.id === '__cleared__'
+            ? undefined
+            : legacyGoalEntryToState(entry)
       }
     }
 
-    const entries = parseJSONL<Entry>(buf)
-
     // Bridge map for legacy progress entries: progress_uuid → progress_parent_uuid.
-    // PR #24099 removed progress from isTranscriptMessage, so old transcripts with
-    // progress in the parentUuid chain would truncate at buildConversationChain
-    // when messages.get(progressUuid) returns undefined. Since transcripts are
-    // append-only (parents before children), we record each progress→parent link
-    // as we see it, chain-resolving through consecutive progress entries, then
-    // rewrite any subsequent message whose parentUuid lands in the bridge.
     const progressBridge = new Map<UUID, UUID | null>()
 
-    for (const entry of entries) {
+    for (const entry of mainEntries) {
       // Legacy progress check runs before the Entry-typed else-if chain —
       // progress is not in the Entry union, so checking it after TypeScript
       // has narrowed `entry` intersects to `never`.
       if (isLegacyProgressEntry(entry)) {
-        // Chain-resolve through consecutive progress entries so a later
-        // message pointing at the tail of a progress run bridges to the
-        // nearest non-progress ancestor in one lookup.
         const parent = entry.parentUuid
         progressBridge.set(
           entry.uuid,
@@ -3761,12 +3789,8 @@ export async function loadTranscriptFile(
         }
         messages.set(entry.uuid as UUID, entry)
         // Compact boundary: prior marble-origami-commit entries reference
-        // messages that won't be in the post-boundary chain. The >5MB
-        // backward-scan path discards them naturally by never reading the
-        // pre-boundary bytes; the <5MB path reads everything, so discard
-        // here. Without this, getStats().collapsedSpans in /context
-        // overcounts (projectView silently skips the stale commits but
-        // they're still in the log).
+        // messages that won't be in the post-boundary chain. Discard them so
+        // getStats().collapsedSpans doesn't overcount.
         if (isCompactBoundaryMessage(entry)) {
           contextCollapseCommits.length = 0
           contextCollapseSnapshot = undefined
@@ -3819,21 +3843,13 @@ export async function loadTranscriptFile(
       }
     }
   } catch {
-    // File doesn't exist or can't be read
+    // Malformed entry — preserve partial maps (matches prior in-try behavior).
   }
 
   applyPreservedSegmentRelinks(messages)
   applySnipRemovals(messages)
 
   // Compute leaf UUIDs once at load time
-  // Only user/assistant messages should be considered as leaves for anchoring resume.
-  // Other message types (system, attachment) are metadata or auxiliary and shouldn't
-  // anchor a conversation chain.
-  //
-  // We use standard parent relationship for main chain detection, but also need to
-  // handle cases where the last message is a system/metadata message.
-  // For each conversation chain (identified by following parent links), the leaf
-  // is the most recent user/assistant message.
   const allMessages = [...messages.values()]
 
   // Standard leaf computation using parent relationships
@@ -3851,7 +3867,6 @@ export async function loadTranscriptFile(
 
   if (getFeatureValue_CACHED_MAY_BE_STALE('tengu_pebble_leaf_prune', false)) {
     // Build a set of UUIDs that have user/assistant children
-    // (these are mid-conversation nodes, not dead ends)
     const hasUserAssistantChild = new Set<UUID>()
     for (const msg of allMessages) {
       if (msg.parentUuid && (msg.type === 'user' || msg.type === 'assistant')) {
@@ -3859,10 +3874,6 @@ export async function loadTranscriptFile(
       }
     }
 
-    // For each terminal message, walk back to find the nearest user/assistant ancestor.
-    // Skip ancestors that already have user/assistant children - those are mid-conversation
-    // nodes where the conversation continued (e.g., an assistant tool_use message whose
-    // progress child is terminal, but whose tool_result child continues the conversation).
     for (const terminal of terminalMessages) {
       const seen = new Set<UUID>()
       let current: TranscriptMessage | undefined = terminal
