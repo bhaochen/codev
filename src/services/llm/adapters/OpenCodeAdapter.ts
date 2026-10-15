@@ -85,6 +85,15 @@ export class OpenCodeAdapter implements ProviderAdapter {
     const headers: Record<string, string> = {}
     h.forEach((value, key) => { headers[key.toLowerCase()] = value })
 
+    // buildOpencodeHeaders hardcodes "Bearer public"; override with the real
+    // key on PAYG so billing actually uses the configured credential.
+    if (!this.isFreeTier()) {
+      const cred = this.resolveAuth()
+      const token = cred.type === 'bearer' ? cred.token : cred.type === 'api-key' ? cred.key : 'public'
+      if (protocol === 'anthropic') headers['x-api-key'] = token
+      else headers.authorization = `Bearer ${token}`
+    }
+
     if (this.isFreeTier()) {
       headers.accept = 'text/event-stream'
     }

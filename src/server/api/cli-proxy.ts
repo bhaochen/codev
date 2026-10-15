@@ -10,12 +10,15 @@
  */
 
 import { readCliAuthProvider } from './models.js'
+import { buildOpencodeHeaders, normalizeToolsForZen } from '../../services/api/opencodeUserAgent.js'
 
 type ProviderClientConfig = {
   baseUrl: string
   apiKey: string
   model: string
   protocol: 'anthropic' | 'openai'
+  /** 'opencode' when the upstream is opencode.ai (needs the v2 fingerprint). */
+  provider?: string
 }
 
 // Map authProvider to API config
@@ -56,6 +59,7 @@ async function getCliProviderConfig(): Promise<ProviderClientConfig | null> {
         apiKey,
         model,
         protocol: 'openai',
+        provider: 'opencode',
       }
     }
 
@@ -199,13 +203,33 @@ async function handleOpenAiChat(incomingReq: Request, cfg: ProviderClientConfig)
   const url = `${cfg.baseUrl.replace(/\/$/, '')}/chat/completions`
   const isStream = body.stream === true
 
+  // Opencode free tier requires the v2 fingerprint (PR #4842): anchored UA,
+  // session headers, NO x-opencode-request, and read/shell tool definitions.
+  // Without them upstream answers 403 FreeTierError.
+  let upstreamHeaders: Record<string, string>
+  if (cfg.provider === 'opencode') {
+    const tempHeaders = new Headers()
+    const built = buildOpencodeHeaders('chat', tempHeaders, body)
+    upstreamHeaders = {}
+    built.forEach((v, k) => { upstreamHeaders[k.toLowerCase()] = v })
+    // buildOpencodeHeaders hardcodes "Bearer public"; use the configured key
+    // when present (PAYG) so billing actually uses the credential.
+    if (cfg.apiKey && cfg.apiKey !== 'public') {
+      upstreamHeaders.authorization = `Bearer ${cfg.apiKey}`
+    }
+    normalizeToolsForZen(body, 'chat')
+    if (body.tool_choice === 'none') delete body.tool_choice
+  } else {
+    upstreamHeaders = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${cfg.apiKey}`,
+    }
+  }
+
   try {
     const upstream = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${cfg.apiKey}`,
-      },
+      headers: upstreamHeaders,
       body: JSON.stringify({ ...body, model }),
       signal: AbortSignal.timeout(120_000),
     })
