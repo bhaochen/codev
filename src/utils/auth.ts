@@ -637,6 +637,140 @@ export function getKiroRegion(): string | null {
   return config.kiroRegion || null
 }
 
+export interface KiroAutoDetectResult {
+  found: boolean
+  refreshToken?: string
+  profileArn?: string
+  clientId?: string
+  clientSecret?: string
+  region?: string
+  authMethod?: string
+  error?: string
+}
+
+/**
+ * Auto-detect Kiro authentication from AWS SSO cache and Kiro IDE profile.
+ * Mirrors 9router's auto-import logic.
+ */
+export async function autoDetectKiroAuth(): Promise<KiroAutoDetectResult> {
+  const { homedir } = await import('os')
+  const { join } = await import('path')
+  const { readdir, readFile } = await import('fs/promises')
+
+  try {
+    const cachePath = join(homedir(), '.aws/sso/cache')
+
+    let files: string[]
+    try {
+      files = await readdir(cachePath)
+    } catch {
+      return { found: false, error: 'AWS SSO cache not found. Please login to Kiro IDE first.' }
+    }
+
+    let refreshToken: string | null = null
+    let tokenData: Record<string, unknown> | null = null
+    let foundFile: string | null = null
+
+    // First try kiro-auth-token.json
+    const kiroTokenFile = 'kiro-auth-token.json'
+    if (files.includes(kiroTokenFile)) {
+      try {
+        const content = await readFile(join(cachePath, kiroTokenFile), 'utf-8')
+        const data = JSON.parse(content)
+        if (data.refreshToken && typeof data.refreshToken === 'string' && data.refreshToken.startsWith('aorAAAAAG')) {
+          refreshToken = data.refreshToken
+          foundFile = kiroTokenFile
+          tokenData = data
+        }
+      } catch {
+        // Continue to search other files
+      }
+    }
+
+    // If not found, search all .json files
+    if (!refreshToken) {
+      for (const file of files) {
+        if (!file.endsWith('.json')) continue
+        try {
+          const content = await readFile(join(cachePath, file), 'utf-8')
+          const data = JSON.parse(content)
+          if (data.refreshToken && typeof data.refreshToken === 'string' && data.refreshToken.startsWith('aorAAAAAG')) {
+            refreshToken = data.refreshToken
+            foundFile = file
+            tokenData = data
+            break
+          }
+        } catch {
+          continue
+        }
+      }
+    }
+
+    if (!refreshToken) {
+      return { found: false, error: 'Kiro token not found in AWS SSO cache. Please login to Kiro IDE first.' }
+    }
+
+    // For IDC/organization tokens, resolve clientId and clientSecret from
+    // the linked client registration file (referenced by clientIdHash).
+    let clientId: string | null = null
+    let clientSecret: string | null = null
+    const region = (tokenData?.region as string) || 'us-east-1'
+    const authMethod = (tokenData?.authMethod as string) || 'builder-id'
+
+    if (tokenData?.clientIdHash && typeof tokenData.clientIdHash === 'string') {
+      const clientFile = `${tokenData.clientIdHash}.json`
+      try {
+        const clientContent = await readFile(join(cachePath, clientFile), 'utf-8')
+        const clientData = JSON.parse(clientContent)
+        if (clientData.clientId && clientData.clientSecret) {
+          clientId = clientData.clientId
+          clientSecret = clientData.clientSecret
+        }
+      } catch {
+        // Client registration file not found - continue without it
+      }
+    }
+
+    // Read profileArn from Kiro IDE's profile.json.
+    // Important: the runtime gateway requires us-east-1 in the ARN regardless
+    // of the IDC region, so we normalize the region in the ARN to us-east-1.
+    let profileArn: string | null = null
+    const kiroProfilePaths = [
+      // Windows
+      join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'Kiro', 'User', 'globalStorage', 'kiro.kiroagent', 'profile.json'),
+      // Linux
+      join(homedir(), '.config', 'Kiro', 'User', 'globalStorage', 'kiro.kiroagent', 'profile.json'),
+      // macOS
+      join(homedir(), 'Library', 'Application Support', 'Kiro', 'User', 'globalStorage', 'kiro.kiroagent', 'profile.json'),
+    ]
+    for (const profilePath of kiroProfilePaths) {
+      try {
+        const profileContent = await readFile(profilePath, 'utf-8')
+        const profileData = JSON.parse(profileContent)
+        if (profileData.arn) {
+          // Normalize region to us-east-1 for the runtime gateway
+          profileArn = profileData.arn.replace(/arn:aws:codewhisperer:[^:]+:/, 'arn:aws:codewhisperer:us-east-1:')
+          break
+        }
+      } catch {
+        continue
+      }
+    }
+
+    return {
+      found: true,
+      refreshToken,
+      profileArn,
+      clientId: clientId || undefined,
+      clientSecret: clientSecret || undefined,
+      region,
+      authMethod,
+    }
+  } catch (error) {
+    return { found: false, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
 function getCodexHomeDir(): string {
   return process.env.CODEX_HOME || join(homedir(), '.codex')
 }

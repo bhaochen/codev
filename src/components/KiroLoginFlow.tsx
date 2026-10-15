@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useState, useEffect } from 'react'
-import { saveKiroAuthTokens, getKiroAccessToken } from '../utils/auth.js'
+import { saveKiroAuthTokens, getKiroAccessToken, autoDetectKiroAuth } from '../utils/auth.js'
 import { Box, Text } from '../ink.js'
 import TextInput from './TextInput.js'
 import { Select } from './CustomSelect/select.js'
@@ -10,7 +10,7 @@ type KiroLoginFlowProps = {
   startingMessage?: string
 }
 
-type LoginMode = 'menu' | 'device_code' | 'import_token'
+type LoginMode = 'menu' | 'device_code' | 'import_token' | 'auto_detect'
 
 export function KiroLoginFlow({
   onDone,
@@ -22,6 +22,14 @@ export function KiroLoginFlow({
   const [inputValue, setInputValue] = useState('')
   const [cursorOffset, setCursorOffset] = useState(0)
   const [existingAccessToken, setExistingAccessToken] = useState<string | null>(null)
+  const [autoDetectedData, setAutoDetectedData] = useState<{
+    refreshToken: string
+    profileArn?: string
+    clientId?: string
+    clientSecret?: string
+    region?: string
+    authMethod?: string
+  } | null>(null)
 
   useEffect(() => {
     const token = getKiroAccessToken()
@@ -41,9 +49,57 @@ export function KiroLoginFlow({
       // 3. Poll for token
       // 4. Get profile ARN from CodeWhisperer
       // 5. Save tokens
-      setStatus('Device code flow not yet implemented. Use "Import Token" for now.')
+      setStatus('Device code flow not yet implemented. Use "Import Token" or "Auto-detect" for now.')
       // For now, just show a message
       await new Promise(resolve => setTimeout(resolve, 2000))
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error))
+    } finally {
+      setIsBusy(false)
+    }
+  }
+
+  async function handleAutoDetect(): Promise<void> {
+    setIsBusy(true)
+    setStatus(null)
+    try {
+      const result = await autoDetectKiroAuth()
+      if (!result.found) {
+        setStatus(result.error || 'Auto-detection failed. Try manual import.')
+        setMode('menu')
+        return
+      }
+
+      setAutoDetectedData({
+        refreshToken: result.refreshToken!,
+        profileArn: result.profileArn,
+        clientId: result.clientId,
+        clientSecret: result.clientSecret,
+        region: result.region,
+        authMethod: result.authMethod,
+      })
+      setMode('auto_detect')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error))
+      setMode('menu')
+    } finally {
+      setIsBusy(false)
+    }
+  }
+
+  async function handleConfirmAutoDetect(): Promise<void> {
+    if (!autoDetectedData) return
+
+    setIsBusy(true)
+    setStatus(null)
+    try {
+      await saveKiroAuthTokens({
+        accessToken: '',
+        refreshToken: autoDetectedData.refreshToken,
+        profileArn: autoDetectedData.profileArn || null,
+        region: autoDetectedData.region || 'us-east-1',
+      })
+      onDone()
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
     } finally {
@@ -102,6 +158,61 @@ export function KiroLoginFlow({
     )
   }
 
+  if (mode === 'auto_detect' && autoDetectedData) {
+    return (
+      <Box flexDirection="column" gap={1}>
+        <Text>
+          Auto-detected Kiro credentials:
+          {'\n'}
+          <Text dimColor={true}>
+            Source: {autoDetectedData.authMethod === 'idc' ? 'IDC (Organization)' : 'AWS Builder ID'}
+            {autoDetectedData.region ? ` | Region: ${autoDetectedData.region}` : ''}
+            {autoDetectedData.clientId ? ' | Client ID: found' : ''}
+            {autoDetectedData.profileArn ? ' | Profile ARN: found' : ''}
+          </Text>
+        </Text>
+        <Text dimColor={true}>
+          Refresh token: {autoDetectedData.refreshToken.slice(0, 12)}...{autoDetectedData.refreshToken.slice(-8)}
+        </Text>
+        {status ? <Text color="error">{status}</Text> : null}
+        <Box>
+          <Select
+            options={[
+              {
+                label: (
+                  <Text>
+                    Use these credentials{' '}
+                    <Text dimColor={true}>Save and continue</Text>
+                    {'\n'}
+                  </Text>
+                ),
+                value: 'confirm',
+              },
+              {
+                label: (
+                  <Text>
+                    Cancel{' '}
+                    <Text dimColor={true}>Go back to menu</Text>
+                    {'\n'}
+                  </Text>
+                ),
+                value: 'cancel',
+              },
+            ]}
+            onChange={value => {
+              if (value === 'confirm') {
+                void handleConfirmAutoDetect()
+              } else {
+                setMode('menu')
+                setAutoDetectedData(null)
+              }
+            }}
+          />
+        </Box>
+      </Box>
+    )
+  }
+
   if (mode === 'import_token') {
     return (
       <Box flexDirection="column" gap={1}>
@@ -156,12 +267,12 @@ export function KiroLoginFlow({
             {
               label: (
                 <Text>
-                  AWS Builder ID / IDC (Device Code Flow){' '}
-                  <Text dimColor={true}>Sign in via browser (not yet implemented)</Text>
+                  Auto-detect from Kiro IDE{' '}
+                  <Text dimColor={true}>Reads AWS SSO cache + Kiro profile (recommended)</Text>
                   {'\n'}
                 </Text>
               ),
-              value: 'device_code',
+              value: 'auto_detect',
             },
             {
               label: (
@@ -173,6 +284,16 @@ export function KiroLoginFlow({
               ),
               value: 'import_token',
             },
+            {
+              label: (
+                <Text>
+                  AWS Builder ID / IDC (Device Code Flow){' '}
+                  <Text dimColor={true}>Sign in via browser (not yet implemented)</Text>
+                  {'\n'}
+                </Text>
+              ),
+              value: 'device_code',
+            },
           ]}
           onChange={value => {
             if (value === 'device_code') {
@@ -181,6 +302,8 @@ export function KiroLoginFlow({
               setInputValue('')
               setCursorOffset(0)
               setMode('import_token')
+            } else if (value === 'auto_detect') {
+              void handleAutoDetect()
             }
           }}
         />
