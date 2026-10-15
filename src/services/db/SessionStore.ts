@@ -342,6 +342,45 @@ export class SessionStore {
     return buildTranscriptShape(entries)
   }
 
+  /**
+   * Rebuild a session's SQLite mirror from an ordered entry list (typically
+   * parsed from its JSONL source). Full fidelity: stores EVERY entry — not just
+   * transcript messages + summary — so loadTranscript reconstructs the exact
+   * loadTranscriptFile shape. Also projects session-list metadata (title/tag/
+   * agent) into the sessions row for efficient listing and extracts createdAt
+   * from the first entry.
+   *
+   * Idempotent: REPLACES any existing rows for the session (unlike
+   * writeTranscript, which appends). This is the canonical "make SQLite match
+   * the source" operation used by migration and sync-on-load — unlike the old
+   * migrateFromJsonl/migrateSession path, which dropped every non-transcript
+   * entry type and produced an incomplete mirror.
+   */
+  syncSession(sessionId: string, projectDir: string, entries: Entry[]): number {
+    // Project listing metadata (first-wins, matching prior migration semantics).
+    let title: string | undefined
+    let tag: string | undefined
+    let agentName: string | undefined
+    let agentColor: string | undefined
+    for (const entry of entries) {
+      if (!title && entry.type === 'custom-title') title = (entry as { customTitle?: string }).customTitle
+      if (!tag && entry.type === 'tag') tag = (entry as { tag?: string }).tag
+      if (!agentName && entry.type === 'agent-name') agentName = (entry as { agentName?: string }).agentName
+      if (!agentColor && entry.type === 'agent-color') agentColor = (entry as { agentColor?: string }).agentColor
+    }
+    const firstTimestamp = (entries[0] as { timestamp?: string }).timestamp
+    const parsed = firstTimestamp ? new Date(firstTimestamp).getTime() : NaN
+    // A malformed timestamp must not crash the sync (and must not store NaN).
+    const createdAt = Number.isFinite(parsed) ? parsed : Date.now()
+    const now = Date.now()
+
+    this.db.run('DELETE FROM messages WHERE session_id = ?', [sessionId])
+    this.db.run('DELETE FROM sessions WHERE id = ?', [sessionId])
+    this.createSession({ id: sessionId, projectDir, title, tag, agentName, agentColor, createdAt, updatedAt: now })
+    if (entries.length > 0) this.appendMessages(sessionId, entries)
+    return entries.length
+  }
+
   // =========================================================================
   // JSONL Migration
   // =========================================================================

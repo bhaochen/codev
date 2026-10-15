@@ -15,7 +15,6 @@ import { join, basename } from 'node:path'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 import { SessionStore } from './SessionStore.js'
 import { parseJSONL } from '../../utils/json.js'
-import { isTranscriptMessage } from '../../utils/sessionStorage.js'
 import { logForDebugging } from '../../utils/debug.js'
 import type { Entry } from '../../types/logs.js'
 
@@ -101,41 +100,15 @@ async function migrateSession(
       return 'skipped'
     }
 
-    // Extract metadata
-    const firstTimestamp = (entries[0] as { timestamp?: string }).timestamp
-    const createdAt = firstTimestamp ? new Date(firstTimestamp).getTime() : Date.now()
-    const now = Date.now()
-
-    let title: string | undefined
-    let tag: string | undefined
-    let agentName: string | undefined
-    let agentColor: string | undefined
-
-    for (const entry of entries) {
-      if (entry.type === 'custom-title' && !title) title = (entry as { customTitle?: string }).customTitle
-      if (entry.type === 'tag' && !tag) tag = (entry as { tag?: string }).tag
-      if (entry.type === 'agent-name' && !agentName) agentName = (entry as { agentName?: string }).agentName
-      if (entry.type === 'agent-color' && !agentColor) agentColor = (entry as { agentColor?: string }).agentColor
-    }
-
-    // Insert session
-    store.createSession({
-      id: sessionId,
-      projectDir,
-      title,
-      tag,
-      agentName,
-      agentColor,
-      createdAt,
-      updatedAt: now,
-    })
-
-    // Insert messages
-    const transcriptEntries = entries.filter(e => isTranscriptMessage(e) || e.type === 'summary')
-    store.appendMessages(sessionId, transcriptEntries)
+    // Full-fidelity mirror: syncSession stores EVERY entry (not just transcript
+    // messages + summary) and projects listing metadata. The old inline path
+    // filtered to isTranscriptMessage || summary and dropped snapshots, collapse
+    // commits, content-replacements, etc. — producing an incomplete mirror that
+    // could not round-trip via loadTranscript.
+    store.syncSession(sessionId, projectDir, entries)
 
     if (options.verbose) {
-      logForDebugging(`  Migrated ${sessionId}: ${transcriptEntries.length} entries`)
+      logForDebugging(`  Migrated ${sessionId}: ${entries.length} entries`)
     }
 
     return 'migrated'

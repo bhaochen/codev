@@ -24,7 +24,7 @@ import { loadTranscriptFile, type TranscriptShape } from '../../utils/sessionSto
 import { SessionStore } from './SessionStore.js'
 import type { Entry } from '../../types/logs.js'
 
-const S = 'sess-rt-1'
+const S = '00000000-0000-4000-8000-000000000001'
 const PROJECT = '/tmp/proj'
 
 /** Comprehensive entry set covering every reducer + storage branch. */
@@ -135,5 +135,66 @@ describe('SQLite transcript round-trip fidelity vs loadTranscriptFile', () => {
 
     expect(normalize(fromDb)).toEqual(normalize(fromFile))
     expect(fromDb.messages.size).toBe(0)
+  })
+})
+
+describe('SessionStore.syncSession (full-fidelity mirror)', () => {
+  let dir: string
+  let store: SessionStore
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'codev-sync-'))
+    store = SessionStore.open(join(dir, 'store.db'))
+  })
+  afterEach(() => {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('round-trips ALL entry types (unlike the old lossy migration)', async () => {
+    const entries = buildEntries()
+
+    const jsonl = join(dir, 'transcript.jsonl')
+    writeFileSync(jsonl, entries.map(e => JSON.stringify(e)).join('\n') + '\n')
+    const fromFile = await loadTranscriptFile(jsonl)
+
+    store.syncSession(S, PROJECT, entries)
+    const fromDb = store.loadTranscript(S)
+
+    // Non-transcript entries the old migration dropped must survive.
+    expect(fromDb.fileHistorySnapshots.size).toBe(1)
+    expect(fromDb.attributionSnapshots.size).toBe(1)
+    expect(fromDb.contentReplacements.get(S)?.length).toBe(1)
+    expect([...fromDb.agentContentReplacements.values()][0]?.length).toBe(1)
+    expect(fromDb.contextCollapseCommits.length).toBe(2)
+
+    expect(normalize(fromDb)).toEqual(normalize(fromFile))
+  })
+
+  it('projects listing metadata onto the session row', () => {
+    store.syncSession(S, PROJECT, buildEntries())
+    const meta = store.getSession(S)
+    expect(meta).not.toBeNull()
+    expect(meta?.title).toBe('My Title')
+    expect(meta?.tag).toBe('backend')
+    expect(meta?.agentName).toBe('Agent X')
+    expect(meta?.agentColor).toBe('blue')
+    expect(meta?.projectDir).toBe(PROJECT)
+    expect(meta?.messageCount).toBeGreaterThan(0)
+  })
+
+  it('is idempotent — re-syncing replaces rows without duplication', async () => {
+    const entries = buildEntries()
+
+    const jsonl = join(dir, 'transcript.jsonl')
+    writeFileSync(jsonl, entries.map(e => JSON.stringify(e)).join('\n') + '\n')
+    const fromFile = await loadTranscriptFile(jsonl)
+
+    store.syncSession(S, PROJECT, entries)
+    store.syncSession(S, PROJECT, entries) // second sync must not duplicate
+    const fromDb = store.loadTranscript(S)
+
+    expect(fromDb.messages.size).toBe(fromFile.messages.size)
+    expect(normalize(fromDb)).toEqual(normalize(fromFile))
   })
 })
