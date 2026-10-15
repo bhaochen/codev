@@ -8,14 +8,21 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import * as os from 'node:os'
+import { statSync, realpathSync } from 'node:fs'
 import { ApiError } from '../middleware/errorHandler.js'
-import { sanitizePath as sanitizePortablePath } from '../../utils/sessionStoragePortable.js'
+import {
+  sanitizePath as sanitizePortablePath,
+  SKIP_PRECOMPACT_THRESHOLD,
+} from '../../utils/sessionStoragePortable.js'
 import type { FileHistorySnapshot } from '../../utils/fileHistory.js'
 import { findCanonicalGitRoot } from '../../utils/git.js'
 import { calculateUSDCost, MODEL_COSTS } from '../../utils/modelCost.js'
 import type { Entry } from '../../types/logs.js'
 // Phase A shadow writer: mirrors this bypass append into the SQLite mirror.
 import { shadowAppendBatch } from '../../services/db/shadowWriter.js'
+// Phase C2: shared persistence gate for the DB-first read path.
+import { shouldSkipSessionPersistence } from '../../utils/sessionPersistence.js'
+import { isEnvTruthy } from '../../utils/envUtils.js'
 import {
   calculateCurrentContextTokenTotal,
   MODEL_CONTEXT_WINDOW_DEFAULT,
@@ -280,6 +287,50 @@ export class SessionService {
       }
     }
     return entries
+  }
+
+  /**
+   * Phase C2: DB-first raw entry read. For small sessions (<= the precompact
+   * skip threshold — no boundary truncation semantics) with a row that is
+   * provably current for the file, the rows mirror the file 1:1 in seq order,
+   * so the full-file read is unnecessary. Anything else (large file, stale or
+   * missing row, DB unavailable) falls back to the raw file read.
+   */
+  private async readJsonlEntries(
+    sessionId: string,
+    filePath: string,
+  ): Promise<RawEntry[]> {
+    try {
+      const useDb =
+        process.env.NODE_ENV === 'test'
+          ? isEnvTruthy(process.env.TEST_ENABLE_TRANSCRIPT_CACHE)
+          : !shouldSkipSessionPersistence()
+      if (useDb) {
+        const st = statSync(filePath)
+        if (st.size <= SKIP_PRECOMPACT_THRESHOLD) {
+          const { getSessionStore } = await import('../../services/db/SessionStore.js')
+          const store = getSessionStore()
+          const sync = store.getSyncInfo(sessionId)
+          if (
+            sync &&
+            sync.size === st.size &&
+            sync.mtime === Math.trunc(st.mtimeMs) &&
+            sync.path === realpathSync(filePath)
+          ) {
+            const rows = store.getMessages({
+              sessionId,
+              limit: Number.MAX_SAFE_INTEGER,
+            })
+            if (rows.length > 0) {
+              return rows.map(row => row.data as unknown as RawEntry)
+            }
+          }
+        }
+      }
+    } catch {
+      // fall through to the file read
+    }
+    return this.readJsonlFile(filePath)
   }
 
   private async appendJsonlEntry(filePath: string, entry: Record<string, unknown>): Promise<void> {
@@ -1407,7 +1458,8 @@ export class SessionService {
       throw ApiError.notFound(`Session not found: ${sessionId}`)
     }
 
-    const entries = await this.readJsonlFile(found.filePath)
+    // Phase C2: DB-first raw entries (file fallback built in).
+    const entries = await this.readJsonlEntries(sessionId, found.filePath)
     return await this.appendSubagentToolMessages(
       found.projectDir,
       sessionId,

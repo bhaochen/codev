@@ -614,6 +614,54 @@ describe('SessionService', () => {
     expect(messages).toHaveLength(2)
   })
 
+  it('serves getSessionMessages from the DB when the row is current (Phase C2)', async () => {
+    const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    const filePath = await writeSessionFile('-tmp-c2-db', sessionId, [
+      makeSnapshotEntry(),
+      makeUserEntry('Hello DB world'),
+      makeAssistantEntry('World'),
+    ])
+
+    // File-based baseline (DB gate off in tests by default).
+    const fromFile = await service.getSessionMessages(sessionId)
+    expect(fromFile).toHaveLength(2)
+
+    process.env.TEST_ENABLE_TRANSCRIPT_CACHE = '1'
+    try {
+      const { getSessionStore, __resetSessionStoreForTests } =
+        await import('../../services/db/SessionStore.js')
+      const { loadTranscriptCached } = await import(
+        '../../services/db/transcriptCache.js'
+      )
+      const store = getSessionStore()
+      await loadTranscriptCached(store, sessionId, filePath, '-tmp-c2-db')
+
+      // DB path must produce identical messages.
+      const fromDb = await service.getSessionMessages(sessionId)
+      expect(fromDb).toEqual(fromFile)
+
+      // Prove the DB path really is used: with the file unreadable, only the
+      // DB can still serve the messages.
+      await fs.chmod(filePath, 0o000)
+      const fromDbUnreadable = await service.getSessionMessages(sessionId)
+      expect(fromDbUnreadable).toEqual(fromFile)
+      await fs.chmod(filePath, 0o600)
+
+      // Stale row (file changed after sync) falls back to the file.
+      await fs.appendFile(
+        filePath,
+        JSON.stringify(makeUserEntry('After sync')) + '\n',
+        'utf-8',
+      )
+      const afterChange = await service.getSessionMessages(sessionId)
+      expect(afterChange).toHaveLength(3)
+
+      __resetSessionStoreForTests()
+    } finally {
+      delete process.env.TEST_ENABLE_TRANSCRIPT_CACHE
+    }
+  })
+
   it('should append subagent tool calls under their parent agent tool result', async () => {
     const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
     const projectDir = '-tmp-project'
