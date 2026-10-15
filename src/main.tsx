@@ -335,11 +335,34 @@ const CURRENT_SESSION_MIGRATION_VERSION = 3
 // Session migration with progress indicator.
 // Runs JSONL → SQLite migration for all historical sessions in the BACKGROUND.
 // Shows a live spinner "Migrating sessions X/Y" so startup isn't blocked.
+// Uses a single SessionStore connection, handles Ctrl+C cleanup, and captures
+// config at start to avoid config races.
 async function runSessionMigration(): Promise<void> {
-  const config = getGlobalConfig()
-  if (config.sessionMigrationVersion === CURRENT_SESSION_MIGRATION_VERSION) {
+  // Capture config at start to avoid race with async migration
+  const configAtStart = getGlobalConfig()
+  if (configAtStart.sessionMigrationVersion === CURRENT_SESSION_MIGRATION_VERSION) {
     return // already migrated
   }
+
+  const store = SessionStore.open()
+  let spinnerHandle: ReturnType<typeof setTimeout> | null = null
+  let done = false
+
+  const cleanup = () => {
+    if (spinnerHandle) clearTimeout(spinnerHandle)
+    if (!done) {
+      process.stderr.write('\r' + ' '.repeat(80) + '\r')
+    }
+    store.close()
+  }
+
+  // Handle Ctrl+C and process termination gracefully
+  const handleSignal = () => {
+    cleanup()
+    process.exit(1)
+  }
+  process.on('SIGINT', handleSignal)
+  process.on('SIGTERM', handleSignal)
 
   // Fire-and-forget background migration with live spinner
   void (async () => {
@@ -347,7 +370,6 @@ async function runSessionMigration(): Promise<void> {
     let frame = 0
     let current = 0
     let total = 0
-    let done = false
 
     const spin = () => {
       if (done) return
@@ -356,46 +378,23 @@ async function runSessionMigration(): Promise<void> {
         : `Discovering sessions... ${spinnerFrames[frame % spinnerFrames.length]}`
       process.stderr.write(`\r${chalk.cyan(msg)}`)
       frame++
-      setTimeout(spin, 80)
+      spinnerHandle = setTimeout(spin, 80)
     }
     spin()
 
     try {
-      // First pass: count total sessions (fast, no DB writes)
-      const store = SessionStore.open()
-      let allFiles: string[] = []
-      try {
-        const { getProjectDirs } = await import('./services/db/migrateSessions.js')
-        const projectDirs = await getProjectDirs()
-        for (const dir of projectDirs) {
-          const { findSessionFiles } = await import('./services/db/migrateSessions.js')
-          const files = await findSessionFiles(dir)
-          allFiles.push(...files)
-        }
-      } finally {
-        store.close()
-      }
-      total = allFiles.length
-
-      // Second pass: migrate with progress callback
-      let migrated = 0
-      let skipped = 0
-      let failed = 0
-      const errors: Array<{ session: string; error: string }> = []
-
+      // Single pass: discover and migrate using shared store
       const result = await migrateAllSessions({
-        verbose: false, // we handle progress ourselves
+        verbose: false,
         vacuum: true,
+        _store: store, // reuse single connection
         onProgress: (status: 'migrated' | 'skipped' | 'failed', sessionId: string) => {
           current++
-          if (status === 'migrated') migrated++
-          else if (status === 'skipped') skipped++
-          else { failed++; errors.push({ session: sessionId, error: 'Migration failed' }) }
         },
       })
 
       done = true
-      process.stderr.write('\r' + ' '.repeat(60) + '\r') // clear line
+      process.stderr.write('\r' + ' '.repeat(80) + '\r')
 
       console.log(chalk.green('Session migration complete:'))
       console.log(chalk.green(`  Total sessions: ${result.total}`))
@@ -408,17 +407,25 @@ async function runSessionMigration(): Promise<void> {
         }
       }
 
-      saveGlobalConfig(prev => ({
-        ...prev,
-        sessionMigrationVersion: CURRENT_SESSION_MIGRATION_VERSION
-      }))
+      // Use config at start for version check, then update
+      if (getGlobalConfig().sessionMigrationVersion !== CURRENT_SESSION_MIGRATION_VERSION) {
+        saveGlobalConfig(prev => ({
+          ...prev,
+          sessionMigrationVersion: CURRENT_SESSION_MIGRATION_VERSION
+        }))
+      }
 
       logForDebugging(`Session migration finished: ${result.migrated} migrated, ${result.skipped} skipped, ${result.failed} failed`)
     } catch (err) {
       done = true
-      process.stderr.write('\r' + ' '.repeat(60) + '\r')
+      process.stderr.write('\r' + ' '.repeat(80) + '\r')
       console.log(chalk.yellow(`Session migration failed: ${String(err)}`))
       logForDebugging(`Session migration error: ${String(err)}`)
+    } finally {
+      // Remove signal handlers to avoid leaks
+      process.off('SIGINT', handleSignal)
+      process.off('SIGTERM', handleSignal)
+      cleanup()
     }
   })()
 

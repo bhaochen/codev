@@ -22,6 +22,7 @@ export type ProtocolId =
   | 'openai-chat'
   | 'openai-responses'
   | 'openai-compatible-chat'
+  | 'aws-eventstream'
   | 'gemini'
   | 'bedrock-converse'
 

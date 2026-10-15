@@ -9,6 +9,7 @@ import { queryOpenAIChat } from '../clients/openaiChat.js'
 import { queryAnthropicMessages } from '../clients/anthropicMessages.js'
 import { queryOpenAIResponses } from './openaiResponses.js'
 import { queryOpenAICompatibleChat } from './openaiCompatibleChat.js'
+import { queryAWSEventStream } from './awsEventStream.js'
 
 export type ProtocolHandler = (
   route: LLMRoute,
@@ -46,6 +47,12 @@ export const ProtocolRegistry: Record<ProtocolId, ProtocolDef> = {
     displayName: 'OpenAI Compatible Chat',
     endpointPath: '/chat/completions',
     handler: queryOpenAICompatibleChat,
+  },
+  'aws-eventstream': {
+    id: 'aws-eventstream',
+    displayName: 'AWS EventStream (Kiro/Amazon Q)',
+    endpointPath: '/',
+    handler: queryAWSEventStream,
   },
   gemini: {
     id: 'gemini',

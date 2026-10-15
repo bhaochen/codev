@@ -43,6 +43,9 @@ export interface SessionMeta {
   updatedAt: number
   messageCount: number
   metadata?: Record<string, unknown>
+  syncedSize?: number
+  syncedMtime?: number
+  syncedPath?: string
 }
 
 export interface MessageRow {
@@ -168,6 +171,20 @@ export class SessionStore {
   deleteSession(id: string): void {
     this.db.run('DELETE FROM messages WHERE session_id = ?', [id])
     this.db.run('DELETE FROM sessions WHERE id = ?', [id])
+  }
+
+  /**
+   * Execute a function inside a database transaction (BEGIN IMMEDIATE / COMMIT / ROLLBACK).
+   * Uses savepoint-based nesting so callers can compose transactions safely.
+   * If fn throws, the transaction is rolled back and the error is re-thrown.
+   */
+  transaction<T>(fn: () => T): T {
+    return this.db.transaction(fn)()
+  }
+
+  /** Test-only: execute raw SQL within a transaction. */
+  testOnly_runInTransaction<T>(fn: (db: { run(sql: string, params?: unknown[]): void; query(sql: string): { get(...p: unknown[]): unknown; all(...p: unknown[]): unknown[] } }) => T): T {
+    return this.transaction(() => fn(this.db))
   }
 
   // =========================================================================
@@ -602,6 +619,9 @@ function rowToSessionMeta(row: Record<string, unknown>): SessionMeta {
     updatedAt: row.updated_at as number,
     messageCount: row.message_count as number,
     metadata: row.metadata_json ? JSON.parse(row.metadata_json as string) : undefined,
+    syncedSize: row.synced_size as number | undefined,
+    syncedMtime: row.synced_mtime as number | undefined,
+    syncedPath: row.synced_path as string | undefined,
   }
 }
 
