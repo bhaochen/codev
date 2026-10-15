@@ -23,49 +23,7 @@ import { parseJSONL } from '../../utils/json.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { openDatabaseSync } from './driver.js'
 import type { SqliteDatabase, SqlValue } from './driver.js'
-
-// ============================================================================
-// Schema
-// ============================================================================
-
-const SCHEMA = `
--- Session metadata table
-CREATE TABLE IF NOT EXISTS sessions (
-  id TEXT PRIMARY KEY,
-  project_dir TEXT NOT NULL,
-  title TEXT,
-  tag TEXT,
-  agent_id TEXT,
-  agent_name TEXT,
-  agent_color TEXT,
-  model TEXT,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  message_count INTEGER NOT NULL DEFAULT 0,
-  metadata_json TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_dir);
-CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated_at DESC);
-
--- Messages table (append-only, ordered by seq)
-CREATE TABLE IF NOT EXISTS messages (
-  seq INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id TEXT NOT NULL REFERENCES sessions(id),
-  uuid TEXT NOT NULL,
-  parent_uuid TEXT,
-  entry_type TEXT NOT NULL,
-  data_json TEXT NOT NULL,
-  created_at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, seq);
-CREATE INDEX IF NOT EXISTS idx_messages_uuid ON messages(uuid);
-
--- Migration tracking
-CREATE TABLE IF NOT EXISTS migrations (
-  id TEXT PRIMARY KEY,
-  applied_at INTEGER NOT NULL
-);
-`
+import { runMigrations } from './migrations/index.js'
 
 // ============================================================================
 // Types
@@ -129,7 +87,7 @@ export class SessionStore {
     // This removes the previous hard dependency on bun:sqlite so the store
     // also works on plain Node ≥22.5.
     const db = openDatabaseSync(path)
-    db.exec(SCHEMA)
+    runMigrations(db)
     return new SessionStore(db)
   }
 
