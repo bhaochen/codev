@@ -33,7 +33,7 @@
  * module cycle.
  */
 import { statSync, realpathSync } from 'node:fs'
-import { basename, dirname, relative } from 'node:path'
+import { isAbsolute, relative } from 'node:path'
 import { getProjectsDir, SKIP_PRECOMPACT_THRESHOLD } from '../../utils/sessionStoragePortable.js'
 import { isDbPrimaryMode, shouldSkipSessionPersistence } from '../../utils/sessionPersistence.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
@@ -49,6 +49,9 @@ type PendingBatch = { entries: Entry[]; bytes: number }
 type ShadowState = {
   path: string
   projectDir: string
+  /** 'main' user session or 'subagent' sidechain transcript (composite id). */
+  kind: 'main' | 'subagent'
+  parentSessionId?: string
   batches: PendingBatch[]
   bufferedBytes: number
   bufferedCount: number
@@ -101,17 +104,55 @@ function nodeEnv(): string {
 
 function shadowAllowed(jsonlPath: string): boolean {
   if (!jsonlPath.endsWith('.jsonl')) return false
-  // Subagent transcripts are not mirrored (see module doc).
-  if (jsonlPath.includes('/subagents/')) return false
   if (nodeEnv() === 'test') {
     return isEnvTruthy(process.env.TEST_ENABLE_SHADOW_WRITER)
   }
   return !shouldSkipSessionPersistence()
 }
 
-function sessionIdForPath(jsonlPath: string): string | null {
-  const name = basename(jsonlPath, '.jsonl')
-  return name.length > 0 ? name : null
+/** A session transcript path under the projects root, with its DB identity. */
+type ParsedSessionPath = {
+  sessionId: string
+  projectDir: string
+  kind: 'main' | 'subagent'
+  parentSessionId?: string
+}
+
+/**
+ * Parse a transcript path into its DB identity (item 2 — subagent mirroring):
+ *   <projects>/<proj>/<sid>.jsonl                                → main
+ *   <projects>/<proj>/<sid>/subagents/[.../]agent-<id>.jsonl     → subagent
+ *     (composite id `<sid>/subagents/[.../]agent-<id>`, matching the
+ *      migration scanner's relative-path convention)
+ * Returns null for anything else (other nested layouts, paths outside the
+ * projects root) — those are not sessions.
+ *
+ * Exported for the migration scanner so both sides derive identical ids.
+ */
+export function parseSessionPath(jsonlPath: string): ParsedSessionPath | null {
+  const rel = relative(getProjectsDir(), jsonlPath)
+  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return null
+  const parts = rel.split(/[\\/]/)
+  if (parts.length < 2) return null
+  const projectDir = parts[0]!
+  const withoutExt = parts
+    .slice(1)
+    .join('/')
+    .replace(/\.jsonl$/, '')
+  if (withoutExt.length === 0) return null
+
+  if (parts.length >= 4 && parts[2] === 'subagents') {
+    return {
+      sessionId: withoutExt,
+      projectDir,
+      kind: 'subagent',
+      parentSessionId: parts[1]!,
+    }
+  }
+  if (parts.length === 2) {
+    return { sessionId: withoutExt, projectDir, kind: 'main' }
+  }
+  return null
 }
 
 /** Boundary semantics (truncation + metadata re-classification) cannot be
@@ -177,15 +218,17 @@ export function flushShadowWritesSync(): void {
   }
   const store = injectedStore ?? defaultStore
   if (!store) return
-  const primary = isDbPrimaryMode()
   for (const [sessionId, st] of states) {
-    if (primary) {
-      // D1: direct row append (sync) — the exit-path contract.
+    if (isDbPrimaryMode() || st.kind === 'subagent') {
+      // D1 / item 2: direct row append (sync) — the exit-path contract.
       if (st.bufferedCount === 0) continue
       const entries = st.batches.flatMap(b => b.entries)
       try {
         store.transaction(() => {
-          store.ensureSession(sessionId, st.projectDir)
+          store.ensureSession(sessionId, st.projectDir, {
+            kind: st.kind,
+            parentSessionId: st.parentSessionId,
+          })
           store.appendMessages(sessionId, entries, 'main')
           store.mergeSessionListingMeta(sessionId, entries)
           store.markSessionPrimaryOwned(sessionId)
@@ -237,8 +280,9 @@ export function shadowAppendBatch(
   try {
     if (entries.length === 0) return
     if (!shadowAllowed(jsonlPath)) return
-    const sessionId = sessionIdForPath(jsonlPath)
-    if (!sessionId) return
+    const parsed = parseSessionPath(jsonlPath)
+    if (!parsed) return
+    const { sessionId } = parsed
 
     ensureExitHook()
 
@@ -246,7 +290,9 @@ export function shadowAppendBatch(
     if (!st) {
       st = {
         path: jsonlPath,
-        projectDir: relative(getProjectsDir(), dirname(jsonlPath)),
+        projectDir: parsed.projectDir,
+        kind: parsed.kind,
+        parentSessionId: parsed.parentSessionId,
         batches: [],
         bufferedBytes: 0,
         bufferedCount: 0,
@@ -259,7 +305,9 @@ export function shadowAppendBatch(
       // Same sessionId addressed by a second path in this process (worktree
       // aliasing). Mixing incremental state across files is unsafe.
       st.path = jsonlPath
-      st.projectDir = relative(getProjectsDir(), dirname(jsonlPath))
+      st.projectDir = parsed.projectDir
+      st.kind = parsed.kind
+      st.parentSessionId = parsed.parentSessionId
       st.forceResync = true
     }
 
@@ -304,14 +352,19 @@ async function processState(sessionId: string, st: ShadowState): Promise<void> {
     return
   }
 
-  // D1 (DB-primary): direct row append — no file-anchored guards, no sync
-  // info, no resync-from-file. The file is an export handled by the write
-  // seams themselves.
-  if (isDbPrimaryMode()) {
+  // Direct row append — no file-anchored guards, no sync info, no
+  // resync-from-file. Two cases:
+  //   - D1 (DB-primary): rows are authoritative, the file is an export.
+  //   - Item 2: subagent transcripts are mirrored directly in BOTH modes
+  //     (the file-anchored session sync does not model their composite id).
+  if (isDbPrimaryMode() || st.kind === 'subagent') {
     const entries = st.batches.flatMap(b => b.entries)
     if (entries.length > 0) {
       store.transaction(() => {
-        store.ensureSession(sessionId, st.projectDir)
+        store.ensureSession(sessionId, st.projectDir, {
+          kind: st.kind,
+          parentSessionId: st.parentSessionId,
+        })
         store.appendMessages(sessionId, entries, 'main')
         store.mergeSessionListingMeta(sessionId, entries)
         // Adopt into primary-owned: reads now serve these rows without the
@@ -481,8 +534,9 @@ export async function shadowReconcileSession(
 ): Promise<{ ok: boolean; detail?: string }> {
   try {
     await flushShadowWrites()
-    const sessionId = sessionIdForPath(jsonlPath)
-    if (!sessionId) return { ok: false, detail: `not a session path: ${jsonlPath}` }
+    const parsed = parseSessionPath(jsonlPath)
+    if (!parsed) return { ok: false, detail: `not a session path: ${jsonlPath}` }
+    const sessionId = parsed.sessionId
     const { loadTranscriptFile } = await import('../../utils/sessionStorage.js')
     const fromDb = store.loadTranscript(sessionId)
     const fromFile = await loadTranscriptFile(jsonlPath)

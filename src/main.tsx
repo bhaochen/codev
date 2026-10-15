@@ -331,7 +331,8 @@ const CURRENT_MIGRATION_VERSION = 11
 // changes in a way that requires re-migration (e.g., schema changes).
 // Currently requires migration 003 (role column + synced_path).
 // v4: repair pass (re-sync stale rows, prune orphans from old bug keys).
-const CURRENT_SESSION_MIGRATION_VERSION = 4
+// v5: subagent transcripts mirrored (composite ids, kind='subagent').
+const CURRENT_SESSION_MIGRATION_VERSION = 5
 
 // Session migration with progress indicator.
 // Runs JSONL → SQLite migration for all historical sessions in the BACKGROUND.

@@ -45,6 +45,10 @@ export interface SessionMeta {
   syncedSize?: number
   syncedMtime?: number
   syncedPath?: string
+  /** 'main' (user session) or 'subagent' (sidechain transcript). */
+  kind?: 'main' | 'subagent'
+  /** Spawning session for kind='subagent'. */
+  parentSessionId?: string
 }
 
 export interface MessageRow {
@@ -64,6 +68,8 @@ export interface SessionListOptions {
   limit?: number
   offset?: number
   orderBy?: 'updated' | 'created'
+  /** Filter by session kind. Omit for all rows (main + subagent). */
+  kind?: 'main' | 'subagent'
 }
 
 export interface MessageQueryOptions {
@@ -106,8 +112,8 @@ export class SessionStore {
   createSession(meta: Omit<SessionMeta, 'messageCount'>): void {
     const now = Date.now()
     this.db.run(
-      `INSERT INTO sessions (id, project_dir, title, tag, agent_id, agent_name, agent_color, model, created_at, updated_at, message_count, metadata_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+      `INSERT INTO sessions (id, project_dir, title, tag, agent_id, agent_name, agent_color, model, created_at, updated_at, message_count, metadata_json, kind, parent_session_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
       [
         meta.id,
         meta.projectDir,
@@ -120,6 +126,8 @@ export class SessionStore {
         meta.createdAt,
         meta.updatedAt,
         meta.metadata ? JSON.stringify(meta.metadata) : null,
+        meta.kind ?? 'main',
+        meta.parentSessionId ?? null,
       ],
     )
   }
@@ -154,6 +162,10 @@ export class SessionStore {
     if (options.projectDir) {
       clauses.push('project_dir = ?')
       params.push(options.projectDir)
+    }
+    if (options.kind) {
+      clauses.push('kind = ?')
+      params.push(options.kind)
     }
 
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : ''
@@ -370,11 +382,23 @@ export class SessionStore {
   /**
    * Ensure a session row exists (idempotent). Required before appendMessages,
    * which references sessions(id) via FK and updates its message_count.
+   * `opts.kind`/`opts.parentSessionId` stamp subagent rows on first create.
    */
-  ensureSession(sessionId: string, projectDir: string): void {
+  ensureSession(
+    sessionId: string,
+    projectDir: string,
+    opts?: { kind?: 'main' | 'subagent'; parentSessionId?: string },
+  ): void {
     if (this.getSession(sessionId)) return
     const now = Date.now()
-    this.createSession({ id: sessionId, projectDir, createdAt: now, updatedAt: now })
+    this.createSession({
+      id: sessionId,
+      projectDir,
+      createdAt: now,
+      updatedAt: now,
+      kind: opts?.kind,
+      parentSessionId: opts?.parentSessionId,
+    })
   }
 
   /**
@@ -476,6 +500,7 @@ export class SessionStore {
     projectDir: string,
     entries: Entry[],
     preBoundaryMeta: Entry[] = [],
+    opts?: { kind?: 'main' | 'subagent'; parentSessionId?: string },
   ): number {
     // Project listing metadata over [pre-boundary meta, main] — the same
     // order the reducer's two passes apply (metadata pass first, main
@@ -503,6 +528,8 @@ export class SessionStore {
       createdAt,
       updatedAt: now,
       metadata: listing as Record<string, unknown>,
+      kind: opts?.kind,
+      parentSessionId: opts?.parentSessionId,
     })
     if (preBoundaryMeta.length > 0) this.appendMessages(sessionId, preBoundaryMeta, 'meta')
     if (entries.length > 0) this.appendMessages(sessionId, entries, 'main')
@@ -622,6 +649,8 @@ function rowToSessionMeta(row: Record<string, unknown>): SessionMeta {
     syncedSize: row.synced_size as number | undefined,
     syncedMtime: row.synced_mtime as number | undefined,
     syncedPath: row.synced_path as string | undefined,
+    kind: (row.kind as 'main' | 'subagent' | undefined) ?? 'main',
+    parentSessionId: (row.parent_session_id as string | null) ?? undefined,
   }
 }
 

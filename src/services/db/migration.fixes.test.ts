@@ -83,7 +83,7 @@ describe('Session Migration Regression Tests', () => {
       expect(filesB[0].projectDir).toBe('projectB')
     })
 
-    it('skips subagent directories', async () => {
+    it('mirrors subagent files with composite ids instead of skipping them', async () => {
       const projectDir = join(projectsDir, 'projectWithSubagent')
       const sessionDir = join(projectDir, 'session123')
       const subagentDir = join(sessionDir, 'subagents')
@@ -94,9 +94,14 @@ describe('Session Migration Regression Tests', () => {
 
       const files = await findSessionFiles('projectWithSubagent')
 
-      expect(files).toHaveLength(1)
-      expect(files[0].sessionId).toBe('session123')
-      expect(files[0].isSubagent).toBe(false)
+      const main = files.find(f => !f.isSubagent)
+      const sub = files.find(f => f.isSubagent)
+      expect(main?.sessionId).toBe('session123')
+      // Item 2: subagent transcripts are mirrored under composite ids
+      // (relative to the project dir), with their parent session linked.
+      expect(sub?.sessionId).toBe('session123/subagents/agent-abc')
+      expect(sub?.parentSessionId).toBe('session123')
+      expect(sub?.projectDir).toBe('projectWithSubagent')
     })
 
     it('handles nested project directories', async () => {

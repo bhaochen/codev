@@ -4502,45 +4502,100 @@ export async function getAgentTranscript(agentId: AgentId): Promise<{
 } | null> {
   const agentFile = getAgentTranscriptPath(agentId)
 
+  // Item 2: DB-first when the mirrored subagent rows exist — the same
+  // composite-id convention the shadow writer / migration use
+  // (`<parentSessionId>/subagents/[.../]agent-<agentId>`), or a
+  // migrate-synced row that is provably fresh for the file.
   try {
-    const { messages, agentContentReplacements } =
-      await loadTranscriptFile(agentFile)
-
-    // Find messages with matching agentId
-    const agentMessages = Array.from(messages.values()).filter(
-      msg => msg.agentId === agentId && msg.isSidechain,
-    )
-
-    if (agentMessages.length === 0) {
-      return null
-    }
-
-    // Find the most recent leaf message with this agentId
-    const parentUuids = new Set(agentMessages.map(msg => msg.parentUuid))
-    const leafMessage = findLatestMessage(
-      agentMessages,
-      msg => !parentUuids.has(msg.uuid as UUID),
-    )
-
-    if (!leafMessage) {
-      return null
-    }
-
-    // Build the conversation chain
-    const transcript = buildConversationChain(messages, leafMessage)
-
-    // Filter to only include messages with this agentId
-    const agentTranscript = transcript.filter(msg => msg.agentId === agentId)
-
-    return {
-      // Convert TranscriptMessage[] to Message[]
-      messages: agentTranscript.map(
-        ({ isSidechain, parentUuid, ...msg }) => msg,
-      ),
-      contentReplacements: agentContentReplacements.get(agentId) ?? [],
+    if (shouldUseTranscriptCache()) {
+      const rel = relative(getProjectsDir(), agentFile)
+      if (!rel.startsWith('..') && !isAbsolute(rel)) {
+        const parts = rel.split(/[\\/]/)
+        if (parts.length >= 4 && parts[2] === 'subagents') {
+          const dbId = parts
+            .slice(1)
+            .join('/')
+            .replace(/\.jsonl$/, '')
+          const { getSessionStore } = await import('../services/db/SessionStore.js')
+          const store = getSessionStore()
+          if (store.getMessageCount(dbId) > 0) {
+            let servable = store.isSessionPrimaryOwned(dbId)
+            if (!servable) {
+              // Migrate-synced rows carry sync info; serve them when fresh.
+              const sync = store.getSyncInfo(dbId)
+              if (sync) {
+                try {
+                  const st = statSync(agentFile)
+                  servable =
+                    sync.size === st.size &&
+                    sync.mtime === Math.trunc(st.mtimeMs) &&
+                    sync.path === realpathSync(agentFile)
+                } catch {
+                  servable = false
+                }
+              }
+            }
+            if (servable) {
+              return agentTranscriptFromShape(store.loadTranscript(dbId), agentId)
+            }
+          }
+        }
+      }
     }
   } catch {
+    // fall through to the file
+  }
+
+  try {
+    const shape = await loadTranscriptFile(agentFile)
+    return agentTranscriptFromShape(shape, agentId)
+  } catch {
     return null
+  }
+}
+
+/** Shared downstream of getAgentTranscript: shape → the agent's chain. */
+function agentTranscriptFromShape(
+  shape: TranscriptShape,
+  agentId: AgentId,
+): {
+  messages: Message[]
+  contentReplacements: ContentReplacementRecord[]
+} | null {
+  const { messages, agentContentReplacements } = shape
+
+  // Find messages with matching agentId
+  const agentMessages = Array.from(messages.values()).filter(
+    msg => msg.agentId === agentId && msg.isSidechain,
+  )
+
+  if (agentMessages.length === 0) {
+    return null
+  }
+
+  // Find the most recent leaf message with this agentId
+  const parentUuids = new Set(agentMessages.map(msg => msg.parentUuid))
+  const leafMessage = findLatestMessage(
+    agentMessages,
+    msg => !parentUuids.has(msg.uuid as UUID),
+  )
+
+  if (!leafMessage) {
+    return null
+  }
+
+  // Build the conversation chain
+  const transcript = buildConversationChain(messages, leafMessage)
+
+  // Filter to only include messages with this agentId
+  const agentTranscript = transcript.filter(msg => msg.agentId === agentId)
+
+  return {
+    // Convert TranscriptMessage[] to Message[]
+    messages: agentTranscript.map(
+      ({ isSidechain, parentUuid, ...msg }) => msg,
+    ),
+    contentReplacements: agentContentReplacements.get(agentId) ?? [],
   }
 }
 
@@ -5310,6 +5365,7 @@ export async function getSessionFilesLite(
         const store = getSessionStore()
         for (const meta of store.listSessions({
           projectDir: projectDirRel,
+          kind: 'main',
           limit: Number.MAX_SAFE_INTEGER,
         })) {
           if (sessionFilesMap.has(meta.id)) continue

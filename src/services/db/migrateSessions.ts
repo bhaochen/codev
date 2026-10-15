@@ -24,6 +24,7 @@ import { join, relative } from 'node:path'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 import { SessionStore } from './SessionStore.js'
 import { parseTranscriptFile } from '../../utils/sessionStorage.js'
+import { parseSessionPath } from './shadowWriter.js'
 import { logForDebugging } from '../../utils/debug.js'
 import type { Entry } from '../../types/logs.js'
 
@@ -64,40 +65,78 @@ interface SessionFile {
   sessionId: string
   projectDir: string
   isSubagent: boolean
+  /** Spawning session for subagent transcripts. */
+  parentSessionId?: string
 }
 
 export async function findSessionFiles(projectDir: string): Promise<SessionFile[]> {
   const sessionsDir = join(getClaudeConfigHomeDir(), 'projects', projectDir)
-  const files: SessionFile[] = []
 
-  try {
-    const entries = await readdir(sessionsDir, { withFileTypes: true })
+  async function walk(
+    dirAbs: string,
+    projectDirForFiles: string,
+    inSubagents: boolean,
+  ): Promise<SessionFile[]> {
+    let entries
+    try {
+      entries = await readdir(dirAbs, { withFileTypes: true })
+    } catch {
+      return []
+    }
+
+    const files: SessionFile[] = []
     for (const entry of entries) {
-      const fullPath = join(sessionsDir, entry.name)
+      const fullPath = join(dirAbs, entry.name)
       if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+        if (inSubagents) {
+          // Item 2: subagent identity via the shared path parser — composite
+          // id + top-level project dir, identical to the shadow writer's.
+          const parsed = parseSessionPath(fullPath)
+          if (parsed?.kind === 'subagent') {
+            files.push({
+              filePath: fullPath,
+              sessionId: parsed.sessionId,
+              projectDir: parsed.projectDir,
+              isSubagent: true,
+              parentSessionId: parsed.parentSessionId,
+            })
+          } else {
+            logForDebugging(
+              `Skipping subagent file outside the standard layout: ${fullPath}`,
+            )
+          }
+          continue
+        }
         // Top-level session file: <sessionId>.jsonl
         // Session ID is relative path WITHOUT .jsonl extension for backward compatibility
-        const relPath = relative(sessionsDir, fullPath)
+        const relPath = relative(dirAbs, fullPath)
         const sessionId = relPath.endsWith('.jsonl') ? relPath.slice(0, -6) : relPath
         files.push({
           filePath: fullPath,
           sessionId,
-          projectDir,
+          projectDir: projectDirForFiles,
           isSubagent: false,
         })
       } else if (entry.isDirectory()) {
-        // Skip subagent directories (sessionId/subagents/) - they are not top-level sessions
-        if (entry.name === 'subagents') continue
-        // Recurse into nested project directories
-        const subFiles = await findSessionFiles(join(projectDir, entry.name))
-        files.push(...subFiles)
+        if (entry.name === 'subagents') {
+          // Walk subagent transcripts for mirroring, but without another
+          // normal-recursion (their files never become top-level ids).
+          files.push(...(await walk(fullPath, projectDirForFiles, true)))
+        } else if (!inSubagents) {
+          // Recurse into nested project directories
+          files.push(
+            ...(await walk(fullPath, join(projectDirForFiles, entry.name), false)),
+          )
+        } else {
+          // Nested subdirectories under subagents/ keep the subagent identity.
+          files.push(...(await walk(fullPath, projectDirForFiles, true)))
+        }
       }
     }
-  } catch {
-    // Directory doesn't exist
+    return files
   }
 
-  return files
+  return walk(sessionsDir, projectDir, false)
 }
 
 export async function getProjectDirs(): Promise<string[]> {
@@ -165,7 +204,10 @@ export async function migrateSession(
     // Atomic migration: wrap in transaction so crash = rollback (JSONL preserved)
     store.transaction(() => {
       // Full-fidelity mirror: syncSession stores EVERY entry with role separation
-      store.syncSession(sessionId, projectDir, mainEntries, metadataEntries)
+      store.syncSession(sessionId, projectDir, mainEntries, metadataEntries, {
+        kind: sessionFile.isSubagent ? 'subagent' : 'main',
+        parentSessionId: sessionFile.parentSessionId,
+      })
       // Record sync info so read-through cache treats this as fresh
       store.setSyncInfo(sessionId, size, mtime, resolvedPath)
     })
