@@ -10,6 +10,8 @@ import type {
 import type { ContentReplacementRecord } from './toolResultStorage.js'
 import { parseJSONL } from './json.js'
 import { buildConversationChain, loadTranscriptFile } from './sessionStorage.js'
+import type { TranscriptShape } from './sessionStorage.js'
+import { isDbPrimaryMode } from './sessionPersistence.js'
 import { jsonStringify } from './slowOperations.js'
 import { escapeRegExp } from './stringUtils.js'
 
@@ -379,19 +381,48 @@ export async function createSessionBranch(
   } = options
 
   const projectDirPath = path.dirname(sourceTranscriptPath)
-  const sourceEntries = await readRawEntries(sourceTranscriptPath).catch((error) => {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw new SessionBranchingError(
-        'SOURCE_NOT_FOUND',
-        `Session not found: ${sourceSessionId}`,
-      )
-    }
-    throw error
-  })
 
-  const transcript = await loadTranscriptFile(sourceTranscriptPath, {
-    keepAllLeaves: true,
-  })
+  // C5 (DB-primary): fork from the ROWS when they exist — the file is a
+  // best-effort export that may lag, and a fork must copy what a resume
+  // would show. Same canonical view: loadTranscript applies the same
+  // boundary/walkChain reducer; dead branches are irrelevant because only
+  // the active chain is copied. Falls back to the file (with its
+  // SOURCE_NOT_FOUND semantics) when there are no rows or the DB is off.
+  let sourceEntries: RawEntry[] | null = null
+  let transcript: TranscriptShape | null = null
+  if (isDbPrimaryMode()) {
+    try {
+      const { getSessionStore } = await import('../services/db/SessionStore.js')
+      const store = getSessionStore()
+      if (store.getMessageCount(sourceSessionId) > 0) {
+        const rows = store.getMessages({
+          sessionId: sourceSessionId,
+          limit: Number.MAX_SAFE_INTEGER,
+        })
+        if (rows.length > 0) {
+          sourceEntries = rows.map(row => row.data as unknown as RawEntry)
+          transcript = store.loadTranscript(sourceSessionId)
+        }
+      }
+    } catch {
+      // fall through to the file path
+    }
+  }
+
+  if (!sourceEntries || !transcript) {
+    sourceEntries = await readRawEntries(sourceTranscriptPath).catch((error) => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new SessionBranchingError(
+          'SOURCE_NOT_FOUND',
+          `Session not found: ${sourceSessionId}`,
+        )
+      }
+      throw error
+    })
+    transcript = await loadTranscriptFile(sourceTranscriptPath, {
+      keepAllLeaves: true,
+    })
+  }
   const activeLeaf = findLatestActiveLeaf(transcript.messages, transcript.leafUuids)
   if (!activeLeaf) {
     throw new SessionBranchingError(

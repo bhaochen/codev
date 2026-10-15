@@ -249,6 +249,43 @@ describe('D1 DB-primary mode', () => {
     }
   })
 
+  it('forks from rows when the export file lags or is missing (C5)', async () => {
+    // Source chain synced to rows (bootstrap path).
+    writeFileSync(
+      jsonl,
+      [user(1, null, 'hello'), user(2, uid(1), 'world')]
+        .map(e => JSON.stringify(e))
+        .join('\n') + '\n',
+    )
+    await loadTranscriptCached(store, S1, jsonl, 'proj')
+
+    // A newer entry lands in rows only, then the export file is lost —
+    // exactly the lagging-export state a fork must survive.
+    shadowAppendBatch(jsonl, [user(3, uid(2), 'newest')], 1)
+    await flushShadowWrites()
+    rmSync(jsonl)
+    expect(existsSync(jsonl)).toBe(false)
+
+    const { createSessionBranch } = await import('../../utils/sessionBranching.js')
+    const branch = await createSessionBranch({
+      sourceSessionId: S1,
+      sourceTranscriptPath: jsonl,
+      title: 'Fork',
+    })
+
+    const forkPath = join(dir, 'projects', 'proj', `${branch.sessionId}.jsonl`)
+    expect(existsSync(forkPath)).toBe(true)
+    const forkEntries = readFileSync(forkPath, 'utf-8')
+      .trim()
+      .split('\n')
+      .map(line => JSON.parse(line) as { type?: string; uuid?: string })
+    const forkedMessageUuids = forkEntries
+      .filter(e => e.type === 'user')
+      .map(e => e.uuid)
+    // All three source messages copied from the rows, in chain order.
+    expect(forkedMessageUuids).toEqual([uid(1), uid(2), uid(3)])
+  })
+
   it('flag off restores file-first ordering (shadow mirror still runs)', async () => {
     delete process.env.CODEV_DB_PRIMARY
     writeFileSync(jsonl, JSON.stringify(user(1, null, 'v1')) + '\n')
