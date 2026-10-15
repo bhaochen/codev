@@ -9,7 +9,7 @@ import { queryOpenAIChat } from '../clients/openaiChat.js'
 import { queryAnthropicMessages } from '../clients/anthropicMessages.js'
 import { queryOpenAIResponses } from './openaiResponses.js'
 import { queryOpenAICompatibleChat } from './openaiCompatibleChat.js'
-import { queryAWSEventStream } from './awsEventStream.js'
+import { queryAWSEventStream } from './awsEventStream/index.js'
 
 export type ProtocolHandler = (
   route: LLMRoute,

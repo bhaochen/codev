@@ -6,27 +6,27 @@
 
 import type { LLMRoute } from '../../types.js';
 import type { LLMRequest } from '../../runtime/types.js';
-import type { StreamEvent, AssistantMessage, SystemAPIErrorMessage } from '../../../types/message.js';
+import type { StreamEvent, AssistantMessage, SystemAPIErrorMessage } from '../../../../types/message.js';
 import { httpRequest } from '../../transport/http.js';
 import { requestWithRetry } from '../../transport/retryHttpRequest.js';
 import { parseOpenAIChunksFromSSE } from '../../transport/sse.js';
 import { detectUpstreamFailures } from '../upstreamError.js';
-import { getSessionId } from '../../../bootstrap/state.js';
-import { logForDebugging } from '../../../utils/debug.js';
+import { getSessionId } from '../../../../bootstrap/state.js';
+import { logForDebugging } from '../../../../utils/debug.js';
 import {
   createAssistantAPIErrorMessage,
   normalizeContentFromAPI,
   normalizeMessagesForAPI,
-} from '../../../utils/messages.js';
-import type { AgentId } from '../../../types/ids.js';
-import { toolToAPISchema } from '../../../utils/api.js';
-import { calculateUSDCost } from '../../../utils/modelCost.js';
-import { addToTotalSessionCost } from '../../../cost-tracker.js';
-import { isAbortError } from '../../../utils/errors.js';
+} from '../../../../utils/messages.js';
+import type { AgentId } from '../../../../types/ids.js';
+import { toolToAPISchema } from '../../../../utils/api.js';
+import { calculateUSDCost } from '../../../../utils/modelCost.js';
+import { addToTotalSessionCost } from '../../../../cost-tracker.js';
+import { isAbortError } from '../../../../utils/errors.js';
 import { resolveAuth } from '../../auth/resolveAuth.js';
 import { codeWhispererToMessages, extractTools } from './formatConversion.js';
 import { initKiroState, convertOpenAIToKiro } from './responseConverter.js';
-import { getKiroAccessToken, getKiroProfileArn, getKiroRegion, getKiroBaseUrl } from '../../../utils/auth.js';
+import { getKiroAccessToken, getKiroProfileArn, getKiroRegion, getKiroBaseUrl } from '../../../../utils/auth.js';
 import { buildEventStreamFrame, withInitialFrame } from './frameBuilder.js';
 
 export type ProtocolHandler = (
