@@ -4,7 +4,7 @@ import type { Dirent } from 'fs'
 // Sync fs primitives for readFileTailSync — separate from fs/promises
 // imports above. Named (not wildcard) per CLAUDE.md style; no collisions
 // with the async-suffixed names.
-import { closeSync, fstatSync, openSync, readSync, realpathSync } from 'fs'
+import { closeSync, fstatSync, openSync, readSync, realpathSync, statSync } from 'fs'
 import {
   appendFile as fsAppendFile,
   open as fsOpen,
@@ -5088,10 +5088,20 @@ export async function readLiteMetadataFromDb(
       (typeof meta.customTitle === 'string' ? meta.customTitle : undefined) ??
       (typeof meta.aiTitle === 'string' ? meta.aiTitle : undefined)
 
-    // Without a lastPrompt the file path would scrape the first prompt from
-    // the head window (which we deliberately do not store) — always defer to
-    // the file for those (legacy) sessions.
-    if (!lastPrompt) return null
+    // Without a lastPrompt, the FILE path would scrape the first prompt from
+    // the head window (which we deliberately do not store) — defer to the
+    // file while it exists. Once the file is gone (rows are the only copy),
+    // serve what the rows have; the '(session)' fallback upstream covers
+    // empty prompts.
+    if (!lastPrompt) {
+      let fileExists = true
+      try {
+        statSync(filePath)
+      } catch {
+        fileExists = false
+      }
+      if (fileExists) return null
+    }
 
     return {
       firstPrompt: lastPrompt,
@@ -5283,6 +5293,38 @@ export async function getSessionFilesLite(
   projectPath?: string,
 ): Promise<LogOption[]> {
   const sessionFilesMap = await getSessionFilesWithMtime(projectDir)
+
+  // C6 (DB supplement): sessions whose files are gone — or a projects
+  // directory that is missing/unreadable entirely — still appear when rows
+  // exist. File-backed entries keep their scan mtime (ordering unchanged);
+  // DB-only entries order by their last row activity (updated_at).
+  try {
+    if (shouldUseTranscriptCache()) {
+      const projectDirRel = relative(getProjectsDir(), projectDir)
+      const underProjectsRoot =
+        projectDirRel !== '' &&
+        !projectDirRel.startsWith('..') &&
+        !isAbsolute(projectDirRel)
+      if (underProjectsRoot) {
+        const { getSessionStore } = await import('../services/db/SessionStore.js')
+        const store = getSessionStore()
+        for (const meta of store.listSessions({
+          projectDir: projectDirRel,
+          limit: Number.MAX_SAFE_INTEGER,
+        })) {
+          if (sessionFilesMap.has(meta.id)) continue
+          sessionFilesMap.set(meta.id, {
+            path: join(projectDir, `${meta.id}.jsonl`),
+            mtime: meta.updatedAt,
+            ctime: meta.createdAt,
+            size: meta.syncedSize ?? 0,
+          })
+        }
+      }
+    }
+  } catch {
+    // scan-only fallback
+  }
 
   // Sort by mtime descending and apply limit
   let entries = [...sessionFilesMap.entries()].sort(

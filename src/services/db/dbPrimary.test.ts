@@ -286,6 +286,34 @@ describe('D1 DB-primary mode', () => {
     expect(forkedMessageUuids).toEqual([uid(1), uid(2), uid(3)])
   })
 
+  it('lists DB-only sessions when the projects tree is gone (C6)', async () => {
+    // The listing queries getProjectDir(originalCwd) — put the rows there.
+    const { getProjectDir, getProjectsDir } = await import(
+      '../../utils/sessionStoragePortable.js'
+    )
+    const { getOriginalCwd } = await import('../../bootstrap/state.js')
+    const { relative } = await import('node:path')
+    const listingProjDir = getProjectDir(getOriginalCwd())
+    const relProject = relative(getProjectsDir(), listingProjDir)
+
+    // Rows only — no JSONL file exists at all, and no lastPrompt either
+    // (the custom-title must still resolve with the file gone).
+    store.syncSession(S1, relProject, [
+      user(1, null, 'listed from db'),
+      { type: 'custom-title', customTitle: 'DB-only title', sessionId: S1 } as unknown as Entry,
+    ])
+    store.markSessionPrimaryOwned(S1)
+
+    // The whole projects tree vanishes (files are just exports).
+    rmSync(join(dir, 'projects'), { recursive: true, force: true })
+
+    const { loadMessageLogs } = await import('../../utils/sessionStorage.js')
+    const logs = await loadMessageLogs(50)
+    const entry = logs.find(l => l.sessionId === S1)
+    expect(entry).toBeDefined()
+    expect(entry?.customTitle).toBe('DB-only title')
+  })
+
   it('default/gate semantics: tests opt in, explicit 0 disables', async () => {
     const { isDbPrimaryMode } = await import('../../utils/sessionPersistence.js')
     // Test env default: OFF (hermetic suite).
