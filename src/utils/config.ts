@@ -610,6 +610,11 @@ export type GlobalConfig = {
   // (avoiding 11× saveGlobalConfig lock+re-read on every startup).
   migrationVersion?: number
 
+  // Version of the session migration (JSONL → SQLite). When equal to
+  // CURRENT_SESSION_MIGRATION_VERSION, runMigrations() skips the session
+  // migration. Increment when the migration logic changes significantly.
+  sessionMigrationVersion?: number
+
 }
 
 /**

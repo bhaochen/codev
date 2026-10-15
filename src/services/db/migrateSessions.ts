@@ -23,6 +23,7 @@ interface MigrationOptions {
   projectDir?: string
   verbose?: boolean
   vacuum?: boolean
+  onProgress?: (status: 'migrated' | 'skipped' | 'failed', sessionId: string) => void
 }
 
 interface MigrationResult {
@@ -33,7 +34,7 @@ interface MigrationResult {
   errors: Array<{ session: string; error: string }>
 }
 
-async function findSessionFiles(projectDir: string): Promise<string[]> {
+export async function findSessionFiles(projectDir: string): Promise<string[]> {
   const sessionsDir = join(getClaudeConfigHomeDir(), 'projects', projectDir)
   const files: string[] = []
 
@@ -55,7 +56,7 @@ async function findSessionFiles(projectDir: string): Promise<string[]> {
   return files
 }
 
-async function getProjectDirs(): Promise<string[]> {
+export async function getProjectDirs(): Promise<string[]> {
   const projectsDir = join(getClaudeConfigHomeDir(), 'projects')
   const dirs: string[] = []
 
@@ -152,6 +153,8 @@ export async function migrateAllSessions(options: MigrationOptions = {}): Promis
           result.failed++
           result.errors.push({ session: sessionId, error: 'Migration failed' })
         }
+        // Fire progress callback for live spinner
+        options.onProgress?.(status, sessionId)
       }
     }
 

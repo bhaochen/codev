@@ -193,11 +193,22 @@ export class SessionStore {
     )
   }
 
-  appendMessages(sessionId: string, entries: Entry[]): void {
+  /**
+   * Batch-insert entries. `role` preserves the shared reducer's two input
+   * lists: 'main' (the transcript buffer) vs 'meta' (pre-boundary
+   * session-scoped metadata), so loadTranscript can rebuild both lists in
+   * their original order instead of a flattened, reduction-order-destroying
+   * single list.
+   */
+  appendMessages(
+    sessionId: string,
+    entries: Entry[],
+    role: 'main' | 'meta' = 'main',
+  ): void {
     const now = Date.now()
     const insertStmt = this.db.prepare(
-      `INSERT INTO messages (session_id, uuid, parent_uuid, entry_type, data_json, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO messages (session_id, uuid, parent_uuid, entry_type, data_json, created_at, role)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
     const updateStmt = this.db.prepare(
       'UPDATE sessions SET message_count = message_count + ?, updated_at = ? WHERE id = ?',
@@ -208,7 +219,7 @@ export class SessionStore {
       for (const entry of entries) {
         const uuid = (entry as { uuid?: string }).uuid ?? crypto.randomUUID()
         const parentUuid = (entry as TranscriptMessage).parentUuid ?? null
-        insertStmt.run(sessionId, uuid, parentUuid, entry.type, JSON.stringify(entry), now)
+        insertStmt.run(sessionId, uuid, parentUuid, entry.type, JSON.stringify(entry), now, role)
       }
       updateStmt.run(entries.length, now, sessionId)
     })()
@@ -330,66 +341,103 @@ export class SessionStore {
   /**
    * Read a session's full transcript and reduce it to the same TranscriptShape
    * the JSONL path produces. Rows are read in seq order (append-only log order)
-   * and each data_json is parsed back to its Entry, then fed to the shared
-   * buildTranscriptShape reducer — so the SQLite path is guaranteed to agree
-   * with loadTranscriptFile (fidelity by construction, not by two copies).
+   * and split back into the reducer's two input lists by `role` — mainEntries
+   * and the pre-boundary metadataEntries whose pass must run first — then fed
+   * to the shared buildTranscriptShape reducer, so the SQLite path is
+   * guaranteed to agree with loadTranscriptFile (fidelity by construction,
+   * not by two copies).
    */
   loadTranscript(sessionId: string): TranscriptShape {
     const rows = this.db
-      .query('SELECT data_json FROM messages WHERE session_id = ? ORDER BY seq ASC')
-      .all(sessionId) as Array<{ data_json: string }>
-    const entries = rows.map(r => JSON.parse(r.data_json) as Entry)
-    return buildTranscriptShape(entries)
+      .query('SELECT data_json, role FROM messages WHERE session_id = ? ORDER BY seq ASC')
+      .all(sessionId) as Array<{ data_json: string; role: string }>
+    const mainEntries: Entry[] = []
+    const metadataEntries: Entry[] = []
+    for (const row of rows) {
+      const entry = JSON.parse(row.data_json) as Entry
+      if (row.role === 'meta') metadataEntries.push(entry)
+      else mainEntries.push(entry)
+    }
+    return buildTranscriptShape(mainEntries, metadataEntries)
   }
 
   /**
-   * Byte size + mtime this session was last synced from its JSONL source.
-   * NULL = never synced (the read-through loader treats that as stale).
+   * Byte size + mtime + source path this session was last synced from.
+   * NULL (or a NULL path — rows written before migration 003) = never synced
+   * through the path-aware loader; the read-through loader treats that as
+   * stale. The path participates in freshness because one sessionId can
+   * resolve to files in different project dirs (worktree listings), and
+   * size/mtime alone cannot tell those apart.
    */
-  getSyncInfo(sessionId: string): { size: number; mtime: number } | null {
+  getSyncInfo(sessionId: string): { size: number; mtime: number; path: string } | null {
     const row = this.db
-      .query('SELECT synced_size, synced_mtime FROM sessions WHERE id = ?')
-      .get(sessionId) as { synced_size: number | null; synced_mtime: number | null } | null
-    if (!row || row.synced_size == null || row.synced_mtime == null) return null
-    return { size: row.synced_size, mtime: row.synced_mtime }
+      .query('SELECT synced_size, synced_mtime, synced_path FROM sessions WHERE id = ?')
+      .get(sessionId) as {
+      synced_size: number | null
+      synced_mtime: number | null
+      synced_path: string | null
+    } | null
+    if (
+      !row ||
+      row.synced_size == null ||
+      row.synced_mtime == null ||
+      row.synced_path == null
+    )
+      return null
+    return { size: row.synced_size, mtime: row.synced_mtime, path: row.synced_path }
   }
 
   /** Record the JSONL stat this session was synced at (post-sync freshness mark). */
-  setSyncInfo(sessionId: string, size: number, mtime: number): void {
-    this.db.run('UPDATE sessions SET synced_size = ?, synced_mtime = ? WHERE id = ?', [
-      size,
-      mtime,
-      sessionId,
-    ])
+  setSyncInfo(sessionId: string, size: number, mtime: number, path: string): void {
+    this.db.run(
+      'UPDATE sessions SET synced_size = ?, synced_mtime = ?, synced_path = ? WHERE id = ?',
+      [size, mtime, path, sessionId],
+    )
   }
 
   /**
-   * Rebuild a session's SQLite mirror from an ordered entry list (typically
-   * parsed from its JSONL source). Full fidelity: stores EVERY entry — not just
-   * transcript messages + summary — so loadTranscript reconstructs the exact
-   * loadTranscriptFile shape. Also projects session-list metadata (title/tag/
-   * agent) into the sessions row for efficient listing and extracts createdAt
-   * from the first entry.
+   * Rebuild a session's SQLite mirror from the parsed JSONL entry lists.
+   * Full fidelity: stores EVERY entry — not just transcript messages + summary
+   * — in its reducer role: `entries` (main buffer) as role 'main' and
+   * `preBoundaryMeta` (session-scoped metadata recovered from before the
+   * compact boundary) as role 'meta', so loadTranscript feeds the reducer the
+   * same two lists in the same pass order loadTranscriptFile does. Also
+   * projects session-list metadata (title/tag/agent) into the sessions row
+   * for efficient listing and extracts createdAt from the first entry.
    *
    * Idempotent: REPLACES any existing rows for the session (unlike
    * writeTranscript, which appends). This is the canonical "make SQLite match
    * the source" operation used by migration and sync-on-load — unlike the old
    * migrateFromJsonl/migrateSession path, which dropped every non-transcript
    * entry type and produced an incomplete mirror.
+   *
+   * Non-transactional across the DELETE+rebuild boundary by design: a crash
+   * mid-sync leaves synced_path NULL (setSyncInfo runs after this returns),
+   * so the next read re-syncs rather than trusting partial rows.
    */
-  syncSession(sessionId: string, projectDir: string, entries: Entry[]): number {
-    // Project listing metadata (first-wins, matching prior migration semantics).
+  syncSession(
+    sessionId: string,
+    projectDir: string,
+    entries: Entry[],
+    preBoundaryMeta: Entry[] = [],
+  ): number {
+    // Project listing metadata, LAST-wins across [pre-boundary meta, main] —
+    // the same order and precedence the reducer's two passes apply (metadata
+    // pass first, main pass overwrites), so the sessions row shows the same
+    // effective title/tag/agent the transcript shape resolves to. Prior
+    // first-wins semantics showed the ORIGINAL title even after a rename.
     let title: string | undefined
     let tag: string | undefined
     let agentName: string | undefined
     let agentColor: string | undefined
-    for (const entry of entries) {
-      if (!title && entry.type === 'custom-title') title = (entry as { customTitle?: string }).customTitle
-      if (!tag && entry.type === 'tag') tag = (entry as { tag?: string }).tag
-      if (!agentName && entry.type === 'agent-name') agentName = (entry as { agentName?: string }).agentName
-      if (!agentColor && entry.type === 'agent-color') agentColor = (entry as { agentColor?: string }).agentColor
+    for (const entry of [...preBoundaryMeta, ...entries]) {
+      if (entry.type === 'custom-title') title = (entry as { customTitle?: string }).customTitle
+      if (entry.type === 'tag') tag = (entry as { tag?: string }).tag
+      if (entry.type === 'agent-name') agentName = (entry as { agentName?: string }).agentName
+      if (entry.type === 'agent-color') agentColor = (entry as { agentColor?: string }).agentColor
     }
-    const firstTimestamp = (entries[0] as { timestamp?: string }).timestamp
+    const firstOfAll = preBoundaryMeta[0] ?? entries[0]
+    const firstTimestamp = (firstOfAll as { timestamp?: string } | undefined)?.timestamp
     const parsed = firstTimestamp ? new Date(firstTimestamp).getTime() : NaN
     // A malformed timestamp must not crash the sync (and must not store NaN).
     const createdAt = Number.isFinite(parsed) ? parsed : Date.now()
@@ -398,8 +446,9 @@ export class SessionStore {
     this.db.run('DELETE FROM messages WHERE session_id = ?', [sessionId])
     this.db.run('DELETE FROM sessions WHERE id = ?', [sessionId])
     this.createSession({ id: sessionId, projectDir, title, tag, agentName, agentColor, createdAt, updatedAt: now })
-    if (entries.length > 0) this.appendMessages(sessionId, entries)
-    return entries.length
+    if (preBoundaryMeta.length > 0) this.appendMessages(sessionId, preBoundaryMeta, 'meta')
+    if (entries.length > 0) this.appendMessages(sessionId, entries, 'main')
+    return entries.length + preBoundaryMeta.length
   }
 
   // =========================================================================

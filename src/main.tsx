@@ -49,7 +49,10 @@ import { isAgentSwarmsEnabled } from './utils/agentSwarmsEnabled.js';
 import { count, uniq } from './utils/array.js';
 import { installAsciicastRecorder } from './utils/asciicast.js';
 import { getSubscriptionType, isClaudeAISubscriber, prefetchAwsCredentialsAndBedRockInfoIfSafe, prefetchGcpCredentialsIfSafe, validateForceLoginOrg } from './utils/auth.js';
-import { checkHasTrustDialogAccepted, getGlobalConfig, getRemoteControlAtStartup, isAutoUpdaterDisabled, saveGlobalConfig } from './utils/config.js';
+import { checkHasTrustDialogAccepted, getGlobalConfig, getRemoteControlAtStartup, isAutoUpdaterDisabled, saveGlobalConfig } from './utils/config.js'
+import { migrateAllSessions } from './services/db/migrateSessions.js'
+import { findSessionFiles, getProjectDirs } from './services/db/migrateSessions.js'
+import { SessionStore } from './services/db/SessionStore.js'
 import { seedEarlyInput, stopCapturingEarlyInput } from './utils/earlyInput.js';
 import { getInitialEffortSetting, parseEffortValue } from './utils/effort.js';
 import { getInitialFastModeSetting, isFastModeEnabled, prefetchFastModeStatus, resolveFastModeStatusFromCache } from './utils/fastMode.js';
@@ -322,33 +325,140 @@ async function logStartupTelemetry(): Promise<void> {
 
 // @[MODEL LAUNCH]: Consider any migrations you may need for model strings. See migrateSonnet1mToSonnet45.ts for an example.
 // Bump this when adding a new sync migration so existing users re-run the set.
-const CURRENT_MIGRATION_VERSION = 11;
-function runMigrations(): void {
-  if (getGlobalConfig().migrationVersion !== CURRENT_MIGRATION_VERSION) {
-    migrateAutoUpdatesToSettings();
-    migrateBypassPermissionsAcceptedToSettings();
-    migrateEnableAllProjectMcpServersToSettings();
-    resetProToOpusDefault();
-    migrateSonnet1mToSonnet45();
-    migrateLegacyOpusToCurrent();
-    migrateSonnet45ToSonnet46();
-    migrateOpusToOpus1m();
-    migrateReplBridgeEnabledToRemoteControlAtStartup();
-    if (feature('TRANSCRIPT_CLASSIFIER')) {
-      resetAutoModeOptInForDefaultOffer();
+const CURRENT_MIGRATION_VERSION = 11
+
+// Session migration version — bump when the JSONL → SQLite migration logic
+// changes in a way that requires re-migration (e.g., schema changes).
+// Current schema is at migration 003 (role column + synced_path).
+const CURRENT_SESSION_MIGRATION_VERSION = 3
+
+// Session migration with progress indicator.
+// Runs JSONL → SQLite migration for all historical sessions in the BACKGROUND.
+// Shows a live spinner "Migrating sessions X/Y" so startup isn't blocked.
+async function runSessionMigration(): Promise<void> {
+  const config = getGlobalConfig()
+  if (config.sessionMigrationVersion === CURRENT_SESSION_MIGRATION_VERSION) {
+    return // already migrated
+  }
+
+  // Fire-and-forget background migration with live spinner
+  void (async () => {
+    const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+    let frame = 0
+    let current = 0
+    let total = 0
+    let done = false
+
+    const spin = () => {
+      if (done) return
+      const msg = total > 0
+        ? `Migrating sessions ${current}/${total} ${spinnerFrames[frame % spinnerFrames.length]}`
+        : `Discovering sessions... ${spinnerFrames[frame % spinnerFrames.length]}`
+      process.stderr.write(`\r${chalk.cyan(msg)}`)
+      frame++
+      setTimeout(spin, 80)
     }
-    if (("external" as string) === 'ant') {
-      migrateFennecToOpus();
+    spin()
+
+    try {
+      // First pass: count total sessions (fast, no DB writes)
+      const store = SessionStore.open()
+      let allFiles: string[] = []
+      try {
+        const { getProjectDirs } = await import('./services/db/migrateSessions.js')
+        const projectDirs = await getProjectDirs()
+        for (const dir of projectDirs) {
+          const { findSessionFiles } = await import('./services/db/migrateSessions.js')
+          const files = await findSessionFiles(dir)
+          allFiles.push(...files)
+        }
+      } finally {
+        store.close()
+      }
+      total = allFiles.length
+
+      // Second pass: migrate with progress callback
+      let migrated = 0
+      let skipped = 0
+      let failed = 0
+      const errors: Array<{ session: string; error: string }> = []
+
+      const result = await migrateAllSessions({
+        verbose: false, // we handle progress ourselves
+        vacuum: true,
+        onProgress: (status: 'migrated' | 'skipped' | 'failed', sessionId: string) => {
+          current++
+          if (status === 'migrated') migrated++
+          else if (status === 'skipped') skipped++
+          else { failed++; errors.push({ session: sessionId, error: 'Migration failed' }) }
+        },
+      })
+
+      done = true
+      process.stderr.write('\r' + ' '.repeat(60) + '\r') // clear line
+
+      console.log(chalk.green('Session migration complete:'))
+      console.log(chalk.green(`  Total sessions: ${result.total}`))
+      console.log(chalk.green(`  Migrated: ${result.migrated}`))
+      console.log(chalk.green(`  Skipped (already in DB): ${result.skipped}`))
+      if (result.failed > 0) {
+        console.log(chalk.yellow(`  Failed: ${result.failed}`))
+        for (const err of result.errors) {
+          console.log(chalk.yellow(`    ${err.session}: ${err.error}`))
+        }
+      }
+
+      saveGlobalConfig(prev => ({
+        ...prev,
+        sessionMigrationVersion: CURRENT_SESSION_MIGRATION_VERSION
+      }))
+
+      logForDebugging(`Session migration finished: ${result.migrated} migrated, ${result.skipped} skipped, ${result.failed} failed`)
+    } catch (err) {
+      done = true
+      process.stderr.write('\r' + ' '.repeat(60) + '\r')
+      console.log(chalk.yellow(`Session migration failed: ${String(err)}`))
+      logForDebugging(`Session migration error: ${String(err)}`)
+    }
+  })()
+
+  // Return immediately — migration continues in background
+  console.log(chalk.cyan('Migrating sessions to SQLite in background...'))
+  console.log(chalk.dim('  (You can continue working; migration resumes on next startup if interrupted)'))
+}
+
+async function runMigrations(): Promise<void> {
+  if (getGlobalConfig().migrationVersion !== CURRENT_MIGRATION_VERSION) {
+    migrateAutoUpdatesToSettings()
+    migrateBypassPermissionsAcceptedToSettings()
+    migrateEnableAllProjectMcpServersToSettings()
+    resetProToOpusDefault()
+    migrateSonnet1mToSonnet45()
+    migrateLegacyOpusToCurrent()
+    migrateSonnet45ToSonnet46()
+    migrateOpusToOpus1m()
+    migrateReplBridgeEnabledToRemoteControlAtStartup()
+    if (feature('TRANSCRIPT_CLASSIFIER')) {
+      resetAutoModeOptInForDefaultOffer()
+    }
+    if (('external' as string) === 'ant') {
+      migrateFennecToOpus()
     }
     saveGlobalConfig(prev => prev.migrationVersion === CURRENT_MIGRATION_VERSION ? prev : {
       ...prev,
       migrationVersion: CURRENT_MIGRATION_VERSION
-    });
+    })
   }
+
+  // Session migration (JSONL → SQLite) — runs once per version bump
+  if (getGlobalConfig().sessionMigrationVersion !== CURRENT_SESSION_MIGRATION_VERSION) {
+    await runSessionMigration()
+  }
+
   // Async migration - fire and forget since it's non-blocking
   migrateChangelogFromConfig().catch(() => {
     // Silently ignore migration errors - will retry on next startup
-  });
+  })
 }
 
 /**
@@ -949,7 +1059,7 @@ async function run(): Promise<CommanderCommand> {
       setInlinePlugins(pluginDir);
       clearPluginCache('preAction: --plugin-dir inline plugins');
     }
-    runMigrations();
+    await runMigrations();
     profileCheckpoint('preAction_after_migrations');
 
     // Load remote managed settings for enterprise customers (non-blocking)

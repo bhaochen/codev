@@ -17,7 +17,7 @@ import {
   writeFile,
 } from 'fs/promises'
 import memoize from 'lodash-es/memoize.js'
-import { basename, dirname, join } from 'path'
+import { basename, dirname, join, relative } from 'path'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -561,6 +561,25 @@ export function setRemoteIngressUrlForTesting(url: string): void {
 
 const REMOTE_FLUSH_INTERVAL_MS = 10
 
+/**
+ * True when test env / cleanupPeriodDays=0 / --no-session-persistence /
+ * CLAUDE_CODE_SKIP_PROMPT_HISTORY should suppress all transcript persistence.
+ * Shared by the Project write guards (appendEntry / materializeSessionFile)
+ * and the SQLite read-through cache gate (a cache of session data IS
+ * persistence, so a disabled-persistence run must not write one either).
+ */
+function shouldSkipSessionPersistence(): boolean {
+  const allowTestPersistence = isEnvTruthy(
+    process.env.TEST_ENABLE_SESSION_PERSISTENCE,
+  )
+  return (
+    (getNodeEnv() === 'test' && !allowTestPersistence) ||
+    getSettings_DEPRECATED()?.cleanupPeriodDays === 0 ||
+    isSessionPersistenceDisabled() ||
+    isEnvTruthy(process.env.CLAUDE_CODE_SKIP_PROMPT_HISTORY)
+  )
+}
+
 class Project {
   // Minimal cache for current session only (not all sessions)
   currentSessionTag: string | undefined
@@ -1014,15 +1033,7 @@ class Project {
    * test sessions don't pollute the user's --resume list.
    */
   private shouldSkipPersistence(): boolean {
-    const allowTestPersistence = isEnvTruthy(
-      process.env.TEST_ENABLE_SESSION_PERSISTENCE,
-    )
-    return (
-      (getNodeEnv() === 'test' && !allowTestPersistence) ||
-      getSettings_DEPRECATED()?.cleanupPeriodDays === 0 ||
-      isSessionPersistenceDisabled() ||
-      isEnvTruthy(process.env.CLAUDE_CODE_SKIP_PROMPT_HISTORY)
-    )
+    return shouldSkipSessionPersistence()
   }
 
   /**
@@ -3080,7 +3091,7 @@ export async function loadFullLog(log: LogOption): Promise<LogOption> {
       contextCollapseSnapshot,
       leafUuids,
       goalStore,
-    } = await loadTranscriptFile(sessionFile)
+    } = await loadTranscriptViaCache(sessionFile)
 
     if (messages.size === 0) {
       return log
@@ -3571,13 +3582,23 @@ function walkChainBeforeParse(buf: Buffer): Buffer {
 }
 
 /**
- * Loads all messages, summaries, and file history snapshots from a transcript file.
- * Returns the messages, summaries, custom titles, tags, file history snapshots, and attribution snapshots.
+ * Parse a transcript file into the exact entry lists `loadTranscriptFile`
+ * reduces: `metadataEntries` (pre-boundary session-scoped metadata recovered
+ * by the byte scan) and `mainEntries` (post-boundary buffer, with walkChain
+ * pruning applied for large files).
+ *
+ * Extracted so the SQLite read-through cache syncs from the SAME file-read
+ * pipeline — the fd-level attr-snap skip, compact-boundary truncation,
+ * metadata recovery, and walkChain pruning apply identically. Syncing from
+ * anything else (e.g. a plain full-file read) would diverge from
+ * loadTranscriptFile on files over SKIP_PRECOMPACT_THRESHOLD that contain
+ * compact boundaries: those files reduce differently (pre-boundary messages
+ * and dead fork branches excluded).
  */
-export async function loadTranscriptFile(
+export async function parseTranscriptFile(
   filePath: string,
   opts?: { keepAllLeaves?: boolean },
-): Promise<TranscriptShape> {
+): Promise<{ mainEntries: Entry[]; metadataEntries: Entry[] }> {
   let mainEntries: Entry[] = []
   let metadataEntries: Entry[] = []
 
@@ -3657,6 +3678,18 @@ export async function loadTranscriptFile(
     // File doesn't exist or can't be read
   }
 
+  return { mainEntries, metadataEntries }
+}
+
+/**
+ * Loads all messages, summaries, and file history snapshots from a transcript file.
+ * Returns the messages, summaries, custom titles, tags, file history snapshots, and attribution snapshots.
+ */
+export async function loadTranscriptFile(
+  filePath: string,
+  opts?: { keepAllLeaves?: boolean },
+): Promise<TranscriptShape> {
+  const { mainEntries, metadataEntries } = await parseTranscriptFile(filePath, opts)
   return buildTranscriptShape(mainEntries, metadataEntries)
 }
 
@@ -3946,6 +3979,61 @@ export function buildTranscriptShape(
 }
 
 /**
+ * Whether a transcript read may be served from / synced to the SQLite
+ * read-through cache.
+ *
+ * Test env is opt-in (`TEST_ENABLE_TRANSCRIPT_CACHE`): the default store path
+ * lives in the real config home (CLAUDE_CONFIG_DIR is only redirected by tests
+ * that ask for it) and the SessionStore singleton would leak rows across test
+ * files — an opt-in test must set CLAUDE_CONFIG_DIR itself. Outside tests the
+ * cache follows the same persistence conditions as the write side.
+ */
+function shouldUseTranscriptCache(): boolean {
+  if (getNodeEnv() === 'test') {
+    return isEnvTruthy(process.env.TEST_ENABLE_TRANSCRIPT_CACHE)
+  }
+  return !shouldSkipSessionPersistence()
+}
+
+/**
+ * Load a session transcript, preferring the SQLite read-through cache and
+ * falling back to the direct JSONL read on ANY error — cache disabled, DB
+ * unavailable or locked, source file missing, sync failure. The fallback is
+ * exactly the pre-cache behavior, so the cache can only ever be an
+ * acceleration, never a new way to lose a session.
+ *
+ * Only valid for default-opts reads (the cache mirrors what
+ * loadTranscriptFile(sessionFile) with no opts returns); callers that pass
+ * keepAllLeaves must keep calling loadTranscriptFile directly.
+ */
+async function loadTranscriptViaCache(
+  sessionFile: string,
+): Promise<TranscriptShape> {
+  if (shouldUseTranscriptCache() && sessionFile.endsWith('.jsonl')) {
+    try {
+      const { getSessionStore } = await import('../services/db/SessionStore.js')
+      const { loadTranscriptCached } = await import('../services/db/transcriptCache.js')
+      return await loadTranscriptCached(
+        getSessionStore(),
+        // Session files are named `<sessionId>.jsonl` (same convention the
+        // migration CLI uses to key sessions), so the file name is the id.
+        basename(sessionFile, '.jsonl'),
+        sessionFile,
+        // sessions.project_dir is the directory name relative to the projects
+        // root (the convention findSessionFiles/migrateSessions scan by), not
+        // the absolute path the transcript lives at.
+        relative(getProjectsDir(), dirname(sessionFile)),
+      )
+    } catch (err) {
+      logForDebugging(
+        `SQLite transcript cache unavailable for ${sessionFile}, reading JSONL directly: ${String(err)}`,
+      )
+    }
+  }
+  return loadTranscriptFile(sessionFile)
+}
+
+/**
  * Loads all messages, summaries, file history snapshots, and attribution snapshots from a specific session file.
  */
 async function loadSessionFile(sessionId: UUID): Promise<{
@@ -3966,7 +4054,7 @@ async function loadSessionFile(sessionId: UUID): Promise<{
     getSessionProjectDir() ?? getProjectDir(getOriginalCwd()),
     `${sessionId}.jsonl`,
   )
-  return loadTranscriptFile(sessionFile)
+  return loadTranscriptViaCache(sessionFile)
 }
 
 /**

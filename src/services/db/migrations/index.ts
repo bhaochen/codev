@@ -14,6 +14,7 @@
 import type { SqliteDatabase } from '../driver.js'
 import { migration001Initial } from './001-initial.js'
 import { migration002SyncColumns } from './002-sync-columns.js'
+import { migration003CacheRoles } from './003-cache-roles.js'
 
 export interface Migration {
   id: string
@@ -22,7 +23,11 @@ export interface Migration {
 }
 
 /** Ordered registry — ascending version. */
-export const MIGRATIONS: readonly Migration[] = [migration001Initial, migration002SyncColumns]
+export const MIGRATIONS: readonly Migration[] = [
+  migration001Initial,
+  migration002SyncColumns,
+  migration003CacheRoles,
+]
 
 function ensureMigrationsTable(db: SqliteDatabase): void {
   db.exec(`
