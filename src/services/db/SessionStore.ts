@@ -343,6 +343,27 @@ export class SessionStore {
   }
 
   /**
+   * Byte size + mtime this session was last synced from its JSONL source.
+   * NULL = never synced (the read-through loader treats that as stale).
+   */
+  getSyncInfo(sessionId: string): { size: number; mtime: number } | null {
+    const row = this.db
+      .query('SELECT synced_size, synced_mtime FROM sessions WHERE id = ?')
+      .get(sessionId) as { synced_size: number | null; synced_mtime: number | null } | null
+    if (!row || row.synced_size == null || row.synced_mtime == null) return null
+    return { size: row.synced_size, mtime: row.synced_mtime }
+  }
+
+  /** Record the JSONL stat this session was synced at (post-sync freshness mark). */
+  setSyncInfo(sessionId: string, size: number, mtime: number): void {
+    this.db.run('UPDATE sessions SET synced_size = ?, synced_mtime = ? WHERE id = ?', [
+      size,
+      mtime,
+      sessionId,
+    ])
+  }
+
+  /**
    * Rebuild a session's SQLite mirror from an ordered entry list (typically
    * parsed from its JSONL source). Full fidelity: stores EVERY entry — not just
    * transcript messages + summary — so loadTranscript reconstructs the exact
