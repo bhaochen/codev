@@ -517,7 +517,7 @@ export function getPublicModelDisplayName(model: ModelName): string | null {
     }
   }
 
-  // Kiro (Amazon Q) 模型显示名完全由目录驱动
+  // Kiro 模型显示名完全由目录驱动
   if (getAPIProvider() === 'kiro') {
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports

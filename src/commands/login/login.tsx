@@ -225,7 +225,7 @@ export function Login(props: {
       {
         label: (
           <Text>
-            Kiro (Amazon Q){' '}
+            Kiro{' '}
             <Text dimColor={true}>
               Free models via AWS Builder ID or imported token
             </Text>
@@ -256,6 +256,7 @@ export function Login(props: {
         <Box>
           <Select
             options={providerOptions}
+            visibleOptionCount={providerOptions.length}
             onChange={value =>
               setSelectedProvider(value as AuthProviderChoice)
             }
@@ -290,7 +291,7 @@ export function Login(props: {
     ) : selectedProvider === 'kiro' ? (
       <KiroLoginFlow
         onDone={onFlowDone}
-        startingMessage="Codev can use Kiro (Amazon Q) free models via AWS Builder ID or imported token."
+        startingMessage="Codev can use Kiro free models via AWS Builder ID or imported token."
       />
     ) : (
       <ConsoleOAuthFlow

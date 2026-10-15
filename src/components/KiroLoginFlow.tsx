@@ -256,7 +256,7 @@ export function KiroLoginFlow({
     <Box flexDirection="column" gap={1}>
       <Text bold={true}>
         {startingMessage ??
-          'Codev can use Kiro (Amazon Q) free models via AWS Builder ID or imported token.'}
+          'Codev can use Kiro free models via AWS Builder ID or imported token.'}
       </Text>
       <Text dimColor={true}>
         Free models require AWS authentication. Import a refresh token if you already have one.

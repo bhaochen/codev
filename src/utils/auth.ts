@@ -637,6 +637,76 @@ export function getKiroRegion(): string | null {
   return config.kiroRegion || null
 }
 
+/**
+ * Refresh Kiro access token using refresh token.
+ * Calls Kiro auth service (same as 9router's KiroService.refreshToken).
+ */
+export async function refreshKiroAccessToken(): Promise<string | null> {
+  const refreshToken = getKiroRefreshToken()
+  const profileArn = getKiroProfileArn()
+  const region = getKiroRegion() || 'us-east-1'
+
+  if (!refreshToken) {
+    console.error('[Kiro] No refresh token available')
+    return null
+  }
+
+  try {
+    // Kiro auth service endpoint (same as 9router)
+    const authService = 'https://prod.us-east-1.auth.desktop.kiro.dev'
+    
+    const response = await fetch(`${authService}/refreshToken`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ refreshToken }),
+    })
+
+    if (!response.ok) {
+      const error = await response.text()
+      console.error(`[Kiro] Token refresh failed: ${error}`)
+      return null
+    }
+
+    const data = await response.json()
+    const newAccessToken = data.accessToken
+    const newRefreshToken = data.refreshToken || refreshToken
+    const newProfileArn = data.profileArn || profileArn
+    const expiresIn = data.expiresIn || 3600
+
+    // Save new tokens
+    await saveKiroAuthTokens({
+      accessToken: newAccessToken,
+      refreshToken: newRefreshToken,
+      profileArn: newProfileArn,
+      region,
+      expiresAt: Date.now() + expiresIn * 1000,
+    })
+
+    return newAccessToken
+  } catch (error) {
+    console.error('[Kiro] Token refresh error:', error)
+    return null
+  }
+}
+
+/**
+ * Get valid Kiro access token, refreshing if needed.
+ */
+export async function getValidKiroAccessToken(): Promise<string | null> {
+  const accessToken = getKiroAccessToken()
+  const expiresAt = getGlobalConfig().kiroTokenExpiresAt
+
+  // If we have a token and it's not expired (with 5 min buffer), return it
+  if (accessToken && expiresAt && Date.now() < expiresAt - 5 * 60 * 1000) {
+    return accessToken
+  }
+
+  // Otherwise refresh
+  return refreshKiroAccessToken()
+}
+
 export interface KiroAutoDetectResult {
   found: boolean
   refreshToken?: string
@@ -827,19 +897,9 @@ async function tryDetectFromIDE(): Promise<KiroAutoDetectResult> {
         continue
       }
     }
-
-    return {
-      found: true,
-      refreshToken,
-      profileArn,
-      clientId: clientId || undefined,
-      clientSecret: clientSecret || undefined,
-      region,
-      authMethod,
-      source: 'ide',
-    }
-  } catch (error) {
-    return { found: false, error: error instanceof Error ? error.message : String(error) }
+  } catch {
+    // If any unexpected error occurs, return failure
+    return { found: false, error: 'Unexpected error during IDE detection' }
   }
 }
 

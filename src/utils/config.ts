@@ -211,7 +211,7 @@ export type GlobalConfig = {
   // NVIDIA API key
   nvidiaApiKey?: string
 
-  // Kiro (Amazon Q) configuration
+  // Kiro configuration
   kiroAccessToken?: string
   kiroRefreshToken?: string
   kiroProfileArn?: string

@@ -579,7 +579,7 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
     return [defaultOpt]
   }
 
-  // Kiro (Amazon Q): Show dynamically fetched models from CodeWhisperer
+  // Kiro: Show dynamically fetched models from CodeWhisperer
   if (getAPIProvider() === 'kiro') {
     const defaultOpt = getDefaultOptionForUser(fastMode)
     try {
@@ -594,7 +594,7 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
           ...models.map(m => ({
             value: m.id,
             label: m.name || m.id,
-            description: 'Kiro 免费模型 (Amazon Q)',
+            description: 'Kiro 免费模型',
           })),
         ]
       }

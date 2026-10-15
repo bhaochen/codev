@@ -50,7 +50,7 @@ export const ProtocolRegistry: Record<ProtocolId, ProtocolDef> = {
   },
   'aws-eventstream': {
     id: 'aws-eventstream',
-    displayName: 'AWS EventStream (Kiro/Amazon Q)',
+    displayName: 'AWS EventStream (Kiro)',
     endpointPath: '/',
     handler: queryAWSEventStream,
   },

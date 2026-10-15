@@ -73,10 +73,13 @@ function getBuiltinModelStrings(provider: APIProvider): ModelStrings {
   }
 
   if (provider === 'kiro') {
+    // Map codev's Claude-family model keys to Kiro model IDs.
+    // These IDs come from CodeWhisperer ListAvailableModels.
     const out = getBuiltinModelStrings('firstParty') as Record<string, string>
-    out.haiku45 = process.env.KIRO_HAIKU_MODEL || 'amazon.q.developer'
-    out.sonnet46 = process.env.KIRO_SONNET_MODEL || 'amazon.q.developer'
-    out.opus46 = process.env.KIRO_OPUS_MODEL || 'amazon.q.developer'
+    out.haiku45 = process.env.KIRO_HAIKU_MODEL || 'claude-haiku-4.5'
+    out.sonnet45 = process.env.KIRO_SONNET_MODEL || 'claude-sonnet-4.5'
+    out.sonnet46 = process.env.KIRO_SONNET_MODEL || 'claude-sonnet-4.5'
+    out.opus46 = process.env.KIRO_OPUS_MODEL || 'claude-sonnet-4.5'
     return out as ModelStrings
   }
 

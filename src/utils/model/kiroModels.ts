@@ -1,5 +1,5 @@
 import type { ModelOption } from './modelOptions.js'
-import { getKiroAccessToken, getKiroProfileArn, getKiroRegion } from '../auth.js'
+import { getValidKiroAccessToken, getKiroProfileArn, getKiroRegion } from '../auth.js'
 import { getKiroBaseUrl } from './providers.js'
 import { recordProviderContextWindows } from './contextWindowStore.js'
 import { recordModelVision, visionFromModelsDevEntry } from './visionCapability.js'
@@ -29,7 +29,7 @@ export async function fetchKiroModels(): Promise<void> {
 
   fetchPromise = (async () => {
     try {
-      const accessToken = getKiroAccessToken()
+      const accessToken = await getValidKiroAccessToken()
       const profileArn = getKiroProfileArn()
       const region = getKiroRegion() || 'us-east-1'
 
@@ -101,10 +101,10 @@ export async function fetchKiroModels(): Promise<void> {
     } catch (error) {
       console.error('[kiroModels] Error fetching Kiro models:', error)
       if (!cachedModels) {
-        // Fallback models if network fails
+        // Fallback models if network fails (IDs match CodeWhisperer ListAvailableModels)
         cachedModels = [
-          { id: 'amazon.q.developer', name: 'Amazon Q Developer', isFree: true, contextWindow: 200_000, maxTokens: 32_000 },
-          { id: 'amazon.q.business', name: 'Amazon Q Business', isFree: true, contextWindow: 200_000, maxTokens: 32_000 },
+          { id: 'auto', name: 'Auto', isFree: true, contextWindow: 1_000_000, maxTokens: 64_000 },
+          { id: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5', isFree: true, contextWindow: 200_000, maxTokens: 64_000 },
         ]
       }
     } finally {
