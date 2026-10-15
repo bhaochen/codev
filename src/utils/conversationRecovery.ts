@@ -45,7 +45,7 @@ import {
   isLiteLog,
   loadFullLog,
   loadMessageLogs,
-  loadTranscriptFile,
+  loadTranscriptViaCache,
   removeExtraFields,
 } from './sessionStorage.js'
 import type { ContentReplacementRecord } from './toolResultStorage.js'
@@ -419,7 +419,9 @@ export async function loadMessagesFromJsonlPath(path: string): Promise<{
   messages: SerializedMessage[]
   sessionId: UUID | undefined
 }> {
-  const { messages: byUuid, leafUuids } = await loadTranscriptFile(path)
+  // Read-through cache when available (same shape, file fallback built in);
+  // legacy direct read for paths outside the projects root.
+  const { messages: byUuid, leafUuids } = await loadTranscriptViaCache(path)
   let tip: (typeof byUuid extends Map<UUID, infer T> ? T : never) | null = null
   let tipTs = 0
   for (const m of byUuid.values()) {

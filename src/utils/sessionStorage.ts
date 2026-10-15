@@ -17,7 +17,7 @@ import {
   writeFile,
 } from 'fs/promises'
 import memoize from 'lodash-es/memoize.js'
-import { basename, dirname, join, relative } from 'path'
+import { basename, dirname, isAbsolute, join, relative } from 'path'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -2378,7 +2378,7 @@ export async function loadTranscriptFromFile(
       contentReplacements,
       worktreeStates,
       goalStore,
-    } = await loadTranscriptFile(filePath)
+    } = await loadTranscriptViaCache(filePath)
 
     if (messages.size === 0) {
       throw new Error('No messages found in JSONL file')
@@ -4007,11 +4007,25 @@ function shouldUseTranscriptCache(): boolean {
  * Only valid for default-opts reads (the cache mirrors what
  * loadTranscriptFile(sessionFile) with no opts returns); callers that pass
  * keepAllLeaves must keep calling loadTranscriptFile directly.
+ *
+ * Exported for the remaining CLI readers (conversationRecovery's
+ * `--resume <path.jsonl>` chain-walk). Only files that live UNDER the
+ * projects root are cacheable — a transcript imported from elsewhere would
+ * otherwise create a mirror row with a nonsensical project_dir.
  */
-async function loadTranscriptViaCache(
+export async function loadTranscriptViaCache(
   sessionFile: string,
 ): Promise<TranscriptShape> {
-  if (shouldUseTranscriptCache() && sessionFile.endsWith('.jsonl')) {
+  const projectDirRel = relative(getProjectsDir(), dirname(sessionFile))
+  const underProjectsRoot =
+    projectDirRel !== '' &&
+    !projectDirRel.startsWith('..') &&
+    !isAbsolute(projectDirRel)
+  if (
+    shouldUseTranscriptCache() &&
+    sessionFile.endsWith('.jsonl') &&
+    underProjectsRoot
+  ) {
     try {
       const { getSessionStore } = await import('../services/db/SessionStore.js')
       const { loadTranscriptCached } = await import('../services/db/transcriptCache.js')
@@ -4024,7 +4038,7 @@ async function loadTranscriptViaCache(
         // sessions.project_dir is the directory name relative to the projects
         // root (the convention findSessionFiles/migrateSessions scan by), not
         // the absolute path the transcript lives at.
-        relative(getProjectsDir(), dirname(sessionFile)),
+        projectDirRel,
       )
     } catch (err) {
       logForDebugging(
