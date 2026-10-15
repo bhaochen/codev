@@ -1,65 +1,91 @@
 import { createHash, randomBytes } from 'crypto'
 
-// OpenCode 1.19.0+ required for free tier (since mid-Oct 2026)
-const OPENCODE_VERSION = '1.19.0'
+// OpenCode v2.0.26+ required for free tier (since 2026-10-14)
+const OPENCODE_VERSION = '2.0.26'
+const OPENCODE_CHANNEL = 'latest'
+const OPENCODE_CLIENT = 'cli'
 
-// Provider-utils versions per protocol (from OpenCode 1.19.0 release binary)
+// Provider-utils versions per protocol (from OpenCode 2.0.26 release binary)
 const PROVIDER_UTILS = {
   chat: '4.0.23',
   responses: '4.0.40',
   anthropic: '4.0.46',
 } as const
 
-// Zen free tier endpoints (since mid-Oct 2026)
+// Zen free tier endpoints (since 2026-10-14) - inference API, NOT zen/v1
 const DEFAULT_BASE = 'https://opencode.ai/inference/v1'
 const LEGACY_BASE = 'https://opencode.ai/zen/v1'
 
-// Tools Zen's free tier requires (5 tools, each with a required parameter)
-const CORE_TOOLS = ['bash', 'edit', 'glob', 'grep', 'read'] as const
+// OpenCode v2 free tier requires EXACTLY these two tools with VERBATIM definitions
+// Upstream compares description and parameters exactly; do not reword or reformat
+const CORE_TOOLS = ['read', 'shell'] as const
 
 const CORE_PARAMETER: Record<string, string> = {
-  bash: 'command',
-  edit: 'filePath',
-  glob: 'pattern',
-  grep: 'pattern',
-  read: 'filePath',
+  read: 'path',
+  shell: 'command',
+}
+
+// Verbatim from OpenCode v2.0.26 CLI - upstream compares description and parameters exactly
+const FINGERPRINT_TOOL_DEFINITIONS = {
+  read: {
+    description: 'Read the contents of a file or directory. Supports text files, images, and PDFs. Images and PDFs are presented directly to the model. Each text line is prefixed by its 1-based line number as <line>: <content>. The prefix is for reference and is not part of the file content. Directory entries are returned one per line. Use offset and limit to read large files or directories in sections. Prefer one larger read over many small slices, and use grep to find specific content in large files.',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'File or directory to read' },
+        offset: { type: 'integer', minimum: 0, description: 'The line or directory entry to start reading from (1-based)' },
+        limit: { type: 'integer', minimum: 0, description: 'The maximum number of lines or directory entries to read (defaults to and capped at 2000)' },
+      },
+      required: ['path'],
+      additionalProperties: false,
+    },
+  },
+  shell: {
+    description: 'Execute a shell command and return its output. Commands run on Linux using bash. Quote file paths containing spaces or special characters. Prefer dedicated tools over shell commands when possible. When output is large, the full result is saved to a file and a truncated preview is returned. Rely on automatic truncation unless filtering the output is more useful. Commands accept an optional timeout, background commands have no timeout by default. Background commands return immediately, and you will be notified when they completes.',
+    parameters: {
+      type: 'object',
+      properties: {
+        command: { type: 'string', description: 'Shell command string to execute' },
+        workdir: { type: 'string', description: 'Working directory to execute the command in. Defaults to the current working directory. When possible, avoid changing directories in the command and set the working directory here instead.' },
+        timeout: { type: 'integer', minimum: 0, description: 'Timeout in milliseconds. Set to 0 to disable the timeout. Defaults to 120000 for foreground commands. Background commands have no timeout by default.' },
+        background: { type: 'boolean', description: 'Run the command in the background and return immediately (useful for dev servers and long-running builds). You do not need to use "&" at the end of the command when using this parameter. You will be notified when it completes. DO NOT poll for completion.' },
+      },
+      required: ['command'],
+      additionalProperties: false,
+    },
+  },
 }
 
 // Session ID validation regex with counter (low 12 bits inverted < 16)
-const SESSION_ID_RE = /^ses_[0-9a-f]{9}([0-9a-f]{3})[0-9A-Za-z]{14}$/
-
-const ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+// Upstream decodes prefix as ~(timeMs * 0x1000 + counter) and rejects non-small counter
+const SESSION_ID_RE = /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/
+const BASE62_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+const SESSION_PREFIX_MASK = (1n << 48n) - 1n
+const SESSION_TIME_MASK = (1n << 36n) - 1n
 
 let lastTimestamp = 0
 let sessionCounter = 0
-let requestCounter = 0
 
-/**
- * Generate an OpenCode-style ID (session or request).
- * Format: prefix_ + 12 hex of (timestamp * 0x1000 + counter) + 14 random base62
- * For sessions: counter is bit-inverted (descending) so newer sorts first.
- */
-function generateOpencodeId(prefix: 'ses' | 'msg', descending: boolean, now = Date.now()): string {
+function generateOpencodeId(prefix: 'ses' | 'msg', descending: boolean, now = Date.now(), counterValue = 1): string {
   if (now !== lastTimestamp) {
     lastTimestamp = now
-    if (prefix === 'ses') sessionCounter = 0
-    else requestCounter = 0
+    sessionCounter = 0
   }
-  const counter = prefix === 'ses' ? ++sessionCounter : ++requestCounter
+  if (prefix === 'ses') sessionCounter++
+  const counter = prefix === 'ses' ? sessionCounter : counterValue
   const current = BigInt(now) * 0x1000n + BigInt(counter)
-  const value = (descending ? ~current : current) & 0xffffffffffffn
+  const value = (descending ? ~current : current) & SESSION_PREFIX_MASK
+  const timeHex = value.toString(16).padStart(12, '0')
   const random = randomBytes(14)
   let tail = ''
-  for (const byte of random) tail += ALPHABET[byte % 62]
-  return `${prefix}_${value.toString(16).padStart(12, '0')}${tail}`
+  for (const byte of random) tail += BASE62_CHARS[byte % 62]
+  return `${prefix}_${timeHex}${tail}`
 }
 
-/** Generate a session ID (descending timestamp). */
 export function createSessionId(now = Date.now()): string {
-  return generateOpencodeId('ses', true, now)
+  return generateOpencodeId('ses', true, now, 1)
 }
 
-/** Generate a request ID (ascending timestamp). */
 export function createRequestId(now = Date.now()): string {
   return generateOpencodeId('msg', false, now)
 }
@@ -74,25 +100,28 @@ export async function getOpencodeProjectId(): Promise<string> {
   return 'global'
 }
 
-/** Check if a session ID is a real OpenCode session (counter in low 12 bits < 16). */
+/** Legacy alias for createRequestId. */
+export function createOpencodeId(prefix: 'ses' | 'msg'): string {
+  return prefix === 'ses' ? createSessionId() : createRequestId()
+}
+
+/** Get project ID from git remote (async). */
+export async function getOpencodeProjectId(): Promise<string> {
+  return 'global'
+}
+
 export function isRealOpencodeSession(id: string): boolean {
-  const match = SESSION_ID_RE.exec(id ?? '')
+  const match = /^ses_[0-9a-f]{9}([0-9a-f]{3})[0-9A-Za-z]{14}$/.exec(id ?? '')
   return !!match && 0xfff - Number.parseInt(match[1], 16) < 16
 }
 
-// Stable session per conversation (LRU cache, max 1000)
 const SESSIONS = new Map<string, string>()
 const KEEP_SESSIONS = 1000
 
-/**
- * Get or create a stable session ID for a conversation.
- * Reads from multiple headers; falls back to hash of first user message.
- */
 export function getSessionIdForRequest(
   headers: Headers,
   body: Record<string, unknown>
 ): string {
-  // Read session from various headers (in priority order)
   let signal: string | null = null
   for (const name of [
     'x-opencode-session',
@@ -102,19 +131,11 @@ export function getSessionIdForRequest(
     'conversation-id',
   ]) {
     const value = headers.get(name)
-    if (value) {
-      signal = value
-      break
-    }
+    if (value) { signal = value; break }
   }
-  // Fallback to body metadata
-  if (!signal && typeof body.metadata?.session_id === 'string') {
-    signal = body.metadata.session_id
-  }
-  // Use existing valid session ID
+  if (!signal && typeof body.metadata?.session_id === 'string') signal = body.metadata.session_id
   if (signal && isRealOpencodeSession(signal)) return signal
 
-  // No signal or invalid: create stable session keyed by first user message
   if (!signal) {
     const messages = (body.messages ?? body.input) as unknown[]
     const first = Array.isArray(messages)
@@ -126,10 +147,8 @@ export function getSessionIdForRequest(
 
   const key = createHash('sha256').update(`ses\0${signal}`).digest('hex')
   let session = SESSIONS.get(key)
-  if (session) {
-    // Move to end (LRU)
-    SESSIONS.delete(key)
-  } else {
+  if (session) { SESSIONS.delete(key) }
+  else {
     session = createSessionId()
     if (SESSIONS.size >= KEEP_SESSIONS) {
       const oldest = SESSIONS.keys().next().value
@@ -140,114 +159,10 @@ export function getSessionIdForRequest(
   return session
 }
 
-/** Get User-Agent matching OpenCode 1.19.0 per protocol. */
 export function getOpencodeUserAgent(protocol: 'chat' | 'responses' | 'anthropic' = 'chat'): string {
-  return `opencode/${OPENCODE_VERSION} ai-sdk/provider-utils/${PROVIDER_UTILS[protocol]} runtime/bun/1.3.14`
+  return `opencode/${OPENCODE_CHANNEL}/${OPENCODE_VERSION}/${OPENCODE_CLIENT}`
 }
 
-/** Real OpenCode tool schemas (exact parameters Zen's free tier expects). */
-export const OPENCODE_TOOL_SCHEMAS: Record<string, Record<string, unknown>> = {
-  bash: {
-    type: 'object',
-    properties: {
-      command: { type: 'string', description: 'The command to execute' },
-      timeout: { type: 'integer', description: 'Optional timeout in milliseconds' },
-      workdir: { type: 'string', description: 'The working directory to run the command in' },
-    },
-    required: ['command'],
-    additionalProperties: false,
-  },
-  edit: {
-    type: 'object',
-    properties: {
-      filePath: { type: 'string', description: 'The file to edit' },
-      oldString: { type: 'string', description: 'The text to replace' },
-      newString: { type: 'string', description: 'The text to replace it with' },
-    },
-    required: ['filePath', 'oldString', 'newString'],
-    additionalProperties: false,
-  },
-  glob: {
-    type: 'object',
-    properties: {
-      pattern: { type: 'string', description: 'The glob pattern to match' },
-    },
-    required: ['pattern'],
-    additionalProperties: false,
-  },
-  grep: {
-    type: 'object',
-    properties: {
-      pattern: { type: 'string', description: 'The regex pattern to search for' },
-    },
-    required: ['pattern'],
-    additionalProperties: false,
-  },
-  read: {
-    type: 'object',
-    properties: {
-      filePath: { type: 'string', description: 'The absolute path to the file or directory to read' },
-      offset: { type: 'integer', description: 'The line number to start reading from (1-indexed)' },
-      limit: { type: 'integer', description: 'The maximum number of lines to read' },
-    },
-    required: ['filePath'],
-    additionalProperties: false,
-  },
-}
-
-/** Get tool schema for Zen free tier (includes "Not available" description). */
-export function getZenToolSchema(name: string): Record<string, unknown> {
-  const base = OPENCODE_TOOL_SCHEMAS[name]
-  return base
-    ? { ...base, properties: { ...base.properties, [CORE_PARAMETER[name]]: base.properties[CORE_PARAMETER[name]] } }
-    : { type: 'object', properties: {} }
-}
-
-/** Normalize tools for Zen free tier: inject missing CORE_TOOLS with proper schemas. */
-export function normalizeToolsForZen(
-  body: Record<string, unknown>,
-  protocol: 'chat' | 'responses' | 'anthropic'
-): { declared: Set<string> } {
-  const tools = (body.tools as unknown[] | undefined) ?? []
-  body.tools = tools
-
-  const declared = new Set<string>()
-  const present = new Set<string>()
-
-  for (const tool of tools) {
-    const name = protocol === 'chat'
-      ? (tool as Record<string, unknown>)?.function?.name
-      : (tool as Record<string, unknown>)?.name
-    if (typeof name === 'string') {
-      present.add(name)
-      declared.add(name)
-    }
-  }
-
-  for (const name of CORE_TOOLS) {
-    if (present.has(name)) continue
-
-    const paramName = CORE_PARAMETER[name]
-    const parameters = {
-      type: 'object',
-      properties: { [paramName]: { type: 'string' } },
-      additionalProperties: false,
-    }
-    const definition = { name, description: 'Not available. Never call this tool.' }
-
-    const tool = protocol === 'chat'
-      ? { type: 'function', function: { ...definition, parameters } }
-      : protocol === 'anthropic'
-        ? { ...definition, input_schema: parameters }
-        : { type: 'function', ...definition, parameters }
-
-    tools.push(tool)
-  }
-
-  return { declared }
-}
-
-/** Get the inference API base URL (not legacy zen/v1). */
 export function getInferenceBaseUrl(url?: string): string {
   try {
     const parsed = new URL(url ?? DEFAULT_BASE)
@@ -258,31 +173,24 @@ export function getInferenceBaseUrl(url?: string): string {
     if (parsed.pathname.startsWith('/zen/go')) return url ?? DEFAULT_BASE
     parsed.pathname = '/inference' + parsed.pathname.slice(4)
     return parsed.toString()
-  } catch {
-    return url ?? DEFAULT_BASE
-  }
+  } catch { return url ?? DEFAULT_BASE }
 }
 
-/** Build headers matching OpenCode 1.19.0 exactly. */
 export function buildOpencodeHeaders(
   protocol: 'chat' | 'responses' | 'anthropic',
   headers: Headers,
-  body: Record<string, unknown>,
-  projectId?: string
+  body: Record<string, unknown>
 ): Headers {
   const session = getSessionIdForRequest(headers, body)
-  const requestId = generateOpencodeId('msg', false)
-
   const h = new Headers({
     'content-type': 'application/json',
     accept: '*/*',
-    'user-agent': getOpencodeUserAgent(protocol),
-    'x-opencode-project':
-      headers.get('x-opencode-project') ||
-      (projectId ? projectId : 'global'),
+    'user-agent': `opencode/${OPENCODE_CHANNEL}/${OPENCODE_VERSION}/${OPENCODE_CLIENT}`,
+    'x-opencode-project': headers.get('x-opencode-project') || 'global',
     'x-opencode-session': session,
     'x-opencode-session-id': session,
-    'x-opencode-request': generateOpencodeId('msg', false),
+    'x-session-affinity': session,
+    'x-session-id': session,
     'x-opencode-client': 'cli',
   })
 
@@ -297,3 +205,75 @@ export function buildOpencodeHeaders(
 
   return h
 }
+
+export function fingerprintToolKey(name: string): string {
+  const trimmed = String(name ?? '').trim()
+  return CORE_TOOLS.includes(trimmed as any) ? trimmed : ''
+}
+
+function chatFunctionOf(tool: unknown) {
+  const fn = (tool as Record<string, unknown>)?.function
+  return fn && typeof fn === 'object' && !Array.isArray(fn) ? fn : null
+}
+
+function toolNameOf(tool: unknown): string {
+  return (protocol === 'chat' ? chatFunctionOf(tool)?.name : (tool as Record<string, unknown>)?.name) ?? ''
+}
+
+function isFingerprintDefinition(tool: unknown, key: string): boolean {
+  const def = tool && (chatFunctionOf(tool) || tool)
+  const want = FINGERPRINT_TOOL_DEFINITIONS[key as keyof typeof FINGERPRINT_TOOL_DEFINITIONS]
+  return !!def && def.description === want.description
+    && JSON.stringify(def.parameters) === JSON.stringify(want.parameters)
+}
+
+function toolNameOf(tool: unknown, protocol: 'chat' | 'responses' | 'anthropic'): string {
+  if (protocol === 'chat') return chatFunctionOf(tool)?.name ?? ''
+  return String((tool as Record<string, unknown>)?.name ?? '')
+}
+
+function withToolName(tool: unknown, name: string) {
+  const fn = chatFunctionOf(tool)
+  return fn ? { ...tool, function: { ...fn, name } } : { ...tool, name }
+}
+
+function normalizeToolsForZen(
+  body: Record<string, unknown>,
+  protocol: 'chat' | 'responses' | 'anthropic'
+): { declared: Set<string>; appended: string[] } {
+  const tools = (body.tools as unknown[] | undefined) ?? []
+  body.tools = tools
+  const declared = new Set<string>()
+  const taken = new Set<string>()
+  const seen = new Set<string>()
+
+  for (const tool of tools) {
+    const name = toolNameOf(tool, protocol)
+    if (typeof name === 'string') {
+      taken.add(name)
+    }
+  }
+
+  const appended: string[] = []
+  for (const name of CORE_TOOLS) {
+    if (tools.some((tool) => toolNameOf(tool, protocol) === name)) continue
+    const { description, parameters } = FINGERPRINT_TOOL_DEFINITIONS[name as keyof typeof FINGERPRINT_TOOL_DEFINITIONS]
+    const tool = protocol === 'chat'
+      ? { type: 'function', function: { name, description, parameters } }
+      : protocol === 'anthropic'
+        ? { name, description, input_schema: parameters }
+        : { type: 'function', name, description, parameters }
+    tools.push(tool)
+    appended.push(name)
+  }
+
+  // Determine declared tools (after fingerprint injection)
+  for (const tool of tools) {
+    const name = toolNameOf(tool, protocol)
+    if (typeof name === 'string') declared.add(name)
+  }
+
+  return { declared, appended }
+}
+
+export { CORE_TOOLS, FINGERPRINT_TOOL_DEFINITIONS, normalizeToolsForZen }
