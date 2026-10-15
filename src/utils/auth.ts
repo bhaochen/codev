@@ -646,6 +646,7 @@ export interface KiroAutoDetectResult {
   region?: string
   authMethod?: string
   error?: string
+  source?: 'ide' | 'cli'
 }
 
 /**
@@ -653,6 +654,76 @@ export interface KiroAutoDetectResult {
  * Mirrors 9router's auto-import logic.
  */
 export async function autoDetectKiroAuth(): Promise<KiroAutoDetectResult> {
+  const { homedir } = await import('os')
+  const { join } = await import('path')
+  const { readdir, readFile } = await import('fs/promises')
+
+  // First try kiro-cli SQLite database (most common for CLI users)
+  const cliResult = await tryDetectFromKiroCLI()
+  if (cliResult.found) {
+    return { ...cliResult, source: 'cli' }
+  }
+
+  // Then try AWS SSO cache + Kiro IDE profile (for IDE users)
+  return tryDetectFromIDE()
+}
+
+async function tryDetectFromKiroCLI(): Promise<KiroAutoDetectResult> {
+  const { homedir } = await import('os')
+  const { join } = await import('path')
+  const { readFile } = await import('fs/promises')
+
+  const cliDbPath = join(homedir(), '.local', 'share', 'kiro-cli', 'data.sqlite3')
+  
+  try {
+    // Check if file exists
+    await readFile(cliDbPath)
+  } catch {
+    return { found: false, error: 'kiro-cli database not found' }
+  }
+
+  try {
+    // Use Bun's built-in SQLite (no external dependency)
+    const { Database } = await import('bun:sqlite')
+    const db = new Database(cliDbPath, { readonly: true })
+    
+    try {
+      const row = db.query('SELECT value FROM auth_kv WHERE key = ?').get('kirocli:social:token')
+      if (!row?.value) {
+        return { found: false, error: 'No auth token found in kiro-cli database' }
+      }
+
+      const auth = JSON.parse(row.value as string)
+      const refreshToken = auth.refresh_token
+      const profileArn = auth.profile_arn
+
+      if (!refreshToken || typeof refreshToken !== 'string' || !refreshToken.startsWith('aorAAAAAG')) {
+        return { found: false, error: 'Invalid refresh token format in kiro-cli database' }
+      }
+
+      if (!profileArn) {
+        return { found: false, error: 'No profile ARN found in kiro-cli database' }
+      }
+
+      // Determine auth method from provider
+      const authMethod = auth.provider === 'github' || auth.provider === 'google' ? 'social' : 'builder-id'
+
+      return {
+        found: true,
+        refreshToken,
+        profileArn,
+        region: 'us-east-1', // kiro-cli profile ARN is already normalized
+        authMethod,
+      }
+    } finally {
+      db.close()
+    }
+  } catch (error) {
+    return { found: false, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+async function tryDetectFromIDE(): Promise<KiroAutoDetectResult> {
   const { homedir } = await import('os')
   const { join } = await import('path')
   const { readdir, readFile } = await import('fs/promises')
@@ -765,6 +836,7 @@ export async function autoDetectKiroAuth(): Promise<KiroAutoDetectResult> {
       clientSecret: clientSecret || undefined,
       region,
       authMethod,
+      source: 'ide',
     }
   } catch (error) {
     return { found: false, error: error instanceof Error ? error.message : String(error) }

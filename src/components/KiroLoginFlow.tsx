@@ -29,6 +29,7 @@ export function KiroLoginFlow({
     clientSecret?: string
     region?: string
     authMethod?: string
+    source?: 'cli' | 'ide'
   } | null>(null)
 
   useEffect(() => {
@@ -77,6 +78,7 @@ export function KiroLoginFlow({
         clientSecret: result.clientSecret,
         region: result.region,
         authMethod: result.authMethod,
+        source: result.source,
       })
       setMode('auto_detect')
     } catch (error) {
@@ -159,13 +161,14 @@ export function KiroLoginFlow({
   }
 
   if (mode === 'auto_detect' && autoDetectedData) {
+    const sourceLabel = autoDetectedData.source === 'cli' ? 'kiro-cli' : 'Kiro IDE'
     return (
       <Box flexDirection="column" gap={1}>
         <Text>
           Auto-detected Kiro credentials:
           {'\n'}
           <Text dimColor={true}>
-            Source: {autoDetectedData.authMethod === 'idc' ? 'IDC (Organization)' : 'AWS Builder ID'}
+            Source: {sourceLabel} ({autoDetectedData.authMethod === 'social' ? 'GitHub/Google' : autoDetectedData.authMethod === 'idc' ? 'IDC (Organization)' : 'AWS Builder ID'})
             {autoDetectedData.region ? ` | Region: ${autoDetectedData.region}` : ''}
             {autoDetectedData.clientId ? ' | Client ID: found' : ''}
             {autoDetectedData.profileArn ? ' | Profile ARN: found' : ''}
