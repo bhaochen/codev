@@ -45,8 +45,8 @@ export function classifyComboError(error: unknown): ComboErrorClass {
     const msg = error.message ?? ''
     const name = error.name ?? ''
     
-    // Abort detection
-    if (name === 'AbortError' || name === 'APIUserAbortError' || msg.includes('abort')) {
+    // Abort detection (case-insensitive: `new Error('AbortError')` has name 'Error')
+    if (name === 'AbortError' || name === 'APIUserAbortError' || msg.toLowerCase().includes('abort')) {
       return 'abort'
     }
     

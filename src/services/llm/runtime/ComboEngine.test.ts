@@ -115,11 +115,14 @@ describe('ComboEngine', () => {
 
   it('should throw when no valid combo items', async () => {
     const combo = createCombo({ items: [] })
-    await expect(async () => {
-      for await (const _ of engine.generate(createRequest(), combo)) {
-        // consume
-      }
-    }).rejects.toThrow('No valid combo items')
+    // `.rejects` needs a promise: call the async function immediately
+    await expect(
+      (async () => {
+        for await (const _ of engine.generate(createRequest(), combo)) {
+          // consume
+        }
+      })(),
+    ).rejects.toThrow('No valid combo items')
   })
 
   it('should filter paid models when allowPaidFallback is false', async () => {
@@ -130,20 +133,21 @@ describe('ComboEngine', () => {
       ],
       allowPaidFallback: false,
     })
-    
+
     // Should only try the free model
-    const events: string[] = []
+    const attemptedModels: string[] = []
     try {
       for await (const _ of engine.generate(createRequest(), combo, (e) => {
-        events.push(e.type)
+        if (e.type === 'attempt_start') attemptedModels.push(e.item.model)
       })) {
         // consume
       }
     } catch {
       // Expected to fail since we're using mock routes
     }
-    
-    // Should not have attempted the paid model
-    expect(events).not.toContain('attempt_start')
+
+    // The paid candidate was filtered out before any attempt
+    expect(attemptedModels).not.toContain('gpt-4')
+    expect(attemptedModels).toContain('free-model')
   })
 })
