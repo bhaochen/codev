@@ -110,7 +110,7 @@ import { BackgroundTasksDialog } from '../tasks/BackgroundTasksDialog.js';
 import { shouldHideTasksFooter } from '../tasks/taskStatusUtils.js';
 import { TeamsDialog } from '../teams/TeamsDialog.js';
 import VimTextInput from '../VimTextInput.js';
-import { getModeFromInput, getModeSwitchFromInput, getValueFromInput, isHiddenBashInput } from './inputModes.js';
+import { getModeFromInput, getModeSwitchFromInput, getValueFromInput, isHiddenBashInput, withHiddenBashSpace } from './inputModes.js';
 import { FOOTER_TEMPORARY_STATUS_TIMEOUT, Notifications } from './Notifications.js';
 import PromptInputFooter from './PromptInputFooter.js';
 import type { SuggestionItem } from './PromptInputFooterSuggestions.js';
@@ -906,7 +906,9 @@ function PromptInput({
       // Multi-char insertion into empty input (e.g. tab-accepting "! gcloud auth login")
       if (input.length === 0) {
         onModeChange(newMode);
-        const valueWithoutMode = getValueFromInput(value).replaceAll('\t', '    ');
+        // `!!cmd`: keep the space a typed second `!` gets, so the box reads
+        // `!! cmd` (submit trims it) whatever way the text arrived.
+        const valueWithoutMode = withHiddenBashSpace(getValueFromInput(value).replaceAll('\t', '    '));
         pushToBuffer(input, cursorOffset, pastedContents);
         trackAndSetInput(valueWithoutMode);
         setCursorOffset(valueWithoutMode.length);
@@ -1238,6 +1240,11 @@ function PromptInput({
       if (pastedMode !== 'prompt') {
         onModeChange(pastedMode);
         text = getValueFromInput(text);
+        // `!!cmd`: same space a typed second `!` gets, so the box reads
+        // `!! cmd` instead of `!!cmd` (getHiddenBashCommand trims it).
+        if (pastedMode === 'bash') {
+          text = withHiddenBashSpace(text);
+        }
       }
     }
     const numLines = getPastedTextRefNumLines(text);

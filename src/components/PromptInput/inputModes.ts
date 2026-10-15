@@ -56,6 +56,19 @@ export function isHiddenBashInput(bashCommand: string): boolean {
 }
 
 /**
+ * `!!cmd`: the input form of a hidden bash command keeps one space after the
+ * marker — the same space the `!` indicator gives a normal bash command — so
+ * the box reads `!! cmd` rather than `!!cmd`. Submit trims it (see
+ * getHiddenBashCommand). Any other value is returned unchanged.
+ */
+export function withHiddenBashSpace(bashValue: string): string {
+  if (bashValue.startsWith('!') && !bashValue.startsWith('! ')) {
+    return `! ${bashValue.slice(1)}`
+  }
+  return bashValue
+}
+
+/**
  * The command a hidden (`!!cmd`) bash input runs, or null when there is none:
  * not a hidden input, or nothing typed after `!!`.
  */

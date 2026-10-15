@@ -6,6 +6,7 @@ import {
   getValueFromInput,
   isHiddenBashInput,
   prependModeCharacterToInput,
+  withHiddenBashSpace,
 } from './inputModes.js'
 
 describe('isHiddenBashInput', () => {
@@ -59,6 +60,29 @@ describe('getModeSwitchFromInput', () => {
 
   test('inputs without a mode keep switching on !', () => {
     expect(getModeSwitchFromInput('!', undefined)).toBe('bash')
+  })
+})
+
+describe('withHiddenBashSpace', () => {
+  test('keeps one space after the hidden marker, like `! ` for bash', () => {
+    expect(withHiddenBashSpace('!')).toBe('! ')
+    expect(withHiddenBashSpace('!git status')).toBe('! git status')
+  })
+
+  test('leaves already-spaced hidden commands alone', () => {
+    expect(withHiddenBashSpace('! ')).toBe('! ')
+    expect(withHiddenBashSpace('! git status')).toBe('! git status')
+  })
+
+  test('spacing a hidden command does not change what it runs', () => {
+    expect(getHiddenBashCommand(withHiddenBashSpace('!git status'))).toBe(
+      'git status',
+    )
+  })
+
+  test('normal bash commands are untouched', () => {
+    expect(withHiddenBashSpace('')).toBe('')
+    expect(withHiddenBashSpace('git status')).toBe('git status')
   })
 })
 

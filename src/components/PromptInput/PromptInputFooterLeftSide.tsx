@@ -333,7 +333,9 @@ function ModeIndicator({
   const hasTeams = isAgentSwarmsEnabled() && !isInProcessEnabled() && teamContext !== undefined && count(Object.values(teamContext.teammates) as { name: string }[], t_0 => t_0.name !== 'team-lead') > 0;
   if (mode === 'bash') {
     // `!!cmd`: say so while typing, so the second `!` isn't taken for a typo.
-    return hiddenBashInput ? <Text dimColor>!! output not sent to model</Text> : <Text color="bashBorder">! for bash mode</Text>;
+    // Colored like the box it labels — hidden bash uses `warning` (the amber
+    // indicator and border), exactly as `! for bash mode` uses `bashBorder`.
+    return hiddenBashInput ? <Text color="warning">!! output not sent to model</Text> : <Text color="bashBorder">! for bash mode</Text>;
   }
   const currentMode = toolPermissionContext?.mode;
   const hasActiveMode = !isDefaultMode(currentMode);

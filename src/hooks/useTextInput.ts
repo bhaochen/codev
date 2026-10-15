@@ -410,13 +410,17 @@ export function useTextInput({
                 .replace(/\r/g, '\n')
               // A mode character that switches modes keeps the cursor in
               // front of it, because the caller strips it. In its own mode
-              // it's plain text (`!!cmd` in bash mode).
-              if (
-                cursor.isAtStart() &&
-                isInputModeCharacter(input) &&
-                getModeSwitchFromInput(input, inputMode) !== null
-              ) {
-                return cursor.insert(text).left()
+              // it's plain text: the second `!` opens hidden bash (`!!cmd`),
+              // and it keeps the space the `!` indicator gives a normal bash
+              // command, so the box reads `!! cmd`. The caller keeps both
+              // characters (submit trims the space).
+              if (cursor.isAtStart() && isInputModeCharacter(input)) {
+                if (getModeSwitchFromInput(input, inputMode) !== null) {
+                  return cursor.insert(text).left()
+                }
+                if (cursor.text === '') {
+                  return cursor.insert(`${text} `)
+                }
               }
               return cursor.insert(text)
             }

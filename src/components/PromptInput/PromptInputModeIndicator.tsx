@@ -12,7 +12,12 @@ type Props = {
   isLoading: boolean;
   viewingAgentName?: string;
   viewingAgentColor?: AgentColorName;
-  /** Bash mode with a `!!cmd`: the output isn't sent to the model. */
+  /**
+   * Bash mode with a `!!cmd`: the output isn't sent to the model. The input
+   * text already carries the second `!`, so only the mode `!` is added here —
+   * without the usual trailing space, so the two bangs stay adjacent (`!!cmd`,
+   * matching the footer's `!!` label) instead of reading `! !` or `!! !`.
+   */
   hiddenBashInput?: boolean;
 };
 
@@ -82,7 +87,7 @@ export function PromptInputModeIndicator(t0) {
   const viewedTeammateThemeColor = viewingAgentColor ? AGENT_COLOR_TO_THEME_COLOR[viewingAgentColor] : undefined;
   let t2;
   if ($[1] !== isLoading || $[2] !== mode || $[3] !== viewedTeammateThemeColor || $[4] !== viewingAgentName || $[6] !== hiddenBashInput) {
-    t2 = <Box alignItems="flex-start" alignSelf="flex-start" flexWrap="nowrap" justifyContent="flex-start">{viewingAgentName ? <PromptChar isLoading={isLoading} themeColor={viewedTeammateThemeColor} /> : mode === "bash" ? <Text color={hiddenBashInput ? "warning" : "bashBorder"} dimColor={isLoading}>{hiddenBashInput ? "!! " : "! "}</Text> : <PromptChar isLoading={isLoading} themeColor={isAgentSwarmsEnabled() ? teammateColor : undefined} />}</Box>;
+    t2 = <Box alignItems="flex-start" alignSelf="flex-start" flexWrap="nowrap" justifyContent="flex-start">{viewingAgentName ? <PromptChar isLoading={isLoading} themeColor={viewedTeammateThemeColor} /> : mode === "bash" ? <Text color={hiddenBashInput ? "warning" : "bashBorder"} dimColor={isLoading}>{hiddenBashInput ? "!" : "! "}</Text> : <PromptChar isLoading={isLoading} themeColor={isAgentSwarmsEnabled() ? teammateColor : undefined} />}</Box>;
     $[1] = isLoading;
     $[2] = mode;
     $[3] = viewedTeammateThemeColor;
