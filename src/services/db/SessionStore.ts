@@ -277,7 +277,7 @@ export class SessionStore {
     const limit = options.limit ?? 1000
 
     const rows = this.db
-      .query(`SELECT * FROM messages ${where} ORDER BY seq ASC LIMIT ?`)
+      .query(`SELECT * FROM messages WHERE ${where} ORDER BY seq ASC LIMIT ?`)
       .all(...params, limit) as Array<{
       seq: number
       session_id: string

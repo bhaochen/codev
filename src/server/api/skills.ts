@@ -77,7 +77,9 @@ function normalizeFrontmatter(content: string, sourcePath?: string): {
   const parsed = parseFrontmatter(content, sourcePath)
   return {
     frontmatter: parsed.frontmatter as Record<string, unknown>,
-    body: parsed.content,
+    // Frontmatter is conventionally followed by a blank separator line; drop it
+    // so `body` starts at the actual content (`---\n...\n---\n\nbody` → `body`).
+    body: parsed.content.replace(/^\r?\n/, ''),
   }
 }
 
