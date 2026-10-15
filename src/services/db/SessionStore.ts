@@ -55,6 +55,8 @@ export interface MessageRow {
   entryType: string
   data: Entry
   createdAt: number
+  /** Reducer role: 'main' (transcript buffer) or 'meta' (pre-boundary metadata). */
+  role: 'main' | 'meta'
 }
 
 export interface SessionListOptions {
@@ -270,6 +272,7 @@ export class SessionStore {
       entry_type: string
       data_json: string
       created_at: number
+      role: string | null
     }>
 
     return rows.map(row => ({
@@ -280,6 +283,7 @@ export class SessionStore {
       entryType: row.entry_type,
       data: JSON.parse(row.data_json) as Entry,
       createdAt: row.created_at,
+      role: row.role === 'meta' ? 'meta' : 'main',
     }))
   }
 
@@ -308,6 +312,7 @@ export class SessionStore {
           entry_type: string
           data_json: string
           created_at: number
+          role: string | null
         }
       | null
     if (!row) return null
@@ -319,6 +324,7 @@ export class SessionStore {
       entryType: row.entry_type,
       data: JSON.parse(row.data_json) as Entry,
       createdAt: row.created_at,
+      role: row.role === 'meta' ? 'meta' : 'main',
     }
   }
 
