@@ -119,7 +119,8 @@ and tested:
 | D0 | ✅ | `7e2ccd1` | DB→JSONL export/repair tool (`exportSession.ts`) — the self-heal prerequisite for the write flip |
 | D1 | ✅ | `f4cc239` | DB-primary write mode (`CODEV_DB_PRIMARY`): rows authoritative, export best-effort, export-failure repair |
 | C5 | ✅ | `e691253` | Forks read the source from rows in primary mode (lagging/missing export safe) |
-| D3 | ✅ | — | **Default flip**: primary mode ON by default; `CODEV_DB_PRIMARY=0` reverts to JSONL-as-truth |
+| C6 | ✅ | `662691b` | `/resume` listing supplements the dir scan with DB rows — sessions stay listed (with DB titles) even when the projects tree is gone |
+| D3 | ✅ | `2e4b127` | **Default flip**: primary mode ON by default; `CODEV_DB_PRIMARY=0` reverts to JSONL-as-truth |
 
 ### DB-Primary Mode (current default)
 
