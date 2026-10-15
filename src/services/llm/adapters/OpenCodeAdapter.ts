@@ -19,14 +19,15 @@ import type { Credential } from '../auth/strategies.js'
 import { getOpenCodeApiKey } from '../../../utils/auth.js'
 import { getOpencodeModelMaxTokens } from '../../../utils/model/opencodeModels.js'
 import {
-  getOpencodeUserAgent,
   getInferenceBaseUrl,
   getSessionIdForRequest,
   buildOpencodeHeaders,
   CORE_TOOLS,
   FINGERPRINT_TOOL_DEFINITIONS,
+  normalizeToolsForZen,
+  aliasHistoryToolCalls,
+  restoreToolNames,
 } from '../../../services/api/opencodeUserAgent.js'
-import { normalizeToolsForZen } from '../../../services/api/opencodeUserAgent.js'
 import { logForDebugging } from '../../../utils/debug.js'
 
 export class OpenCodeAdapter implements ProviderAdapter {
@@ -41,7 +42,7 @@ export class OpenCodeAdapter implements ProviderAdapter {
   }
 
   getEndpoint(route: LLMRoute, request: LLMRequest): string {
-    const baseUrl = route.endpoint ?? 'https://opencode.ai/zen/v1/chat/completions'
+    const baseUrl = route.endpoint ?? 'https://opencode.ai/inference/v1/chat/completions'
     return getInferenceBaseUrl(baseUrl)
   }
 
@@ -86,30 +87,55 @@ export class OpenCodeAdapter implements ProviderAdapter {
       body.stream = true
     }
 
-    // Tool choice: "auto" for Responses, undefined for chat (never "none")
-    if (this.isFreeModel(request.model)) {
-      if (protocol === 'responses') {
-        body.tool_choice = 'auto'
-      } else if (protocol === 'chat' && body.tool_choice === 'none') {
-        delete (body as Record<string, unknown>).tool_choice
-      }
-    }
-
     // Inject read + shell with verbatim OpenCode definitions
     if (this.isFreeModel(request.model) && Array.isArray(body.tools)) {
-      const { declared, appended } = normalizeToolsForZen(body, protocol)
+      const { declared, appended, aliasMap } = normalizeToolsForZen(body, protocol)
+
+      // Rename prior-turn calls to aliased tools so the model doesn't confuse them
+      if (aliasMap.size > 0) {
+        aliasHistoryToolCalls(body, aliasMap)
+      }
+
+      // Retarget tool_choice that points at an aliased tool
+      if (aliasMap.size > 0 && body.tool_choice && typeof body.tool_choice === 'object') {
+        const choice = body.tool_choice as Record<string, unknown>
+        const fn = choice.function as Record<string, unknown> | undefined
+        const targetName = typeof choice.name === 'string' ? choice.name
+          : fn && typeof fn.name === 'string' ? fn.name
+          : ''
+        if (targetName) {
+          for (const [alias, original] of aliasMap) {
+            if (original === targetName) {
+              if (typeof choice.name === 'string') {
+                body.tool_choice = { ...choice, name: alias }
+              } else if (fn) {
+                body.tool_choice = { ...choice, function: { ...fn, name: alias } }
+              }
+              break
+            }
+          }
+        }
+      }
 
       if (appended.length > 0) {
         // Add placeholder system note
-        const note = `\n\nDo not call the \`read\` or \`shell\` tools; they are placeholders for the free-tier fingerprint. Use the other tools you have been given.`
-        if (protocol === 'chat' || protocol === 'responses') {
-          // For chat: add to first system message or create one
-          if (protocol === 'chat') {
-            // Handled in queryModel via system prompt injection
+        const toolList = appended.map((name) => `\`${name}\``).join(' or ')
+        const note = appended.length > 1
+          ? `\n\nDo not call the ${toolList} tools; they are placeholders that do nothing. Use the other tools you have been given instead.`
+          : `\n\nDo not call the ${toolList} tool; it is a placeholder that does nothing. Use the other tools you have been given instead.`
+        if (protocol === 'chat') {
+          // For chat: prepend a system message
+          const messages = (body.messages as Record<string, unknown>[]) ?? []
+          const firstSystem = messages.find((m: Record<string, unknown>) => m.role === 'system')
+          if (firstSystem && typeof firstSystem.content === 'string') {
+            messages[0] = { ...firstSystem, content: `${firstSystem.content}${note}` }
+          } else {
+            body.messages = [{ role: 'system', content: note }, ...messages]
           }
-          body.instructions = (body.instructions ?? '') + note
+        } else {
+          body.instructions = ((body.instructions as string | undefined) ?? '') + note
         }
-        logForDebugging(`[OpenCodeAdapter] Injected fingerprint tools: ${appended.join(', ')}`)
+        logForDebugging(`[OpenCodeAdapter] Injected fingerprint tools: ${appended.join(', ')}; aliased: ${[...aliasMap.keys()].join(', ')}`)
       }
 
       // Tool choice: "auto" for Responses, undefined for chat (never "none")

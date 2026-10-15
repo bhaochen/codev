@@ -203,7 +203,7 @@ export function isLocalConfigured(): boolean {
 }
 
 export function getOpencodeBaseUrl(): string {
-  return process.env.OPENCODE_BASE_URL ?? 'https://opencode.ai/zen/v1'
+  return process.env.OPENCODE_BASE_URL ?? 'https://opencode.ai/inference/v1'
 }
 
 export function getOpenRouterBaseUrl(): string {

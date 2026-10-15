@@ -3,8 +3,12 @@ import {
   createOpencodeId,
   createSessionId,
   createRequestId,
-  translateSessionId,
   OPENCODE_SESSION_RE,
+  normalizeToolsForZen,
+  aliasHistoryToolCalls,
+  restoreToolNames,
+  FINGERPRINT_TOOL_DEFINITIONS,
+  CORE_TOOLS,
 } from '../opencodeUserAgent.js'
 
 describe('OpenCode ID Format', () => {
@@ -32,37 +36,137 @@ describe('OpenCode ID Format', () => {
   })
 })
 
-describe('translateSessionId', () => {
-  it('translates foreign IDs into valid OpenCode session format', () => {
-    const inputs = [
-      'claude:550e8400-e29b-41d4-a716-446655440000',
-      'antigravity:conv-abc-123',
-      'session-from-codex',
-      '12345',
-      '',
-    ]
-    for (const raw of inputs) {
-      const translated = translateSessionId(raw, 'codev')
-      expect(translated).toMatch(OPENCODE_SESSION_RE)
-      expect(translated).toHaveLength(30)
+describe('normalizeToolsForZen', () => {
+  it('appends read/shell fingerprint tools when missing', () => {
+    const body = { tools: [{ type: 'function', name: 'Edit', description: 'Edit a file', parameters: { type: 'object', properties: {} } }] }
+    const result = normalizeToolsForZen(body, 'chat')
+    const names = (body.tools as any[]).map((t) => t.function?.name ?? t.name)
+    expect(names).toContain('Edit')
+    expect(names).toContain('read')
+    expect(names).toContain('shell')
+    expect(result.appended).toEqual(['read', 'shell'])
+    expect(result.aliasMap.size).toBe(0)
+  })
+
+  it('aliases a caller tool named read with a different definition', () => {
+    const body = {
+      tools: [
+        { type: 'function', function: { name: 'read', description: 'Custom read tool', parameters: { type: 'object', properties: {} } } },
+        { type: 'function', function: { name: 'Edit', description: 'Edit a file', parameters: { type: 'object', properties: {} } } },
+      ],
     }
+    const result = normalizeToolsForZen(body, 'chat')
+    const names = (body.tools as any[]).map((t) => t.function?.name ?? t.name)
+    expect(names).toContain('read_client')
+    expect(names).toContain('Edit')
+    expect(names).toContain('read')
+    expect(names).toContain('shell')
+    expect(result.aliasMap.get('read_client')).toBe('read')
+    expect(result.appended).toEqual(['read', 'shell'])
   })
 
-  it('preserves already-valid OpenCode sessions', () => {
-    const valid = 'ses_f534dfae8ffeCy4Ee4tLWNygDc'
-    expect(translateSessionId(valid)).toBe(valid)
-    expect(translateSessionId(`  ${valid}  `)).toBe(valid)
+  it('aliases a caller tool named shell with a different definition', () => {
+    const body = {
+      tools: [
+        { type: 'function', function: { name: 'shell', description: 'Custom shell tool', parameters: { type: 'object', properties: {} } } },
+      ],
+    }
+    const result = normalizeToolsForZen(body, 'chat')
+    const names = (body.tools as any[]).map((t) => t.function?.name ?? t.name)
+    expect(names).toContain('shell_client')
+    expect(names).toContain('read')
+    expect(names).toContain('shell')
+    expect(result.aliasMap.get('shell_client')).toBe('shell')
   })
 
-  it('translates deterministically (same input -> same output)', () => {
-    const a = translateSessionId('conversation-a', 'claude')
-    const b = translateSessionId('conversation-a', 'claude')
-    expect(a).toBe(b)
+  it('does not alias case variants like Read/Bash (upstream accepts them)', () => {
+    const body = {
+      tools: [
+        { type: 'function', function: { name: 'Read', description: 'Claude Code read', parameters: { type: 'object', properties: {} } } },
+        { type: 'function', function: { name: 'Bash', description: 'Claude Code bash', parameters: { type: 'object', properties: {} } } },
+      ],
+    }
+    const result = normalizeToolsForZen(body, 'chat')
+    const names = (body.tools as any[]).map((t) => t.function?.name ?? t.name)
+    expect(names).toContain('Read')
+    expect(names).toContain('Bash')
+    expect(names).toContain('read')
+    expect(names).toContain('shell')
+    expect(result.aliasMap.size).toBe(0)
   })
 
-  it('isolates different tools', () => {
-    const claude = translateSessionId('same', 'claude')
-    const codex = translateSessionId('same', 'codex')
-    expect(claude).not.toBe(codex)
+  it('keeps a caller tool that already has the exact fingerprint definition', () => {
+    const readDef = FINGERPRINT_TOOL_DEFINITIONS.read
+    const body = {
+      tools: [
+        { type: 'function', function: { name: 'read', description: readDef.description, parameters: readDef.parameters } },
+      ],
+    }
+    const result = normalizeToolsForZen(body, 'chat')
+    const names = (body.tools as any[]).map((t) => t.function?.name ?? t.name)
+    expect(names).toEqual(['read', 'shell'])
+    expect(result.aliasMap.size).toBe(0)
+    expect(result.appended).toEqual(['shell'])
+  })
+})
+
+describe('aliasHistoryToolCalls', () => {
+  it('renames prior-turn tool_calls in messages to use aliases', () => {
+    const aliasMap = new Map([['read_client', 'read']])
+    const body = {
+      messages: [
+        { role: 'assistant', tool_calls: [{ id: '1', type: 'function', function: { name: 'read', arguments: '{}' } }] },
+      ],
+    }
+    aliasHistoryToolCalls(body, aliasMap)
+    const msg = (body.messages as any[])[0]
+    expect(msg.tool_calls[0].function.name).toBe('read_client')
+  })
+
+  it('renames function_call items in input to use aliases', () => {
+    const aliasMap = new Map([['shell_client', 'shell']])
+    const body = {
+      input: [
+        { type: 'message', role: 'user', content: 'hi' },
+        { type: 'function_call', call_id: '1', name: 'shell', arguments: '{}' },
+        { type: 'function_call_output', call_id: '1', output: 'done' },
+      ],
+    }
+    aliasHistoryToolCalls(body, aliasMap)
+    const input = body.input as any[]
+    expect(input[1].name).toBe('shell_client')
+  })
+})
+
+describe('restoreToolNames', () => {
+  it('restores aliased tool names in response tool_calls', () => {
+    const aliasMap = new Map([['read_client', 'read']])
+    const body = {
+      messages: [
+        { role: 'assistant', tool_calls: [{ id: '1', type: 'function', function: { name: 'read_client', arguments: '{}' } }] },
+      ],
+    }
+    restoreToolNames(body, aliasMap)
+    const msg = (body.messages as any[])[0]
+    expect(msg.tool_calls[0].function.name).toBe('read')
+  })
+
+  it('restores aliased function_call items in input', () => {
+    const aliasMap = new Map([['shell_client', 'shell']])
+    const body = {
+      input: [
+        { type: 'function_call', call_id: '1', name: 'shell_client', arguments: '{}' },
+      ],
+    }
+    restoreToolNames(body, aliasMap)
+    const input = body.input as any[]
+    expect(input[0].name).toBe('shell')
+  })
+
+  it('does nothing when aliasMap is empty', () => {
+    const body = { messages: [{ role: 'assistant', tool_calls: [{ id: '1', type: 'function', function: { name: 'read', arguments: '{}' } }] }] }
+    restoreToolNames(body, new Map())
+    const msg = (body.messages as any[])[0]
+    expect(msg.tool_calls[0].function.name).toBe('read')
   })
 })

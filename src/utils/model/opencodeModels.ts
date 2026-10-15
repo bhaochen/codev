@@ -4,6 +4,8 @@ import { getOpencodeBaseUrl } from './providers.js'
 import { recordProviderContextWindows } from './contextWindowStore.js'
 import { recordModelVision, visionFromModelsDevEntry } from './visionCapability.js'
 
+// Note: Model catalog fetcher still uses /zen/v1/models (still returns 200 upstream).
+// The free-tier inference endpoint moved to /inference/v1 (handled in OpenCodeAdapter).
 const OPENCODE_BASE_URL = 'https://opencode.ai/zen/v1'
 // 模型目录源与官方 opencode 对齐：优先自建镜像，失败回退上游 models.dev
 // （对标 opencode packages/core/src/models-dev.ts: `Flag.OPENCODE_MODELS_URL || "https://models.opencode.ai"`）

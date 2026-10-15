@@ -52,7 +52,7 @@ async function getCliProviderConfig(): Promise<ProviderClientConfig | null> {
       const apiKey = (config?.openCodeApiKey as string) || 'public'
       const model = (config?.openCodeModelName as string) || 'big-pickle'
       return {
-        baseUrl: 'https://opencode.ai/zen/v1',
+        baseUrl: 'https://opencode.ai/inference/v1',
         apiKey,
         model,
         protocol: 'openai',

@@ -107,7 +107,7 @@ describe('resolveRoute', () => {
 describe('Client=Protocol', () => {
   test('OpenAI/OpenCode/DeepSeek → same OpenAIChatClient', async () => {
     const openaiRoute = { provider: 'openai' as const, protocol: 'openai-chat' as const, model: 'gpt-5', endpoint: 'https://api.openai.com/v1/chat/completions' }
-    const opencodeRoute = { provider: 'opencode' as const, protocol: 'openai-chat' as const, model: 'big-pickle', endpoint: 'https://opencode.ai/zen/v1/chat/completions' }
+    const opencodeRoute = { provider: 'opencode' as const, protocol: 'openai-chat' as const, model: 'big-pickle', endpoint: 'https://opencode.ai/inference/v1/chat/completions' }
     const c1 = getClientForRoute(openaiRoute)
     const c2 = getClientForRoute(opencodeRoute)
     expect(c1).not.toBeNull()

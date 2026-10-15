@@ -59,6 +59,7 @@ const FINGERPRINT_TOOL_DEFINITIONS = {
 // Session ID validation regex with counter (low 12 bits inverted < 16)
 // Upstream decodes prefix as ~(timeMs * 0x1000 + counter) and rejects non-small counter
 const SESSION_ID_RE = /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/
+const OPENCODE_SESSION_RE = SESSION_ID_RE
 const BASE62_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
 const SESSION_PREFIX_MASK = (1n << 48n) - 1n
 const SESSION_TIME_MASK = (1n << 36n) - 1n
@@ -88,16 +89,6 @@ export function createSessionId(now = Date.now()): string {
 
 export function createRequestId(now = Date.now()): string {
   return generateOpencodeId('msg', false, now)
-}
-
-/** Legacy alias for createRequestId. */
-export function createOpencodeId(prefix: 'ses' | 'msg'): string {
-  return prefix === 'ses' ? createSessionId() : createRequestId()
-}
-
-/** Get project ID from git remote (async). */
-export async function getOpencodeProjectId(): Promise<string> {
-  return 'global'
 }
 
 /** Legacy alias for createRequestId. */
@@ -216,10 +207,6 @@ function chatFunctionOf(tool: unknown) {
   return fn && typeof fn === 'object' && !Array.isArray(fn) ? fn : null
 }
 
-function toolNameOf(tool: unknown): string {
-  return (protocol === 'chat' ? chatFunctionOf(tool)?.name : (tool as Record<string, unknown>)?.name) ?? ''
-}
-
 function isFingerprintDefinition(tool: unknown, key: string): boolean {
   const def = tool && (chatFunctionOf(tool) || tool)
   const want = FINGERPRINT_TOOL_DEFINITIONS[key as keyof typeof FINGERPRINT_TOOL_DEFINITIONS]
@@ -240,12 +227,13 @@ function withToolName(tool: unknown, name: string) {
 function normalizeToolsForZen(
   body: Record<string, unknown>,
   protocol: 'chat' | 'responses' | 'anthropic'
-): { declared: Set<string>; appended: string[] } {
+): { declared: Set<string>; appended: string[]; aliasMap: Map<string, string> } {
   const tools = (body.tools as unknown[] | undefined) ?? []
   body.tools = tools
   const declared = new Set<string>()
   const taken = new Set<string>()
   const seen = new Set<string>()
+  const aliasMap = new Map<string, string>()  // alias -> original name
 
   for (const tool of tools) {
     const name = toolNameOf(tool, protocol)
@@ -254,6 +242,28 @@ function normalizeToolsForZen(
     }
   }
 
+  // Phase 1: Alias conflicting caller tools (exact name match but different definition)
+  for (let i = 0; i < tools.length; i++) {
+    const tool = tools[i]
+    const name = toolNameOf(tool, protocol)
+    if (!name || !CORE_TOOLS.includes(name as any)) continue
+    if (seen.has(name)) continue
+
+    if (isFingerprintDefinition(tool, name as any)) {
+      seen.add(name)
+      continue
+    }
+
+    // Name collides with a fingerprint tool but definition differs → alias it
+    let alias = `${name}_client`
+    for (let n = 2; taken.has(alias); n++) alias = `${name}_client${n}`
+    taken.add(alias)
+    aliasMap.set(alias, name)
+    tools[i] = withToolName(tool, alias)
+    seen.add(alias)
+  }
+
+  // Phase 2: Append missing fingerprint tools with exact definitions
   const appended: string[] = []
   for (const name of CORE_TOOLS) {
     if (tools.some((tool) => toolNameOf(tool, protocol) === name)) continue
@@ -267,13 +277,94 @@ function normalizeToolsForZen(
     appended.push(name)
   }
 
-  // Determine declared tools (after fingerprint injection)
+  // Phase 3: Determine declared tools (after fingerprint injection)
   for (const tool of tools) {
     const name = toolNameOf(tool, protocol)
     if (typeof name === 'string') declared.add(name)
   }
 
-  return { declared, appended }
+  return { declared, appended, aliasMap }
 }
 
-export { CORE_TOOLS, FINGERPRINT_TOOL_DEFINITIONS, normalizeToolsForZen }
+/** Rename prior-turn calls to aliased tools so the model doesn't confuse them with OpenCode's. */
+export function aliasHistoryToolCalls(
+  body: Record<string, unknown>,
+  aliasMap: Map<string, string>
+): void {
+  if (!aliasMap.size) return
+  // aliasMap: alias -> original. We need original -> alias for history renaming.
+  const originalToAlias = new Map<string, string>()
+  for (const [alias, original] of aliasMap) originalToAlias.set(original, alias)
+
+  if (Array.isArray(body.input)) {
+    body.input = (body.input as Record<string, unknown>[]).map((item) => {
+      if (item?.type === 'function_call' && typeof item.name === 'string') {
+        const alias = originalToAlias.get(item.name)
+        if (alias) return { ...item, name: alias }
+      }
+      return item
+    })
+  }
+
+  if (Array.isArray(body.messages)) {
+    body.messages = (body.messages as Record<string, unknown>[]).map((msg) => {
+      if (!Array.isArray(msg?.tool_calls)) return msg
+      return {
+        ...msg,
+        tool_calls: msg.tool_calls.map((call: Record<string, unknown>) => {
+          const fn = call.function as Record<string, unknown> | undefined
+          if (!fn || typeof fn.name !== 'string') return call
+          const alias = originalToAlias.get(fn.name)
+          if (!alias) return call
+          return { ...call, function: { ...fn, name: alias } }
+        }),
+      }
+    })
+  }
+}
+
+/** Restore aliased tool names in the response to the caller's original names. */
+export function restoreToolNames(
+  body: Record<string, unknown>,
+  aliasMap: Map<string, string>
+): void {
+  if (!aliasMap.size) return
+
+  // Restore tool_calls in messages (chat shape)
+  if (Array.isArray(body.messages)) {
+    body.messages = (body.messages as Record<string, unknown>[]).map((msg) => {
+      if (!Array.isArray(msg?.tool_calls)) return msg
+      return {
+        ...msg,
+        tool_calls: msg.tool_calls.map((call: Record<string, unknown>) => {
+          const fn = call.function as Record<string, unknown> | undefined
+          if (!fn || typeof fn.name !== 'string') return call
+          const original = aliasMap.get(fn.name)
+          if (!original) return call
+          return { ...call, function: { ...fn, name: original } }
+        }),
+      }
+    })
+  }
+
+  // Restore function_call items in input (Responses shape)
+  if (Array.isArray(body.input)) {
+    body.input = (body.input as Record<string, unknown>[]).map((item) => {
+      if (item?.type === 'function_call' && typeof item.name === 'string') {
+        const original = aliasMap.get(item.name)
+        if (original) return { ...item, name: original }
+      }
+      if (item?.type === 'function_call_output') {
+        // function_call_output uses call_id, not name — nothing to restore
+      }
+      return item
+    })
+  }
+}
+
+export {
+  CORE_TOOLS,
+  FINGERPRINT_TOOL_DEFINITIONS,
+  normalizeToolsForZen,
+  OPENCODE_SESSION_RE,
+}

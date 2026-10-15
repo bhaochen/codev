@@ -36,7 +36,7 @@ import { isAbortError } from '../../../utils/errors.js'
 import { resolveOpenAIMaxTokens } from '../utils/requestBody.js'
 import { formatOpenAIPromptCacheKey, updateOpenAIUsage } from '../utils/openaiShared.js'
 import { resolveAuth } from '../auth/resolveAuth.js'
-import { createRequestId, getOpencodeUserAgent, translateSessionId } from '../../api/opencodeUserAgent.js'
+import { createRequestId, getOpencodeUserAgent } from '../../api/opencodeUserAgent.js'
 import { getNvidiaModelMaxTokens } from '../../../utils/model/nvidiaModels.js'
 import {
   adaptOpenAIChatSSE,
