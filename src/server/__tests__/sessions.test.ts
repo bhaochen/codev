@@ -662,6 +662,46 @@ describe('SessionService', () => {
     }
   })
 
+  it('resolves the session via the DB row project dir when enabled (Phase C3)', async () => {
+    const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    // Older copy in proj-b — this is the copy that gets synced into the DB.
+    const fileB = await writeSessionFile('-tmp-c3-b', sessionId, [
+      makeSnapshotEntry(),
+      makeUserEntry('Message B'),
+    ])
+    // Newer copy in proj-a — the file scan would prefer this one.
+    await new Promise(resolve => setTimeout(resolve, 10))
+    await writeSessionFile('-tmp-c3-a', sessionId, [
+      makeSnapshotEntry(),
+      makeUserEntry('Message A'),
+    ])
+
+    // Default (no DB): the scan picks the newest copy.
+    const fromScan = await service.getSessionMessages(sessionId)
+    expect(JSON.stringify(fromScan)).toContain('Message A')
+
+    process.env.TEST_ENABLE_TRANSCRIPT_CACHE = '1'
+    try {
+      const { getSessionStore, __resetSessionStoreForTests } =
+        await import('../../services/db/SessionStore.js')
+      const { loadTranscriptCached } = await import(
+        '../../services/db/transcriptCache.js'
+      )
+      const store = getSessionStore()
+      await loadTranscriptCached(store, sessionId, fileB, '-tmp-c3-b')
+
+      // With the DB enabled, the row's copy wins — and its entries are
+      // served from the DB rows (fresh, ≤5MB).
+      const fromDb = await service.getSessionMessages(sessionId)
+      expect(JSON.stringify(fromDb)).toContain('Message B')
+      expect(JSON.stringify(fromDb)).not.toContain('Message A')
+
+      __resetSessionStoreForTests()
+    } finally {
+      delete process.env.TEST_ENABLE_TRANSCRIPT_CACHE
+    }
+  })
+
   it('should append subagent tool calls under their parent agent tool result', async () => {
     const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
     const projectDir = '-tmp-project'

@@ -290,6 +290,17 @@ export class SessionService {
   }
 
   /**
+   * Phase C2/C3: whether server reads may consult the SQLite mirror first.
+   * Mirrors the CLI's gate: off in tests unless TEST_ENABLE_TRANSCRIPT_CACHE,
+   * otherwise suppressed together with session persistence.
+   */
+  private useDbReads(): boolean {
+    return process.env.NODE_ENV === 'test'
+      ? isEnvTruthy(process.env.TEST_ENABLE_TRANSCRIPT_CACHE)
+      : !shouldSkipSessionPersistence()
+  }
+
+  /**
    * Phase C2: DB-first raw entry read. For small sessions (<= the precompact
    * skip threshold — no boundary truncation semantics) with a row that is
    * provably current for the file, the rows mirror the file 1:1 in seq order,
@@ -301,11 +312,7 @@ export class SessionService {
     filePath: string,
   ): Promise<RawEntry[]> {
     try {
-      const useDb =
-        process.env.NODE_ENV === 'test'
-          ? isEnvTruthy(process.env.TEST_ENABLE_TRANSCRIPT_CACHE)
-          : !shouldSkipSessionPersistence()
-      if (useDb) {
+      if (this.useDbReads()) {
         const st = statSync(filePath)
         if (st.size <= SKIP_PRECOMPACT_THRESHOLD) {
           const { getSessionStore } = await import('../../services/db/SessionStore.js')
@@ -1046,6 +1053,32 @@ export class SessionService {
     }
 
     const projectsDir = this.getProjectsDir()
+
+    // Phase C3: DB-first resolution. The session row's project_dir points at
+    // the copy the SQLite mirror tracks; one indexed query + one stat replaces
+    // the scan over every project directory. Falls back to the scan when the
+    // row is missing or its file is gone (external writers, pruned rows).
+    // Trade-off: with multiple copies of one sessionId, the row's copy wins
+    // over the scan's newest-mtime copy — the row is the copy whose state the
+    // read/write paths have been tracking.
+    try {
+      if (this.useDbReads()) {
+        const { getSessionStore } = await import('../../services/db/SessionStore.js')
+        const row = getSessionStore().getSession(sessionId)
+        if (row) {
+          const filePath = path.join(projectsDir, row.projectDir, `${sessionId}.jsonl`)
+          try {
+            await fs.stat(filePath)
+            return [{ filePath, projectDir: row.projectDir }]
+          } catch {
+            // Row exists but file is gone — fall through to the scan.
+          }
+        }
+      }
+    } catch {
+      // fall through to the scan
+    }
+
     let projectDirs: string[]
 
     try {
@@ -1103,7 +1136,7 @@ export class SessionService {
     const found = await this.findSessionFile(sessionId)
     if (!found) return null
 
-    const entries = await this.readJsonlFile(found.filePath)
+    const entries = await this.readJsonlEntries(sessionId, found.filePath)
     const metadata: TranscriptMetadataSnapshot = {}
 
     for (let i = entries.length - 1; i >= 0; i--) {
@@ -1127,7 +1160,7 @@ export class SessionService {
     const found = await this.findSessionFile(sessionId)
     if (!found) return null
 
-    const entries = await this.readJsonlFile(found.filePath)
+    const entries = await this.readJsonlEntries(sessionId, found.filePath)
     let latest: {
       model: string
       inputTokens: number
@@ -1216,7 +1249,7 @@ export class SessionService {
     const found = await this.findSessionFile(sessionId)
     if (!found) return null
 
-    const entries = await this.readJsonlFile(found.filePath)
+    const entries = await this.readJsonlEntries(sessionId, found.filePath)
     const models = new Map<string, TranscriptUsageSnapshot['models'][number]>()
     let totalCostUSD = 0
     let totalInputTokens = 0
@@ -1365,7 +1398,7 @@ export class SessionService {
     // Build session list items with metadata from file stats & first entries
     const items = (await Promise.all(paginatedFiles.map(async ({ filePath, projectDir, sessionId, stat }) => {
       try {
-        const entries = await this.readJsonlFile(filePath)
+        const entries = await this.readJsonlEntries(sessionId, filePath)
         const workDir = this.resolveWorkDirFromEntries(entries, projectDir)
         const projectRoot = await this.resolveProjectRootFromEntries(entries, workDir, projectDir)
         const workDirExists = await this.pathExists(workDir)
@@ -1415,7 +1448,7 @@ export class SessionService {
 
     const { filePath, projectDir } = found
     const stat = await fs.stat(filePath)
-    const entries = await this.readJsonlFile(filePath)
+    const entries = await this.readJsonlEntries(sessionId, filePath)
 
     const messages = await this.appendSubagentToolMessages(
       projectDir,
@@ -1617,7 +1650,7 @@ export class SessionService {
     const found = await this.findSessionFile(sessionId)
     if (!found) return null
 
-    const entries = await this.readJsonlFile(found.filePath)
+    const entries = await this.readJsonlEntries(sessionId, found.filePath)
     let customTitle: string | null = null
     for (const entry of entries) {
       if (entry.type === 'custom-title' && typeof entry.customTitle === 'string' && entry.customTitle.trim()) {
@@ -1635,7 +1668,7 @@ export class SessionService {
     const found = await this.findSessionFile(sessionId)
     if (!found) return null
 
-    const entries = await this.readJsonlFile(found.filePath)
+    const entries = await this.readJsonlEntries(sessionId, found.filePath)
     return this.resolveWorkDirFromEntries(entries, found.projectDir)
   }
 
@@ -1652,7 +1685,7 @@ export class SessionService {
     const found = await this.findSessionFile(sessionId)
     if (!found) return null
 
-    const entries = await this.readJsonlFile(found.filePath)
+    const entries = await this.readJsonlEntries(sessionId, found.filePath)
     const entry = entries.find((candidate) => candidate.uuid === messageId)
     return typeof entry?.cwd === 'string' && entry.cwd.trim() ? entry.cwd : null
   }
@@ -1665,7 +1698,7 @@ export class SessionService {
     const found = await this.findSessionFile(sessionId)
     if (!found) return null
 
-    const entries = await this.readJsonlFile(found.filePath)
+    const entries = await this.readJsonlEntries(sessionId, found.filePath)
     const workDir = this.resolveWorkDirFromEntries(entries, found.projectDir) || process.cwd()
     const repository = this.resolveRepositoryFromEntries(entries)
     const worktreeSession = this.resolveWorktreeSessionFromEntries(entries)
@@ -1711,7 +1744,7 @@ export class SessionService {
       throw ApiError.notFound(`Session not found: ${sessionId}`)
     }
 
-    const entries = await this.readJsonlFile(found.filePath)
+    const entries = await this.readJsonlEntries(sessionId, found.filePath)
     const workDir = this.resolveWorkDirFromEntries(entries, found.projectDir) || fallbackWorkDir || process.cwd()
     const repository = this.resolveRepositoryFromEntries(entries)
     const now = new Date().toISOString()
@@ -1756,7 +1789,7 @@ export class SessionService {
     let repository = metadata.repository
     if (!repository) {
       for (const match of matches) {
-        const candidate = this.resolveRepositoryFromEntries(await this.readJsonlFile(match.filePath))
+        const candidate = this.resolveRepositoryFromEntries(await this.readJsonlEntries(sessionId, match.filePath))
         if (candidate) {
           repository = candidate
           break
@@ -1806,7 +1839,7 @@ export class SessionService {
       if (!projectDir.isDirectory()) continue
       if (projectDir.name === keepProjectDir) continue
       const filePath = path.join(projectsDir, projectDir.name, `${sessionId}.jsonl`)
-      const entries = await this.readJsonlFile(filePath)
+      const entries = await this.readJsonlEntries(sessionId, filePath)
       if (entries.length === 0) continue
 
       if (this.countTranscriptMessages(entries) > 0) continue
@@ -1826,7 +1859,7 @@ export class SessionService {
       throw ApiError.notFound(`Session not found: ${sessionId}`)
     }
 
-    const entries = await this.readJsonlFile(found.filePath)
+    const entries = await this.readJsonlEntries(sessionId, found.filePath)
     const activeMessages = this.entriesToMessages(entries)
     const startIndex = activeMessages.findIndex((message) => message.id === startMessageId)
 
@@ -1882,7 +1915,7 @@ export class SessionService {
       throw ApiError.notFound(`Session not found: ${sessionId}`)
     }
 
-    const entries = await this.readJsonlFile(found.filePath)
+    const entries = await this.readJsonlEntries(sessionId, found.filePath)
     const snapshotsByMessageId = new Map<string, FileHistorySnapshot>()
 
     for (const entry of entries) {
@@ -1921,7 +1954,7 @@ export class SessionService {
       throw ApiError.notFound(`Session not found: ${sessionId}`)
     }
 
-    const entries = await this.readJsonlFile(found.filePath)
+    const entries = await this.readJsonlEntries(sessionId, found.filePath)
     const notifications: SessionTaskNotification[] = []
     for (const entry of entries) {
       if (entry.message?.role !== 'user') continue
