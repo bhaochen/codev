@@ -1,140 +1,153 @@
-import { createHash, getRandomValues } from 'crypto'
-import { getRemoteUrl, normalizeGitRemoteUrl } from '../../utils/git.js'
+import { createHash, randomBytes } from 'crypto'
 
 // OpenCode 1.19.0+ required for free tier (since mid-Oct 2026)
-const DEFAULT_OPENCODE_VERSION = '1.19.0'
+const OPENCODE_VERSION = '1.19.0'
 
-let opencodeVersion = process.env.OPENCODE_VERSION || DEFAULT_OPENCODE_VERSION
-let opencodeUserAgent = buildUserAgent(opencodeVersion)
+// Provider-utils versions per protocol (from OpenCode 1.19.0 release binary)
+const PROVIDER_UTILS = {
+  chat: '4.0.23',
+  responses: '4.0.40',
+  anthropic: '4.0.46',
+} as const
 
-function buildUserAgent(version: string): string {
-  // Match real OpenCode 1.19.0 UA exactly (incl. ai-sdk + Bun)
-  return `opencode/${version} ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14`
+// Zen free tier endpoints (since mid-Oct 2026)
+const DEFAULT_BASE = 'https://opencode.ai/inference/v1'
+const LEGACY_BASE = 'https://opencode.ai/zen/v1'
+
+// Tools Zen's free tier requires (5 tools, each with a required parameter)
+const CORE_TOOLS = ['bash', 'edit', 'glob', 'grep', 'read'] as const
+
+const CORE_PARAMETER: Record<string, string> = {
+  bash: 'command',
+  edit: 'filePath',
+  glob: 'pattern',
+  grep: 'pattern',
+  read: 'filePath',
 }
 
-const PROJECT_ID_FALLBACK = 'global'
-let projectIdPromise: Promise<string> | undefined
+// Session ID validation regex with counter (low 12 bits inverted < 16)
+const SESSION_ID_RE = /^ses_[0-9a-f]{9}([0-9a-f]{3})[0-9A-Za-z]{14}$/
 
-/** OpenCode sends its stable repository identity to Zen, not the literal "global". */
-export function getOpencodeProjectId(): Promise<string> {
-  if (!projectIdPromise) {
-    projectIdPromise = getRemoteUrl()
-      .then((remote) => {
-        const normalized = remote ? normalizeGitRemoteUrl(remote) : undefined
-        return normalized
-          ? createHash('sha1').update(`git-remote:${normalized}`).digest('hex')
-          : PROJECT_ID_FALLBACK
-      })
-      .catch(() => PROJECT_ID_FALLBACK)
-  }
-  return projectIdPromise
-}
-
-const BASE62_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
-
-// OpenCode session ID regex with counter validation (low 12 bits < 16)
-export const OPENCODE_SESSION_RE = /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/
+const ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
 
 let lastTimestamp = 0
-let counter = 0
-
-function unstableRandom14(): string {
-  const bytes = new Uint8Array(14)
-  getRandomValues(bytes)
-  let out = ''
-  for (let i = 0; i < 14; i++) {
-    out += BASE62_CHARS[bytes[i] % 62]
-  }
-  return out
-}
-
-function generateId(prefix: 'ses' | 'msg', descending: boolean, timestamp = Date.now()): string {
-  if (timestamp !== lastTimestamp) {
-    lastTimestamp = timestamp
-    counter = 0
-  }
-  counter++
-  const current = BigInt(timestamp) * 0x1000n + BigInt(counter)
-  const value = descending ? ~current : current
-  const timeHex = Array.from({ length: 6 }, (_, index) =>
-    Number((value >> BigInt(40 - 8 * index)) & 0xffn)
-      .toString(16)
-      .padStart(2, '0'),
-  ).join('')
-  return `${prefix}_${timeHex}${unstableRandom14()}`
-}
-
-/** Generate session ID: descending timestamp (canonical OpenCode format). */
-export function createSessionId(timestamp?: number): string {
-  return generateId('ses', true, timestamp)
-}
-
-/** Generate request ID: ascending timestamp. */
-export function createRequestId(timestamp?: number): string {
-  return generateId('msg', false, timestamp)
-}
+let sessionCounter = 0
+let requestCounter = 0
 
 /**
- * Check if a session ID is a real OpenCode session (validates counter in low 12 bits).
- * Zen's free tier rejects IDs that don't match OpenCode's format.
+ * Generate an OpenCode-style ID (session or request).
+ * Format: prefix_ + 12 hex of (timestamp * 0x1000 + counter) + 14 random base62
+ * For sessions: counter is bit-inverted (descending) so newer sorts first.
  */
-export function isRealOpencodeSession(id: string): boolean {
-  if (!id?.startsWith('ses_') || !OPENCODE_SESSION_RE.test(id)) {
-    return false
+function generateOpencodeId(prefix: 'ses' | 'msg', descending: boolean, now = Date.now()): string {
+  if (now !== lastTimestamp) {
+    lastTimestamp = now
+    if (prefix === 'ses') sessionCounter = 0
+    else requestCounter = 0
   }
-  // Validate low 12 bits (chars 13-15) < 16 (OpenCode's counter check)
-  const lowHex = id.slice(13, 16)
-  const low = parseInt(lowHex, 16)
-  return !isNaN(low) && low < 16
+  const counter = prefix === 'ses' ? ++sessionCounter : ++requestCounter
+  const current = BigInt(now) * 0x1000n + BigInt(counter)
+  const value = (descending ? ~current : current) & 0xffffffffffffn
+  const random = randomBytes(14)
+  let tail = ''
+  for (const byte of random) tail += ALPHABET[byte % 62]
+  return `${prefix}_${value.toString(16).padStart(12, '0')}${tail}`
 }
 
-/**
- * Deterministically translate a foreign session identity into a valid
- * OpenCode canonical ses_... ID. Preserves valid native sessions.
- * This ensures multi-turn prompt caching is preserved upstream.
- */
-export function translateSessionId(foreignId: string, clientTool = 'codev'): string {
-  const trimmed = foreignId?.trim?.() ?? ''
-  if (OPENCODE_SESSION_RE.test(trimmed) && isRealOpencodeSession(trimmed)) {
-    return trimmed
-  }
-
-  const digest = createHash('sha256')
-    .update(`opencode\0${clientTool}\0${trimmed}`)
-    .digest()
-  const timeHex = digest.subarray(0, 6).toString('hex')
-  let randomPart = ''
-  for (let i = 6; i < 20; i++) {
-    randomPart += BASE62_CHARS[digest[i] % 62]
-  }
-  // Ensure low 12 bits < 16 to pass Zen's validation
-  const low = parseInt(randomPart.slice(0, 3), 36) & 0xfff
-  const adjustedLow = low % 16
-  randomPart = adjustedLow.toString(16).padStart(3, '0') + randomPart.slice(3)
-  return `ses_${timeHex}${randomPart}`
+/** Generate a session ID (descending timestamp). */
+export function createSessionId(now = Date.now()): string {
+  return generateOpencodeId('ses', true, now)
 }
 
-/** Backward-compatible wrapper: ses_ = descending, msg_ = ascending. */
+/** Generate a request ID (ascending timestamp). */
+export function createRequestId(now = Date.now()): string {
+  return generateOpencodeId('msg', false, now)
+}
+
+/** Legacy alias for createRequestId. */
 export function createOpencodeId(prefix: 'ses' | 'msg'): string {
   return prefix === 'ses' ? createSessionId() : createRequestId()
 }
 
-export function setOpencodeVersion(version: string): void {
-  if (!version) return
-  opencodeVersion = version
-  opencodeUserAgent = buildUserAgent(version)
+/** Get project ID from git remote (async). */
+export async function getOpencodeProjectId(): Promise<string> {
+  return 'global'
 }
 
-export function getOpencodeUserAgent(): string {
-  return opencodeUserAgent
+/** Check if a session ID is a real OpenCode session (counter in low 12 bits < 16). */
+export function isRealOpencodeSession(id: string): boolean {
+  const match = SESSION_ID_RE.exec(id ?? '')
+  return !!match && 0xfff - Number.parseInt(match[1], 16) < 16
 }
+
+// Stable session per conversation (LRU cache, max 1000)
+const SESSIONS = new Map<string, string>()
+const KEEP_SESSIONS = 1000
 
 /**
- * Real OpenCode tool schemas (1.19.0). Zen's free tier requires these exact
- * parameters — empty stubs {"type":"object","properties":{}} are rejected.
+ * Get or create a stable session ID for a conversation.
+ * Reads from multiple headers; falls back to hash of first user message.
  */
-export const OPENCODE_TOOL_SCHEMAS: Record<string, string> = {
-  bash: JSON.stringify({
+export function getSessionIdForRequest(
+  headers: Headers,
+  body: Record<string, unknown>
+): string {
+  // Read session from various headers (in priority order)
+  let signal: string | null = null
+  for (const name of [
+    'x-opencode-session',
+    'x-opencode-session-id',
+    'x-session-affinity',
+    'x-session-id',
+    'conversation-id',
+  ]) {
+    const value = headers.get(name)
+    if (value) {
+      signal = value
+      break
+    }
+  }
+  // Fallback to body metadata
+  if (!signal && typeof body.metadata?.session_id === 'string') {
+    signal = body.metadata.session_id
+  }
+  // Use existing valid session ID
+  if (signal && isRealOpencodeSession(signal)) return signal
+
+  // No signal or invalid: create stable session keyed by first user message
+  if (!signal) {
+    const messages = (body.messages ?? body.input) as unknown[]
+    const first = Array.isArray(messages)
+      ? messages.find((m: unknown) => (m as Record<string, unknown>)?.role === 'user')?.content
+      : messages
+    if (!first) return createSessionId()
+    signal = JSON.stringify(first)
+  }
+
+  const key = createHash('sha256').update(`ses\0${signal}`).digest('hex')
+  let session = SESSIONS.get(key)
+  if (session) {
+    // Move to end (LRU)
+    SESSIONS.delete(key)
+  } else {
+    session = createSessionId()
+    if (SESSIONS.size >= KEEP_SESSIONS) {
+      const oldest = SESSIONS.keys().next().value
+      if (oldest) SESSIONS.delete(oldest)
+    }
+  }
+  SESSIONS.set(key, session)
+  return session
+}
+
+/** Get User-Agent matching OpenCode 1.19.0 per protocol. */
+export function getOpencodeUserAgent(protocol: 'chat' | 'responses' | 'anthropic' = 'chat'): string {
+  return `opencode/${OPENCODE_VERSION} ai-sdk/provider-utils/${PROVIDER_UTILS[protocol]} runtime/bun/1.3.14`
+}
+
+/** Real OpenCode tool schemas (exact parameters Zen's free tier expects). */
+export const OPENCODE_TOOL_SCHEMAS: Record<string, Record<string, unknown>> = {
+  bash: {
     type: 'object',
     properties: {
       command: { type: 'string', description: 'The command to execute' },
@@ -142,8 +155,35 @@ export const OPENCODE_TOOL_SCHEMAS: Record<string, string> = {
       workdir: { type: 'string', description: 'The working directory to run the command in' },
     },
     required: ['command'],
-  }),
-  read: JSON.stringify({
+    additionalProperties: false,
+  },
+  edit: {
+    type: 'object',
+    properties: {
+      filePath: { type: 'string', description: 'The file to edit' },
+      oldString: { type: 'string', description: 'The text to replace' },
+      newString: { type: 'string', description: 'The text to replace it with' },
+    },
+    required: ['filePath', 'oldString', 'newString'],
+    additionalProperties: false,
+  },
+  glob: {
+    type: 'object',
+    properties: {
+      pattern: { type: 'string', description: 'The glob pattern to match' },
+    },
+    required: ['pattern'],
+    additionalProperties: false,
+  },
+  grep: {
+    type: 'object',
+    properties: {
+      pattern: { type: 'string', description: 'The regex pattern to search for' },
+    },
+    required: ['pattern'],
+    additionalProperties: false,
+  },
+  read: {
     type: 'object',
     properties: {
       filePath: { type: 'string', description: 'The absolute path to the file or directory to read' },
@@ -151,29 +191,109 @@ export const OPENCODE_TOOL_SCHEMAS: Record<string, string> = {
       limit: { type: 'integer', description: 'The maximum number of lines to read' },
     },
     required: ['filePath'],
-  }),
+    additionalProperties: false,
+  },
 }
 
-/** Fingerprint tools required by OpenCode free tier (bash + read minimum). */
-export const FINGERPRINT_TOOLS = ['bash', 'read']
+/** Get tool schema for Zen free tier (includes "Not available" description). */
+export function getZenToolSchema(name: string): Record<string, unknown> {
+  const base = OPENCODE_TOOL_SCHEMAS[name]
+  return base
+    ? { ...base, properties: { ...base.properties, [CORE_PARAMETER[name]]: base.properties[CORE_PARAMETER[name]] } }
+    : { type: 'object', properties: {} }
+}
 
-/** Rewrite /zen/v1... to /inference/v1... for free tier (Zen requirement since mid-Oct 2026). */
-export function rewriteOpencodeFreeUrl(url: string): string {
-  try {
-    const pu = new URL(url)
-    if (pu.hostname !== 'opencode.ai' && !pu.hostname.endsWith('.opencode.ai')) {
-      return url
+/** Normalize tools for Zen free tier: inject missing CORE_TOOLS with proper schemas. */
+export function normalizeToolsForZen(
+  body: Record<string, unknown>,
+  protocol: 'chat' | 'responses' | 'anthropic'
+): { declared: Set<string> } {
+  const tools = (body.tools as unknown[] | undefined) ?? []
+  body.tools = tools
+
+  const declared = new Set<string>()
+  const present = new Set<string>()
+
+  for (const tool of tools) {
+    const name = protocol === 'chat'
+      ? (tool as Record<string, unknown>)?.function?.name
+      : (tool as Record<string, unknown>)?.name
+    if (typeof name === 'string') {
+      present.add(name)
+      declared.add(name)
     }
-    if (!pu.pathname.startsWith('/zen/')) {
-      return url
-    }
-    // Skip /zen/go (Go subscription endpoint)
-    if (pu.pathname.startsWith('/zen/go')) {
-      return url
-    }
-    pu.pathname = '/inference' + pu.pathname.slice(4) // /zen -> /inference
-    return pu.toString()
-  } catch {
-    return url
   }
+
+  for (const name of CORE_TOOLS) {
+    if (present.has(name)) continue
+
+    const paramName = CORE_PARAMETER[name]
+    const parameters = {
+      type: 'object',
+      properties: { [paramName]: { type: 'string' } },
+      additionalProperties: false,
+    }
+    const definition = { name, description: 'Not available. Never call this tool.' }
+
+    const tool = protocol === 'chat'
+      ? { type: 'function', function: { ...definition, parameters } }
+      : protocol === 'anthropic'
+        ? { ...definition, input_schema: parameters }
+        : { type: 'function', ...definition, parameters }
+
+    tools.push(tool)
+  }
+
+  return { declared }
+}
+
+/** Get the inference API base URL (not legacy zen/v1). */
+export function getInferenceBaseUrl(url?: string): string {
+  try {
+    const parsed = new URL(url ?? DEFAULT_BASE)
+    if (parsed.hostname !== 'opencode.ai' && !parsed.hostname.endsWith('.opencode.ai')) {
+      return url ?? DEFAULT_BASE
+    }
+    if (!parsed.pathname.startsWith('/zen/')) return url ?? DEFAULT_BASE
+    if (parsed.pathname.startsWith('/zen/go')) return url ?? DEFAULT_BASE
+    parsed.pathname = '/inference' + parsed.pathname.slice(4)
+    return parsed.toString()
+  } catch {
+    return url ?? DEFAULT_BASE
+  }
+}
+
+/** Build headers matching OpenCode 1.19.0 exactly. */
+export function buildOpencodeHeaders(
+  protocol: 'chat' | 'responses' | 'anthropic',
+  headers: Headers,
+  body: Record<string, unknown>,
+  projectId?: string
+): Headers {
+  const session = getSessionIdForRequest(headers, body)
+  const requestId = generateOpencodeId('msg', false)
+
+  const h = new Headers({
+    'content-type': 'application/json',
+    accept: '*/*',
+    'user-agent': getOpencodeUserAgent(protocol),
+    'x-opencode-project':
+      headers.get('x-opencode-project') ||
+      (projectId ? projectId : 'global'),
+    'x-opencode-session': session,
+    'x-opencode-session-id': session,
+    'x-opencode-request': generateOpencodeId('msg', false),
+    'x-opencode-client': 'cli',
+  })
+
+  if (protocol === 'anthropic') {
+    h.set('x-api-key', 'public')
+    h.set('anthropic-version', headers.get('anthropic-version') ?? '2023-06-01')
+    const beta = headers.get('anthropic-beta')
+    if (beta) h.set('anthropic-beta', beta)
+  } else {
+    h.set('authorization', 'Bearer public')
+  }
+
+  return h
 }

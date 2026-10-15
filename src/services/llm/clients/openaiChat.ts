@@ -29,13 +29,14 @@ import {
 import type { AgentId } from '../../../types/ids.js'
 import { toolToAPISchema } from '../../../utils/api.js'
 import { getOpencodeAdapter } from '../adapters/index.js'
+import { CORE_TOOLS } from '../adapters/OpenCodeAdapter.js'
 import { calculateUSDCost } from '../../../utils/modelCost.js'
 import { addToTotalSessionCost } from '../../../cost-tracker.js'
 import { isAbortError } from '../../../utils/errors.js'
 import { resolveOpenAIMaxTokens } from '../utils/requestBody.js'
 import { formatOpenAIPromptCacheKey, updateOpenAIUsage } from '../utils/openaiShared.js'
 import { resolveAuth } from '../auth/resolveAuth.js'
-import { createRequestId, getOpencodeUserAgent, translateSessionId, FINGERPRINT_TOOLS } from '../../api/opencodeUserAgent.js'
+import { createRequestId, getOpencodeUserAgent, translateSessionId } from '../../api/opencodeUserAgent.js'
 import { getNvidiaModelMaxTokens } from '../../../utils/model/nvidiaModels.js'
 import {
   adaptOpenAIChatSSE,
@@ -233,27 +234,27 @@ export async function* queryOpenAIChat(
     let effectiveTools = openaiTools
     let finalEndpoint = endpoint
     let adapterHeaders: Record<string, string> = {}
+    let adapterBodyTransform: ((body: Record<string, unknown>) => void) | null = null
 
     if (route.provider === 'opencode') {
       const adapter = getOpencodeAdapter()
       if (adapter) {
-        // Build a minimal request for the adapter
+        // Build request object for adapter
         const adapterRequest = {
           model,
-          context: {
-            ...context,
-            model,
-          },
+          context: { ...context, model },
         } as any
 
-        // Get rewritten endpoint for free tier
+        // Get rewritten endpoint for free tier (inference/v1)
         finalEndpoint = adapter.getEndpoint(route, adapterRequest)
 
-        // Get adapter headers (includes session-id, session, request-id, etc.)
+        // Get adapter headers
         adapterHeaders = adapter.buildHeaders(route, adapterRequest)
 
-        // Transform body (inject real tool schemas)
-        // We'll apply this after building the body
+        // Get body transform function
+        adapterBodyTransform = (b) => {
+          adapter.transformRequestBody(b, route, adapterRequest)
+        }
       } else if (isFree) {
         // Fallback to inline logic if adapter not available
         const existingNames = new Set(openaiTools.map((t: any) => t.name ?? t.function?.name ?? ''))
@@ -289,24 +290,15 @@ export async function* queryOpenAIChat(
       temperatureOverride: config.temperature,
       promptCacheKey,
     })
-    // Free tier opencode: force stream=true, backend SSE only (#4132)
-    // Also apply adapter body transform for real tool schemas
-    if (route.provider === 'opencode') {
-      const adapter = getOpencodeAdapter()
-      if (adapter) {
-        adapter.transformRequestBody(body, route, {
-          model,
-          context: { ...context, model },
-        } as any)
-      } else if (isFree) {
-        ;(body as any).stream = true
-      }
+    // Apply adapter body transform for OpenCode (injects CORE_TOOLS with real schemas)
+    if (adapterBodyTransform) {
+      adapterBodyTransform(body)
     }
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'User-Agent': route.provider === 'opencode' ? getOpencodeUserAgent() : 'codev',
     }
-    // Merge adapter headers for OpenCode (includes session-id, session, request-id, Accept)
+    // Merge adapter headers for OpenCode (includes session, session-id, request-id, Accept)
     if (route.provider === 'opencode') {
       Object.assign(headers, adapterHeaders)
     } else if (route.provider === 'nvidia') {
@@ -320,13 +312,13 @@ export async function* queryOpenAIChat(
     if (cred.type === 'bearer') headers.Authorization = `Bearer ${cred.token}`
     else headers.Authorization = 'Bearer public'
     const fetchOverride = context.fetchOverride as unknown as typeof fetch | undefined
-    // Use rewritten endpoint for OpenCode free tier
+    // Use rewritten endpoint for OpenCode free tier (inference/v1)
     const url = finalEndpoint.includes('/chat/completions') ? finalEndpoint : chatCompletionsUrlFromBase(finalEndpoint)
     const sendRequest = (requestBody: object) =>
       requestWithRetry(
         () =>
           httpRequest(
-            { url, method: 'POST', headers, body: JSON.stringify(requestBody), signal },
+            { url, method: 'POST', headers, body: JSON.stringify(requestBody), signal, redirect: 'error' },
             fetchOverride,
           ),
         signal,

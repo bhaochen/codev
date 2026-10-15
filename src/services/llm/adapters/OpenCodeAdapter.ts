@@ -1,13 +1,14 @@
 /**
- * OpenCode Provider Adapter.
+ * OpenCode Provider Adapter — matches zen-free plugin implementation.
  *
- * OpenCode-specific behavior (matching magpie's implementation):
- * - URL rewrite: /zen/v1 → /inference/v1 for free tier (since mid-Oct 2026)
- * - Precise headers matching OpenCode 1.19.0
- * - Real tool schemas (bash + read with parameters)
- * - Session ID with counter validation (low 12 bits < 16)
- * - Force stream=true for free models
- * - User-Agent matching real OpenCode 1.19.0
+ * Key behaviors (matching magpie's zen-free plugin):
+ * - Base URL: https://opencode.ai/inference/v1 (not zen/v1)
+ * - Per-protocol User-Agent with correct provider-utils version
+ * - Stable session ID per conversation (validated counter < 16)
+ * - Injects 5 CORE_TOOLS (bash, edit, glob, grep, read) with parameters
+ * - Forces stream=true for all requests
+ * - Forces redirect: "error" to prevent redirects
+ * - Real tool schemas with proper parameters
  */
 import type { ProviderAdapter } from './ProviderAdapter.js'
 import type { LLMRoute } from '../types.js'
@@ -17,12 +18,11 @@ import { getOpenCodeApiKey } from '../../../utils/auth.js'
 import { getOpencodeModelMaxTokens } from '../../../utils/model/opencodeModels.js'
 import {
   getOpencodeUserAgent,
-  translateSessionId,
-  createRequestId,
-  isRealOpencodeSession,
-  FINGERPRINT_TOOLS,
-  OPENCODE_TOOL_SCHEMAS,
-  rewriteOpencodeFreeUrl,
+  getInferenceBaseUrl,
+  getSessionIdForRequest,
+  normalizeToolsForZen,
+  buildOpencodeHeaders,
+  CORE_TOOLS,
 } from '../../../services/api/opencodeUserAgent.js'
 import { logForDebugging } from '../../../utils/debug.js'
 
@@ -38,42 +38,37 @@ export class OpenCodeAdapter implements ProviderAdapter {
     return { type: 'bearer', token: 'public' }
   }
 
+  /**
+   * Get endpoint URL — always uses inference/v1 for free tier.
+   */
+  getEndpoint(route: LLMRoute, request: LLMRequest): string {
+    const baseUrl = route.endpoint ?? 'https://opencode.ai/zen/v1/chat/completions'
+    return getInferenceBaseUrl(baseUrl)
+  }
+
   buildHeaders(route: LLMRoute, request: LLMRequest): Record<string, string> {
-    // Generate session ID with proper counter validation
-    const sessionId = translateSessionId(request.context.model, 'codev')
-    const requestId = createRequestId()
+    // Determine protocol from route
+    const protocol = route.protocol === 'openai-responses' ? 'responses'
+      : route.protocol === 'anthropic-messages' ? 'anthropic'
+      : 'chat'
 
-    const headers: Record<string, string> = {
-      'User-Agent': getOpencodeUserAgent(),
-      'x-opencode-client': 'cli',  // Zen expects "cli" for official client
-      'x-opencode-project': 'global',
-      'x-opencode-session': sessionId,
-      'x-opencode-session-id': sessionId,  // Zen reads both
-      'x-opencode-request': requestId,
-    }
+    // Build minimal headers object for session ID extraction
+    const tempHeaders = new Headers()
+    const body = { model: request.model, messages: request.messages }
 
-    // Free tier requires stream
+    const h = buildOpencodeHeaders(protocol, tempHeaders, body)
+
+    // Convert to plain object
+    const headers: Record<string, string> = {}
+    h.forEach((value, key) => { headers[key] = value })
+
+    // Free tier always requires streaming
     if (this.isFreeModel(request.model)) {
       headers.Accept = 'text/event-stream'
     }
 
-    // Warn that free tier is likely blocked for third-party clients
-    if (this.isFreeModel(request.model)) {
-      logForDebugging('[OpenCodeAdapter] WARNING: OpenCode free tier is blocked for third-party clients (TLS fingerprinting/device attestation). Consider using NVIDIA/OpenRouter free tier instead.')
-    }
-
+    logForDebugging('[OpenCodeAdapter] Using inference API with proper headers for free tier')
     return headers
-  }
-
-  /**
-   * Get the endpoint URL, rewriting /zen/v1 to /inference/v1 for free tier.
-   */
-  getEndpoint(route: LLMRoute, request: LLMRequest): string {
-    const baseUrl = route.endpoint ?? 'https://opencode.ai/zen/v1/chat/completions'
-    if (this.isFreeModel(request.model)) {
-      return rewriteOpencodeFreeUrl(baseUrl)
-    }
-    return baseUrl
   }
 
   supportsCapability(capability: 'reasoning_details' | 'prompt_cache'): boolean {
@@ -93,28 +88,21 @@ export class OpenCodeAdapter implements ProviderAdapter {
     route: LLMRoute,
     request: LLMRequest,
   ): Record<string, string | boolean | object> {
-    // Free tier: force stream=true, backend SSE only
+    // Determine protocol
+    const protocol = route.protocol === 'openai-responses' ? 'responses'
+      : route.protocol === 'anthropic-messages' ? 'anthropic'
+      : 'chat'
+
+    // Free tier: always stream
     if (this.isFreeModel(request.model)) {
       body.stream = true
     }
 
-    // Inject real tool schemas for bash/read if missing
+    // Inject CORE_TOOLS (bash, edit, glob, grep, read) with proper schemas
     if (this.isFreeModel(request.model) && Array.isArray(body.tools)) {
-      const existingNames = new Set(
-        body.tools.map((t: any) => t.function?.name ?? t.name ?? '').filter(Boolean),
-      )
-      for (const toolName of FINGERPRINT_TOOLS) {
-        if (!existingNames.has(toolName)) {
-          body.tools.push({
-            type: 'function',
-            function: {
-              name: toolName,
-              description: 'Not available in this session. Never call this tool.',
-              parameters: JSON.parse(OPENCODE_TOOL_SCHEMAS[toolName]),
-            },
-          })
-        }
-      }
+      const { declared } = normalizeToolsForZen(body, protocol)
+
+      logForDebugging(`[OpenCodeAdapter] Injected tools, declared: ${[...declared].join(', ')}`)
     }
 
     return body
@@ -126,19 +114,18 @@ export class OpenCodeAdapter implements ProviderAdapter {
 
   classifyError(error: unknown): import('./ProviderAdapter.js').ProviderErrorClass {
     const status = (error as { status?: number })?.status
+    const text = String(error)
+
+    // FreeTierError is permanent for third-party clients
+    if (status === 403 || text.includes('FreeTierError') || text.includes('free tier can only be used from within OpenCode')) {
+      return 'auth'
+    }
     if (status === 429) return 'rate_limit'
     if (status === 500) return 'capacity'
     if (status && status >= 500) return 'server_error'
-    if (status === 401 || status === 403) {
-      // Check if it's a FreeTierError (permanently blocked for third-party)
-      const text = String(error)
-      if (text.includes('FreeTierError') || text.includes('free tier can only be used from within OpenCode')) {
-        return 'auth'  // Treat as auth error to prevent retries
-      }
-      return 'auth'
-    }
+    if (status === 401) return 'auth'
     return 'unknown'
   }
 }
 
-export { FINGERPRINT_TOOLS, OPENCODE_TOOL_SCHEMAS }
+export { CORE_TOOLS }
