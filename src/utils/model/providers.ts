@@ -13,6 +13,7 @@ export type APIProvider =
   | 'bedrock'
   | 'vertex'
   | 'foundry'
+  | 'kiro'
 
 /** Every provider a pinned agent may name, in `/login` order. */
 export const API_PROVIDERS: readonly APIProvider[] = [
@@ -25,6 +26,7 @@ export const API_PROVIDERS: readonly APIProvider[] = [
   'bedrock',
   'vertex',
   'foundry',
+  'kiro',
 ]
 
 export function isAPIProvider(value: string): value is APIProvider {
@@ -52,6 +54,7 @@ function getStoredProviderPreference(): APIProvider | null {
         | 'local'
         | 'opencode'
         | 'nvidia'
+        | 'kiro'
       openRouterApiKey?: string
       openAiApiKey?: string
       openAiAccessToken?: string
@@ -60,6 +63,10 @@ function getStoredProviderPreference(): APIProvider | null {
       openCodeApiKey?: string
       openCodeModelName?: string
       nvidiaApiKey?: string
+      kiroAccessToken?: string
+      kiroRefreshToken?: string
+      kiroProfileArn?: string
+      kiroRegion?: string
     }
 
     let result: APIProvider | null
@@ -81,6 +88,9 @@ function getStoredProviderPreference(): APIProvider | null {
         break
       case 'nvidia':
         result = config.nvidiaApiKey ? 'nvidia' : null
+        break
+      case 'kiro':
+        result = config.kiroAccessToken ? 'kiro' : null
         break
       case 'anthropic':
         result = 'firstParty'
@@ -127,6 +137,8 @@ function getExplicitProviderOverride(): APIProvider | null {
       return 'vertex'
     case 'foundry':
       return 'foundry'
+    case 'kiro':
+      return 'kiro'
     default:
       return null
   }
@@ -168,6 +180,21 @@ export function isNvidiaConfigured(): boolean {
 
 export function getNvidiaBaseUrl(): string {
   return process.env.NVIDIA_BASE_URL ?? 'https://integrate.api.nvidia.com/v1'
+}
+
+export function isKiroConfigured(): boolean {
+  if (getExplicitProviderOverride() === 'kiro') {
+    return true
+  }
+  return getStoredProviderPreference() === 'kiro'
+}
+
+export function getKiroBaseUrl(): string {
+  return process.env.KIRO_BASE_URL ?? 'https://q.us-east-1.amazonaws.com'
+}
+
+export function getKiroRegion(): string {
+  return process.env.KIRO_REGION ?? 'us-east-1'
 }
 
 export function isOpenAIConfigured(): boolean {
@@ -266,8 +293,10 @@ export function getAPIProvider(): APIProvider | null {
                 ? 'openai'
                 : isOpenRouterConfigured()
                   ? 'openrouter'
-                  // This fork defaults to the OpenCode free gateway when no provider is
-                  // configured (fresh machine / empty ~/.claude.json), not null -> firstParty Anthropic.
+                  : isKiroConfigured()
+                    ? 'kiro'
+                    // This fork defaults to the OpenCode free gateway when no provider is
+                    // configured (fresh machine / empty ~/.claude.json), not null -> firstParty Anthropic.
                 : getStoredProviderPreference() ?? 'opencode'
 }
 
@@ -278,7 +307,7 @@ export function getAPIProviderForStatsig(): AnalyticsMetadata_I_VERIFIED_THIS_IS
 export function isAnthropicCompatibleProvider(
   provider: APIProvider = getAPIProvider(),
 ): boolean {
-  return provider !== 'openai' && provider !== 'opencode' && provider !== 'nvidia'
+  return provider !== 'openai' && provider !== 'opencode' && provider !== 'nvidia' && provider !== 'kiro'
 }
 
 /**

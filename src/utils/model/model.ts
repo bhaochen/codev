@@ -517,6 +517,17 @@ export function getPublicModelDisplayName(model: ModelName): string | null {
     }
   }
 
+  // Kiro (Amazon Q) 模型显示名完全由目录驱动
+  if (getAPIProvider() === 'kiro') {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getKiroModelDisplayName } = require('./kiroModels.js') as typeof import('./kiroModels.js')
+      return getKiroModelDisplayName(model) ?? model
+    } catch {
+      return model
+    }
+  }
+
   return getKnownModelDisplayName(model)
 }
 

@@ -7,6 +7,7 @@ import { bedrock } from './bedrock.js'
 import { vertex } from './vertex.js'
 import { foundry } from './foundry.js'
 import { openrouter } from './openrouter.js'
+import { kiro } from './kiro.js'
 import type { ProviderId } from '../types.js'
 
 export const providers = {
@@ -19,6 +20,7 @@ export const providers = {
   bedrock,
   vertex,
   foundry,
+  kiro,
 } as const
 
 // firstParty 为 anthropic 的规范 id，anthropic 为兼容别名

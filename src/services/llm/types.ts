@@ -13,6 +13,7 @@ export type ProviderId =
   | 'vertex'
   | 'foundry'
   | 'local'
+  | 'kiro'
   // legacy alias
   | 'anthropic'
 

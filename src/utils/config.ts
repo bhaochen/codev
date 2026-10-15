@@ -187,7 +187,7 @@ export type GlobalConfig = {
   apiKeyHelper?: string
   
   // Authentication provider configuration
-  authProvider?: 'anthropic' | 'openai' | 'openrouter' | 'local' | 'opencode' | 'nvidia'
+  authProvider?: 'anthropic' | 'openai' | 'openrouter' | 'local' | 'opencode' | 'nvidia' | 'kiro'
   
   // OpenRouter API key
   openRouterApiKey?: string
@@ -210,6 +210,13 @@ export type GlobalConfig = {
 
   // NVIDIA API key
   nvidiaApiKey?: string
+
+  // Kiro (Amazon Q) configuration
+  kiroAccessToken?: string
+  kiroRefreshToken?: string
+  kiroProfileArn?: string
+  kiroRegion?: string
+  kiroTokenExpiresAt?: number
   
   projects?: Record<string, ProjectConfig>
   numStartups: number
@@ -678,6 +685,11 @@ export const GLOBAL_CONFIG_KEYS = [
   'localModelName',
   'localModelContextWindow',
   'nvidiaApiKey',
+  'kiroAccessToken',
+  'kiroRefreshToken',
+  'kiroProfileArn',
+  'kiroRegion',
+  'kiroTokenExpiresAt',
   'installMethod',
   'autoUpdates',
   'autoUpdatesProtectedForNative',

@@ -579,6 +579,32 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
     return [defaultOpt]
   }
 
+  // Kiro (Amazon Q): Show dynamically fetched models from CodeWhisperer
+  if (getAPIProvider() === 'kiro') {
+    const defaultOpt = getDefaultOptionForUser(fastMode)
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getCachedKiroModels } = require('./kiroModels.js')
+      const models = getCachedKiroModels()
+
+      if (models && Array.isArray(models) && models.length > 0) {
+        return [
+          defaultOpt,
+          // 显示名/描述全部来自目录，无硬编码 ID 分支
+          ...models.map(m => ({
+            value: m.id,
+            label: m.name || m.id,
+            description: 'Kiro 免费模型 (Amazon Q)',
+          })),
+        ]
+      }
+    } catch {
+      // Ignore errors
+    }
+
+    return [defaultOpt]
+  }
+
   // OpenRouter API: Show all available models from OpenRouter
   if (getAPIProvider() === 'openrouter') {
     // Trigger background fetch of OpenRouter models (non-blocking)

@@ -307,7 +307,7 @@ export function getOpenRouterApiKeyWithSource(): {
     : { key: null, source: 'none' }
 }
 
-export function getConfiguredAuthProvider(): 'anthropic' | 'openrouter' | 'openai' | 'local' | 'opencode' | 'nvidia' | null {
+export function getConfiguredAuthProvider(): 'anthropic' | 'openrouter' | 'openai' | 'local' | 'opencode' | 'nvidia' | 'kiro' | null {
   // First try to get from cache for performance
   const storedProvider = getGlobalConfig().authProvider
   if (storedProvider) {
@@ -319,13 +319,13 @@ export function getConfiguredAuthProvider(): 'anthropic' | 'openrouter' | 'opena
 }
 
 // Read authProvider directly from file to bypass cache
-export function getConfiguredAuthProviderFromFile(): 'anthropic' | 'openrouter' | 'openai' | 'local' | 'opencode' | 'nvidia' | null {
+export function getConfiguredAuthProviderFromFile(): 'anthropic' | 'openrouter' | 'openai' | 'local' | 'opencode' | 'nvidia' | 'kiro' | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { readFileSync } = require('fs') as typeof import('fs')
     const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
     const config = JSON.parse(raw) as {
-      authProvider?: 'anthropic' | 'openrouter' | 'openai' | 'local' | 'opencode' | 'nvidia'
+      authProvider?: 'anthropic' | 'openrouter' | 'openai' | 'local' | 'opencode' | 'nvidia' | 'kiro'
     }
 
     if (config.authProvider) {
@@ -592,6 +592,49 @@ export function getLocalModelContextWindowConfig(): number | null {
   } catch (error) {
     return null
   }
+}
+
+export type KiroAuthTokens = {
+  accessToken: string
+  refreshToken?: string | null
+  profileArn?: string | null
+  region?: string | null
+  expiresAt?: number | null
+}
+
+export async function saveKiroAuthTokens(tokens: KiroAuthTokens): Promise<void> {
+  saveGlobalConfig(current => ({
+    ...current,
+    authProvider: 'kiro',
+    kiroAccessToken: tokens.accessToken,
+    kiroRefreshToken: tokens.refreshToken ?? undefined,
+    kiroProfileArn: tokens.profileArn ?? undefined,
+    kiroRegion: tokens.region ?? undefined,
+    kiroTokenExpiresAt: tokens.expiresAt ?? undefined,
+  }))
+  // Clear provider cache so it will be re-read on next access
+  const { clearStoredProviderCache } = await import('./model/providers.js')
+  clearStoredProviderCache()
+}
+
+export function getKiroAccessToken(): string | null {
+  const config = getGlobalConfig()
+  return config.kiroAccessToken || null
+}
+
+export function getKiroRefreshToken(): string | null {
+  const config = getGlobalConfig()
+  return config.kiroRefreshToken || null
+}
+
+export function getKiroProfileArn(): string | null {
+  const config = getGlobalConfig()
+  return config.kiroProfileArn || null
+}
+
+export function getKiroRegion(): string | null {
+  const config = getGlobalConfig()
+  return config.kiroRegion || null
 }
 
 function getCodexHomeDir(): string {

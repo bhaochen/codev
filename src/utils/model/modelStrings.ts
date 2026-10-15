@@ -72,6 +72,14 @@ function getBuiltinModelStrings(provider: APIProvider): ModelStrings {
     return getBuiltinModelStrings('firstParty') as ModelStrings
   }
 
+  if (provider === 'kiro') {
+    const out = getBuiltinModelStrings('firstParty') as Record<string, string>
+    out.haiku45 = process.env.KIRO_HAIKU_MODEL || 'amazon.q.developer'
+    out.sonnet46 = process.env.KIRO_SONNET_MODEL || 'amazon.q.developer'
+    out.opus46 = process.env.KIRO_OPUS_MODEL || 'amazon.q.developer'
+    return out as ModelStrings
+  }
+
   const out = {} as ModelStrings
   for (const key of MODEL_KEYS) {
     out[key] = ALL_MODEL_CONFIGS[key][provider]

@@ -171,6 +171,46 @@ export function SearchableModelPicker({
           }, 60000)
         }
 
+        if (provider === 'kiro' && modelOptions.length <= 1) {
+          let retryCount = 0
+          const MAX_RETRIES = 5
+
+          async function tryFetch(): Promise<void> {
+            const { fetchKiroModels } = await import('../utils/model/kiroModels.js')
+            await fetchKiroModels()
+          }
+          void tryFetch()
+
+          pollTimer = setInterval(async () => {
+            if (!mounted) {
+              if (pollTimer) clearInterval(pollTimer)
+              return
+            }
+            try {
+              const { getCachedKiroModels } = await import('../utils/model/kiroModels.js')
+              const models = getCachedKiroModels()
+              if (models && models.length > 0) {
+                if (mounted) {
+                  setAppState(prev => ({ ...prev, authVersion: prev.authVersion + 1 }))
+                }
+                if (pollTimer) clearInterval(pollTimer)
+              } else if (retryCount < MAX_RETRIES) {
+                retryCount++
+                void tryFetch()
+              }
+            } catch (error) {
+              console.error('Error checking Kiro cache:', error)
+              if (pollTimer) clearInterval(pollTimer)
+            }
+          }, 2000)
+          setTimeout(() => {
+            if (pollTimer && mounted) {
+              clearInterval(pollTimer)
+              pollTimer = null
+            }
+          }, 60000)
+        }
+
         if (provider === 'openai' && modelOptions.length <= 1) {
           let retryCount = 0
           const MAX_RETRIES = 5

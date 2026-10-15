@@ -26,6 +26,7 @@ import { OpenRouterLoginFlow } from '../../components/OpenRouterLoginFlow.js'
 import { LocalLoginFlow } from '../../components/LocalLoginFlow.js'
 import { OpenCodeLoginFlow } from '../../components/OpenCodeLoginFlow.js'
 import { NvidiaLoginFlow } from '../../components/NvidiaLoginFlow.js'
+import { KiroLoginFlow } from '../../components/KiroLoginFlow.js'
 
 import { useMainLoopModel } from '../../hooks/useMainLoopModel.js';
 
@@ -49,7 +50,7 @@ import {
 import { resetUserCache } from '../../utils/user.js';
 
 // TODO
-type AuthProviderChoice = 'anthropic' | 'openai' | 'openrouter' | 'local' | 'opencode' | 'nvidia'
+type AuthProviderChoice = 'anthropic' | 'openai' | 'openrouter' | 'local' | 'opencode' | 'nvidia' | 'kiro'
 
 /* 第一层: 入口函数 call()
  * CLI 执行 /login 真正被调用的函数
@@ -104,6 +105,9 @@ export async function call(
           } else if (provider === 'openai') {
             const { fetchOpenAIModels } = await import('../../utils/model/openaiModels.js')
             await fetchOpenAIModels()
+          } else if (provider === 'kiro') {
+            const { fetchKiroModels } = await import('../../utils/model/kiroModels.js')
+            await fetchKiroModels()
           }
 
           // Clear cached model strings so they re-initialize with the new provider
@@ -118,7 +122,7 @@ export async function call(
           context.setAppState(prev => ({
             ...prev,
             authVersion: prev.authVersion + 1,
-            mainLoopModel: provider === 'nvidia' || provider === 'local' ? null : 'big-pickle',
+            mainLoopModel: provider === 'nvidia' || provider === 'local' || provider === 'kiro' ? null : 'big-pickle',
             mainLoopModelForSession: null,
           }));
         }
@@ -218,6 +222,18 @@ export function Login(props: {
         ),
         value: 'nvidia',
       },
+      {
+        label: (
+          <Text>
+            Kiro (Amazon Q){' '}
+            <Text dimColor={true}>
+              Free models via AWS Builder ID or imported token
+            </Text>
+            {'\n'}
+          </Text>
+        ),
+        value: 'kiro',
+      },
     ],
     [],
   )
@@ -270,6 +286,11 @@ export function Login(props: {
       <NvidiaLoginFlow
         onDone={onFlowDone}
         startingMessage="Codev can use NVIDIA with your NVIDIA API key."
+      />
+    ) : selectedProvider === 'kiro' ? (
+      <KiroLoginFlow
+        onDone={onFlowDone}
+        startingMessage="Codev can use Kiro (Amazon Q) free models via AWS Builder ID or imported token."
       />
     ) : (
       <ConsoleOAuthFlow

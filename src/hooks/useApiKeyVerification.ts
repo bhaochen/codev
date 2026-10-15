@@ -79,6 +79,17 @@ export function useApiKeyVerification(): ApiKeyVerificationResult {
       return 'missing'
     }
 
+    // Check Kiro authentication
+    if (authProvider === 'kiro') {
+      const config = getGlobalConfig()
+      const hasAccessToken = !!config.kiroAccessToken
+      const hasRefreshToken = !!config.kiroRefreshToken
+      if (hasAccessToken || hasRefreshToken) {
+        return 'valid'
+      }
+      return 'missing'
+    }
+
     // Anthropic authentication
     if (!isAnthropicAuthEnabled() || isClaudeAISubscriber()) {
       return 'valid'
@@ -159,6 +170,20 @@ export function useApiKeyVerification(): ApiKeyVerificationResult {
         const freshConfig = getConfig()
         const hasApiKey = !!freshConfig.nvidiaApiKey
         if (hasApiKey) {
+          setStatus('valid')
+        } else {
+          setStatus('missing')
+        }
+        return
+      }
+
+      // Check Kiro authentication
+      if (authProvider === 'kiro') {
+        const { getGlobalConfig: getConfig } = await import('../utils/config.js')
+        const freshConfig = getConfig()
+        const hasAccessToken = !!freshConfig.kiroAccessToken
+        const hasRefreshToken = !!freshConfig.kiroRefreshToken
+        if (hasAccessToken || hasRefreshToken) {
           setStatus('valid')
         } else {
           setStatus('missing')
@@ -256,6 +281,19 @@ export function useApiKeyVerification(): ApiKeyVerificationResult {
       const config = getGlobalConfig()
       const hasApiKey = !!config.nvidiaApiKey
       if (hasApiKey) {
+        setStatus('valid')
+      } else {
+        setStatus('missing')
+      }
+      return
+    }
+
+    // Check Kiro authentication
+    if (authProvider === 'kiro') {
+      const config = getGlobalConfig()
+      const hasAccessToken = !!config.kiroAccessToken
+      const hasRefreshToken = !!config.kiroRefreshToken
+      if (hasAccessToken || hasRefreshToken) {
         setStatus('valid')
       } else {
         setStatus('missing')

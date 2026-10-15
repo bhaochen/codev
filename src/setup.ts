@@ -414,6 +414,9 @@ export async function setup(
   } else if (configuredAuthProvider === 'local') {
     const { fetchLocalModels } = await import('./services/api/localClient.js')
     void fetchLocalModels()
+  } else if (configuredAuthProvider === 'kiro') {
+    const { fetchKiroModels } = await import('./utils/model/kiroModels.js')
+    void fetchKiroModels()
   }
 
   // If permission mode is set to bypass, verify we're in a safe environment
