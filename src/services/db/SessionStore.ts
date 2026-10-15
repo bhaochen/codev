@@ -18,7 +18,8 @@ import { dirname, join } from 'node:path'
 import type { UUID } from 'crypto'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 import type { Entry, TranscriptMessage } from '../../types/logs.js'
-import { isTranscriptMessage } from '../../utils/sessionStorage.js'
+import { isTranscriptMessage, buildTranscriptShape } from '../../utils/sessionStorage.js'
+import type { TranscriptShape } from '../../utils/sessionStorage.js'
 import { parseJSONL } from '../../utils/json.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { openDatabaseSync } from './driver.js'
@@ -293,6 +294,52 @@ export class SessionStore {
       data: JSON.parse(row.data_json) as Entry,
       createdAt: row.created_at,
     }
+  }
+
+  // =========================================================================
+  // Transcript Store (SQLite-backed, shared reducer)
+  // =========================================================================
+
+  /**
+   * Ensure a session row exists (idempotent). Required before appendMessages,
+   * which references sessions(id) via FK and updates its message_count.
+   */
+  ensureSession(sessionId: string, projectDir: string): void {
+    if (this.getSession(sessionId)) return
+    const now = Date.now()
+    this.createSession({ id: sessionId, projectDir, createdAt: now, updatedAt: now })
+  }
+
+  /**
+   * Persist an ordered transcript with FULL fidelity: every entry becomes a row
+   * in the messages table, ordered by autoincrement seq (the append-only log
+   * order). Unlike migrateFromJsonl — which projects a few metadata kinds into
+   * sessions columns and drops the rest — this stores ALL entry types so the
+   * transcript can be reconstructed exactly via loadTranscript.
+   *
+   * Metadata entries (title/tag/agent/etc.) have no uuid; appendMessages
+   * synthesizes one for the row's NOT NULL column, but data_json keeps the
+   * original entry, so the reducer routes it by entry.type — the synthetic
+   * uuid never enters the transcript messages map.
+   */
+  writeTranscript(sessionId: string, projectDir: string, entries: Entry[]): void {
+    this.ensureSession(sessionId, projectDir)
+    this.appendMessages(sessionId, entries)
+  }
+
+  /**
+   * Read a session's full transcript and reduce it to the same TranscriptShape
+   * the JSONL path produces. Rows are read in seq order (append-only log order)
+   * and each data_json is parsed back to its Entry, then fed to the shared
+   * buildTranscriptShape reducer — so the SQLite path is guaranteed to agree
+   * with loadTranscriptFile (fidelity by construction, not by two copies).
+   */
+  loadTranscript(sessionId: string): TranscriptShape {
+    const rows = this.db
+      .query('SELECT data_json FROM messages WHERE session_id = ? ORDER BY seq ASC')
+      .all(sessionId) as Array<{ data_json: string }>
+    const entries = rows.map(r => JSON.parse(r.data_json) as Entry)
+    return buildTranscriptShape(entries)
   }
 
   // =========================================================================
