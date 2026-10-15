@@ -11,6 +11,7 @@
  * In TUI mode: color by session ID for visual distinction.
  * In headless/JSON mode: structured output without ANSI colors.
  */
+import { writeToStderr } from './process.js'
 
 export interface LogContext {
   sessionId?: string
@@ -21,6 +22,16 @@ export interface LogContext {
 }
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error'
+
+/**
+ * Emit ANSI colors only when stderr is an interactive terminal and the user
+ * hasn't opted out via NO_COLOR. Headless/JSON mode, pipes, and file output
+ * get plain text so we never corrupt machine-readable streams.
+ */
+function shouldColorize(): boolean {
+  if (process.env.NO_COLOR) return false
+  return Boolean(process.stderr.isTTY)
+}
 
 // Stable color palette for session IDs (16 colors)
 const SESSION_COLORS = [
@@ -82,10 +93,13 @@ export class SessionLogger {
     const prefix = this.buildPrefix(level)
     const formatted = args.length > 0 ? `${message} ${args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ')}` : message
 
-    if (this.color) {
-      console.log(`${this.color}${prefix}${RESET} ${formatted}`)
+    // Only emit ANSI colors when stderr is an interactive TTY and the user
+    // hasn't disabled color. Otherwise (headless/JSON mode, pipes, files) emit
+    // plain structured text so we never corrupt machine-readable output.
+    if (this.color && shouldColorize()) {
+      writeToStderr(`${this.color}${prefix}${RESET} ${formatted}\n`)
     } else {
-      console.log(`${prefix} ${formatted}`)
+      writeToStderr(`${prefix} ${formatted}\n`)
     }
   }
 
