@@ -261,6 +261,8 @@ export function KiroLoginFlow({
       <Text dimColor={true}>
         Free models require AWS authentication. Import a refresh token if you already have one.
         {'\n'}
+        Inference requires 9router running locally (or set KIRO_BASE_URL to a 9router instance).
+        {'\n'}
         After login, use /model to pick a specific model.
       </Text>
       {status ? <Text color="error">{status}</Text> : null}
@@ -270,8 +272,8 @@ export function KiroLoginFlow({
             {
               label: (
                 <Text>
-                  Auto-detect from Kiro IDE{' '}
-                  <Text dimColor={true}>Reads AWS SSO cache + Kiro profile (recommended)</Text>
+                  Auto-detect from kiro-cli / Kiro IDE{' '}
+                  <Text dimColor={true}>Reads AWS SSO cache + profile (recommended)</Text>
                   {'\n'}
                 </Text>
               ),
@@ -281,7 +283,7 @@ export function KiroLoginFlow({
               label: (
                 <Text>
                   Import Refresh Token{' '}
-                  <Text dimColor={true}>Paste existing token from Kiro IDE</Text>
+                  <Text dimColor={true}>Paste existing token from kiro-cli / Kiro IDE</Text>
                   {'\n'}
                 </Text>
               ),

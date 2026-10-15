@@ -197,6 +197,10 @@ export function getKiroRegion(): string {
   return process.env.KIRO_REGION ?? 'us-east-1'
 }
 
+export function getKiroInferenceBaseUrl(): string {
+  return process.env.KIRO_BASE_URL ?? 'http://localhost:8080'
+}
+
 export function isOpenAIConfigured(): boolean {
   if (
     getExplicitProviderOverride() === 'openai' ||
