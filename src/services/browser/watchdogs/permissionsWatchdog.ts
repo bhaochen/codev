@@ -47,8 +47,8 @@ export class PermissionsWatchdog extends BaseWatchdog {
   }
 
   protected registerListeners(): void {
-    this.bus.onType("browser:connected", this.onBrowserConnected.bind(this));
-    this.bus.onType("permission:requested", this.onPermissionRequested.bind(this));
+    this.trackBusListener("browser:connected", this.onBrowserConnected.bind(this));
+    this.trackBusListener("permission:requested", this.onPermissionRequested.bind(this));
   }
 
   private async onBrowserConnected(event: Extract<WatchdogEvent, { type: "browser:connected" }>): Promise<void> {

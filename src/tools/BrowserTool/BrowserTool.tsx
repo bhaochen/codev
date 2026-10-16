@@ -1284,9 +1284,10 @@ async function runActionInner(
       const { getHarRecorder } = await import('../../services/browser/harRecorder.js')
       const recorder = getHarRecorder()
       const entries = session.getNetworkEntries()
+      const activeTab = (await session.listTabs()).find(tab => tab.active)
       const outputPath = await recorder.export(entries, {
         url: session.getLastKnownUrl(),
-        title: session.getActiveTab()?.title,
+        title: activeTab?.title,
       })
       if (!outputPath) {
         return errorOutput('har', 'No network entries to export.')

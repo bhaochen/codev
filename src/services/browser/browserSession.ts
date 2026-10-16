@@ -611,7 +611,12 @@ export function shouldAdoptTabActivity(
 }
 
 class BrowserSessionService {
-  private client?: CdpClient;
+  /**
+   * Raw CDP connection. Subsystem members (watchdogs, captcha handler) share
+   * this session object, so the connection is intentionally readable here —
+   * assignment stays internal to this class.
+   */
+  client?: CdpClient;
   private child?: ChildProcess;
   private mode: "spawned" | "attached" = "spawned";
   private sessions = new Map<string, string>();
@@ -622,7 +627,8 @@ class BrowserSessionService {
   /** Tabs with the human-activity binding and page listener installed. */
   private activityTargets = new Set<string>();
   private activityBindingName = createTabActivityBindingName();
-  private activeTargetId?: string;
+  /** Target of the tab the agent currently operates on. Readable subsystem-wide. */
+  activeTargetId?: string;
   private cachedElements = new Map<number, InteractiveElement>();
   private cachedElementsTargetId?: string;
   private lastKnownUrl?: string;
@@ -2509,8 +2515,9 @@ class BrowserSessionService {
    * (ported from Bah): returns as soon as the element count is stable for
    * `quietMs` with readyState complete, capped at `maxMs`. Each probe is
    * raced against 1.5s so a page with a wedged main thread cannot hang us.
+   * Public: BrowserTool awaits settle between agent-driven actions.
    */
-  private async waitForSettle(
+  async waitForSettle(
     signal?: AbortSignal,
     options?: { maxMs?: number; quietMs?: number },
   ): Promise<void> {
@@ -2744,7 +2751,12 @@ class BrowserSessionService {
     );
   }
 
-  private async evaluate<T>(
+  /**
+   * Evaluate an expression in the active page and return the JSON value.
+   * Public: shared in-page evaluation primitive for the browser subsystem
+   * (captcha detection, watchdog probes).
+   */
+  async evaluate<T>(
     expression: string,
     options?: { awaitPromise?: boolean; timeoutMs?: number },
   ): Promise<T> {

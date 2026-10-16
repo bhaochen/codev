@@ -34,13 +34,20 @@ interface StorageState {
     expires: number;
     httpOnly: boolean;
     secure: boolean;
-    sameSite: "Strict" | "Lax" | "None";
+    /** CDP reports sameSite as an optional enum — absent when unspecified. */
+    sameSite?: "Strict" | "Lax" | "None";
   }>;
   origins: Array<{
     origin: string;
     localStorage: Record<string, string>;
   }>;
   savedAt: string;
+}
+
+/** CDP `Page.getFrameTree` payload shape (subset used here). */
+interface CdpFrameTree {
+  frame: { id: string; url?: string };
+  childFrames?: CdpFrameTree[];
 }
 
 export class StorageWatchdog extends BaseWatchdog {
@@ -64,9 +71,9 @@ export class StorageWatchdog extends BaseWatchdog {
   }
 
   protected registerListeners(): void {
-    this.bus.onType("browser:connected", this.onBrowserConnected.bind(this));
-    this.bus.onType("browser:stop", this.onBrowserStop.bind(this));
-    this.bus.onType("navigation:completed", this.onNavigationCompleted.bind(this));
+    this.trackBusListener("browser:connected", this.onBrowserConnected.bind(this));
+    this.trackBusListener("browser:stop", this.onBrowserStop.bind(this));
+    this.trackBusListener("navigation:completed", this.onNavigationCompleted.bind(this));
   }
 
   private async onBrowserConnected(): Promise<void> {
@@ -106,7 +113,18 @@ export class StorageWatchdog extends BaseWatchdog {
 
     try {
       // 获取所有 Cookie
-      const { cookies } = await this.session.client.send("Network.getAllCookies");
+      const { cookies } = await this.session.client.send<{
+        cookies: Array<{
+          name: string;
+          value: string;
+          domain: string;
+          path: string;
+          expires?: number;
+          httpOnly: boolean;
+          secure: boolean;
+          sameSite?: "Strict" | "Lax" | "None";
+        }>;
+      }>("Network.getAllCookies");
 
       // 获取所有 localStorage (需要遍历所有 frame)
       const origins = await this.getAllLocalStorage();
@@ -142,7 +160,9 @@ export class StorageWatchdog extends BaseWatchdog {
 
     try {
       // 获取主 frame 的 localStorage
-      const mainFrame = await this.session.client?.send("Page.getFrameTree");
+      const mainFrame = await this.session.client?.send<{ frameTree: CdpFrameTree }>(
+        "Page.getFrameTree",
+      );
       if (mainFrame?.frameTree?.frame?.id) {
         const storage = await this.getFrameLocalStorage(mainFrame.frameTree.frame.id);
         if (Object.keys(storage).length > 0) {
@@ -167,14 +187,14 @@ export class StorageWatchdog extends BaseWatchdog {
     return result;
   }
 
-  private getAllFrames(tree: any): any[] {
-    const frames: any[] = [];
-    const walk = (node: any) => {
-      if (node.childFrames) {
-        for (const child of node.childFrames) {
-          frames.push(child.frame);
-          walk(child);
-        }
+  private getAllFrames(tree: CdpFrameTree | undefined): CdpFrameTree["frame"][] {
+    // Mirrors the original walk: only *child* frames are returned here — the
+    // root frame is handled separately as the "main" origin.
+    const frames: CdpFrameTree["frame"][] = [];
+    const walk = (node: CdpFrameTree | undefined) => {
+      for (const child of node?.childFrames ?? []) {
+        frames.push(child.frame);
+        walk(child);
       }
     };
     walk(tree);
@@ -183,13 +203,21 @@ export class StorageWatchdog extends BaseWatchdog {
 
   private async getFrameLocalStorage(frameId: string): Promise<Record<string, string>> {
     try {
-      // 使用 isolated world 避免页面脚本干扰
-      const { executionContextId } = await this.session.client?.send("Page.createIsolatedWorld", {
-        frameId,
-        grantUniveralAccess: true,
-      });
+      const client = this.session.client;
+      if (!client) return {};
 
-      const result = await this.session.client?.send("Runtime.evaluate", {
+      // 使用 isolated world 避免页面脚本干扰
+      const { executionContextId } = await client.send<{ executionContextId: number }>(
+        "Page.createIsolatedWorld",
+        {
+          frameId,
+          grantUniveralAccess: true,
+        },
+      );
+
+      const result = await client.send<{
+        result: { value?: string };
+      }>("Runtime.evaluate", {
         expression: "JSON.stringify(localStorage)",
         contextId: executionContextId,
         returnByValue: true,
@@ -241,16 +269,23 @@ export class StorageWatchdog extends BaseWatchdog {
 
   private async setFrameLocalStorage(origin: string, storage: Record<string, string>): Promise<void> {
     try {
-      const mainFrame = await this.session.client?.send("Page.getFrameTree");
+      const client = this.session.client;
+      if (!client) return;
+
+      const mainFrame = await client.send<{ frameTree: CdpFrameTree }>("Page.getFrameTree");
       const frames = this.getAllFrames(mainFrame?.frameTree);
-      frames.unshift(mainFrame?.frameTree?.frame);
+      if (mainFrame?.frameTree?.frame) frames.unshift(mainFrame.frameTree.frame);
 
       for (const frame of frames) {
+        if (!frame.id) continue;
         if (frame.url?.startsWith(origin) || frame.id === origin) {
-          const { executionContextId } = await this.session.client?.send("Page.createIsolatedWorld", {
-            frameId: frame.id,
-            grantUniveralAccess: true,
-          });
+          const { executionContextId } = await client.send<{ executionContextId: number }>(
+            "Page.createIsolatedWorld",
+            {
+              frameId: frame.id,
+              grantUniveralAccess: true,
+            },
+          );
 
           const script = `
             const data = ${JSON.stringify(storage)};
@@ -258,7 +293,7 @@ export class StorageWatchdog extends BaseWatchdog {
               localStorage.setItem(k, v);
             }
           `;
-          await this.session.client?.send("Runtime.evaluate", {
+          await client.send("Runtime.evaluate", {
             expression: script,
             contextId: executionContextId,
           });

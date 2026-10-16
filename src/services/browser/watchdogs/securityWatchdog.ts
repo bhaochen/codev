@@ -35,10 +35,12 @@ function globToRegex(glob: string): RegExp {
 }
 
 /** 检查 URL 是否匹配域名模式列表 */
-function matchDomainPatterns(url: string, patterns: string[]): boolean {
+function matchDomainPatterns(url: string, patterns: RegExp[]): boolean {
   try {
     const hostname = new URL(url).hostname;
-    return patterns.some(pattern => globToRegex(pattern).test(hostname));
+    // Patterns arrive pre-compiled (configure() runs globToRegex once); calling
+    // globToRegex on a RegExp here would string-coerce it and never match.
+    return patterns.some(pattern => pattern.test(hostname));
   } catch {
     return false;
   }
@@ -73,7 +75,7 @@ export class SecurityWatchdog extends BaseWatchdog {
   }
 
   protected registerListeners(): void {
-    this.bus.onType("navigation:started", this.onNavigationStarted.bind(this));
+    this.trackBusListener("navigation:started", this.onNavigationStarted.bind(this));
   }
 
   private async onNavigationStarted(event: Extract<WatchdogEvent, { type: "navigation:started" }>): Promise<void> {

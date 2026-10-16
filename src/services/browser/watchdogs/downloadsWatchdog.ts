@@ -74,10 +74,10 @@ export class DownloadsWatchdog extends BaseWatchdog {
   }
 
   protected registerListeners(): void {
-    this.bus.onType("browser:connected", this.onBrowserConnected.bind(this));
-    this.bus.onType("network:request", this.onNetworkRequest.bind(this));
-    this.bus.onType("network:response", this.onNetworkResponse.bind(this));
-    this.bus.onType("network:finished", this.onNetworkFinished.bind(this));
+    this.trackBusListener("browser:connected", this.onBrowserConnected.bind(this));
+    this.trackBusListener("network:request", this.onNetworkRequest.bind(this));
+    this.trackBusListener("network:response", this.onNetworkResponse.bind(this));
+    this.trackBusListener("network:finished", this.onNetworkFinished.bind(this));
   }
 
   private async onBrowserConnected(): Promise<void> {

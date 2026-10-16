@@ -39,7 +39,7 @@ export type WatchdogEvent =
   | { type: "network:request"; targetId: string; requestId: string; url: string; method: string }
   | { type: "network:response"; targetId: string; requestId: string; status: number }
   | { type: "network:finished"; targetId: string; requestId: string }
-  | { type: "dialog:opened"; targetId: string; type: string; message: string }
+  | { type: "dialog:opened"; targetId: string; dialogType: string; message: string }
   | { type: "permission:requested"; targetId: string; permissions: string[] }
   | { type: "captcha:started" }
   | { type: "captcha:finished"; solved: boolean }
@@ -78,12 +78,26 @@ export abstract class BaseWatchdog {
   protected config: WatchdogConfig;
   protected enabled: boolean;
   private attached = false;
+  /** Un-register functions for the bus listeners added by registerListeners(). */
+  private busOffs: Array<() => void> = [];
 
   constructor(bus: WatchdogEventBus, session: BrowserSessionService, config: WatchdogConfig = {}) {
     this.bus = bus;
     this.session = session;
     this.config = config;
     this.enabled = config.enabled !== false;
+  }
+
+  /**
+   * Register a bus listener that detach() will clean up. Subclasses must
+   * route their registerListeners() calls through this so teardown is exact
+   * (the bus is shared across watchdogs — never removeAllListeners on it).
+   */
+  protected trackBusListener<T extends WatchdogEvent["type"]>(
+    type: T,
+    listener: (event: Extract<WatchdogEvent, { type: T }>) => void,
+  ): void {
+    this.busOffs.push(this.bus.onType(type, listener));
   }
 
   /** Watchdog 名称 (用于日志/调试) */
@@ -108,7 +122,9 @@ export abstract class BaseWatchdog {
     if (!this.attached) return;
     this.attached = false;
     this.onDetach?.();
-    this.removeAllListeners();
+    // Remove exactly the listeners this watchdog registered (the bus is
+    // shared — removeAllListeners on it would tear down other watchdogs).
+    for (const off of this.busOffs.splice(0)) off();
   }
 
   /** 子类重写: 注册事件监听器 */
