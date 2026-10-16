@@ -137,7 +137,10 @@ async function* parseEventStreamBody(
   stream: ReadableStream<Uint8Array>,
 ): AsyncGenerator<ParsedEventStreamFrame, void> {
   const reader = stream.getReader();
-  let buffer = new Uint8Array(0);
+  // `reader.read()` yields ArrayBufferLike-backed views (subarray slices of the
+  // underlying buffer); typing the accumulator as ArrayBufferLike accepts both
+  // freshly allocated buffers and those slices without copying.
+  let buffer: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
   try {
     while (true) {
       const { done, value } = await reader.read();

@@ -96,8 +96,8 @@ export class GitDiffFilter implements RTKFilter {
   private contextLines = 3
 
   matches(context: RTKToolContext): boolean {
-    return context.toolName === 'bash' && 
-           context.toolInput?.command?.includes('git diff')
+    const command = context.toolInput?.command
+    return context.toolName === 'bash' && typeof command === 'string' && command.includes('git diff')
   }
 
   compress(context: RTKToolContext, content: string): CompressionResult {

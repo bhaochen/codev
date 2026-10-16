@@ -19,6 +19,7 @@
  */
 import type { ProviderId } from '../types.js'
 import type { LLMRequest, LLMStreamEvent } from './types.js'
+import type { AssistantMessage, SystemAPIErrorMessage } from '../../../types/message.js'
 import { resolveRoute } from '../router/resolveRoute.js'
 import { getClientForRoute } from '../clients/index.js'
 import { getModelMetadata } from '../models/registry.js'
@@ -147,7 +148,7 @@ export class ComboEngine {
     request: LLMRequest,
     combo: ComboConfig,
     onEvent?: (event: ComboEvent) => void
-  ): AsyncGenerator<LLMStreamEvent, ComboResult> {
+  ): AsyncGenerator<LLMStreamEvent | AssistantMessage | SystemAPIErrorMessage, ComboResult> {
     this.startTime = Date.now()
     this.totalAttempts = 0
 
@@ -271,18 +272,32 @@ export class ComboEngine {
    * Determine if an event represents "content" that cannot be transparently withdrawn.
    * This includes text, thinking, and tool_use events.
    */
-  private isContentEvent(event: LLMStreamEvent): boolean {
-    // Content events that the consumer has already seen
+  private isContentEvent(
+    event: LLMStreamEvent | AssistantMessage | SystemAPIErrorMessage,
+  ): boolean {
+    // Content events that the consumer has already seen. The stream union is
+    // AgentStreamEvent plus whole AssistantMessage / SystemAPIErrorMessage
+    // items the protocol layer may yield. Content arrives as
+    // content_block_start (with a block of type text/thinking/tool_use/
+    // tool_result), content_block_delta, or a complete assistant message —
+    // the block-type cases below were written against block kinds, not event
+    // kinds.
     switch (event.type) {
-      case 'text':
-      case 'thinking':
-      case 'tool_use':
-      case 'tool_result':
-        return true
       case 'message_start':
+        return true
       case 'content_block_start':
+        return ['text', 'thinking', 'tool_use', 'tool_result'].includes(
+          event.content_block.type,
+        )
+      case 'content_block_delta':
+        // A delta is always in-flight content for the streamed block kinds.
+        return true
+      case 'assistant':
+        // A complete assistant message is emitted content — falling back now
+        // would duplicate it.
         return true
       default:
+        // message_delta / message_stop / system API errors: not content gates.
         return false
     }
   }

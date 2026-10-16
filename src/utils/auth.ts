@@ -758,12 +758,14 @@ async function tryDetectFromKiroCLI(): Promise<KiroAutoDetectResult> {
     const db = new Database(cliDbPath, { readonly: true })
     
     try {
-      const row = db.query('SELECT value FROM auth_kv WHERE key = ?').get('kirocli:social:token')
+      const row = db
+        .query('SELECT value FROM auth_kv WHERE key = ?')
+        .get('kirocli:social:token') as { value?: string } | undefined
       if (!row?.value) {
         return { found: false, error: 'No auth token found in kiro-cli database' }
       }
 
-      const auth = JSON.parse(row.value as string)
+      const auth = JSON.parse(row.value)
       const refreshToken = auth.refresh_token
       const profileArn = auth.profile_arn
 

@@ -6,6 +6,7 @@ import { ComboEngine, classifyComboError } from './ComboEngine.js'
 import type { ComboConfig } from './ComboEngine.js'
 import type { LLMRequest, LLMStreamEvent } from './types.js'
 import type { ProviderId } from '../types.js'
+import { asSystemPrompt } from '../../../utils/systemPromptType.js'
 
 // ============================================================================
 // Error Classification Tests
@@ -73,7 +74,7 @@ describe('ComboEngine', () => {
     return {
       model: 'test-model',
       messages: [],
-      systemPrompt: { content: '' },
+      systemPrompt: asSystemPrompt(['']),
       tools: [],
       signal: new AbortController().signal,
       config: {},
@@ -83,6 +84,7 @@ describe('ComboEngine', () => {
         agents: [],
         mcpTools: [],
         isNonInteractiveSession: false,
+        hasAppendSystemPrompt: false,
         querySource: 'repl_main_thread' as any,
       },
       ...overrides,

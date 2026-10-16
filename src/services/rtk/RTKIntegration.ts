@@ -92,6 +92,10 @@ export function compressMessages(messages: Message[]): {
   let totalSavingsBytes = 0
 
   const compressedMessages = messages.map(message => {
+    // extractToolResultContext only produces a context for user messages (and
+    // returns null otherwise); narrowing here lets the compiler see the
+    // `.message` member that only user/assistant messages carry.
+    if (message.type !== 'user') return message
     const context = extractToolResultContext(message)
     if (!context) return message
 
