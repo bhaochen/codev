@@ -17,7 +17,10 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
-import { loadMessageLogs } from '../../utils/sessionStorage.js'
+import {
+  loadAllProjectsMessageLogs,
+  loadMessageLogs,
+} from '../../utils/sessionStorage.js'
 import { loadTranscriptCached } from './transcriptCache.js'
 import {
   __resetSessionStoreForTests,
@@ -108,6 +111,7 @@ describe('DB-first listing (Phase C1)', () => {
   afterEach(() => {
     __resetSessionStoreForTests()
     delete process.env.TEST_ENABLE_TRANSCRIPT_CACHE
+    delete process.env.CODEV_DB_PRIMARY
     delete process.env.CLAUDE_CONFIG_DIR
     // Ensure cleanup can remove a chmod-000 file.
     try {
@@ -184,7 +188,7 @@ describe('DB-first listing (Phase C1)', () => {
     expect(logs[0]!.firstPrompt).toBe('newer prompt')
   })
 
-  it('legacy row without lastPrompt falls back to the file head scan', async () => {
+  it('legacy row without lastPrompt derives the first prompt from stored rows', async () => {
     // Rewrite the file WITHOUT a last-prompt entry (legacy shape).
     const legacy: Entry[] = [
       user('legacy first prompt'),
@@ -193,14 +197,74 @@ describe('DB-first listing (Phase C1)', () => {
     writeFileSync(jsonl, legacy.map(e => JSON.stringify(e)).join('\n') + '\n')
 
     process.env.TEST_ENABLE_TRANSCRIPT_CACHE = '1'
+    process.env.CODEV_DB_PRIMARY = '1'
     const store = getSessionStore()
     const relProject = relative(getProjectsDir(), projectsProjectDir)
     await loadTranscriptCached(store, S, jsonl, relProject)
 
     const logs = await loadMessageLogs()
     expect(logs).toHaveLength(1)
-    // The head scan extracts the first user prompt.
+    // No last-prompt was stored, so the prompt is recovered from the rows.
     expect(logs[0]!.firstPrompt).toBe('legacy first prompt')
     expect(logs[0]!.customTitle).toBe('Legacy')
+  })
+
+  it('serves a listing when the export file is deleted (rows are the only copy)', async () => {
+    // Legacy shape: no last-prompt entry, so the title must come from rows.
+    const legacy: Entry[] = [
+      user('deleted-file prompt'),
+      { type: 'tag', tag: '#keep', sessionId: S } as unknown as Entry,
+    ]
+    writeFileSync(jsonl, legacy.map(e => JSON.stringify(e)).join('\n') + '\n')
+
+    process.env.TEST_ENABLE_TRANSCRIPT_CACHE = '1'
+    process.env.CODEV_DB_PRIMARY = '1'
+    const store = getSessionStore()
+    const relProject = relative(getProjectsDir(), projectsProjectDir)
+    await loadTranscriptCached(store, S, jsonl, relProject)
+
+    // Deferred export (D4): the file may never be materialized or may be pruned.
+    rmSync(jsonl)
+
+    const logs = await loadMessageLogs()
+    expect(logs).toHaveLength(1)
+    expect(logs[0]!.sessionId).toBe(S)
+    expect(logs[0]!.firstPrompt).toBe('deleted-file prompt')
+    expect(logs[0]!.tag).toBe('#keep')
+  })
+
+  it('enumerates projects from the DB when the projects tree is gone', async () => {
+    process.env.TEST_ENABLE_TRANSCRIPT_CACHE = '1'
+    process.env.CODEV_DB_PRIMARY = '1'
+    const store = getSessionStore()
+    const relProject = relative(getProjectsDir(), projectsProjectDir)
+    await loadTranscriptCached(store, S, jsonl, relProject)
+
+    // Drop the whole project directory: readdir(getProjectsDir()) can no longer
+    // discover it, so only the DB rows can supply the directory name.
+    rmSync(projectsProjectDir, { recursive: true, force: true })
+
+    const logs = await loadAllProjectsMessageLogs()
+    const found = logs.find(l => l.sessionId === S)
+    expect(found).toBeDefined()
+    expect(found!.firstPrompt).toBe('hello world')
+  })
+
+  it('listCandidates enumerates rows when the project dir is gone', async () => {
+    process.env.TEST_ENABLE_TRANSCRIPT_CACHE = '1'
+    process.env.CODEV_DB_PRIMARY = '1'
+    const store = getSessionStore()
+    const relProject = relative(getProjectsDir(), projectsProjectDir)
+    await loadTranscriptCached(store, S, jsonl, relProject)
+
+    rmSync(projectsProjectDir, { recursive: true, force: true })
+
+    const { listCandidates } = await import('../../utils/listSessionsImpl.js')
+    const candidates = await listCandidates(
+      getProjectDir(getOriginalCwd()),
+      true,
+      getOriginalCwd(),
+    )
+    expect(candidates.map(c => c.sessionId)).toContain(S)
   })
 })

@@ -16,6 +16,7 @@ import { migration001Initial } from './001-initial.js'
 import { migration002SyncColumns } from './002-sync-columns.js'
 import { migration003CacheRoles } from './003-cache-roles.js'
 import { migration004SubagentSessions } from './004-subagent-sessions.js'
+import { migration005SessionActivity } from './005-session-activity.js'
 
 export interface Migration {
   id: string
@@ -29,6 +30,7 @@ export const MIGRATIONS: readonly Migration[] = [
   migration002SyncColumns,
   migration003CacheRoles,
   migration004SubagentSessions,
+  migration005SessionActivity,
 ]
 
 function ensureMigrationsTable(db: SqliteDatabase): void {

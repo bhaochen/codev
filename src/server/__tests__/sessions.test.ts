@@ -552,6 +552,41 @@ describe('SessionService', () => {
     expect(resultA.sessions[0]!.id).toBe(id1)
   })
 
+  it('discovers and serves a session from the DB when the export tree is gone', async () => {
+    process.env.TEST_ENABLE_TRANSCRIPT_CACHE = '1'
+    const { __resetSessionStoreForTests, getSessionStore } = await import(
+      '../../services/db/SessionStore.js'
+    )
+    __resetSessionStoreForTests()
+    try {
+      const sessionId = 'dddddd01-bbbb-cccc-dddd-eeeeeeeeeeee'
+      const projectDir = '-tmp-dbonly'
+      const entries = [
+        makeSnapshotEntry(),
+        makeUserEntry('DB only session'),
+        makeAssistantEntry('reply'),
+      ]
+      const filePath = await writeSessionFile(projectDir, sessionId, entries)
+
+      // Mirror into the row store, then drop the whole project directory so
+      // discovery can only succeed via the DB.
+      const store = getSessionStore()
+      store.syncSession(sessionId, projectDir, entries as never, [])
+      await fs.rm(path.dirname(filePath), { recursive: true, force: true })
+
+      const result = await service.listSessions()
+      expect(result.sessions.map((s) => s.id)).toContain(sessionId)
+
+      const detail = await service.getSession(sessionId)
+      expect(detail).not.toBeNull()
+      expect(detail!.title).toBe('DB only session')
+      expect(detail!.messages.length).toBeGreaterThan(0)
+    } finally {
+      __resetSessionStoreForTests()
+      delete process.env.TEST_ENABLE_TRANSCRIPT_CACHE
+    }
+  })
+
   // --------------------------------------------------------------------------
   // getSession
   // --------------------------------------------------------------------------

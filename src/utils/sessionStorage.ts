@@ -4289,6 +4289,41 @@ export async function loadMessageLogs(limit?: number): Promise<LogOption[]> {
  * @param limit Optional limit on number of session files to load per project (used when no index exists)
  * @returns List of message logs sorted by date
  */
+/**
+ * Project directory NAMES to scan for a session listing: the union of the
+ * on-disk `projects/` entries and the `project_dir` values the DB knows.
+ *
+ * The listing previously enumerated only `readdir(projects/… )`. Under
+ * DB-primary + deferred export (D4) the export tree is not maintained on the
+ * append path and may be absent entirely — the rows are the record — so a
+ * readdir-only listing shows nothing. The DB supplies the directories and
+ * `getSessionFilesLite` supplements each with its rows (C6). When rows are
+ * unavailable (legacy mode / no store) this degrades to the on-disk set, so
+ * `CODEV_DB_PRIMARY=0` keeps the old behavior.
+ */
+async function listProjectDirNames(): Promise<string[]> {
+  const names = new Set<string>()
+  try {
+    const dirents = await readdir(getProjectsDir(), { withFileTypes: true })
+    for (const d of dirents) {
+      if (d.isDirectory()) names.add(d.name)
+    }
+  } catch {
+    // projects/ missing entirely — the DB below still supplies names.
+  }
+  if (shouldUseTranscriptCache()) {
+    try {
+      const { getSessionStore } = await import('../services/db/SessionStore.js')
+      for (const dir of getSessionStore().listProjectDirs('main')) {
+        names.add(dir)
+      }
+    } catch {
+      // scan-only fallback
+    }
+  }
+  return [...names]
+}
+
 export async function loadAllProjectsMessageLogs(
   limit?: number,
   options?: { skipIndex?: boolean; initialEnrichCount?: number },
@@ -4308,17 +4343,10 @@ async function loadAllProjectsMessageLogsFull(
   limit?: number,
 ): Promise<LogOption[]> {
   const projectsDir = getProjectsDir()
-
-  let dirents: Dirent[]
-  try {
-    dirents = await readdir(projectsDir, { withFileTypes: true })
-  } catch {
-    return []
-  }
-
-  const projectDirs = dirents
-    .filter(dirent => dirent.isDirectory())
-    .map(dirent => join(projectsDir, dirent.name))
+  const projectDirs = (await listProjectDirNames()).map(name =>
+    join(projectsDir, name),
+  )
+  if (projectDirs.length === 0) return []
 
   const logsPerProject = await Promise.all(
     projectDirs.map(projectDir => getLogsWithoutIndex(projectDir, limit)),
@@ -4349,17 +4377,12 @@ export async function loadAllProjectsMessageLogsProgressive(
   initialEnrichCount: number = INITIAL_ENRICH_COUNT,
 ): Promise<SessionLogResult> {
   const projectsDir = getProjectsDir()
-
-  let dirents: Dirent[]
-  try {
-    dirents = await readdir(projectsDir, { withFileTypes: true })
-  } catch {
+  const projectDirs = (await listProjectDirNames()).map(name =>
+    join(projectsDir, name),
+  )
+  if (projectDirs.length === 0) {
     return { logs: [], allStatLogs: [], nextIndex: 0 }
   }
-
-  const projectDirs = dirents
-    .filter(dirent => dirent.isDirectory())
-    .map(dirent => join(projectsDir, dirent.name))
 
   const rawLogs: LogOption[] = []
   for (const projectDir of projectDirs) {
@@ -4472,21 +4495,19 @@ async function getStatOnlyLogsForWorktrees(
   const allLogs: LogOption[] = []
   const seenDirs = new Set<string>()
 
-  let allDirents: Dirent[]
-  try {
-    allDirents = await readdir(projectsDir, { withFileTypes: true })
-  } catch (e) {
-    // Fall back to current project
+  const dirNames = await listProjectDirNames()
+  if (dirNames.length === 0) {
+    // Nothing on disk and no rows — fall back to the current project so the
+    // caller still gets the (possibly empty) local listing.
     logForDebugging(
-      `Failed to read projects dir ${projectsDir}, falling back to current project: ${e}`,
+      `No project directories found for worktrees, falling back to current project`,
     )
     const projectDir = getProjectDir(getOriginalCwd())
     return getSessionFilesLite(projectDir, limit, getOriginalCwd())
   }
 
-  for (const dirent of allDirents) {
-    if (!dirent.isDirectory()) continue
-    const dirName = caseInsensitive ? dirent.name.toLowerCase() : dirent.name
+  for (const dirNameRaw of dirNames) {
+    const dirName = caseInsensitive ? dirNameRaw.toLowerCase() : dirNameRaw
     if (seenDirs.has(dirName)) continue
 
     for (const { path: wtPath, prefix } of indexed) {
@@ -4494,7 +4515,7 @@ async function getStatOnlyLogsForWorktrees(
         seenDirs.add(dirName)
         allLogs.push(
           ...(await getSessionFilesLite(
-            join(projectsDir, dirent.name),
+            join(projectsDir, dirNameRaw),
             undefined,
             wtPath,
           )),
@@ -5164,14 +5185,22 @@ async function readLiteMetadata(
 }
 
 /**
+ * Number of leading `user` entries scanned to recover a first prompt from
+ * stored rows. The file path scans the first ~64KB, which covers roughly the
+ * same set; the first meaningful prompt is essentially always within a small
+ * prefix.
+ */
+const FIRST_PROMPT_SCAN_LIMIT = 100
+
+/**
  * DB-first listing metadata (Phase C1): serve what readLiteMetadata would
  * scrape from the JSONL head/tail straight from the session row — one indexed
  * SELECT instead of two 64KB file reads. Returns null (caller falls back to
  * the file scan) whenever the row is not provably current:
  *   - no row / no sync info for this session,
  *   - sync info does not match the live file (path + size + mtime),
- *   - no lastPrompt AND no title (legacy sessions where the file path would
- *     still scrape a first prompt from the head window).
+ *   - the row has no title/prompt AND the file still exists (defer to its head
+ *     scan, which has raw fallbacks the rows do not).
  */
 export async function readLiteMetadataFromDb(
   store: SessionStore,
@@ -5185,14 +5214,25 @@ export async function readLiteMetadataFromDb(
     if (!row) return null
 
     // D1/D3: primary-owned rows are authoritative; the export file may lag.
-    // Otherwise the row must be provably current for the file.
+    // Otherwise the row must be provably current for the file — EXCEPT when
+    // the file is gone entirely (DB-primary + deferred export: rows are then
+    // the only copy, and skipping the check is what lets a listing serve a
+    // session whose export file was never materialized or was dropped).
     const primaryOwned = store.isSessionPrimaryOwned(sessionId)
     if (!primaryOwned) {
-      const sync = store.getSyncInfo(sessionId)
-      if (!sync) return null
-      if (sync.size !== fileSize) return null
-      if (sync.mtime !== Math.trunc(modifiedMs)) return null
-      if (sync.path !== realpathSync(filePath)) return null
+      let filePresent = true
+      try {
+        realpathSync(filePath)
+      } catch {
+        filePresent = false
+      }
+      if (filePresent || !isDbPrimaryMode()) {
+        const sync = store.getSyncInfo(sessionId)
+        if (!sync) return null
+        if (sync.size !== fileSize) return null
+        if (sync.mtime !== Math.trunc(modifiedMs)) return null
+        if (filePresent && sync.path !== realpathSync(filePath)) return null
+      }
     }
 
     const meta = (row.metadata ?? {}) as Record<string, unknown>
@@ -5202,23 +5242,38 @@ export async function readLiteMetadataFromDb(
       (typeof meta.customTitle === 'string' ? meta.customTitle : undefined) ??
       (typeof meta.aiTitle === 'string' ? meta.aiTitle : undefined)
 
-    // Without a lastPrompt, the FILE path would scrape the first prompt from
-    // the head window (which we deliberately do not store) — defer to the
-    // file while it exists. Once the file is gone (rows are the only copy),
-    // serve what the rows have; the '(session)' fallback upstream covers
-    // empty prompts.
-    if (!lastPrompt) {
-      let fileExists = true
-      try {
-        statSync(filePath)
-      } catch {
-        fileExists = false
+    // Without a lastPrompt the FILE path scrapes the first prompt from the
+    // head window. That prompt is recoverable from the stored user messages,
+    // so derive it here rather than deferring to the file — listings then work
+    // whether or not the export file still exists. The row was proven current
+    // for the file above, so this matches the head scan.
+    let firstPrompt = lastPrompt
+    if (!firstPrompt) {
+      firstPrompt = extractFirstPromptFromEntries(
+        store
+          .getMessages({
+            sessionId,
+            entryTypes: ['user'],
+            limit: FIRST_PROMPT_SCAN_LIMIT,
+          })
+          .map(r => r.data),
+      )
+      if (!firstPrompt) {
+        // Nothing textual recoverable from the rows. While the file exists its
+        // head scan still has raw fallbacks (truncated head lines, array
+        // content blocks) that may find a prompt — defer to it. Once it is
+        // gone, serve the rows as-is; '(session)' covers the empty title.
+        try {
+          statSync(filePath)
+          return null
+        } catch {
+          // File gone — fall through and serve the row.
+        }
       }
-      if (fileExists) return null
     }
 
     return {
-      firstPrompt: lastPrompt,
+      firstPrompt,
       gitBranch: typeof meta.gitBranch === 'string' ? meta.gitBranch : undefined,
       isSidechain: meta.isSidechain === true,
       projectPath:
@@ -5241,13 +5296,107 @@ export async function readLiteMetadataFromDb(
   }
 }
 
+/** Mutable state threaded through a first-prompt scan. */
+type PromptScanState = {
+  hasTickMessages: boolean
+  firstCommandFallback: string
+}
+
+/**
+ * Text values a `user` entry can carry as a prompt. Array content (common in
+ * VS Code where IDE metadata tags precede the real prompt) is flattened to its
+ * text blocks so the actual prompt behind <ide_selection> is not missed.
+ */
+function userTextValues(entry: Record<string, unknown>): string[] {
+  const message = entry.message as Record<string, unknown> | undefined
+  if (!message) return []
+  const content = message.content
+  const texts: string[] = []
+  if (typeof content === 'string') {
+    texts.push(content)
+  } else if (Array.isArray(content)) {
+    for (const block of content) {
+      const b = block as Record<string, unknown>
+      if (b.type === 'text' && typeof b.text === 'string') {
+        texts.push(b.text as string)
+      }
+    }
+  }
+  return texts
+}
+
+/**
+ * Apply the first-prompt display rules to one candidate text block.
+ * Returns the display prompt when this block answers the scan, or null when
+ * the caller should keep looking. Shared by the JSONL head scan
+ * (`extractFirstPromptFromChunk`) and the DB entries projection
+ * (`extractFirstPromptFromEntries`) so both produce the same title.
+ *
+ * Skip logic matches getFirstMeaningfulUserMessageTextContent, but slash
+ * commands are formatted cleanly (e.g. "/clear") rather than discarded, so the
+ * session still appears in the resume picker.
+ */
+function firstPromptFromTextBlock(
+  text: string,
+  state: PromptScanState,
+): string | null {
+  if (!text) return null
+
+  let result = text.replace(/\n/g, ' ').trim()
+
+  const commandNameTag = extractTag(result, COMMAND_NAME_TAG)
+  if (commandNameTag) {
+    const name = commandNameTag.replace(/^\//, '')
+    const commandArgs = extractTag(result, 'command-args')?.trim() || ''
+    if (builtInCommandNames().has(name) || !commandArgs) {
+      if (!state.firstCommandFallback) {
+        state.firstCommandFallback = commandNameTag
+      }
+      return null
+    }
+    // Custom command with meaningful args — use clean display
+    return commandArgs ? `${commandNameTag} ${commandArgs}` : commandNameTag
+  }
+
+  // Format bash input with ! prefix before the generic XML skip
+  const bashInput = extractTag(result, 'bash-input')
+  if (bashInput) return `! ${bashInput}`
+
+  if (SKIP_FIRST_PROMPT_PATTERN.test(result)) {
+    if (
+      (feature('PROACTIVE') || feature('KAIROS')) &&
+      result.startsWith(`<${TICK_TAG}>`)
+    )
+      state.hasTickMessages = true
+    return null
+  }
+  if (result.length > 200) {
+    result = result.slice(0, 200).trim() + '…'
+  }
+  return result
+}
+
+/** Tail of a first-prompt scan: command fallback, tick synthetic, or ''. */
+function finishPromptScan(state: PromptScanState): string {
+  // Session started with a slash command but had no subsequent real message —
+  // use the clean command name so the session still appears in the resume picker
+  if (state.firstCommandFallback) return state.firstCommandFallback
+  // Proactive sessions have only tick messages — give them a synthetic prompt
+  // so they're not filtered out by enrichLogs
+  if ((feature('PROACTIVE') || feature('KAIROS')) && state.hasTickMessages)
+    return 'Proactive session'
+  return ''
+}
+
 /**
  * Scans a chunk of text for the first meaningful user prompt.
  */
 function extractFirstPromptFromChunk(chunk: string): string {
+  const state: PromptScanState = {
+    hasTickMessages: false,
+    firstCommandFallback: '',
+  }
   let start = 0
-  let hasTickMessages = false
-  let firstCommandFallback = ''
   while (start < chunk.length) {
     const newlineIdx = chunk.indexOf('\n', start)
     const line =
@@ -5261,85 +5410,44 @@ function extractFirstPromptFromChunk(chunk: string): string {
     if (line.includes('"isMeta":true') || line.includes('"isMeta": true'))
       continue
 
+    let entry: Record<string, unknown>
     try {
-      const entry = jsonParse(line) as Record<string, unknown>
-      if (entry.type !== 'user') continue
-
-      const message = entry.message as Record<string, unknown> | undefined
-      if (!message) continue
-
-      const content = message.content
-      // Collect all text values from the message content. For array content
-      // (common in VS Code where IDE metadata tags come before the user's
-      // actual prompt), iterate all text blocks so we don't miss the real
-      // prompt hidden behind <ide_selection>/<ide_opened_file> blocks.
-      const texts: string[] = []
-      if (typeof content === 'string') {
-        texts.push(content)
-      } else if (Array.isArray(content)) {
-        for (const block of content) {
-          const b = block as Record<string, unknown>
-          if (b.type === 'text' && typeof b.text === 'string') {
-            texts.push(b.text as string)
-          }
-        }
-      }
-
-      for (const text of texts) {
-        if (!text) continue
-
-        let result = text.replace(/\n/g, ' ').trim()
-
-        // Skip command messages (slash commands) but remember the first one
-        // as a fallback title. Matches skip logic in
-        // getFirstMeaningfulUserMessageTextContent, but instead of discarding
-        // command messages entirely, we format them cleanly (e.g. "/clear")
-        // so the session still appears in the resume picker.
-        const commandNameTag = extractTag(result, COMMAND_NAME_TAG)
-        if (commandNameTag) {
-          const name = commandNameTag.replace(/^\//, '')
-          const commandArgs = extractTag(result, 'command-args')?.trim() || ''
-          if (builtInCommandNames().has(name) || !commandArgs) {
-            if (!firstCommandFallback) {
-              firstCommandFallback = commandNameTag
-            }
-            continue
-          }
-          // Custom command with meaningful args — use clean display
-          return commandArgs
-            ? `${commandNameTag} ${commandArgs}`
-            : commandNameTag
-        }
-
-        // Format bash input with ! prefix before the generic XML skip
-        const bashInput = extractTag(result, 'bash-input')
-        if (bashInput) return `! ${bashInput}`
-
-        if (SKIP_FIRST_PROMPT_PATTERN.test(result)) {
-          if (
-            (feature('PROACTIVE') || feature('KAIROS')) &&
-            result.startsWith(`<${TICK_TAG}>`)
-          )
-            hasTickMessages = true
-          continue
-        }
-        if (result.length > 200) {
-          result = result.slice(0, 200).trim() + '…'
-        }
-        return result
-      }
+      entry = jsonParse(line) as Record<string, unknown>
     } catch {
       continue
     }
+    if (entry.type !== 'user') continue
+
+    for (const text of userTextValues(entry)) {
+      const prompt = firstPromptFromTextBlock(text, state)
+      if (prompt !== null) return prompt
+    }
   }
-  // Session started with a slash command but had no subsequent real message —
-  // use the clean command name so the session still appears in the resume picker
-  if (firstCommandFallback) return firstCommandFallback
-  // Proactive sessions have only tick messages — give them a synthetic prompt
-  // so they're not filtered out by enrichLogs
-  if ((feature('PROACTIVE') || feature('KAIROS')) && hasTickMessages)
-    return 'Proactive session'
-  return ''
+  return finishPromptScan(state)
+}
+
+/**
+ * First meaningful user prompt of an ordered entry list — the DB-side
+ * equivalent of scanning the head window of a session file. Lets a session
+ * row supply a title when its `last-prompt` entry is absent (legacy rows
+ * written before that entry existed) and the export file is gone.
+ */
+export function extractFirstPromptFromEntries(
+  entries: readonly Entry[],
+): string {
+  const state: PromptScanState = {
+    hasTickMessages: false,
+    firstCommandFallback: '',
+  }
+  for (const entry of entries) {
+    const e = entry as Record<string, unknown>
+    if (e.type !== 'user' || e.isMeta === true) continue
+    for (const text of userTextValues(e)) {
+      const prompt = firstPromptFromTextBlock(text, state)
+      if (prompt !== null) return prompt
+    }
+  }
+  return finishPromptScan(state)
 }
 
 /**

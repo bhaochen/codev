@@ -9,7 +9,7 @@
 
 import type { Dirent } from 'fs'
 import { readdir, stat } from 'fs/promises'
-import { basename, join } from 'path'
+import { basename, isAbsolute, join, relative } from 'path'
 import { getWorktreePathsPortable } from './getWorktreePathsPortable.js'
 import type { LiteSessionFile } from './sessionStoragePortable.js'
 import {
@@ -175,7 +175,7 @@ export async function listCandidates(
   try {
     names = await readdir(projectDir)
   } catch {
-    return []
+    names = []
   }
 
   const results = await Promise.all(
@@ -194,7 +194,50 @@ export async function listCandidates(
     }),
   )
 
-  return results.filter((c): c is Candidate => c !== null)
+  const candidates = results.filter((c): c is Candidate => c !== null)
+  const seen = new Set(candidates.map(c => c.sessionId))
+
+  // DB-primary: rows are the record. A session whose export file is gone (D4
+  // defers it) — or a project directory that is missing entirely — must still
+  // be a candidate, or callers like autoDream silently see nothing once the
+  // JSONL tree is dropped. Row activity (`updated_at`) stands in for mtime.
+  // Dynamic imports keep this module safe to import from the SDK entrypoint.
+  try {
+    const { isDbPrimaryMode } = await import('./sessionPersistence.js')
+    if (isDbPrimaryMode()) {
+      const projectDirRel = relative(getProjectsDir(), projectDir)
+      const underProjectsRoot =
+        projectDirRel !== '' &&
+        !projectDirRel.startsWith('..') &&
+        !isAbsolute(projectDirRel)
+      if (underProjectsRoot) {
+        const { resolveShadowStore } = await import(
+          '../services/db/shadowWriter.js'
+        )
+        const store = await resolveShadowStore()
+        if (store) {
+          for (const meta of store.listSessions({
+            projectDir: projectDirRel,
+            kind: 'main',
+            limit: Number.MAX_SAFE_INTEGER,
+          })) {
+            if (seen.has(meta.id)) continue
+            seen.add(meta.id)
+            candidates.push({
+              sessionId: meta.id,
+              filePath: join(projectDir, `${meta.id}.jsonl`),
+              mtime: doStat ? meta.updatedAt : 0,
+              projectPath,
+            })
+          }
+        }
+      }
+    }
+  } catch {
+    // Rows unavailable — the directory scan above is the whole answer.
+  }
+
+  return candidates
 }
 
 /**

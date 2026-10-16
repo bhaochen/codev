@@ -326,11 +326,17 @@ export class SessionService {
         } catch {
           fileStat = null
         }
+        // Rows are the only copy when the export file is gone (D4 deferred
+        // export): serve them rather than falling back to a file that is not
+        // there. With a file present, the raw-order guarantee only holds for
+        // files without boundary truncation.
+        const fileMissing = fileStat === null
         const eligible =
           primaryOwned ||
-          (fileStat !== null && fileStat.size <= SKIP_PRECOMPACT_THRESHOLD)
+          fileMissing ||
+          fileStat.size <= SKIP_PRECOMPACT_THRESHOLD
         if (eligible) {
-          let fresh = primaryOwned
+          let fresh = primaryOwned || fileMissing
           if (!fresh && fileStat) {
             const sync = store.getSyncInfo(sessionId)
             const size = Number(fileStat.size)
@@ -1003,23 +1009,26 @@ export class SessionService {
     Array<{ filePath: string; projectDir: string; sessionId: string }>
   > {
     const projectsDir = this.getProjectsDir()
-    let projectDirs: string[]
+    // dir name → session ids discovered there (from the tree and/or the rows).
+    const byDir = new Map<string, Set<string>>()
+    const dirSet = (name: string): Set<string> => {
+      let set = byDir.get(name)
+      if (!set) {
+        set = new Set<string>()
+        byDir.set(name, set)
+      }
+      return set
+    }
 
+    // On-disk scan (best effort — the projects tree may be absent).
+    let dirents: string[] = []
     try {
-      projectDirs = await fs.readdir(projectsDir)
+      dirents = await fs.readdir(projectsDir)
     } catch {
-      return []
+      dirents = []
     }
 
-    // Optionally filter to a specific project
-    if (projectFilter) {
-      const sanitized = this.sanitizePath(projectFilter)
-      projectDirs = projectDirs.filter((d) => d === sanitized)
-    }
-
-    const results: Array<{ filePath: string; projectDir: string; sessionId: string }> = []
-
-    for (const dir of projectDirs) {
+    for (const dir of dirents) {
       const dirPath = path.join(projectsDir, dir)
 
       // Ensure it's a directory
@@ -1037,11 +1046,49 @@ export class SessionService {
         continue
       }
 
+      const sessions = dirSet(dir)
       for (const file of files) {
         if (!file.endsWith('.jsonl')) continue
-        const sessionId = file.replace('.jsonl', '')
+        sessions.add(file.replace('.jsonl', ''))
+      }
+    }
+
+    // DB-primary: rows are the record. Under D4 deferred export a project
+    // directory may not exist and a session's file may never have been
+    // materialized — discovery must still find them or /resume-style listings
+    // go empty once the export tree is dropped.
+    if (this.useDbReads()) {
+      try {
+        const { getSessionStore } = await import('../../services/db/SessionStore.js')
+        const store = getSessionStore()
+        for (const dir of store.listProjectDirs('main')) {
+          const sessions = dirSet(dir)
+          for (const meta of store.listSessions({
+            projectDir: dir,
+            kind: 'main',
+            limit: Number.MAX_SAFE_INTEGER,
+          })) {
+            sessions.add(meta.id)
+          }
+        }
+      } catch {
+        // scan-only fallback
+      }
+    }
+
+    let dirNames = [...byDir.keys()]
+
+    // Optionally filter to a specific project
+    if (projectFilter) {
+      const sanitized = this.sanitizePath(projectFilter)
+      dirNames = dirNames.filter((d) => d === sanitized)
+    }
+
+    const results: Array<{ filePath: string; projectDir: string; sessionId: string }> = []
+    for (const dir of dirNames) {
+      for (const sessionId of byDir.get(dir)!) {
         results.push({
-          filePath: path.join(dirPath, file),
+          filePath: path.join(projectsDir, dir, `${sessionId}.jsonl`),
           projectDir: dir,
           sessionId,
         })
@@ -1049,6 +1096,36 @@ export class SessionService {
     }
 
     return results
+  }
+
+  /**
+   * Stat a session's export file, falling back to the row's timestamps when the
+   * file is absent. Under D4 deferred export rows are the record, so a listing
+   * must not drop a session merely because its file was never materialized
+   * (or was pruned).
+   */
+  private async statSessionFile(
+    filePath: string,
+    sessionId?: string,
+  ): Promise<{ size: number; mtime: Date; birthtime: Date } | null> {
+    try {
+      const st = await fs.stat(filePath)
+      return { size: st.size, mtime: st.mtime, birthtime: st.birthtime }
+    } catch {
+      if (!sessionId || !this.useDbReads()) return null
+      try {
+        const { getSessionStore } = await import('../../services/db/SessionStore.js')
+        const row = getSessionStore().getSession(sessionId)
+        if (!row) return null
+        return {
+          size: row.syncedSize ?? 0,
+          mtime: new Date(row.updatedAt),
+          birthtime: new Date(row.createdAt),
+        }
+      } catch {
+        return null
+      }
+    }
   }
 
   /**
@@ -1416,14 +1493,8 @@ export class SessionService {
   }): Promise<{ sessions: SessionListItem[]; total: number }> {
     const sessionFiles = await this.discoverSessionFiles(options?.project)
     const filesWithStats = (await Promise.all(sessionFiles.map(async (sessionFile) => {
-      try {
-        return {
-          ...sessionFile,
-          stat: await fs.stat(sessionFile.filePath),
-        }
-      } catch {
-        return null
-      }
+      const stat = await this.statSessionFile(sessionFile.filePath, sessionFile.sessionId)
+      return stat ? { ...sessionFile, stat } : null
     }))).filter((item): item is NonNullable<typeof item> => item !== null)
 
     filesWithStats.sort((a, b) => b.stat.mtime.getTime() - a.stat.mtime.getTime())
@@ -1485,7 +1556,8 @@ export class SessionService {
     if (!found) return null
 
     const { filePath, projectDir } = found
-    const stat = await fs.stat(filePath)
+    const stat = await this.statSessionFile(filePath, sessionId)
+    if (!stat) return null
     const entries = await this.readJsonlEntries(sessionId, filePath)
 
     const messages = await this.appendSubagentToolMessages(

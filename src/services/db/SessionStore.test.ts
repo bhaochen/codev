@@ -338,4 +338,41 @@ describe('SessionStore', () => {
       expect(chain[1].type).toBe('assistant')
     })
   })
+
+  describe('syncSession activity timestamp', () => {
+    function msg(n: number, timestamp: string): Entry {
+      return {
+        type: 'user',
+        uuid: `00000000-0000-4000-8000-${n.toString(16).padStart(12, '0')}`,
+        parentUuid: null,
+        timestamp,
+        sessionId: 'sync-activity',
+        message: { role: 'user', content: `m${n}` },
+      } as unknown as Entry
+    }
+
+    it('stamps updated_at with the newest entry timestamp, not the sync clock', () => {
+      const first = '2026-01-01T00:00:00.000Z'
+      const last = '2026-03-04T05:06:07.000Z'
+      store.syncSession('sync-activity', 'proj', [
+        msg(1, first),
+        msg(2, last),
+        // Trailing metadata entry without a timestamp must not reset activity.
+        { type: 'last-prompt', lastPrompt: 'hi', sessionId: 'sync-activity' } as unknown as Entry,
+      ])
+
+      const row = store.getSession('sync-activity')
+      expect(row!.createdAt).toBe(Date.parse(first))
+      expect(row!.updatedAt).toBe(Date.parse(last))
+    })
+
+    it('falls back to the sync clock when no entry carries a timestamp', () => {
+      const before = Date.now()
+      store.syncSession('sync-activity', 'proj', [
+        { type: 'tag', tag: '#x', sessionId: 'sync-activity' } as unknown as Entry,
+      ])
+      const row = store.getSession('sync-activity')
+      expect(row!.updatedAt).toBeGreaterThanOrEqual(before)
+    })
+  })
 })

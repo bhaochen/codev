@@ -407,31 +407,68 @@ went **9.1 GB → 249 MB**. The 10.6 GB pre-fix database backup was removed too.
 
 ### Can `~/.claude/projects` be deleted now?
 
-**No — keep it.** The default is already DB-primary (D3) with deferred export
-(D4): every entry is durable in SQLite first and the JSONL file is an *export*,
-written on demand just before a hook / statusline / external reader asks for it
-(`materializeExportForPath`). So the tree is no longer the operational source of
-truth — but deleting it would remove four things worth far more than the 249 MB
-it now occupies:
+**Yes — the tooling no longer needs it.** The default is already DB-primary (D3)
+with deferred export (D4): every entry is durable in SQLite first and the JSONL
+file is an *export*, written on demand just before a hook / statusline / external
+reader asks for it (`materializeExportForPath`). What still stood in the way was
+*gross/**discovery*** — listings walked `getProjectsDir()` and only the file scan
+could enumerate sessions. That is now closed:
+
+- **Project enumeration is a union of on-disk dirs and `sessions.project_dir`.**
+  A new `SessionStore.listProjectDirs()` feeds `listProjectDirNames()` in
+  `sessionStorage.ts`, so `loadAllProjectsMessageLogs{Progressive,Full}` and
+  `loadSameRepoMessageLogs` see projects whose directories are absent. The
+  per-session DB supplement inside `getSessionFilesLite` (C6) then fills in the
+  rows.
+- **`readLiteMetadataFromDb` serves a row whose export file is gone** (D1/D3
+  rule: rows are the only copy), and derives the missing title from the stored
+  user messages (`extractFirstPromptFromEntries`) instead of deferring to a file
+  that is not there.
+- **The server mirrors this**: `discoverSessionFiles` unions FS + rows,
+  `statSessionFile` falls back to the row's timestamps for a listing, and
+  `readJsonlEntries` serves rows when the file is absent.
+- **`listCandidates` (the autoDream skip-gate) supplements the directory scan
+  with rows**, so memory consolidation still sees sessions when the tree is
+  gone.
+
+**Measured (tree deleted, then restored), after the change:**
+
+| Path | With tree | Tree deleted |
+|------|-----------|--------------|
+| `listSessionsImpl` (SDK listing; no runtime caller today) | 248 | **0** |
+| `loadAllProjectsMessageLogs` (`/resume` picker) | 251 | **251** |
+| `SessionStore.listSessions` (DB; insights/stats) | 251 | 251 |
+| `/resume` entries with a real title | 251 | **251** |
+| `/resume` recency ordering | by file mtime | **identical** (by row activity) |
+
+Recency ordering needed one more fix: `sessions.updated_at` used to be stamped
+with the sync wall-clock (`appendMessages`), so every session migrated in one run
+shared a timestamp and the DB-only ordering was arbitrary. `syncSession` now
+stamps it with the newest entry's timestamp and migration **005-session-activity**
+backfills existing rows from the last timestamped message — after which the
+tree-deleted order matches the tree-present order exactly.
+
+Still true, and the reason this is a *decision* rather than an automatic cleanup:
 
 1. **Fallback + rebuild source.** Reads fall back to JSONL on any DB error, and
-   "delete the database → rebuild from JSONL" is the safety net. Gone with the
-   tree.
+   "delete the database → rebuild from JSONL" is the safety net.
 2. **Rollback.** `CODEV_DB_PRIMARY=0` returns to JSONL-as-truth; without the
    files, rollback is total history loss.
 3. **Interop.** Hook scripts, statusline commands, the `sessions export` CLI and
-   other external readers consume the `.jsonl` path convention.
-4. **Cost.** After fix B the residual is tiny (the 8.79 GB of duplicated
-   compaction transcripts is what was deleted, not session history).
+   other external readers consume the `.jsonl` path convention — under D4 they
+   are served by `materializeExportForPath`, so this works without a standing
+   tree, but it is the reason to keep `CODEV_SESSION_EXPORT=1` available for
+   anything that watches a path continuously.
 
-Note: under D4 the files can be *stale* for recent sessions (an export is only
-materialized when read), so the tree is deliberately a lazy export, not a live
-mirror. Dropping the fallback entirely would be a deliberate "prove the flip,
-then remove the safety net" project — not a disk-cleanup step.
+Under D4 the files can be *stale* for recent sessions (an export is only
+materialized when read), so the tree is a lazy export, not a live mirror. The
+residual is 249 MB of session history whose only unique value now is as the
+rollback/rebuild copy — so deleting it is a "keep a backup, drop the live tree"
+step rather than a disk-cleanup one.
 
-**Measured (tree deleted, then restored).** Session *discovery* is still
-filesystem-only, so removing the tree breaks the `/resume` picker even though
-every row is in SQLite:
+**Historical measurement (before the change).** Session *discovery* was
+filesystem-only, so removing the tree broke the `/resume` picker even though
+every row was in SQLite:
 
 | Path | With tree | Tree deleted |
 |------|-----------|--------------|
@@ -439,11 +476,6 @@ every row is in SQLite:
 | `loadAllProjectsMessageLogs` (`/resume` picker) | 50 | **0** |
 | `SessionStore.listSessions` (DB; insights/stats) | 498 | 498 |
 | `loadTranscriptViaCache(<session>)` (DB-first read) | 2,108 | 2,108 |
-
-The database can *serve* a known session with no file present, but it cannot
-*list* sessions: `/resume`, the server's `discoverSessionFiles`, and everything
-else that walks `getProjectsDir()` go dark. Making the picker DB-backed is the
-remaining work needed to actually drop the tree.
 
 ---
 

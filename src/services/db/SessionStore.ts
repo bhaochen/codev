@@ -186,6 +186,23 @@ export class SessionStore {
   }
 
   /**
+   * Distinct project directory names (`sessions.project_dir`) for a kind.
+   *
+   * The listing paths (the `/resume` picker, the server's session list) need
+   * the set of projects to scan. On disk that is `readdir(projects/)`; under
+   * DB-primary + deferred export (D4) the tree may be missing or stale, so the
+   * rows are the authoritative source of "which projects exist".
+   */
+  listProjectDirs(kind: 'main' | 'subagent' = 'main'): string[] {
+    const rows = this.db
+      .query(
+        'SELECT DISTINCT project_dir FROM sessions WHERE kind = ? ORDER BY project_dir',
+      )
+      .all(kind) as Array<{ project_dir: string }>
+    return rows.map(r => r.project_dir)
+  }
+
+  /**
    * Execute a function inside a database transaction (BEGIN IMMEDIATE / COMMIT / ROLLBACK).
    * Uses savepoint-based nesting so callers can compose transactions safely.
    * If fn throws, the transaction is rolled back and the error is re-thrown.
@@ -515,6 +532,12 @@ export class SessionStore {
     // A malformed timestamp must not crash the sync (and must not store NaN).
     const createdAt = Number.isFinite(parsed) ? parsed : Date.now()
     const now = Date.now()
+    // Activity = the newest timestamped entry, so listings order by real
+    // session activity rather than by when this (re)sync happened. Under
+    // DB-primary + deferred export (D4) this column is the only activity
+    // signal once the JSONL tree is gone; a wall-clock stamp would make every
+    // session synced in one run look equally recent.
+    const updatedAt = lastEntryTimestamp(all) ?? now
 
     this.db.run('DELETE FROM messages WHERE session_id = ?', [sessionId])
     this.db.run('DELETE FROM sessions WHERE id = ?', [sessionId])
@@ -526,13 +549,16 @@ export class SessionStore {
       agentName: listing.agentName,
       agentColor: listing.agentColor,
       createdAt,
-      updatedAt: now,
+      updatedAt,
       metadata: listing as Record<string, unknown>,
       kind: opts?.kind,
       parentSessionId: opts?.parentSessionId,
     })
     if (preBoundaryMeta.length > 0) this.appendMessages(sessionId, preBoundaryMeta, 'meta')
     if (entries.length > 0) this.appendMessages(sessionId, entries, 'main')
+    // appendMessages stamps its own wall-clock updated_at; restore the activity
+    // timestamp over it so the row reflects the session, not the sync.
+    this.db.run('UPDATE sessions SET updated_at = ? WHERE id = ?', [updatedAt, sessionId])
     return entries.length + preBoundaryMeta.length
   }
 
@@ -631,6 +657,21 @@ export class SessionStore {
 // ============================================================================
 // Helpers
 // ============================================================================
+
+/**
+ * Newest `timestamp` among a session's entries — the session's last activity.
+ * Scans from the end: the tail carries the newest entries and most sessions
+ * hit a usable timestamp within a couple of steps.
+ */
+function lastEntryTimestamp(entries: readonly Entry[]): number | undefined {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const ts = (entries[i] as { timestamp?: unknown }).timestamp
+    if (typeof ts !== 'string') continue
+    const t = new Date(ts).getTime()
+    if (Number.isFinite(t)) return t
+  }
+  return undefined
+}
 
 function rowToSessionMeta(row: Record<string, unknown>): SessionMeta {
   return {
