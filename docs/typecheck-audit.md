@@ -111,12 +111,16 @@ BrowserTool 经 `tools.ts:121` 的 `feature('WEB_BROWSER_TOOL')` 接入，**在�
 | 批次 | 状态 | 提交 | 剩余错误 |
 |------|------|------|----------|
 | 审计 | ✅ | 本文档 | 131 |
-| 1 | ⬜ | | |
-| 2 | ⬜ | | |
-| 3 | ⬜ | | |
-| 4 | ⬜ | | |
-| 5 | ⬜ | | |
-| 6 | ⬜ | | |
+| 1（运行时/解析级真 bug） | ✅ | `174588a4` | 105 |
+| 2（kiro 接口漂移） | ✅ | `64c80ea1` | 82 |
+| 3（wire.ts 声明） | ✅ | `027508b3` | 69 |
+| 4（verbatimModuleSyntax） | ✅ | `08e9a08a` | 53 |
+| 5（browser watchdog/session 面） | ✅ | `10776b4d` | 16 |
+| 6（llm/rtk/auth 残余） | ✅ | `164c016f` | **0** |
+
+最终验证（`164c016f`）：`bunx tsc --noEmit -p tsconfig.json` **exit 0**；全量测试
+1572 pass / 0 fail；生产构建通过；整个修复过程相对 `34ced38e` 基线零新增错误，
+未引入任何 `any` / `@ts-ignore` / tsconfig 排除项。
 
 ## 附录：基线与 HEAD 的完整错误清单（131 行，两者逐条一致）
 
