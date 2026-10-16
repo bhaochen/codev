@@ -41,7 +41,7 @@
 ### 语音
 | 文档 | 说明 |
 |------|------|
-| [语音系统总览](voice/overview.md) | STT/TTS 提供者、Voice Stream 协议 |
+| [语音系统总览](voice/overview.md) | STT/TTS 提供者、语音模式链路（Groq Whisper / Edge TTS） |
 
 ### Ink 终端 UI
 | 文档 | 说明 |

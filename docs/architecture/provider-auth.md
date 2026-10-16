@@ -453,6 +453,8 @@ Tier1 下模型上下文窗口由 `src/utils/model/` 中的 `ALL_MODEL_CONFIGS` 
 
 Tier1 运行时环境通过 `src/utils/model/providers.ts` 及 `getProcessEnvWithTerminalShellEnvironment()` 构建，直接读取 `~/.claude.json` 的 `authProvider` 与环境变量（`ANTHROPIC_*`）。
 
+> 路径解析注：`~/.claude.json` 的解析统一走 `resolveGlobalConfigFilePath()`（`src/utils/globalConfigPath.ts`），CLI 的 `getGlobalClaudeFile()` 与 server 侧读取方（`api/models.ts`、`api/cli-auth.ts`、`ws/handler.ts`）共享同一实现。历史上 server 自行拼接 `$CLAUDE_CONFIG_DIR || ~/.claude` + `.claude.json`，默认读到 CLI 从不写的 `~/.claude/.claude.json`，provider 检测静默落空——已修复。
+
 ---
 
 ## 8. 架构图汇总（P6 最终：单轨 Native + Tier1 仅留）

@@ -309,6 +309,26 @@ VAD（Voice Activity Detection）服务 (`src/friend/voice/vad-service.ts`) 使�
 
 ---
 
+## 9. 配置与设置文件路径解析
+
+三类路径各有**唯一解析入口**，CLI 与 desktop server 共享，禁止调用方自行拼接：
+
+| 层 | 唯一解析器 | 默认值 | 说明 |
+|----|-----------|--------|------|
+| 配置主目录 | `getClaudeConfigHomeDir()`（`src/utils/envUtils.ts`） | `$CLAUDE_CONFIG_DIR` ?? `~/.claude` | 按 `CLAUDE_CONFIG_DIR` 键控 memoize；sessions、teams、tasks、uploads、locks 等目录均由它拼接（server 侧曾有 16 处内联副本，已收口） |
+| 全局配置文件 | `resolveGlobalConfigFilePath()`（`src/utils/globalConfigPath.ts`）；CLI 侧 memoize 包装为 `getGlobalClaudeFile()`（`src/utils/env.ts`） | `~/.claude.json` | 优先级：`<主目录>/.config.json`（legacy，存在即用）→ `$CLAUDE_CONFIG_DIR \|\| $HOME` 下的 `.claude<oauth 后缀>.json`（后缀见 `fileSuffixForOauthConfig`） |
+| 设置文件级联 | `getSettingsFilePathForSource()`（`src/utils/settings/settings.ts`） | userSettings = `<主目录>/settings.json` | 多源合并（policy/flag/user/project/local）+ schema 校验 + 会话级缓存（改 env 或文件后需 `resetSettingsCache()`） |
+
+历史教训（均已修复，回归测试在 `src/utils/globalConfigPath.test.ts`、`src/server/__tests__/global-config-path.test.ts`、`src/server/__tests__/adapter-session-cleanup.test.ts`）：
+
+- server 曾在 5 处内联拼接配置**文件**路径（`$CLAUDE_CONFIG_DIR || ~/.claude` + `.claude.json`），默认读到 `~/.claude/.claude.json`——CLI 从不写这个文件，导致 provider 模型列表、authProvider 检测、cli-auth 读写全部静默落空；cli-auth 甚至会在错误位置创建副本。现统一走 `resolveGlobalConfigFilePath()`。
+- 另有 16 处内联解析配置**主目录**，其中 `sessions.ts` 的 adapter 会话清理用 `process.env.HOME || ''`——HOME 缺失时解析成相对路径 `./.claude`，与其余读者（passwd 回退的真实 home）分叉。现统一走 `getClaudeConfigHomeDir()`。
+- voice 的 Groq key 曾裸读 `~/.claude/settings.json`，与 `/voice` 开关写入的文件（跟随 `CLAUDE_CONFIG_DIR`）不一致，自定义目录下静默丢 key。现经 `getInitialSettings().env` 读取。
+- 读配置目录的合法直接 env 访问只剩语义不同的场景：`doctorService` 的覆盖标志（`options.configDir || env`）与 macOS Keychain 服务名推导（`macOsKeychainHelpers.ts`——注意：设置非默认 `CLAUDE_CONFIG_DIR` 会使 Keychain 服务名附加 hash 后缀，已存凭据会"消失"）。
+- 同名的"小配置模块"是反模式：`src/config/config.ts` 曾与 `utils/config.ts` 重名、裸读 settings.json 里的 `JINA_API_KEY`，消费者删除后沦为孤儿并带着依赖开发者本机文件的非密封测试，已删除。
+
+---
+
 ## 架构决策记录
 
 | 决策 | 理由 |
