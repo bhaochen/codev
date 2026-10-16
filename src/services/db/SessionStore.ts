@@ -655,7 +655,10 @@ function rowToSessionMeta(row: Record<string, unknown>): SessionMeta {
 }
 
 function defaultStorePath(): string {
-  return join(getClaudeConfigHomeDir(), 'sessions', 'sessions.sqlite')
+  // Named `sessions.db` (renamed from `sessions.sqlite`); the directory is
+  // already `sessions/`, so the file name stays short. See
+  // docs/architecture/session-storage-migration.md for the rename/rollback.
+  return join(getClaudeConfigHomeDir(), 'sessions', 'sessions.db')
 }
 
 // Singleton instance
