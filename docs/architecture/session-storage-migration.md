@@ -136,7 +136,8 @@ and tested:
 | C6 | ✅ | `662691b` | `/resume` listing supplements the dir scan with DB rows — sessions stay listed (with DB titles) even when the projects tree is gone |
 | D3 | ✅ | `2e4b127` | **Default flip**: primary mode ON by default; `CODEV_DB_PRIMARY=0` reverts to JSONL-as-truth |
 | ② | ✅ | `d8ac182` | **Subagent transcripts mirrored**: composite ids (`<sid>/subagents/…`, `kind='subagent'`, `parent_session_id`), migration 004, migration scanner walks subagent trees (v5), `getAgentTranscript` DB-first |
-| ②-A | ✅ | — | **Compaction subagents excluded from the mirror** (storage fix A): `agent-acompact-*` never mirrored (writer + scanner) and pruned by the migration pass; `CODEV_MIRROR_COMPACTION_SUBAGENTS=1` restores the old behavior |
+| ②-A | ✅ | `994ef17` | **Compaction subagents excluded from the mirror** (storage fix A): `agent-acompact-*` never mirrored (writer + scanner) and pruned by the migration pass; `CODEV_MIRROR_COMPACTION_SUBAGENTS=1` restores the old behavior |
+| ②-B | ✅ | — | **Recording fix**: compaction forks pass `skipTranscript: true` — no `agent-acompact-*` transcript is written anymore (context was redundant; summary stays in the parent). Historical files pending cleanup |
 | D4 | ✅ | — | **Deferred export**: the append path no longer writes JSONL by default; the file is materialized on demand for external readers (hooks/statusline), `CODEV_SESSION_EXPORT=1` restores eager export |
 
 > **Open item after ②**: mirroring subagent transcripts literally re-stores
@@ -354,10 +355,10 @@ Options, cheapest/most-targeted first:
    transcript, read callers unchanged.
 3. **Opt-in mirroring** — mirror subagents only when enabled (e.g.
    `CODEV_MIRROR_SUBAGENTS=1`); default back to ~125 MB.
-4. **Fix the recording layer** — record only the delta (the agent's own turns)
-   or a reference to the parent's `seq` range instead of the full fork context.
-   This is the only option that also shrinks the **8.86 GB of subagent JSONL on
-   disk**; larger change (touches `forkedAgent` / `recordSidechainTranscript`).
+4. **Fix the recording layer** — ✅ **implemented (fix B)**: compaction forks no
+   longer persist a sidechain transcript at all (`streamCompactSummary` passes
+   `skipTranscript: true`). This is the only option that also shrinks the
+   **8.86 GB of subagent JSONL on disk**.
 5. **Keep as-is / roll back ②** — 11.13 GB, or delete `subagent` rows + `VACUUM`
    → ~125 MB and revisit later.
 
@@ -380,6 +381,27 @@ Options, cheapest/most-targeted first:
 `agent-acompact-*` reads now fall back to the (untouched) JSONL files —
 `getAgentTranscript` already serves from the file when there are no rows. The
 on-disk subagent JSONL is a separate problem (fix B).
+
+### Applied: fix B (recording layer)
+
+The compaction fork no longer persists a sidechain transcript:
+`streamCompactSummary` passes `skipTranscript: true` to `runForkedAgent` — the
+same mechanism other ephemeral forks (`agent_summary`, `speculation`,
+`prompt_suggestion`, `extractMemories`, `autoDream`) already use. The fork
+still shares the main thread's prompt cache; only transcript I/O is gone.
+
+- New compactions (successful **or** failed) write no `agent-acompact-*` file.
+- The durable summary is unaffected — it lands in the parent as
+  `isCompactSummary`.
+- Tests: `src/utils/forkedAgent.transcript.test.ts` (behavioural, stubbed query)
+  plus a linkage guard that the compaction call site keeps the flag.
+
+**Historical cleanup (pending operator confirmation)**: the existing
+`agent-acompact-*.jsonl` files are ~8.85 GB of the 8.86 GB subagent JSONL and are
+now dead weight — their rows are gone (fix A) and their content is the parents'
+history. Reads still work from them (verified: `getAgentTranscript` falls back to
+the file — 0 rows → 2,127 messages), so they can be deleted once they are
+confirmed unneeded for debugging/training.
 
 ---
 

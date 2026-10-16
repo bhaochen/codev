@@ -1331,6 +1331,15 @@ async function streamCompactSummary({
           forkLabel: 'compact',
           maxTurns: 1,
           skipCacheWrite: true,
+          // Fix B: do not persist a sidechain transcript for the compaction
+          // fork. Its context is the parent's whole history (forked for prompt
+          // cache), so recording it stores that history again — the only
+          // durable output is the summary, which already lands in the parent as
+          // an `isCompactSummary` entry. Failed attempts (rate limits) are
+          // retried and used to re-persist the full context each time. Other
+          // ephemeral forks (agent_summary, speculation, prompt_suggestion)
+          // already pass skipTranscript for the same reason.
+          skipTranscript: true,
           // Pass the compact context's abortController so user Esc aborts the
           // fork — same signal the streaming fallback uses at
           // `signal: context.abortController.signal` below.
