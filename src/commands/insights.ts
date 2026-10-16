@@ -2752,27 +2752,56 @@ type LiteSessionInfo = {
  * Scans all project directories using filesystem metadata only (no JSONL parsing).
  * Returns a list of session file info sorted by mtime descending.
  * Yields to the event loop between project directories to keep the UI responsive.
+ *
+ * DB-first (item ③): the session rows are the record of which sessions exist,
+ * so analytics do not depend on the export file being present (D4 defers it)
+ * or on the projects tree surviving. The file scan only adds sessions the
+ * rows do not know about yet.
  */
-async function scanAllSessions(): Promise<LiteSessionInfo[]> {
+export async function scanAllSessions(): Promise<LiteSessionInfo[]> {
   const projectsDir = getProjectsDir()
+  const byId = new Map<string, LiteSessionInfo>()
+
+  try {
+    const { isDbPrimaryMode } = await import('../utils/sessionPersistence.js')
+    if (isDbPrimaryMode()) {
+      const { resolveShadowStore } = await import('../services/db/shadowWriter.js')
+      const store = await resolveShadowStore()
+      if (store) {
+        for (const meta of store.listSessions({
+          kind: 'main',
+          limit: Number.MAX_SAFE_INTEGER,
+        })) {
+          byId.set(meta.id, {
+            sessionId: meta.id,
+            path: join(projectsDir, meta.projectDir, `${meta.id}.jsonl`),
+            mtime: meta.updatedAt,
+            size: 0,
+          })
+        }
+      }
+    }
+  } catch {
+    // Rows unavailable — fall through to the file scan.
+  }
 
   let dirents: Dirent[]
   try {
     dirents = await readdir(projectsDir, { withFileTypes: true })
   } catch {
-    return []
+    return [...byId.values()].sort((a, b) => b.mtime - a.mtime)
   }
 
   const projectDirs = dirents
     .filter(dirent => dirent.isDirectory())
     .map(dirent => join(projectsDir, dirent.name))
 
-  const allSessions: LiteSessionInfo[] = []
-
   for (let i = 0; i < projectDirs.length; i++) {
     const sessionFiles = await getSessionFilesWithMtime(projectDirs[i]!)
     for (const [sessionId, fileInfo] of sessionFiles) {
-      allSessions.push({
+      // The row (when present) is authoritative for recency/identity.
+      if (byId.has(sessionId)) continue
+      byId.set(sessionId, {
         sessionId,
         path: fileInfo.path,
         mtime: fileInfo.mtime,
@@ -2786,8 +2815,7 @@ async function scanAllSessions(): Promise<LiteSessionInfo[]> {
   }
 
   // Sort by mtime descending (most recent first)
-  allSessions.sort((a, b) => b.mtime - a.mtime)
-  return allSessions
+  return [...byId.values()].sort((a, b) => b.mtime - a.mtime)
 }
 
 // ============================================================================

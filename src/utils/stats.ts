@@ -9,6 +9,9 @@ import { getFsImplementation } from './fsOperations.js'
 import { readJSONLFile } from './json.js'
 import { SYNTHETIC_MODEL } from './messages.js'
 import { getProjectsDir, isTranscriptMessage } from './sessionStorage.js'
+import { isDbPrimaryMode } from './sessionPersistence.js'
+import { resolveShadowStore } from '../services/db/shadowWriter.js'
+import { parseSessionPath } from '../services/db/shadowWriter.js'
 import { SHELL_TOOL_NAMES } from './shell/shellToolUtils.js'
 import { jsonParse } from './slowOperations.js'
 import {
@@ -111,11 +114,108 @@ type ProcessOptions = {
 }
 
 /**
- * Process session files and extract stats.
+ * A transcript to aggregate: the file path (may be absent — rows are the
+ * record) plus the DB identity when the source is mirrored in SQLite.
+ */
+type StatsSource = {
+  path: string
+  dbId: string | null
+  /** Row updatedAt when the source came from the DB (else stat the file). */
+  mtimeMs: number | null
+}
+
+function toStatsSource(filePath: string): StatsSource {
+  const parsed = parseSessionPath(filePath)
+  return {
+    path: filePath,
+    dbId: parsed?.sessionId ?? basename(filePath, '.jsonl'),
+    mtimeMs: null,
+  }
+}
+
+/**
+ * Enumerate every transcript to aggregate — DB-first (main + subagent rows)
+ * so analytics work with a missing export (D4 deferred) or a deleted projects
+ * tree; falls back to the file scan when there are no rows.
+ */
+async function getStatsSources(): Promise<StatsSource[]> {
+  try {
+    if (isDbPrimaryMode()) {
+      const store = await resolveShadowStore()
+      if (store) {
+        const metas = store.listSessions({ limit: Number.MAX_SAFE_INTEGER })
+        if (metas.length > 0) {
+          const root = getProjectsDir()
+          return metas.map(m => ({
+            path: join(root, m.projectDir, `${m.id}.jsonl`),
+            dbId: m.id,
+            mtimeMs: m.updatedAt,
+          }))
+        }
+      }
+    }
+  } catch {
+    // Fall back to the scan.
+  }
+  const files = await getAllSessionFiles()
+  return files.map(toStatsSource)
+}
+
+/** Entries for a source: rows when we have them, else the file. */
+async function readSourceEntries(src: StatsSource): Promise<Entry[]> {
+  if (src.dbId) {
+    try {
+      const store = await resolveShadowStore()
+      if (store && store.getMessageCount(src.dbId) > 0) {
+        return store
+          .getMessages({ sessionId: src.dbId, limit: Number.MAX_SAFE_INTEGER })
+          .map(row => row.data)
+      }
+    } catch {
+      // Fall back to the file.
+    }
+  }
+  return readJSONLFile<Entry>(src.path)
+}
+
+/**
+ * First main-thread message date for a source (the fromDate pre-filter),
+ * rows-first so it works without a file.
+ */
+async function readSourceStartDate(src: StatsSource): Promise<string | null> {
+  if (src.dbId) {
+    try {
+      const store = await resolveShadowStore()
+      if (store && store.getMessageCount(src.dbId) > 0) {
+        for (const row of store.getMessages({ sessionId: src.dbId, limit: 50 })) {
+          const entry = row.data as {
+            type?: unknown
+            timestamp?: unknown
+            isSidechain?: unknown
+          }
+          if (typeof entry.type !== 'string') continue
+          if (!TRANSCRIPT_MESSAGE_TYPES.has(entry.type)) continue
+          if (entry.isSidechain === true) continue
+          if (typeof entry.timestamp !== 'string') return null
+          const date = new Date(entry.timestamp)
+          if (Number.isNaN(date.getTime())) return null
+          return toDateString(date)
+        }
+        return null
+      }
+    } catch {
+      // Fall back to the file.
+    }
+  }
+  return readSessionStartDate(src.path)
+}
+
+/**
+ * Process transcripts and extract stats.
  * Can filter by date range.
  */
 async function processSessionFiles(
-  sessionFiles: string[],
+  sources: StatsSource[],
   options: ProcessOptions = {},
 ): Promise<ProcessedStats> {
   const { fromDate, toDate } = options
@@ -134,39 +234,49 @@ async function processSessionFiles(
   // Track parent sessions that already recorded a shot count (dedup across subagents)
   const sessionsWithShotCount = new Set<string>()
 
-  // Process session files in parallel batches for better performance
+  // Process transcripts in parallel batches for better performance
   const BATCH_SIZE = 20
-  for (let i = 0; i < sessionFiles.length; i += BATCH_SIZE) {
-    const batch = sessionFiles.slice(i, i + BATCH_SIZE)
+  for (let i = 0; i < sources.length; i += BATCH_SIZE) {
+    const batch = sources.slice(i, i + BATCH_SIZE)
     const results = await Promise.all(
-      batch.map(async sessionFile => {
+      batch.map(async src => {
         try {
-          // If we have a fromDate filter, skip files that haven't been modified since then
+          // If we have a fromDate filter, skip sources that haven't changed
+          // since then (DB row updatedAt, or the file mtime as a fallback).
           if (fromDate) {
             let fileSize = 0
-            try {
-              const fileStat = await fs.stat(sessionFile)
-              const fileModifiedDate = toDateString(fileStat.mtime)
+            let mtime: Date | null =
+              src.mtimeMs !== null ? new Date(src.mtimeMs) : null
+            if (mtime === null) {
+              try {
+                const fileStat = await fs.stat(src.path)
+                mtime = fileStat.mtime
+                fileSize = fileStat.size
+              } catch {
+                // If we can't stat the file, try to read it anyway
+              }
+            }
+            if (mtime) {
+              const fileModifiedDate = toDateString(mtime)
               if (isDateBefore(fileModifiedDate, fromDate)) {
                 return {
-                  sessionFile,
+                  src,
                   entries: null,
                   error: null,
                   skipped: true,
                 }
               }
-              fileSize = fileStat.size
-            } catch {
-              // If we can't stat the file, try to read it anyway
             }
-            // For large files, peek at the session start date before reading everything.
-            // Sessions that pass the mtime filter but started before fromDate are skipped
-            // (e.g. a month-old session resumed today gets a new mtime write but old start date).
-            if (fileSize > 65536) {
-              const startDate = await readSessionStartDate(sessionFile)
+            // For large files, peek at the session start date before reading
+            // everything. Sessions that pass the mtime filter but started
+            // before fromDate are skipped (e.g. a month-old session resumed
+            // today gets a new mtime write but old start date). DB sources
+            // read the first rows, which is cheap regardless of size.
+            if (src.mtimeMs !== null || fileSize > 65536) {
+              const startDate = await readSourceStartDate(src)
               if (startDate && isDateBefore(startDate, fromDate)) {
                 return {
-                  sessionFile,
+                  src,
                   entries: null,
                   error: null,
                   skipped: true,
@@ -174,15 +284,16 @@ async function processSessionFiles(
               }
             }
           }
-          const entries = await readJSONLFile<Entry>(sessionFile)
-          return { sessionFile, entries, error: null, skipped: false }
+          const entries = await readSourceEntries(src)
+          return { src, entries, error: null, skipped: false }
         } catch (error) {
-          return { sessionFile, entries: null, error, skipped: false }
+          return { src, entries: null, error, skipped: false }
         }
       }),
     )
 
-    for (const { sessionFile, entries, error, skipped } of results) {
+    for (const { src, entries, error, skipped } of results) {
+      const sessionFile = src.path
       if (skipped) continue
       if (error || !entries) {
         logForDebugging(
@@ -638,9 +749,9 @@ function cacheToStats(
  * Uses a disk cache to avoid reprocessing historical data.
  */
 export async function aggregateClaudeCodeStats(): Promise<ClaudeCodeStats> {
-  const allSessionFiles = await getAllSessionFiles()
+  const sources = await getStatsSources()
 
-  if (allSessionFiles.length === 0) {
+  if (sources.length === 0) {
     return getEmptyStats()
   }
 
@@ -658,7 +769,7 @@ export async function aggregateClaudeCodeStats(): Promise<ClaudeCodeStats> {
     if (!cache.lastComputedDate) {
       // No cache - process all historical data (everything before today)
       logForDebugging('Stats cache empty, processing all historical data')
-      const historicalStats = await processSessionFiles(allSessionFiles, {
+      const historicalStats = await processSessionFiles(sources, {
         toDate: yesterday,
       })
 
@@ -676,7 +787,7 @@ export async function aggregateClaudeCodeStats(): Promise<ClaudeCodeStats> {
       logForDebugging(
         `Stats cache stale (${cache.lastComputedDate}), processing ${nextDay} to ${yesterday}`,
       )
-      const newStats = await processSessionFiles(allSessionFiles, {
+      const newStats = await processSessionFiles(sources, {
         fromDate: nextDay,
         toDate: yesterday,
       })
@@ -700,7 +811,7 @@ export async function aggregateClaudeCodeStats(): Promise<ClaudeCodeStats> {
   // Always process today's data live (it's incomplete)
   // This doesn't need to be in the lock since it doesn't modify the cache
   const today = getTodayDateString()
-  const todayStats = await processSessionFiles(allSessionFiles, {
+  const todayStats = await processSessionFiles(sources, {
     fromDate: today,
     toDate: today,
   })
@@ -722,8 +833,8 @@ export async function aggregateClaudeCodeStatsForRange(
     return aggregateClaudeCodeStats()
   }
 
-  const allSessionFiles = await getAllSessionFiles()
-  if (allSessionFiles.length === 0) {
+  const sources = await getStatsSources()
+  if (sources.length === 0) {
     return getEmptyStats()
   }
 
@@ -735,7 +846,7 @@ export async function aggregateClaudeCodeStatsForRange(
   const fromDateStr = toDateString(fromDate)
 
   // Process session files for the date range
-  const stats = await processSessionFiles(allSessionFiles, {
+  const stats = await processSessionFiles(sources, {
     fromDate: fromDateStr,
   })
 

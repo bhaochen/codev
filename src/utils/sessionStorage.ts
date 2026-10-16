@@ -98,7 +98,12 @@ import { validateUuid } from './uuid.js'
 import { isDbPrimaryMode, shouldSkipSessionPersistence } from './sessionPersistence.js'
 // Phase A shadow writer: mirrors successful JSONL appends into SQLite.
 // shadowWriter imports the db layer dynamically, so this edge stays acyclic.
-import { shadowAppendBatch, flushShadowWrites } from '../services/db/shadowWriter.js'
+import {
+  shadowAppendBatch,
+  flushShadowWrites,
+  resolveShadowStore,
+  parseSessionPath,
+} from '../services/db/shadowWriter.js'
 import {
   isExportDeferred,
   markExportDirty,
@@ -4897,13 +4902,52 @@ type LiteMetadata = {
 }
 
 /**
+ * TranscriptShape for batch analytics (keepAllLeaves semantics). Rows-first
+ * when they are provably complete for the session — primary-owned rows are
+ * the full append history (a superset of the compaction-truncated file) — or
+ * when the export file is gone entirely. Otherwise the file is parsed with
+ * keepAllLeaves so pre-boundary leaves survive.
+ */
+async function loadTranscriptShapeForAnalytics(
+  sessionFile: string,
+): Promise<TranscriptShape> {
+  try {
+    const parsed = parseSessionPath(sessionFile)
+    if (parsed && isDbPrimaryMode()) {
+      const store = await resolveShadowStore()
+      if (store && store.getMessageCount(parsed.sessionId) > 0) {
+        if (store.isSessionPrimaryOwned(parsed.sessionId)) {
+          return store.loadTranscript(parsed.sessionId)
+        }
+        try {
+          statSync(sessionFile)
+        } catch {
+          // Rows are the only copy left.
+          return store.loadTranscript(parsed.sessionId)
+        }
+      }
+    }
+  } catch {
+    // Fall through to the file.
+  }
+  return loadTranscriptFile(sessionFile, { keepAllLeaves: true })
+}
+
+/**
  * Loads all logs from a single session file with full message data.
  * Builds a LogOption for each leaf message in the file.
+ *
+ * Item ③ (DB-first analytics): when the session's rows are primary-owned (the
+ * full append history — a superset of what the compaction-truncated file
+ * keeps) or the export file is missing entirely (D4 deferred / tree deleted),
+ * the rows are the source. Otherwise the file is parsed with keepAllLeaves so
+ * pre-boundary leaves survive, exactly as before.
  */
 export async function loadAllLogsFromSessionFile(
   sessionFile: string,
   projectPathOverride?: string,
 ): Promise<LogOption[]> {
+  const shape = await loadTranscriptShapeForAnalytics(sessionFile)
   const {
     messages,
     summaries,
@@ -4921,7 +4965,7 @@ export async function loadAllLogsFromSessionFile(
     contentReplacements,
     leafUuids,
     goalStore,
-  } = await loadTranscriptFile(sessionFile, { keepAllLeaves: true })
+  } = shape
 
   if (messages.size === 0) return []
 
