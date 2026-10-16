@@ -396,12 +396,36 @@ still shares the main thread's prompt cache; only transcript I/O is gone.
 - Tests: `src/utils/forkedAgent.transcript.test.ts` (behavioural, stubbed query)
   plus a linkage guard that the compaction call site keeps the flag.
 
-**Historical cleanup (pending operator confirmation)**: the existing
-`agent-acompact-*.jsonl` files are ~8.85 GB of the 8.86 GB subagent JSONL and are
-now dead weight — their rows are gone (fix A) and their content is the parents'
-history. Reads still work from them (verified: `getAgentTranscript` falls back to
-the file — 0 rows → 2,127 messages), so they can be deleted once they are
-confirmed unneeded for debugging/training.
+**Historical cleanup (done)**: the existing `agent-acompact-*.jsonl` files were
+8.79 GB of the 8.86 GB subagent JSONL and are now dead weight — their rows are
+gone (fix A) and their content is the parents' history. Reads fall back to them
+(verified: `getAgentTranscript` — 0 rows → 2,127 messages from file), so it was
+safe to delete them. Deleted **2,372 files / 8.79 GB**; `~/.claude/projects`
+went **9.1 GB → 249 MB**. The 10.6 GB pre-fix database backup was removed too.
+
+### Can `~/.claude/projects` be deleted now?
+
+**No — keep it.** The default is already DB-primary (D3) with deferred export
+(D4): every entry is durable in SQLite first and the JSONL file is an *export*,
+written on demand just before a hook / statusline / external reader asks for it
+(`materializeExportForPath`). So the tree is no longer the operational source of
+truth — but deleting it would remove four things worth far more than the 249 MB
+it now occupies:
+
+1. **Fallback + rebuild source.** Reads fall back to JSONL on any DB error, and
+   "delete the database → rebuild from JSONL" is the safety net. Gone with the
+   tree.
+2. **Rollback.** `CODEV_DB_PRIMARY=0` returns to JSONL-as-truth; without the
+   files, rollback is total history loss.
+3. **Interop.** Hook scripts, statusline commands, the `sessions export` CLI and
+   other external readers consume the `.jsonl` path convention.
+4. **Cost.** After fix B the residual is tiny (the 8.79 GB of duplicated
+   compaction transcripts is what was deleted, not session history).
+
+Note: under D4 the files can be *stale* for recent sessions (an export is only
+materialized when read), so the tree is deliberately a lazy export, not a live
+mirror. Dropping the fallback entirely would be a deliberate "prove the flip,
+then remove the safety net" project — not a disk-cleanup step.
 
 ---
 
