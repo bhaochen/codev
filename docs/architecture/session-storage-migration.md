@@ -17,7 +17,9 @@ Codev migrated session transcript storage from append-only JSONL files to a SQLi
 Renamed from `sessions.sqlite` (Oct 2026) — the file already lives in
 `sessions/`, so the name is short. An existing database must be moved
 (`sessions.sqlite* → sessions.db*`) or it rebuilds from the JSONL sources on
-the next open.
+the next open. A **stale build** still looks for `sessions.sqlite` (the string
+is baked into the bundle), so rebuild (`bun run build`) after the rename or the
+binary will start with an empty database.
 
 ---
 
@@ -426,6 +428,22 @@ Note: under D4 the files can be *stale* for recent sessions (an export is only
 materialized when read), so the tree is deliberately a lazy export, not a live
 mirror. Dropping the fallback entirely would be a deliberate "prove the flip,
 then remove the safety net" project — not a disk-cleanup step.
+
+**Measured (tree deleted, then restored).** Session *discovery* is still
+filesystem-only, so removing the tree breaks the `/resume` picker even though
+every row is in SQLite:
+
+| Path | With tree | Tree deleted |
+|------|-----------|--------------|
+| `listSessionsImpl` (per-project listing) | 248 | **0** |
+| `loadAllProjectsMessageLogs` (`/resume` picker) | 50 | **0** |
+| `SessionStore.listSessions` (DB; insights/stats) | 498 | 498 |
+| `loadTranscriptViaCache(<session>)` (DB-first read) | 2,108 | 2,108 |
+
+The database can *serve* a known session with no file present, but it cannot
+*list* sessions: `/resume`, the server's `discoverSessionFiles`, and everything
+else that walks `getProjectsDir()` go dark. Making the picker DB-backed is the
+remaining work needed to actually drop the tree.
 
 ---
 
