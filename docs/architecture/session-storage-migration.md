@@ -18,7 +18,7 @@ Codev migrated session transcript storage from append-only JSONL files to a SQLi
 
 ## Schema
 
-### `sessions` Table (2,867 rows)
+### `sessions` Table (2,870 rows — 251 `main` + 2,619 `subagent`)
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -37,8 +37,10 @@ Codev migrated session transcript storage from append-only JSONL files to a SQLi
 | `synced_size` | INTEGER | JSONL byte size at last sync |
 | `synced_mtime` | INTEGER | JSONL mtime at last sync |
 | `synced_path` | TEXT | Canonical JSONL path (for path-aware freshness) |
+| `kind` | TEXT | `'main'` (user session) or `'subagent'` (sidechain transcript, migration 004) |
+| `parent_session_id` | TEXT | Session that spawned the subagent (NULL for `main`, migration 004) |
 
-### `messages` Table (2,237,119 rows)
+### `messages` Table (2,223,288 rows)
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -56,6 +58,8 @@ Codev migrated session transcript storage from append-only JSONL files to a SQLi
 ```sql
 CREATE INDEX idx_messages_session_id ON messages(session_id);
 CREATE INDEX idx_messages_uuid ON messages(uuid);  -- 366× faster UUID lookups
+CREATE INDEX idx_sessions_kind ON sessions(kind);               -- picker: kind='main'
+CREATE INDEX idx_sessions_parent ON sessions(parent_session_id); -- subagent roll-up
 ```
 
 ### `migrations` Table
@@ -99,7 +103,12 @@ bun run src/services/db/migrateSessions.ts --project-dir -home-yuki-Code-Agent-c
 | 1 | `001-initial` | Base schema: sessions + messages + indexes |
 | 2 | `002-sync-columns` | `synced_size`, `synced_mtime` for cache freshness |
 | 3 | `003-cache-roles` | `messages.role` (main/meta), `sessions.synced_path` |
-| 4 | (logic) | Repair pass: re-sync stale rows + prune orphaned rows |
+| 4 | `004-subagent-sessions` | `sessions.kind` + `sessions.parent_session_id` + indexes |
+
+Separately, `CURRENT_SESSION_MIGRATION_VERSION` (`src/main.tsx`, currently **5**)
+gates the background *import* pass: bumping it re-runs the scanner
+(migrate / repair / prune). v5 added the walk that also imports subagent trees;
+the repair + prune semantics below apply to it.
 
 ---
 
@@ -123,6 +132,13 @@ and tested:
 | D3 | ✅ | `2e4b127` | **Default flip**: primary mode ON by default; `CODEV_DB_PRIMARY=0` reverts to JSONL-as-truth |
 | ② | ✅ | `d8ac182` | **Subagent transcripts mirrored**: composite ids (`<sid>/subagents/…`, `kind='subagent'`, `parent_session_id`), migration 004, migration scanner walks subagent trees (v5), `getAgentTranscript` DB-first |
 | D4 | ✅ | — | **Deferred export**: the append path no longer writes JSONL by default; the file is materialized on demand for external readers (hooks/statusline), `CODEV_SESSION_EXPORT=1` restores eager export |
+
+> **Open item after ②**: mirroring subagent transcripts literally re-stores
+> each parent's context once per subagent — ~94.5 % of the 9.19 GB payload is
+> redundant and the DB grew 124.8 MB → 11.13 GB. The mirroring code is correct;
+> the **storage policy** (content-addressed dedup / opt-in mirroring / keep /
+> roll back) is undecided. See "Case Study: Why Mirror Subagent Transcripts
+> Duplicates Context".
 
 ### DB-Primary Mode (current default)
 
@@ -198,12 +214,14 @@ Orphans pruned include the two artifacts of pre-v4 bugs:
 - rows keyed **with** the `.jsonl` extension (old sessionId format),
 - **subagent transcripts** (`<sessionId>/subagents/agent-*.jsonl`) wrongly
   migrated as top-level sessions — subagent JSONL files on disk are untouched.
+  (Item ② later mirrors subagent transcripts *deliberately*, as their own
+  `kind='subagent'` rows — see the case study below for what that costs.)
 
 `VACUUM` runs when a pass changed data **or** when the freelist exceeds 20% of
 pages (reclaims space left behind by large prunes); vacuum failures are
 non-fatal.
 
-### Real-World Result (2,867 legacy sessions)
+### Real-World Result (legacy bulk import)
 
 | Phase | Sessions table | Messages table | DB size |
 |-------|---------------|----------------|---------|
@@ -213,6 +231,88 @@ non-fatal.
 
 The 11 GB → 125 MB shrink shows why pruning mattered: the bulk of the original
 2.2M rows were subagent transcripts + duplicated keys, not user sessions.
+
+---
+
+## Case Study: Why "Mirror Subagent Transcripts" Duplicates Context (②)
+
+Item ② sounds additive: mirror subagent transcripts, one row-set per subagent.
+It is not. The CLI hands *every* subagent the **parent's whole message history**
+as context, and the subagent's transcript records that context verbatim before
+its own turns. Mirroring such a transcript therefore re-stores the parent's
+context once per subagent — and compaction subagents (`agent-acompact-*`) are
+spawned over and over, so the same context is stored **hundreds of times**.
+
+### A single compaction subagent re-stores 99.6 % of its parent
+
+Parent `d8744217-b983-44cf-b194-311073443a9a` (1,091 entries, 3.84 MB) has 189
+compaction subagents. Take one child:
+
+| Scope | Entries | Bytes |
+|-------|---------|-------|
+| Parent session | 1,091 | 3,844,013 |
+| Child `…/subagents/agent-acompact-00303fa8be0f529d` | 370 | 1,794,478 |
+| — entries whose `uuid` also occurs in the parent | **368** | **1,787,053 (99.6 %)** |
+| — genuinely new (compaction prompt + result) | **2** | **7,425** |
+
+The child's whole 1.79 MB row-set carries **7.4 KB** of information the parent
+did not already have: a `user` prompt (6,184 B) and an `assistant` reply
+(1,241 B). Everything else is the parent's own entries stored again.
+
+### A single entry, stored 187 times
+
+`uuid` `a7dc5e04-eb14-4769-9da5-292b29bb390a` is the parent's
+`system`/`compact_boundary` marker (`content: "Conversation compacted"`). The
+DB holds it **187 times** — once in the parent and 186 times across that
+parent's compaction subagents. The copies are not byte-identical (the subagent
+variant sets `isSidechain: true` and adds an `agentId`), but they describe the
+same boundary marker; the only "variation" is full-context-copy bookkeeping.
+The most-reused single `uuid` is stored **939 times**.
+
+### Aggregate impact
+
+Measured on the live DB after the v5 subagent import (Oct 2026):
+
+| Quantity | Value |
+|----------|-------|
+| Sessions | 2,870 = 251 `main` + 2,619 `subagent` |
+| Message rows | 2,223,288 |
+| `data_json` bytes, total | 9.19 GB |
+| — `main` | 0.10 GB (1.1 %) |
+| — `subagent` | 9.09 GB (**98.9 %**) |
+| —— of which `agent-acompact-*` (2,372 sessions) | 9.01 GB |
+| —— other subagents (247 sessions) | 0.07 GB |
+| Distinct-`uuid` union (deduped footprint) | **0.50 GB** |
+| Redundant bytes | **8.69 GB (94.5 %)** |
+| DB file | **11.13 GB** (124.8 MB before ②) |
+| JSONL on disk | 9.1 GB (subagent files: 2,619 / 8.86 GB) |
+
+Every mirrored subagent transcript already exists as a JSONL file (8.86 GB), so
+naive ② nearly doubled `~/.claude` (≈9.2 GB → ≈20.2 GB) to keep the same
+context a second time. Only ~5.5 % of the stored payload is distinct content;
+the remaining ~94.5 % is the same entries re-serialised per subagent (modulo
+per-copy bookkeeping such as `isSidechain` / `agentId`).
+
+The worst offender is parent `3f57403f-60f0-48e9-be77-6447e69fada5` (25.8 MB):
+**944** compaction subagents totalling **5.15 GB** — 200× the parent. Parent
+`7a2ddda2-6a61-448b-bf11-1a57821eaeab` is 735 KB yet carries **755** subagents
+totalling 2.61 GB.
+
+### Storage-policy options
+
+The ② code path is correct (subagent transcripts are readable from rows, with
+`kind='subagent'` + `parent_session_id`). The open question is only *how to
+store* them. The measurements above are the input to that decision:
+
+1. **Content-addressed dedup** — a `message_content` table keyed by content
+   hash, with `messages` referencing it. Est. DB ≈ 0.6–0.7 GB; read callers
+   unchanged. Most faithful to "rows are the record".
+2. **Opt-in mirroring** — mirror subagents only when enabled (e.g.
+   `CODEV_MIRROR_SUBAGENTS=1`); default back to ~125 MB, subagents read from
+   JSONL as before.
+3. **Keep as-is** — 11.13 GB; correct but ~94.5 % redundant.
+4. **Roll back ② now** — delete `subagent` rows + `VACUUM` → ~125 MB, revisit
+   dedup as separate work.
 
 ---
 
@@ -233,14 +333,21 @@ The SQLite DB is a **derived mirror** of JSONL (source of truth). On read:
 
 ## Quantitative Metrics
 
-### Storage (after v4 repair + prune + vacuum)
+### Storage (user sessions)
 
 | Metric | JSONL source | SQLite mirror | Notes |
 |--------|-------------|---------------|-------|
-| **Disk size (user sessions)** | 9.1 GB (all JSONL incl. subagents) | **124.8 MB** | Mirror excludes subagent transcripts (read from JSONL directly) |
-| **Sessions** | 243 top-level (+ ~2,600 subagent files) | 243 rows | Subagents deliberately not mirrored |
-| **Messages** | — | 29,727 rows | Reduced view (boundary/walkChain applied) |
+| **Disk size (main sessions)** | 0.16 GB | **124.8 MB** | After v4 repair + prune + vacuum; main sessions only |
+| **Sessions (main)** | ~250 top-level | ~250 rows | Subagents handled separately (see ② below) |
+| **Messages (main)** | — | ~30k rows | Reduced view (boundary/walkChain applied) |
 | **Per-message overhead** | — | +13% vs raw JSONL | Same JSON text + columns + indexes (pre-cleanup measurement) |
+
+**After ② (subagent mirroring, v5)** the picture is dominated by shared
+context: 2,619 extra subagent sessions raise the `data_json` payload to 9.19 GB
+(8.69 GB / 94.5 % redundant — every subagent re-stores its parent's history),
+the DB file to **11.13 GB**, and `~/.claude` total to ≈20.2 GB (JSONL 9.1 GB +
+DB 11.13 GB). See "Case Study: Why Mirror Subagent Transcripts Duplicates
+Context" above for the breakdown and the storage-policy options.
 
 ### Performance (5,000-message session, ~17 MB JSONL)
 
