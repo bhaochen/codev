@@ -37,7 +37,7 @@ export interface QuotaReservation {
 
 export class QuotaManager {
   private reservations = new Map<string, QuotaReservation>()
-  private usage = new Map<string, { used: number; resetTime: number }>()
+  private used = new Map<string, { used: number; resetTime: number }>()
   private limits = new Map<string, { limit: number; windowMs: number }>()
 
   /**

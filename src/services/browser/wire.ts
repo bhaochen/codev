@@ -7,8 +7,8 @@
  * Based on hypruse wire.py and wlroots virtual pointer/keyboard protocols.
  */
 
-import { execFileNoThrow } from '../execFileNoThrow.js';
-import { sleep } from '../sleep.js';
+import { execFileNoThrow } from '../../utils/execFileNoThrow.js';
+import { sleep } from '../../utils/sleep.js';
 
 // Wayland protocol constants
 const VIRTUAL_POINTER_V1_INTERFACE = 'zwp_virtual_pointer_v1';
@@ -219,7 +219,7 @@ export const seatLock = {
  * Check if wtype is available for keyboard input
  */
 export async function checkWtype(): Promise<boolean> {
-  const { code } = await import('../execFileNoThrow.js').then(m =>
+  const { code } = await import('../../utils/execFileNoThrow.js').then(m =>
     m.execFileNoThrow('which', ['wtype'], { timeout: 2000 })
   );
   return code === 0;
@@ -229,7 +229,7 @@ export async function checkWtype(): Promise<boolean> {
  * Check if grim is available for screenshots
  */
 export async function checkGrim(): Promise<boolean> {
-  const { code } = await import('../execFileNoThrow.js').then(m =>
+  const { code } = await import('../../utils/execFileNoThrow.js').then(m =>
     m.execFileNoThrow('which', ['grim'], { timeout: 2000 })
   );
   return code === 0;
@@ -239,7 +239,7 @@ export async function checkGrim(): Promise<boolean> {
  * Check if hyprctl is available
  */
 export async function checkHyprctl(): Promise<boolean> {
-  const { code } = await import('../execFileNoThrow.js').then(m =>
+  const { code } = await import('../../utils/execFileNoThrow.js').then(m =>
     m.execFileNoThrow('which', ['hyprctl'], { timeout: 2000 })
   );
   return code === 0;
@@ -249,7 +249,7 @@ export async function checkHyprctl(): Promise<boolean> {
  * Check if ydotool is available
  */
 export async function checkYdotool(): Promise<boolean> {
-  const { code } = await import('../execFileNoThrow.js').then(m =>
+  const { code } = await import('../../utils/execFileNoThrow.js').then(m =>
     m.execFileNoThrow('which', ['ydotool'], { timeout: 2000 })
   );
   return code === 0;
@@ -260,7 +260,7 @@ export async function checkYdotool(): Promise<boolean> {
  */
 export async function checkYdotoold(): Promise<boolean> {
   try {
-    const { code } = await import('../execFileNoThrow.js').then(m =>
+    const { code } = await import('../../utils/execFileNoThrow.js').then(m =>
       m.execFileNoThrow('ydotool', ['help'], { timeout: 2000 })
     );
     return code === 0;

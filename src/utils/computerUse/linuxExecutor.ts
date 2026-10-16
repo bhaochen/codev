@@ -14,7 +14,7 @@
  * so it can be swapped in for the macOS executor.
  */
 
-import { execFile, execFileNoThrow } from '../execFileNoThrow.js'
+import { execFileNoThrow } from '../execFileNoThrow.js'
 import { sleep } from '../sleep.js'
 import { mkdirSync, writeFileSync, readFileSync } from 'fs'
 import { join } from 'path'
@@ -23,11 +23,13 @@ import { homedir } from 'os'
 // Held button tracking for SIGTERM cleanup (like hypruse release_held)
 let heldButton: string | null = null;
 
-function setHeldButton(button: string | null): void {
+/** Tracks the currently held mouse button for SIGTERM cleanup. Exposed for tests. */
+export function setHeldButton(button: string | null): void {
   heldButton = button;
 }
 
-function getHeldButton(): string | null {
+/** Currently held mouse button, or null. Exposed for tests. */
+export function getHeldButton(): string | null {
   return heldButton;
 }
 
@@ -38,7 +40,11 @@ function getHeldButton(): string | null {
 async function releaseHeldButton(): Promise<void> {
   if (heldButton) {
     try {
-      await ydotool(['click', '0']); // release
+      // Same release the drag flow performs (`['click', '0']`); the closure
+      // `ydotool` helper is not in scope at module level, so call the binary
+      // directly with the same timeout it uses. Failures are ignored — this
+      // runs in a SIGTERM handler.
+      await execFileNoThrow('ydotool', ['click', '0'], { timeout: 10_000 })
     } catch {
       // ignore
     }
@@ -424,16 +430,7 @@ async function createLinuxExecutor(): Promise<LinuxExecutor> {
     },
 
     async getActiveWindow() {
-      console.log('[getActiveWindow] START')
-      console.log('[getActiveWindow] Calling hyprctlJson...')
-      try {
-        const result = await hyprctlJson<WindowInfo>('activewindow')
-        console.log('[getActiveWindow] SUCCESS:', result?.class)
-        return result
-      } catch (e) {
-        console.log('[getActiveWindow] ERROR:', e.message)
-        throw e
-      }
+      return hyprctlJson<WindowInfo>('activewindow')
     },
 
     async focusWindow(selector) {
@@ -504,10 +501,6 @@ async function createLinuxExecutor(): Promise<LinuxExecutor> {
         name,
         exec: execsList[i] ?? name.toLowerCase(),
       }))
-    },
-
-    async getActiveWindow() {
-      return hyprctlJson<WindowInfo>('activewindow')
     },
 
     async listRunningApps() {
@@ -632,7 +625,7 @@ export function isHyprland(): boolean {
 }
 
 export function isWayland(): boolean {
-  return !!process.env.WAYLAND_DISPLAY || !!process.env.XDG_SESSION_TYPE === 'wayland'
+  return !!process.env.WAYLAND_DISPLAY || process.env.XDG_SESSION_TYPE === 'wayland'
 }
 
 export function isX11(): boolean {

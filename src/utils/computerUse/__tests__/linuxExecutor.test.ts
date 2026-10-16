@@ -12,9 +12,10 @@ import {
   getHeldButton,
   onNamedSeat,
   onNamedSeatForKeyboard,
+  type WindowInfo,
 } from "../linuxExecutor.js";
 
-import { execFileNoThrow } from "../execFileNoThrow.js";
+import { execFileNoThrow } from "../../execFileNoThrow.js";
 
 let passed = 0;
 let failed = 0;
@@ -95,7 +96,7 @@ function main(): void {
 
   // Test hyprctlJson works
   testAsync("hyprctlJson works for activewindow", async () => {
-    const result = await hyprctlJson('activewindow');
+    const result = await hyprctlJson<WindowInfo>('activewindow');
     assert(result && typeof result === 'object', "hyprctlJson returns object");
     assert(typeof result.class === 'string', "activewindow has class");
     assert(typeof result.title === 'string', "activewindow has title");
@@ -104,7 +105,7 @@ function main(): void {
 
   // Test hyprctlJson works for clients
   testAsync("hyprctlJson works for clients", async () => {
-    const result = await hyprctlJson('clients');
+    const result = await hyprctlJson<WindowInfo[]>('clients');
     assert(Array.isArray(result), "clients returns array");
     if (result.length > 0) {
       assert(typeof result[0].class === 'string', "window has class");

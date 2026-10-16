@@ -38,8 +38,8 @@ let cached: ComputerUseHostAdapter | undefined
  * Process-lifetime singleton for Linux/Hyprland.
  * Built once on first CU tool call; loads LinuxExecutor via grim/hyprctl/ydotool.
  */
-export function getLinuxComputerUseHostAdapter(): ComputerUseHostAdapter {
-  if (cached) return cached
+export function getLinuxComputerUseHostAdapter(): Promise<ComputerUseHostAdapter> {
+  if (cached) return Promise.resolve(cached)
 
   // Check platform first
   if (!isLinuxDesktopAvailable()) {
@@ -49,28 +49,32 @@ export function getLinuxComputerUseHostAdapter(): ComputerUseHostAdapter {
     )
   }
 
-  const executor = await getLinuxExecutor()
+  return (async () => {
+    const executor = await getLinuxExecutor()
 
-  cached = {
-    serverName: COMPUTER_USE_MCP_SERVER_NAME,
-    logger: new DebugLogger(),
-    executor,
-    ensureOsPermissions: async () => {
-      const perms = await executor.checkPermissions()
-      return perms
-    },
-    isDisabled: () => !isLinuxDesktopAvailable(),
-    getSubGates: () => ({
-      mouseAnimation: true,
-      hideBeforeAction: false,
-      autoTargetDisplay: true,
-      clipboardGuard: true,
-      coordinateMode: 'logical' as const,
-    }),
-    getAutoUnhideEnabled: () => false, // Not applicable on Linux
-    cropRawPatch: () => null,
-  }
-  return cached
+    cached = {
+      serverName: COMPUTER_USE_MCP_SERVER_NAME,
+      logger: new DebugLogger(),
+      executor,
+      ensureOsPermissions: async () => {
+        const perms = await executor.checkPermissions()
+        return perms
+      },
+      isDisabled: () => !isLinuxDesktopAvailable(),
+      getSubGates: () => ({
+        pixelValidation: false,
+        clipboardPasteMultiline: true,
+        mouseAnimation: true,
+        hideBeforeAction: false,
+        autoTargetDisplay: true,
+        clipboardGuard: true,
+        coordinateMode: 'logical' as const,
+      }),
+      getAutoUnhideEnabled: () => false, // Not applicable on Linux
+      cropRawPatch: () => null,
+    }
+    return cached
+  })()
 }
 
 export function resetLinuxComputerUseHostAdapter(): void {
