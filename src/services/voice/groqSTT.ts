@@ -8,9 +8,7 @@
  */
 
 import Groq from 'groq-sdk'
-import { readFileSync, existsSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { getInitialSettings } from '../../utils/settings/settings.js'
 
 // ─── Shared STT connection contracts ───────────────────────────────────────
 
@@ -49,30 +47,24 @@ export type GroqSttOptions = {
 /**
  * Resolve the Groq API key from multiple sources (priority order):
  * 1. Explicitly passed `apiKey` option
- * 2. `getPrefs().groqApiKey` (from companion prefs)
- * 3. `process.env.GROQ_API_KEY`
- * 4. `~/.claude/settings.json` → env.groqApiKey
+ * 2. `process.env.GROQ_API_KEY`
+ * 3. The merged settings `env` block (`groqApiKey` / `GROQ_API_KEY`)
  */
 export function resolveGroqApiKey(explicitKey?: string): string | undefined {
   if (explicitKey) return explicitKey
   if (process.env.GROQ_API_KEY) return process.env.GROQ_API_KEY
 
-  // Fallback: read from ~/.claude/settings.json
+  // Fallback: the settings `env` block, read through the canonical settings
+  // API so it follows CLAUDE_CONFIG_DIR — the same file the /voice toggle,
+  // the voiceProvider setting, and the settings env application all use. A
+  // raw `homedir()/.claude` join here previously read the wrong file whenever
+  // CLAUDE_CONFIG_DIR pointed elsewhere, silently dropping the key.
   try {
-    const settingsPath = join(homedir(), '.claude', 'settings.json')
-    if (existsSync(settingsPath)) {
-      const raw = readFileSync(settingsPath, 'utf-8')
-      const settings = JSON.parse(raw)
-      if (settings.env?.groqApiKey) {
-        return settings.env.groqApiKey
-      }
-      if (settings.env?.GROQ_API_KEY) {
-        return settings.env.GROQ_API_KEY
-      }
-    }
-  } catch { /* ignore */ }
-
-  return undefined
+    const env = getInitialSettings().env
+    return env?.groqApiKey || env?.GROQ_API_KEY || undefined
+  } catch {
+    return undefined
+  }
 }
 
 /**
@@ -112,7 +104,7 @@ export function connectGroqStream(
           const apiKey = resolveGroqApiKey(options.apiKey)
           if (!apiKey) {
             throw new Error(
-              'Groq API key not found. Set GROQ_API_KEY env var or add "groqApiKey" to ~/.claude/settings.json env block.',
+              'Groq API key not found. Set the GROQ_API_KEY env var or add "groqApiKey" to the env block of your user settings (settings.json).',
             )
           }
 
