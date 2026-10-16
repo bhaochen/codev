@@ -30,6 +30,7 @@ import type { ProcessUserInputContext } from './processUserInput/processUserInpu
 import { processUserInput } from './processUserInput/processUserInput.js'
 import type { QueryGuard } from './QueryGuard.js'
 import { queryCheckpoint, startQueryProfile } from './queryProfiler.js'
+import { mergeConsecutiveTaskNotifications } from './queueProcessor.js'
 import { runWithWorkload } from './workloadContext.js'
 
 function exit(): void {
@@ -449,7 +450,10 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
     // Iterate all commands uniformly. First command gets attachments +
     // ideSelection + pastedContents, rest skip attachments to avoid
     // duplicating turn-level context (IDE selection, todos, diffs).
-    const commands = queuedCommands ?? []
+    // Consecutive task-notifications are merged into one message first, so
+    // a burst of background completions is a single user message (one turn
+    // input) rather than N separate API-visible messages.
+    const commands = mergeConsecutiveTaskNotifications(queuedCommands ?? [])
 
     // Compute the workload tag for this turn. queueProcessor can batch a
     // cron prompt with a same-tick human prompt; only tag when EVERY

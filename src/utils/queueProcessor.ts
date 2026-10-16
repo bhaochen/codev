@@ -93,3 +93,55 @@ export function processQueueIfReady({
 export function hasQueuedCommands(): boolean {
   return hasCommandsInQueue()
 }
+
+/**
+ * Merge consecutive `task-notification` commands into one, so a burst of
+ * background completions reaches the model as a single user message instead
+ * of N separate ones (same XML blocks, one turn input — fewer tokens, and
+ * the model sees them as one batch).
+ *
+ * Only consecutive notifications of the same agent are merged; anything
+ * else (user prompts, slash commands, non-string payloads) breaks the run
+ * and is passed through untouched. The merged command keeps the first
+ * notification's uuid/origin/priority — the queue has already forgotten
+ * the absorbed ones by the time this runs (delivery happened at dequeue).
+ */
+export function mergeConsecutiveTaskNotifications(
+  commands: readonly QueuedCommand[],
+): QueuedCommand[] {
+  const out: QueuedCommand[] = []
+  let run: string[] = []
+  let runFirst: QueuedCommand | null = null
+
+  const flush = (): void => {
+    if (!runFirst) return
+    out.push(
+      run.length === 1 ? runFirst : { ...runFirst, value: run.join('\n') },
+    )
+    run = []
+    runFirst = null
+  }
+
+  for (const cmd of commands) {
+    const isTaskNotification =
+      cmd.mode === ('task-notification' as QueuedCommand['mode']) &&
+      typeof cmd.value === 'string'
+    if (
+      isTaskNotification &&
+      runFirst &&
+      cmd.agentId !== runFirst.agentId
+    ) {
+      // Different target agent — don't mix.
+      flush()
+    }
+    if (isTaskNotification) {
+      if (!runFirst) runFirst = cmd
+      run.push(cmd.value as string)
+    } else {
+      flush()
+      out.push(cmd)
+    }
+  }
+  flush()
+  return out
+}
