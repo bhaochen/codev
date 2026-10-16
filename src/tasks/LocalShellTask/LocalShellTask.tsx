@@ -3,6 +3,11 @@ import { stat } from 'fs/promises';
 import { OUTPUT_FILE_TAG, STATUS_TAG, SUMMARY_TAG, TASK_ID_TAG, TASK_NOTIFICATION_TAG, TOOL_USE_ID_TAG } from '../../constants/xml.js';
 import { abortSpeculation } from '../../services/PromptSuggestion/speculation.js';
 import type { AppState } from '../../state/AppState.js';
+import { getOriginalCwd, getSessionId, getSessionProjectDir } from '../../bootstrap/state.js';
+import {
+  trackBackgroundTask,
+  untrackBackgroundTask,
+} from '../../services/db/pendingNotificationStore.js';
 import type { LocalShellSpawnInput, SetAppState, Task, TaskContext, TaskHandle } from '../../Task.js';
 import { createTaskStateBase } from '../../Task.js';
 import type { AgentId } from '../../types/ids.js';
@@ -19,6 +24,7 @@ import { backgroundAgentTask, isLocalAgentTask } from '../LocalAgentTask/LocalAg
 import { isMainSessionTask } from '../LocalMainSessionTask.js';
 import { type BashTaskKind, isLocalShellTask, type LocalShellTaskState } from './guards.js';
 import { killTask } from './killShellTasks.js';
+import { getProjectDir } from '../../utils/sessionStoragePortable.js';
 
 /** Prefix that identifies a LocalShellTask summary to the UI collapse transform. */
 export const BACKGROUND_BASH_SUMMARY_PREFIX = 'Background command ';
@@ -106,6 +112,9 @@ The command is likely blocked on an interactive prompt. Kill this task and re-ru
   };
 }
 function enqueueShellNotification(taskId: string, description: string, status: 'completed' | 'failed' | 'killed', exitCode: number | undefined, setAppState: SetAppState, toolUseId?: string, kind: BashTaskKind = 'bash', agentId?: AgentId): void {
+  // Terminal notification reached — the in-flight durability row has served
+  // its purpose (pending_notifications now carries the delivery guarantee).
+  untrackBackgroundTask(taskId);
   // Atomically check and set notified flag to prevent duplicate notifications.
   // If the task was already marked as notified (e.g., by TaskStopTool), skip
   // enqueueing to avoid sending redundant messages to the model.
@@ -204,6 +213,18 @@ export async function spawnShellTask(input: LocalShellSpawnInput & {
     taskOutput
   } = shellCommand;
   const taskId = taskOutput.taskId;
+  // Durability: remember this task so a crash/restart can report it as
+  // interrupted instead of silently losing it (deleted at terminal
+  // notification / kill; see services/db/pendingNotificationStore.ts).
+  trackBackgroundTask({
+    taskId,
+    projectDir: getSessionProjectDir() ?? getProjectDir(getOriginalCwd()),
+    sessionId: getSessionId(),
+    description,
+    kind,
+    outputPath: getTaskOutputPath(taskId),
+    startedAt: Date.now(),
+  });
   const unregisterCleanup = registerCleanup(async () => {
     killTask(taskId, setAppState);
   });

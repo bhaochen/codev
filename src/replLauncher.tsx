@@ -3,6 +3,7 @@ import { getOriginalCwd, getSessionProjectDir } from './bootstrap/state.js';
 import type { StatsStore } from './context/stats.js';
 import { enqueue, restorePendingNotifications } from './utils/messageQueueManager.js';
 import { getProjectDir } from './utils/sessionStoragePortable.js';
+import { recoverOrphanedBackgroundTasks } from './utils/task/recovery.js';
 import type { Root } from './ink.js';
 import type { Props as REPLProps } from './screens/REPL.js';
 import type { AppState } from './state/AppStateStore.js';
@@ -21,18 +22,20 @@ export async function launchRepl(root: Root, appProps: AppWrapperProps, replProp
   } = await import('./screens/REPL.js');
 
   // Restart recovery: replay task notifications that were queued when a
-  // previous process died (services/db/pendingNotificationStore.ts). The
+  // previous process died, and report background tasks that were still
+  // RUNNING as interrupted (services/db/pendingNotificationStore.ts). The
   // regular queue processor wakes the session with them once idle — the
-  // model learns about background completions that outlived the crash.
-  // Interactive-only: headless one-shots deliberately start clean.
-  const restored = restorePendingNotifications(
-    getSessionProjectDir() ?? getProjectDir(getOriginalCwd()),
-  );
-  if (restored > 0) {
+  // model learns about background work that outlived the crash instead of
+  // it silently vanishing. Interactive-only: headless one-shots start clean.
+  const projectDir = getSessionProjectDir() ?? getProjectDir(getOriginalCwd());
+  const lost = await recoverOrphanedBackgroundTasks(projectDir);
+  const restored = restorePendingNotifications(projectDir);
+  const recovered = lost + restored;
+  if (recovered > 0) {
     // Context for the model. Not persisted (enqueue, not
-    // enqueuePendingNotification) so it never replays again.
+    // enqueuePendingNotification) so it never replays itself.
     enqueue({
-      value: `<system-reminder>The previous ${restored === 1 ? 'session' : 'process'} exited before ${restored === 1 ? 'a' : `${restored}`} background task notification${restored === 1 ? ' was' : 's were'} delivered; ${restored === 1 ? 'it has' : 'they have'} been restored below. The task state may be stale — check the output files before acting on them.</system-reminder>`,
+      value: `<system-reminder>The previous process exited before ${recovered === 1 ? 'a' : `${recovered}`} background task notification${recovered === 1 ? ' was' : 's were'} delivered; ${recovered === 1 ? 'it was' : 'they were'} restored above. Task state may be stale — check the output files before acting on them.</system-reminder>`,
       mode: 'prompt',
       isMeta: true,
       priority: 'later',

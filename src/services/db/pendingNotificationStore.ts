@@ -191,6 +191,143 @@ export function loadPersistedNotifications(projectDir: string): QueuedCommand[] 
   return notificationPersistence().load(projectDir)
 }
 
+// ===========================================================================
+// In-flight background task tracking
+//
+// pending_notifications covers completions queued-but-not-delivered; this
+// second mirror covers tasks that were still RUNNING at process death. One
+// row per spawned background shell task: written at spawn, deleted at the
+// terminal notification (or kill). A row that survives a restart means the
+// task was running when the process died, and utils/task/recovery.ts
+// converts it into an "interrupted" notification on the next launch —
+// mirroring opencode's "Command cancelled because the server restarted"
+// recovery (MIT, session/execution/restart.ts recoverShell).
+// ===========================================================================
+
+export type BackgroundTaskRow = {
+  taskId: string
+  projectDir: string
+  sessionId: string | null
+  description: string
+  kind: string
+  outputPath: string
+  startedAt: number
+}
+
+export interface BackgroundTaskPersistence {
+  track(row: BackgroundTaskRow): void
+  untrack(taskId: string): void
+  loadOrphaned(projectDir: string): BackgroundTaskRow[]
+}
+
+function trackSqlite(row: BackgroundTaskRow): void {
+  const db = getDb()
+  if (!db) return
+  db.run(
+    `INSERT OR REPLACE INTO background_tasks
+       (task_id, project_dir, session_id, description, kind, output_path, started_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      row.taskId,
+      row.projectDir,
+      row.sessionId,
+      row.description,
+      row.kind,
+      row.outputPath,
+      row.startedAt,
+    ],
+  )
+}
+
+function untrackSqlite(taskId: string): void {
+  const db = getDb()
+  if (!db) return
+  db.run('DELETE FROM background_tasks WHERE task_id = ?', [taskId])
+}
+
+function loadOrphanedSqlite(projectDir: string): BackgroundTaskRow[] {
+  const db = getDb()
+  if (!db) return []
+  const rows = db
+    .query(
+      `SELECT task_id, session_id, description, kind, output_path, started_at
+         FROM background_tasks
+        WHERE project_dir = ?
+        ORDER BY started_at, task_id`,
+    )
+    .all(projectDir) as Array<Record<string, unknown>>
+  return rows.map(row => ({
+    taskId: String(row.task_id ?? ''),
+    projectDir,
+    sessionId: (row.session_id as string | null) ?? null,
+    description: String(row.description ?? ''),
+    kind: String(row.kind ?? 'bash'),
+    outputPath: String(row.output_path ?? ''),
+    startedAt: Number(row.started_at ?? 0),
+  }))
+}
+
+export const sqliteBackgroundTaskPersistence: BackgroundTaskPersistence = {
+  track: trackSqlite,
+  untrack: untrackSqlite,
+  loadOrphaned: loadOrphanedSqlite,
+}
+
+let backgroundTaskTestOverride: BackgroundTaskPersistence | null = null
+
+export function backgroundTaskPersistence(): BackgroundTaskPersistence {
+  if (backgroundTaskTestOverride) return backgroundTaskTestOverride
+  if (getNodeEnv() === 'test') return { track: () => {}, untrack: () => {}, loadOrphaned: () => [] }
+  return sqliteBackgroundTaskPersistence
+}
+
+export function trackBackgroundTask(row: BackgroundTaskRow): void {
+  try {
+    backgroundTaskPersistence().track(row)
+  } catch (error) {
+    console.warn(
+      '[pendingNotificationStore] background task track failed:',
+      error instanceof Error ? error.message : error,
+    )
+  }
+}
+
+export function untrackBackgroundTask(taskId: string): void {
+  try {
+    backgroundTaskPersistence().untrack(taskId)
+  } catch (error) {
+    console.warn(
+      '[pendingNotificationStore] background task untrack failed:',
+      error instanceof Error ? error.message : error,
+    )
+  }
+}
+
+export function loadOrphanedBackgroundTasks(
+  projectDir: string,
+): BackgroundTaskRow[] {
+  try {
+    return backgroundTaskPersistence().loadOrphaned(projectDir)
+  } catch (error) {
+    console.warn(
+      '[pendingNotificationStore] background task load failed:',
+      error instanceof Error ? error.message : error,
+    )
+    return []
+  }
+}
+
+/**
+ * Test-only: inject the background-task persistence backend (pass the
+ * exported `sqliteBackgroundTaskPersistence` to exercise the real SQLite
+ * path, or a fake to observe track/untrack calls). Pass null to clear.
+ */
+export function __setBackgroundTaskStoreForTests(
+  impl: BackgroundTaskPersistence | null,
+): void {
+  backgroundTaskTestOverride = impl
+}
+
 /**
  * Test-only: inject a persistence backend (pass the exported
  * `sqliteNotificationPersistence` to exercise the real SQLite path, or a

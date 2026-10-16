@@ -8,6 +8,7 @@ import { logForDebugging } from '../../utils/debug.js'
 import { logError } from '../../utils/log.js'
 import { dequeueAllMatching } from '../../utils/messageQueueManager.js'
 import { evictTaskOutput } from '../../utils/task/diskOutput.js'
+import { untrackBackgroundTask } from '../../services/db/pendingNotificationStore.js'
 import { updateTaskState } from '../../utils/task/framework.js'
 import { isLocalShellTask } from './guards.js'
 
@@ -42,6 +43,10 @@ export function killTask(taskId: string, setAppState: SetAppStateFn): void {
       endTime: Date.now(),
     }
   })
+  // Killed tasks never reach enqueueShellNotification's notified-gate with a
+  // delivery (TaskStopTool latches notified first), so drop the in-flight
+  // durability row here — a killed task must not be reported as lost.
+  untrackBackgroundTask(taskId)
   void evictTaskOutput(taskId)
 }
 
