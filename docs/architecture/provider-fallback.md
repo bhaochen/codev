@@ -44,8 +44,3 @@ Provider request failed; retrying with opencode/nemotron-3-ultra-free
 ## Configuration
 
 The fallback chain is managed internally and not user-configurable. The primary model is always attempted first; fallback only activates on failure.
-
-## Related
-
-- [Model Selection](../cli/model-selection.md) (if exists)
-- [Provider Configuration](../architecture/provider-config.md) (if exists)

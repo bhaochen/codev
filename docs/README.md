@@ -26,7 +26,6 @@
 | [调试系统](cli/debug-system.md) | `/debug` v2.0 DEBUG PROBE 工作流、会话调试日志 |
 | [AI 工具系统](tools/overview.md) | buildTool 框架、执行流程、权限系统、关键工具详解（含 Tavily/SearXNG、REPL 3 层契约） |
 | [工具参考大全](tools/tool-reference.md) | 所有 ~60+ AI 工具的完整参考表 |
-| [REPL Tool 深度解析](tools/repl-tool.md) | Bun node:vm 沙箱、ToolResult/ContextAggregator 3 层契约、isVirtual 不进 LLM、REPL≠SubAgent |
 
 ### 语音
 | 文档 | 说明 |
@@ -42,8 +41,6 @@
 | 文档 | 说明 |
 |------|------|
 | [HTTP/WS 服务器](server/overview.md) | Bun.serve()、REST API、WebSocket、服务层 |
-| [Computer Use 系统](server/computer-use.md) | Python Runtime 辅助脚本架构、跨平台设计、JSON 通信协议 |
-| [Provider 代理](server/proxy-provider.md) | Anthropic ↔ OpenAI 协议转换、多提供商支持 |
 
 ### 后端服务
 | 文档 | 说明 |

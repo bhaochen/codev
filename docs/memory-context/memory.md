@@ -49,7 +49,7 @@ MEMORY.md 是记忆系统的入口索引文件（非记忆本身）：
 - 路径：`<memoryDir>/MEMORY.md`
 - 最大行数：**200 行**（`MAX_ENTRYPOINT_LINES`）
 - 最大字节数：**25,000 字节**（`MAX_ENTRYPOINT_BYTES`）
-- 格式：每行一个条目：`- [Title](file.md) — 简短描述`
+- 格式：每行一个条目，形如 `- [Title](<file>) — 简短描述`（`<file>` 为相对本目录的记忆文件名）
 - 超过限制时自动截断并追加警告
 
 ### 截断策略
