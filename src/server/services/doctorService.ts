@@ -3,6 +3,7 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import type { Dirent } from 'node:fs'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
+import { resolveGlobalConfigFilePath } from '../../utils/globalConfigPath.js'
 import { diagnosticsService } from './diagnosticsService.js'
 
 export type DoctorItemKind = 'json' | 'jsonl' | 'directory'
@@ -400,10 +401,13 @@ export class DoctorService {
   }
 
   private getUserMcpConfigPath(): string {
-    if (this.usesConfigDirOverride) {
-      return path.join(this.configDir, '.claude.json')
-    }
-    return path.join(this.homeDir, '.claude.json')
+    // Same resolver the CLI uses: an explicit config dir (options.configDir or
+    // CLAUDE_CONFIG_DIR) is honored, otherwise the default home is used, and in
+    // both cases the legacy `.config.json` location and the OAuth filename
+    // suffix are respected.
+    return resolveGlobalConfigFilePath(
+      this.usesConfigDirOverride ? this.configDir : undefined,
+    )
   }
 
   private async listJsonlFiles(rootDir: string): Promise<string[]> {

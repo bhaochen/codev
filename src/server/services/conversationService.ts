@@ -22,6 +22,7 @@ import {
   resolveClaudeCliLauncher,
 } from '../../utils/desktopBundledCli.js'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
+import { resolveGlobalConfigFilePath } from '../../utils/globalConfigPath.js'
 import { findCanonicalGitRoot } from '../../utils/git.js'
 import { sanitizePath } from '../../utils/path.js'
 import { getProcessEnvWithTerminalShellEnvironment } from '../../utils/terminalShellEnvironment.js'
@@ -869,8 +870,7 @@ export class ConversationService {
     localBaseUrl?: string
     localModelName?: string
   } | null {
-    const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude')
-    const configPath = path.join(configDir, '.claude.json')
+    const configPath = resolveGlobalConfigFilePath()
     try {
       const raw = fs.readFileSync(configPath, 'utf-8')
       return JSON.parse(raw) as ReturnType<typeof this.readCliGlobalConfig>

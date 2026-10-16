@@ -6,10 +6,9 @@
  * POST /api/cli-auth/invalidate — invalidate the cliProviderModelCache
  */
 
-import { homedir } from 'node:os'
 import { readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { ApiError, errorResponse } from '../middleware/errorHandler.js'
+import { resolveGlobalConfigFilePath } from '../../utils/globalConfigPath.js'
 
 type AuthProvider = 'anthropic' | 'openai' | 'openrouter' | 'local' | 'opencode' | 'nvidia'
 
@@ -25,8 +24,11 @@ type CliAuthConfig = {
   localModelName?: string
 }
 
+// Single source of truth for the global config path, shared with the CLI so
+// the desktop server reads/writes exactly the file the CLI does (see
+// resolveGlobalConfigFilePath for the legacy / OAuth-suffix precedence).
 function getClaudeJsonPath(): string {
-  return join(homedir(), '.claude.json')
+  return resolveGlobalConfigFilePath()
 }
 
 function readCliAuthConfig(): CliAuthConfig {

@@ -1,30 +1,18 @@
 import memoize from 'lodash-es/memoize.js'
-import { homedir } from 'os'
-import { join } from 'path'
-import { fileSuffixForOauthConfig } from '../constants/oauth.js'
 import { isRunningWithBun } from './bundledMode.js'
-import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.js'
+import { isEnvTruthy } from './envUtils.js'
 import { findExecutable } from './findExecutable.js'
 import { getFsImplementation } from './fsOperations.js'
+import { resolveGlobalConfigFilePath } from './globalConfigPath.js'
 import { which } from './which.js'
 
 type Platform = 'win32' | 'darwin' | 'linux'
 
 // Config and data paths
+// Memoized per CLAUDE_CONFIG_DIR; resolution logic is shared with the server
+// (see resolveGlobalConfigFilePath) so both always agree on the path.
 export const getGlobalClaudeFile = memoize(
-  (): string => {
-    // Legacy fallback for backwards compatibility
-    if (
-      getFsImplementation().existsSync(
-        join(getClaudeConfigHomeDir(), '.config.json'),
-      )
-    ) {
-      return join(getClaudeConfigHomeDir(), '.config.json')
-    }
-
-    const filename = `.claude${fileSuffixForOauthConfig()}.json`
-    return join(process.env.CLAUDE_CONFIG_DIR || homedir(), filename)
-  },
+  (): string => resolveGlobalConfigFilePath(),
   () => process.env.CLAUDE_CONFIG_DIR,
 )
 

@@ -11,6 +11,7 @@
 import { SettingsService } from '../services/settingsService.js'
 import { ApiError, errorResponse } from '../middleware/errorHandler.js'
 import { hasOpenAIAuthLogin } from '../../utils/auth.js'
+import { resolveGlobalConfigFilePath } from '../../utils/globalConfigPath.js'
 import { OPENAI_CODEX_MODEL_CATALOG } from '../../services/openaiAuth/models.js'
 
 const EFFORT_LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
@@ -141,14 +142,11 @@ async function fetchCliProviderModels(): Promise<ApiModelInfo[]> {
   }
 
   try {
-    // Read ~/.claude.json directly — avoids importing CLI-side config modules
-    const { homedir } = await import('node:os')
+    // Read the CLI's global config — the exact file the CLI writes.
     const { readFileSync } = await import('node:fs')
-    const { join } = await import('node:path')
     let config: Record<string, unknown> = {}
     try {
-      const configDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
-      const raw = readFileSync(join(configDir, '.claude.json'), 'utf8')
+      const raw = readFileSync(resolveGlobalConfigFilePath(), 'utf8')
       config = JSON.parse(raw)
     } catch {
       return []
@@ -284,11 +282,8 @@ export async function readCliAuthProvider(): Promise<{
   authProvider?: 'anthropic' | 'openai' | 'openrouter' | 'local' | 'opencode' | 'nvidia'
 } | null> {
   try {
-    const { homedir } = await import('node:os')
     const { readFileSync } = await import('node:fs')
-    const { join } = await import('node:path')
-    const configDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
-    const raw = readFileSync(join(configDir, '.claude.json'), 'utf8')
+    const raw = readFileSync(resolveGlobalConfigFilePath(), 'utf8')
     return JSON.parse(raw)
   } catch {
     return null
