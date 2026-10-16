@@ -361,6 +361,15 @@ export class SessionService {
 
   private async appendJsonlEntry(filePath: string, entry: Record<string, unknown>): Promise<void> {
     const line = JSON.stringify(entry) + '\n'
+    const { isExportDeferred, markExportDirty } = await import(
+      '../../services/db/exportDeferral.js'
+    )
+    if (isExportDeferred()) {
+      // D4: rows are the record; the export file is materialized on demand.
+      shadowAppendBatch(filePath, [entry as unknown as Entry], Buffer.byteLength(line))
+      markExportDirty(filePath)
+      return
+    }
     await fs.appendFile(filePath, line, 'utf-8')
     // Phase A: mirror the successful append into the SQLite shadow.
     shadowAppendBatch(filePath, [entry as unknown as Entry], Buffer.byteLength(line))
@@ -1083,14 +1092,24 @@ export class SessionService {
     try {
       if (this.useDbReads()) {
         const { getSessionStore } = await import('../../services/db/SessionStore.js')
-        const row = getSessionStore().getSession(sessionId)
+        const store = getSessionStore()
+        const row = store.getSession(sessionId)
         if (row) {
           const filePath = path.join(projectsDir, row.projectDir, `${sessionId}.jsonl`)
           try {
             await fs.stat(filePath)
             return [{ filePath, projectDir: row.projectDir }]
           } catch {
-            // Row exists but file is gone — fall through to the scan.
+            // Row but no file — expected under D4 deferred export. The store's
+            // copy is still the session's home: reads come from rows and an
+            // append recreates the file. Fall through to the scan only when
+            // the row has nothing to serve.
+            if (
+              store.isSessionPrimaryOwned(sessionId) ||
+              store.getMessageCount(sessionId) > 0
+            ) {
+              return [{ filePath, projectDir: row.projectDir }]
+            }
           }
         }
       }

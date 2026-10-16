@@ -77,6 +77,13 @@ let injectedStore: SessionStore | null = null
 let defaultStore: SessionStore | null = null
 let storeResolveFailed = false
 
+/**
+ * Resolve the store the shadow writer mirrors into (injected test store or the
+ * process singleton). Exported so D4's on-demand export materializer writes
+ * from the same database the writer is filling.
+ */
+export const resolveShadowStore = resolveStore
+
 async function resolveStore(): Promise<SessionStore | null> {
   if (injectedStore) return injectedStore
   if (defaultStore) return defaultStore

@@ -1962,6 +1962,35 @@ export function getUserPromptSubmitHookBlockingMessage(
  * @param messages Optional conversation history for prompt/function hooks
  * @returns Async generator that yields progress messages and hook results
  */
+/**
+ * D4: DB-primary deferred mode stops the append path from writing the JSONL
+ * export, so a hook script that reads `transcript_path` (or statusline /
+ * `agent_transcript_path`) would otherwise see a missing or stale file.
+ * Materialize the export(s) right before the command runs. No-op when export
+ * is eager (`CODEV_SESSION_EXPORT=1`) or when the file is already current.
+ * Best-effort: a failure must never block hook execution.
+ */
+async function materializeHookTranscripts(input: unknown): Promise<void> {
+  try {
+    const { isExportDeferred, materializeExportForPath } = await import(
+      '../services/db/exportDeferral.js'
+    )
+    if (!isExportDeferred()) return
+    const rec = (input ?? {}) as {
+      transcript_path?: string
+      agent_transcript_path?: string
+    }
+    if (rec.transcript_path) {
+      await materializeExportForPath(rec.transcript_path)
+    }
+    if (rec.agent_transcript_path) {
+      await materializeExportForPath(rec.agent_transcript_path)
+    }
+  } catch {
+    // Ignore — hook execution proceeds with whatever file exists.
+  }
+}
+
 async function* executeHooks({
   hookInput,
   toolUseID,
@@ -2031,6 +2060,9 @@ async function* executeHooks({
 
   const userHooks = matchingHooks.filter(h => !isInternalHook(h))
   if (userHooks.length > 0) {
+    // D4: user hooks are external commands that read transcript_path /
+    // agent_transcript_path themselves — materialize the export(s) now.
+    await materializeHookTranscripts(hookInput)
     const pluginHookCounts = getPluginHookCounts(userHooks)
     const hookTypeCounts = getHookTypeCounts(userHooks)
     logEvent(`tengu_run_hook`, {
@@ -3055,6 +3087,8 @@ async function executeHooksOutsideREPL({
   const appState = getAppState ? getAppState() : undefined
   // Use main session ID for outside-REPL hooks
   const sessionId = getSessionId()
+  // D4: make the transcript file(s) the hook scripts read exist and be current.
+  await materializeHookTranscripts(hookInput)
   const matchingHooks = await getMatchingHooks(
     appState,
     sessionId,
@@ -4635,6 +4669,9 @@ export async function executeStatusLineCommand(
   const abortSignal = signal || AbortSignal.timeout(timeoutMs)
 
   try {
+    // D4: the statusline command receives transcript_path in its JSON input —
+    // materialize the on-demand export before it runs.
+    await materializeHookTranscripts(statusLineInput ?? {})
     // Convert status input to JSON
     const jsonInput = jsonStringify(statusLineInput)
 

@@ -99,6 +99,10 @@ import { isDbPrimaryMode, shouldSkipSessionPersistence } from './sessionPersiste
 // Phase A shadow writer: mirrors successful JSONL appends into SQLite.
 // shadowWriter imports the db layer dynamically, so this edge stays acyclic.
 import { shadowAppendBatch, flushShadowWrites } from '../services/db/shadowWriter.js'
+import {
+  isExportDeferred,
+  markExportDirty,
+} from '../services/db/exportDeferral.js'
 // Type-only (erased at runtime) — no module cycle.
 import type { SessionStore } from '../services/db/SessionStore.js'
 
@@ -754,6 +758,12 @@ class Project {
     if (isDbPrimaryMode()) {
       shadowAppendBatch(filePath, chunkEntries, Buffer.byteLength(content))
       await flushShadowWrites() // DB durable before export
+      // D4: the append path stops writing the export file by default; it is
+      // materialized on demand for external readers (see exportDeferral.ts).
+      if (isExportDeferred()) {
+        markExportDirty(filePath)
+        return
+      }
       try {
         await this.appendToFile(filePath, content)
       } catch (err) {
@@ -2712,6 +2722,11 @@ function appendEntryToFile(
 
   if (isDbPrimaryMode()) {
     shadowAppendBatch(fullPath, [entry as Entry], Buffer.byteLength(line))
+    // D4: export deferred by default — the file is materialized on demand.
+    if (isExportDeferred()) {
+      markExportDirty(fullPath)
+      return
+    }
     try {
       writeToFile()
     } catch (err) {

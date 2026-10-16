@@ -121,12 +121,16 @@ and tested:
 | C5 | ✅ | `e691253` | Forks read the source from rows in primary mode (lagging/missing export safe) |
 | C6 | ✅ | `662691b` | `/resume` listing supplements the dir scan with DB rows — sessions stay listed (with DB titles) even when the projects tree is gone |
 | D3 | ✅ | `2e4b127` | **Default flip**: primary mode ON by default; `CODEV_DB_PRIMARY=0` reverts to JSONL-as-truth |
+| ② | ✅ | `d8ac182` | **Subagent transcripts mirrored**: composite ids (`<sid>/subagents/…`, `kind='subagent'`, `parent_session_id`), migration 004, migration scanner walks subagent trees (v5), `getAgentTranscript` DB-first |
+| D4 | ✅ | — | **Deferred export**: the append path no longer writes JSONL by default; the file is materialized on demand for external readers (hooks/statusline), `CODEV_SESSION_EXPORT=1` restores eager export |
 
 ### DB-Primary Mode (current default)
 
 ```
-CODEV_DB_PRIMARY   unset/1  → SQLite is the session store of truth (default)
-                   =0/false → legacy: JSONL source of truth + SQLite mirror
+CODEV_DB_PRIMARY    unset/1  → SQLite is the session store of truth (default)
+                    =0/false → legacy: JSONL source of truth + SQLite mirror
+CODEV_SESSION_EXPORT=1       → eager export: write the JSONL file on every
+                               append (the pre-D4 D3 behavior)
 ```
 
 Behavior in primary mode:
@@ -135,23 +139,46 @@ Behavior in primary mode:
   the primary path, marked `metadata.__primary`) or the file is missing.
   Unmarked rows (pre-v4 legacy) keep the freshness-gated shadow semantics and
   self-heal by one file resync before being adopted.
-- **Writes** (drain seam): rows buffered + flushed first (mandatory), the
-  JSONL file appended after as a **best-effort export**; sync-path entries are
-  buffered first with the file written as export too.
+- **Writes** (drain seam): rows buffered + flushed first (mandatory). By
+  default (D4) the JSONL file is **not** touched by the append path — see
+  "Deferred export" below. With `CODEV_SESSION_EXPORT=1` the file is appended
+  after the rows as a best-effort export.
 - **Export repair**: any failed export append triggers a full-file rewrite
   from the rows (`exportSession`), so external file readers recover.
 - **Forks** (`/branch`, `--fork-session`) source from rows.
 
+#### Deferred export (D4)
+
+The JSONL file is an export, not the record. D4 stops the high-frequency
+append path from writing it at all:
+
+- Nothing is at risk — the rows are durable first (D1 ordering), and the file
+  is reconstructable from them at any time.
+- External consumers get a file **on demand**, right before they read it:
+  - `utils/hooks.ts` calls `materializeExportForPath` for every hook/statusline
+    input that carries `transcript_path` (or `agent_transcript_path`) — the
+    file is complete and current for the command that is about to run.
+  - `bun run src/services/db/exportSession.ts <id>` (or `--all`) rewrites from
+    rows explicitly.
+- **Materialization cost**: a per-session watermark (last row seq + file size
+  after we wrote it) makes the common case an append of only the missing rows.
+  A full rewrite happens on the first touch in a process, after an external
+  modification/truncation, or when pending pre-boundary metadata must precede
+  the boundary.
+- **Continuous file watchers** (an editor extension polling the path) should
+  run the CLI/server with `CODEV_SESSION_EXPORT=1` to restore per-append
+  export writing.
+
 Residual trade-offs (documented, flag-gated): an export that fails before the
-process can repair it leaves the file lagging until the next export write or a
-manual `bun run src/services/db/exportSession.ts <id>` — file-only readers
+process can repair it leaves the file lagging until the next materialization or
+a manual `bun run src/services/db/exportSession.ts <id>` — file-only readers
 (`/insights`, `stats`, external tools) may see the lag, while all primary
 reads serve the full rows.
 
-**Deliberate file-only readers** (left on JSONL by design): subagent
-transcripts (not mirrored), `/insights` + `stats.ts` (batch analytics,
-keepAllLeaves / include subagent files), `findUnresolvedToolUse` (hot
-mid-session path).
+**Deliberate file-only readers** (left on JSONL by design): `/insights` +
+`stats.ts` (batch analytics, keepAllLeaves / include subagent files),
+`findUnresolvedToolUse` (hot mid-session path). Subagent transcripts are
+mirrored (item ②) and served from rows by `getAgentTranscript`.
 
 ### Skip / Repair / Prune Semantics
 
@@ -378,11 +405,17 @@ export kept current on every write path. Rollback is a flag, at any level:
    revert to the legacy JSONL-as-truth behavior (the mirror keeps updating).
 2. **Repair before/after rollback**: `bun run src/services/db/exportSession.ts
    <sessionId>` (or `--all`) rewrites the JSONL files from the rows, so the
-   legacy path sees exactly the DB content.
+   legacy path sees exactly the DB content. (Under D4 the files are not
+   continuously written, so run this before rolling back.)
 3. **Full return**: with the files exported and the flag off, deleting
    `~/.claude/sessions/sessions.sqlite*` loses nothing — everything rebuilds
    from the JSONL via the background migration.
 
+D4 (deferred export) is itself a flag: `CODEV_SESSION_EXPORT=1` restores
+per-append export writing without touching the primary-mode read/write
+semantics, for external tools that watch the file.
+
 No data loss path exists in either direction: the DB is flag-guarded, the
-export files are repaired from rows on append failure, and the legacy reader
+export files are repaired from rows on append failure (eager mode) or
+materialized from rows on demand (deferred mode), and the legacy reader
 self-heals unmarked rows by one resync.

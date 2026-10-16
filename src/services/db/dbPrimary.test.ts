@@ -70,6 +70,10 @@ describe('D1 DB-primary mode', () => {
     process.env.CODEV_DB_PRIMARY = '1'
     process.env.TEST_ENABLE_SHADOW_WRITER = '1'
     process.env.TEST_ENABLE_TRANSCRIPT_CACHE = '1'
+    // These tests cover the eager-export/repair machinery (D3 semantics),
+    // which D4 made opt-in: the default now defers the file until an external
+    // reader asks for it (see exportDeferral.test.ts).
+    process.env.CODEV_SESSION_EXPORT = '1'
 
     __resetSessionStoreForTests()
     store = getSessionStore() // same singleton the repair path uses
@@ -84,6 +88,7 @@ describe('D1 DB-primary mode', () => {
     delete process.env.CODEV_DB_PRIMARY
     delete process.env.TEST_ENABLE_SHADOW_WRITER
     delete process.env.TEST_ENABLE_TRANSCRIPT_CACHE
+    delete process.env.CODEV_SESSION_EXPORT
     delete process.env.CLAUDE_CONFIG_DIR
     rmSync(dir, { recursive: true, force: true })
   })
