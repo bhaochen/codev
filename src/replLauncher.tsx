@@ -1,5 +1,8 @@
 import React from 'react';
+import { getOriginalCwd, getSessionProjectDir } from './bootstrap/state.js';
 import type { StatsStore } from './context/stats.js';
+import { enqueue, restorePendingNotifications } from './utils/messageQueueManager.js';
+import { getProjectDir } from './utils/sessionStoragePortable.js';
 import type { Root } from './ink.js';
 import type { Props as REPLProps } from './screens/REPL.js';
 import type { AppState } from './state/AppStateStore.js';
@@ -16,6 +19,27 @@ export async function launchRepl(root: Root, appProps: AppWrapperProps, replProp
   const {
     REPL
   } = await import('./screens/REPL.js');
+
+  // Restart recovery: replay task notifications that were queued when a
+  // previous process died (services/db/pendingNotificationStore.ts). The
+  // regular queue processor wakes the session with them once idle — the
+  // model learns about background completions that outlived the crash.
+  // Interactive-only: headless one-shots deliberately start clean.
+  const restored = restorePendingNotifications(
+    getSessionProjectDir() ?? getProjectDir(getOriginalCwd()),
+  );
+  if (restored > 0) {
+    // Context for the model. Not persisted (enqueue, not
+    // enqueuePendingNotification) so it never replays again.
+    enqueue({
+      value: `<system-reminder>The previous ${restored === 1 ? 'session' : 'process'} exited before ${restored === 1 ? 'a' : `${restored}`} background task notification${restored === 1 ? ' was' : 's were'} delivered; ${restored === 1 ? 'it has' : 'they have'} been restored below. The task state may be stale — check the output files before acting on them.</system-reminder>`,
+      mode: 'prompt',
+      isMeta: true,
+      priority: 'later',
+      skipSlashCommands: true,
+    });
+  }
+
   await renderAndRun(root, <App {...appProps}>
       <REPL {...replProps} />
     </App>);

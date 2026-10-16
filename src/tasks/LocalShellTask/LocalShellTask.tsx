@@ -7,6 +7,7 @@ import type { LocalShellSpawnInput, SetAppState, Task, TaskContext, TaskHandle }
 import { createTaskStateBase } from '../../Task.js';
 import type { AgentId } from '../../types/ids.js';
 import { registerCleanup } from '../../utils/cleanupRegistry.js';
+import { deterministicUuid } from '../../utils/deterministicUuid.js';
 import { tailFile } from '../../utils/fsOperations.js';
 import { logError } from '../../utils/log.js';
 import { enqueuePendingNotification } from '../../utils/messageQueueManager.js';
@@ -90,6 +91,8 @@ The command is likely blocked on an interactive prompt. Kill this task and re-ru
           value: message,
           mode: 'task-notification',
           priority: 'next',
+          // Stable per (task, event-kind): replays/duplicates collapse.
+          uuid: deterministicUuid(`task-notification:${taskId}:stall`),
           agentId
         });
       }, () => {});
@@ -167,6 +170,10 @@ function enqueueShellNotification(taskId: string, description: string, status: '
     value: message,
     mode: 'task-notification',
     priority: feature('MONITOR_TOOL') ? 'next' : 'later',
+    // Stable per (task, terminal-status): the notified latch prevents
+    // double-enqueue in-process; this uuid also makes the durable mirror
+    // (pendingNotificationStore) idempotent across replays.
+    uuid: deterministicUuid(`task-notification:${taskId}:${status}`),
     agentId
   });
 }

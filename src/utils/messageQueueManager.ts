@@ -1,8 +1,20 @@
 import { feature } from 'bun:bundle'
+import { randomUUID } from 'crypto'
 import type { AgentContentBlock, AgentImageBlock } from '../types/agentMessage.js'
 import { isHiddenBashInput } from 'src/components/PromptInput/inputModes.js'
 import type { Permutations } from 'src/types/utils.js'
-import { getSessionId } from '../bootstrap/state.js'
+import {
+  getOriginalCwd,
+  getSessionId,
+  getSessionProjectDir,
+} from '../bootstrap/state.js'
+import {
+  forgetPersistedNotifications,
+  loadPersistedNotifications,
+  persistQueuedNotification,
+  type NotificationPersistenceContext,
+} from '../services/db/pendingNotificationStore.js'
+import { getProjectDir } from './sessionStoragePortable.js'
 import type { AppState } from '../state/AppState.js'
 import type {
   QueueOperation,
@@ -139,14 +151,71 @@ export function enqueue(command: QueuedCommand): void {
  * Add a task notification to the queue.
  * Convenience wrapper that defaults priority to 'later' so user input
  * is never starved by system messages.
+ *
+ * Identity + durability: the command gets a uuid (producers pass a
+ * deterministic one so a given task event always maps to the same uuid;
+ * see utils/deterministicUuid.ts) and duplicates by uuid are dropped, so
+ * producer retries and crash-recovery replays never double-deliver. The
+ * notification is also mirrored into SQLite (services/db/
+ * pendingNotificationStore.ts) so a restart can replay it — see
+ * restorePendingNotifications().
  */
 export function enqueuePendingNotification(command: QueuedCommand): void {
-  commandQueue.push({ ...command, priority: command.priority ?? 'later' })
+  const normalized: QueuedCommand = {
+    ...command,
+    priority: command.priority ?? 'later',
+    uuid: command.uuid ?? randomUUID(),
+  }
+  if (
+    normalized.uuid !== undefined &&
+    commandQueue.some(cmd => cmd.uuid === normalized.uuid)
+  ) {
+    return
+  }
+  commandQueue.push(normalized)
+  // Best-effort durable mirror — never let persistence break the queue.
+  try {
+    persistQueuedNotification(normalized, currentNotificationContext())
+  } catch (error) {
+    console.warn(
+      '[messageQueueManager] notification persist failed:',
+      error instanceof Error ? error.message : error,
+    )
+  }
   notifySubscribers()
   logOperation(
     'enqueue',
-    typeof command.value === 'string' ? command.value : undefined,
+    typeof normalized.value === 'string' ? normalized.value : undefined,
   )
+}
+
+/**
+ * Where persisted notification mirrors are filed: the session's project
+ * directory (stable across restarts and /resume within a project) and the
+ * current session id for diagnostics.
+ */
+function currentNotificationContext(): NotificationPersistenceContext {
+  return {
+    projectDir: getSessionProjectDir() ?? getProjectDir(getOriginalCwd()),
+    sessionId: getSessionId(),
+  }
+}
+
+/**
+ * Drop the persisted mirrors of commands that left the queue (delivered,
+ * cancelled, or cleared). Only task notifications are mirrored.
+ */
+function forgetPersisted(commands: readonly QueuedCommand[]): void {
+  const uuids = commands
+    .filter(
+      cmd =>
+        cmd.mode === ('task-notification' as PromptInputMode) &&
+        cmd.uuid !== undefined,
+    )
+    .map(cmd => cmd.uuid as string)
+  if (uuids.length > 0) {
+    forgetPersistedNotifications(uuids)
+  }
 }
 
 const PRIORITY_ORDER: Record<QueuePriority, number> = {
@@ -188,6 +257,7 @@ export function dequeue(
   if (bestIdx === -1) return undefined
 
   const [dequeued] = commandQueue.splice(bestIdx, 1)
+  forgetPersisted([dequeued!])
   notifySubscribers()
   logOperation('dequeue')
   return dequeued
@@ -204,6 +274,7 @@ export function dequeueAll(): QueuedCommand[] {
 
   const commands = [...commandQueue]
   commandQueue.length = 0
+  forgetPersisted(commands)
   notifySubscribers()
 
   for (const _cmd of commands) {
@@ -259,6 +330,7 @@ export function dequeueAllMatching(
   }
   commandQueue.length = 0
   commandQueue.push(...remaining)
+  forgetPersisted(matched)
   notifySubscribers()
   for (const _cmd of matched) {
     logOperation('dequeue')
@@ -284,6 +356,7 @@ export function remove(commandsToRemove: QueuedCommand[]): void {
   }
 
   if (commandQueue.length !== before) {
+    forgetPersisted(commandsToRemove)
     notifySubscribers()
   }
 
@@ -307,6 +380,7 @@ export function removeByFilter(
   }
 
   if (removed.length > 0) {
+    forgetPersisted(removed)
     notifySubscribers()
     for (const _cmd of removed) {
       logOperation('remove')
@@ -324,8 +398,43 @@ export function clearCommandQueue(): void {
   if (commandQueue.length === 0) {
     return
   }
+  const removed = [...commandQueue]
   commandQueue.length = 0
+  forgetPersisted(removed)
   notifySubscribers()
+}
+
+/**
+ * Replay task notifications persisted by a previous process run (see
+ * services/db/pendingNotificationStore.ts) back into the queue.
+ *
+ * Called once at interactive launch (replLauncher) so a crash/restart no
+ * longer silently drops background completions: the restored commands are
+ * picked up by the regular queue processor and wake the session exactly
+ * like live notifications. Rows are NOT re-persisted here (they stay in
+ * SQLite until delivered, at-least-once across restarts); duplicates
+ * against the live queue are collapsed by uuid.
+ *
+ * @returns how many notifications were restored.
+ */
+export function restorePendingNotifications(projectDir: string): number {
+  const persisted = loadPersistedNotifications(projectDir)
+  if (persisted.length === 0) {
+    return 0
+  }
+  let restored = 0
+  for (const cmd of persisted) {
+    if (cmd.uuid !== undefined && commandQueue.some(c => c.uuid === cmd.uuid)) {
+      continue
+    }
+    commandQueue.push(cmd)
+    restored++
+  }
+  if (restored > 0) {
+    notifySubscribers()
+    logOperation('restore', `${restored} notification(s) for ${projectDir}`)
+  }
+  return restored
 }
 
 /**
