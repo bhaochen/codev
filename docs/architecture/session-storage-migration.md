@@ -135,10 +135,12 @@ and tested:
 
 > **Open item after ②**: mirroring subagent transcripts literally re-stores
 > each parent's context once per subagent — ~94.5 % of the 9.19 GB payload is
-> redundant and the DB grew 124.8 MB → 11.13 GB. The mirroring code is correct;
-> the **storage policy** (content-addressed dedup / opt-in mirroring / keep /
-> roll back) is undecided. See "Case Study: Why Mirror Subagent Transcripts
-> Duplicates Context".
+> redundant and the DB grew 124.8 MB → 11.13 GB. Worse, **93.6 % of that
+> payload (8.60 GB) is failed compaction retries** (`agent-acompact-*` that end
+> in an API/rate-limit error). The mirroring code is correct; the **storage
+> policy** (skip compaction subagents / content-addressed dedup / opt-in
+> mirroring / recording-layer delta / keep) is undecided. See "Case Study: Why
+> Mirror Subagent Transcripts Duplicates Context".
 
 ### DB-Primary Mode (current default)
 
@@ -269,6 +271,25 @@ variant sets `isSidechain: true` and adds an `agentId`), but they describe the
 same boundary marker; the only "variation" is full-context-copy bookkeeping.
 The most-reused single `uuid` is stored **939 times**.
 
+### Most of the bloat is failed compaction retries
+
+`agent-acompact-*` sessions split by whether their last entry is an API
+error (the free tier rate-limits compaction):
+
+| Status | Sessions | Rows | `data_json` bytes |
+|--------|----------|------|-------------------|
+| **Errored** (API error / rate limit) | 2,135 (90 %) | 2,099,489 | **8.60 GB (93.6 % of all payload)** |
+| Succeeded | 237 | 78,476 | 0.41 GB |
+| Non-compaction subagents | 247 | 15,495 | 0.07 GB |
+| Main sessions | 251 | — | 0.10 GB |
+
+Each failed attempt still forks the full parent context, writes a fresh
+`agent-acompact-*` transcript and is mirrored into the DB — then a retry does it
+all again. The *successful* compaction's real output already lands in the parent
+as an `isCompactSummary` entry, so the subagent transcripts are redundant even
+when they succeed. **Skipping `agent-acompact-*` mirroring would drop the DB
+payload from 9.19 GB to ~0.17 GB** (main + non-compaction subagents).
+
 ### Aggregate impact
 
 Measured on the live DB after the v5 subagent import (Oct 2026):
@@ -298,21 +319,35 @@ The worst offender is parent `3f57403f-60f0-48e9-be77-6447e69fada5` (25.8 MB):
 `7a2ddda2-6a61-448b-bf11-1a57821eaeab` is 735 KB yet carries **755** subagents
 totalling 2.61 GB.
 
-### Storage-policy options
+### Root cause and storage-policy options
 
-The ② code path is correct (subagent transcripts are readable from rows, with
-`kind='subagent'` + `parent_session_id`). The open question is only *how to
-store* them. The measurements above are the input to that decision:
+The duplication comes from the **recording layer**, not from a bug in ②:
+compaction is implemented as a *forked agent*
+(`src/utils/forkedAgent.ts` → `recordSidechainTranscript([...forkContextMessages,
+...promptMessages], agentId)`), so each attempt persists the parent's whole
+context as its own `<sid>/subagents/agent-acompact-*.jsonl`. The fork exists to
+share the main thread's prompt cache; the context must reach the summariser, so
+"subagents shouldn't know the parent context" is not a valid fix for compaction.
+The ② code path is correct (subagent transcripts read from rows, `kind='subagent'`
++ `parent_session_id`); the open question is only *how to store* them.
 
-1. **Content-addressed dedup** — a `message_content` table keyed by content
-   hash, with `messages` referencing it. Est. DB ≈ 0.6–0.7 GB; read callers
-   unchanged. Most faithful to "rows are the record".
-2. **Opt-in mirroring** — mirror subagents only when enabled (e.g.
-   `CODEV_MIRROR_SUBAGENTS=1`); default back to ~125 MB, subagents read from
-   JSONL as before.
-3. **Keep as-is** — 11.13 GB; correct but ~94.5 % redundant.
-4. **Roll back ② now** — delete `subagent` rows + `VACUUM` → ~125 MB, revisit
-   dedup as separate work.
+Options, cheapest/most-targeted first:
+
+1. **Skip `agent-acompact-*` mirroring** — these are ephemeral compaction
+   attempts; the durable summary is already in the parent (`isCompactSummary`).
+   Writer + migration scanner ignore that path; prune existing rows + `VACUUM`.
+   Est. DB 11.13 GB → ~0.2 GB, **zero change to spawn/compaction semantics**.
+2. **Content-addressed dedup** — a `message_content` table keyed by content
+   hash, with `messages` referencing it. Est. DB ≈ 0.6–0.7 GB; keeps every
+   transcript, read callers unchanged.
+3. **Opt-in mirroring** — mirror subagents only when enabled (e.g.
+   `CODEV_MIRROR_SUBAGENTS=1`); default back to ~125 MB.
+4. **Fix the recording layer** — record only the delta (the agent's own turns)
+   or a reference to the parent's `seq` range instead of the full fork context.
+   This is the only option that also shrinks the **8.86 GB of subagent JSONL on
+   disk**; larger change (touches `forkedAgent` / `recordSidechainTranscript`).
+5. **Keep as-is / roll back ②** — 11.13 GB, or delete `subagent` rows + `VACUUM`
+   → ~125 MB and revisit later.
 
 ---
 
