@@ -14,6 +14,11 @@ Codev migrated session transcript storage from append-only JSONL files to a SQLi
 ~/.claude/sessions/sessions.db-wal  # Write-ahead log
 ```
 
+Renamed from `sessions.sqlite` (Oct 2026) — the file already lives in
+`sessions/`, so the name is short. An existing database must be moved
+(`sessions.sqlite* → sessions.db*`) or it rebuilds from the JSONL sources on
+the next open.
+
 ---
 
 ## Schema
@@ -355,6 +360,26 @@ Options, cheapest/most-targeted first:
    disk**; larger change (touches `forkedAgent` / `recordSidechainTranscript`).
 5. **Keep as-is / roll back ②** — 11.13 GB, or delete `subagent` rows + `VACUUM`
    → ~125 MB and revisit later.
+
+### Applied: fix A on the live DB (Oct 2026)
+
+1. Backup: `sessions.db.bak-<ts>` (integrity ok, counts identical).
+2. Rename `sessions.sqlite` → `sessions.db` (the new default path).
+3. Reopen with the new policy and run
+   `bun run src/services/db/migrateSessions.ts --vacuum` → **pruned 2,372**,
+   0 failed; the migration's `VACUUM` reclaimed the pages.
+
+| Metric | Before | After |
+|--------|--------|-------|
+| DB file | 11.13 GB | **202 MB** |
+| Sessions | 2,870 (251 main + 2,619 subagent) | 498 (251 main + 247 subagent) |
+| Message rows | 2,223,288 | 45,323 |
+| `data_json` bytes | 9.19 GB | 0.176 GB |
+| `PRAGMA integrity_check` | ok | ok |
+
+`agent-acompact-*` reads now fall back to the (untouched) JSONL files —
+`getAgentTranscript` already serves from the file when there are no rows. The
+on-disk subagent JSONL is a separate problem (fix B).
 
 ---
 
