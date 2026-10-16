@@ -102,12 +102,11 @@ CLI 入口由 **Commander.js** 解析命令行参数，随后启动 **REPL**（�
 | `/add-dir` | - | 添加技能目录 |
 | `/terminalSetup` | - | 终端设置工具 |
 
-### 语音与 Friend
+### 语音
 
 | 命令 | 别名 | 描述 |
 |------|------|------|
 | `/voice` | feature 控制 | 语音听写模式 |
-| `/friend` | - | Friend 虚拟宠物管理 |
 | `/thinkback` | - | Thinkback 回放 |
 | `/thinkbackPlay` | - | Thinkback 播放控制 |
 

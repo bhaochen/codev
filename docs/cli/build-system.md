@@ -16,13 +16,12 @@
 
 ### 1.2 构建流程步骤
 
-1. **Friend 前端构建检查**：检查 `src/components/friend/frontend/dist/index.html` 是否存在，若不存在则调用 `npm run build` 构建 VRM 头像前端（该前端基于 Vite + React + Three.js，位于 `src/components/friend/frontend/`）。
-2. **版本号计算**：
+1. **版本号计算**：
    - 开发模式（`--dev`）：使用 `git rev-parse --short=8 HEAD` 获取当前 commit SHA，生成格式为 `{baseVersion}-dev.{YYYYMMDD}.t{HHmmss}.sha{commit}` 的版本号。
    - 生产模式：直接使用 `package.json` 中的版本字段 `2.1.0`。
    - 同时获取最近的 20 条 git log 作为 changelog（仅开发模式）。
-3. **编译时宏定义注入**：通过 `--define` 注入 `MACRO.*` 常量（见下文 2.1 节）。
-4. **Bun 打包**：调用 `bun build`，以 `./src/entrypoints/cli.tsx` 为入口，使用以下关键参数：
+2. **编译时宏定义注入**：通过 `--define` 注入 `MACRO.*` 常量（见下文 2.1 节）。
+3. **Bun 打包**：调用 `bun build`，以 `./src/entrypoints/cli.tsx` 为入口，使用以下关键参数：
    - `--compile`：仅在 `compile` 模式下启用
    - `--target bun`：目标运行时为 Bun
    - `--format esm`：输出 ESM 格式
@@ -30,20 +29,10 @@
    - `--bytecode`：启用字节码缓存
    - `--packages bundle`：将所有依赖打包进产物
    - `--conditions bun`：使用 Bun 条件导出
-5. **vendors 复制**：非编译模式下，将 `vendor/` 目录（包含 `audio-capture`、`opus-encdec` 等原生二进制库）复制到输出目录的 `vendor/` 子目录下。
-6. **权限设置**：产物文件设置 `0o755` 可执行权限。
+4. **vendors 复制**：非编译模式下，将 `vendor/` 目录（包含 `audio-capture`、`opus-encdec` 等原生二进制库）复制到输出目录的 `vendor/` 子目录下。
+5. **权限设置**：产物文件设置 `0o755` 可执行权限。
 
-### 1.3 Friend VRM 前端构建集成
-
-Friend 是桌面宠物 VRM 伴侣功能，其前端是一个独立的 Vite + React + Three.js 应用，位于 `src/components/friend/frontend/`。构建系统在主构建前检查其 `dist/` 目录是否已存在：
-
-- 若已存在（如之前构建过），跳过前端构建步骤。
-- 若不存在，自动执行 `npm run build`（调用 Vite 进行生产构建）。
-- 构建产出包含 VRM 模型文件（`.vrm`）、FBX 动画文件、WASM 运行时（onnxruntime-web）、VAD 模型（silero_vad）和音效文件等静态资源。
-
-此步骤是构建流程的**前置必要条件**——若 Friend 前端构建失败，整个构建过程退出并返回错误码 1。
-
-### 1.4 外部依赖排除
+### 1.3 外部依赖排除
 
 以下 native 模块在构建时被声明为 `--external`，不会打包进最终产物，需在运行时由 Bun 动态解析：
 
@@ -561,26 +550,11 @@ dist/
 - 设置 `CLAUDE_CODE_LOCAL_SKIP_REMOTE_PREFETCH=1` 跳过远程预取
 - 切换到调用目录（`process.chdir(CALLER_DIR)`）
 
-### 5.4 Friend 前端静态资源
+### 5.4 WASM 与原生库
 
-Friend VRM 前端构建产出包含大量静态资源（位于 `src/components/friend/frontend/dist/`）：
+项目依赖的 WASM 和原生库：
 
-- **VRM 模型**：5 个 `.vrm` 文件（11MB-48MB 不等）
-- **FBX 动画**：约 10 个动画文件（`angry.fbx`、`happy.fbx`、`greeting.fbx` 等）
-- **VMD/VRMA 动作**：`jile.vmd`、`idle_loop.vrma`、`playFingers.vrma` 等
-- **WASM 文件**：onnxruntime-web 运行时的多个 WASM 二进制（`ort-wasm-simd-threaded.wasm` 等，合计约 80MB）
-- **VAD 模型**：`silero_vad_legacy.onnx`（1.8MB）、`silero_vad_v5.onnx`（2.3MB）
-- **音效**：`jile.mp3`（4.2MB）、`love.mp3`（11MB）
-- **音频工作集**：`vad.worklet.bundle.min.js`（2.5KB）
-- **HTML 入口**：`index.html`
-
-### 5.5 WASM 与原生库
-
-项目依赖多个 WASM 和原生库：
-
-- **onnxruntime-web**：用于语音活动检测（VAD）的推理引擎
 - **audio-capture-napi**（workspace）：原生音频捕获库，通过 workspace `packages/audio-capture-napi` 管理
-- **doubaoime-asr**：字节跳动豆包语音识别引擎（workspace symlink）
 
 ---
 

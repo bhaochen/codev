@@ -79,14 +79,6 @@ Codev 桌面服务器是一个同进程 HTTP + WebSocket 服务器，基于 **Bu
 
 对应文件: `api/doctor.ts`, `api/diagnostics.ts`
 
-### 好友系统
-
-| 路径 | 描述 |
-|------|------|
-| `/api/friend` | VRM 虚拟形象前端路由（由 Tauri 桌面应用调用），包含 TTS/STT、SSE、偏好设置等 |
-
-路由定义在单独模块中（非 router.ts 直接管理），对应文件: `api/friend.ts`
-
 ### 文件与工作区
 
 | 路径 | 描述 |

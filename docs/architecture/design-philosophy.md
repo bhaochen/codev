@@ -4,7 +4,7 @@
 > 源代码的实际实现模式，旨在为面试准备和系统设计讨论提供参考。
 >
 > Claude Code 的设计哲学源于五个核心人类价值，通过十三条设计原则转化为具体的架构决策。
-> Codev 在此基础上进行了多 Provider 和 Friend VRM 等扩展。
+> Codev 在此基础上进行了多 Provider 等扩展。
 
 ---
 
@@ -185,30 +185,16 @@ Codev 以 Claude Code 为上游基础，进行了以下主要变更和扩展：
       `openaiChatToAnthropic.ts`）
 - **架构影响**：代理层引入额外的延迟和错误处理复杂度，但使得系统不受单一供应商限制。
 
-### 4.2 Friend VRM 系统
-
-- 同进程 VRM 伴侣服务，使用 3D 虚拟角色（VRM 格式）作为交互界面。
-- **实现模式**：`src/friend/FriendService.ts` 是单例服务，与 React 组件通过
-  `subscribe()` / `subscribeToInbound()` 模式同步。使用 SSE 广播将表情/TTS 推送到
-  VRM 前端。
-- **关键组件**：
-  - Silero VAD：WASM 推理（`src/friend/voice/vad-service.ts`），通过 onnxruntime-web
-    实现机器学习级语音活动检测
-  - 进程内音频捕获：cpal Rust 库（替代传统的 arecord/parecord 子进程）
-  - TTS 引擎：Edge TTS（默认）和 Qwen TTS（DashScope API）
-- **架构意义**：展示了如何将 Claude Code 的扩展机制（钩子 + 工具）用于非开发场景，
-  将编码代理转变为通用对话代理。
-
-### 4.3 移除 ant-internal 模块
+### 4.2 移除 ant-internal 模块
 
 - 移除了 Anthropic 内部使用的模块（feature flags、内部 API），使代码对社区完全可用。
 - `src/query/transitions.ts` 等文件使用代理桩 (proxy stub) 替代缺少的内部模块，
   通过 `bun:bundle` 的 DCE 在构建时消除。
 
-### 4.4 社区贡献
+### 4.3 关键工程实践
 
-- **onnxruntime-web WASM VAD**：首个在生产级 CLI 工具中集成基于 ML 的语音活动检测。
-- **同进程 Friend 服务**：无需独立后台服务器子进程，简化了部署架构。
+- **进程内音频捕获**：cpal Rust 库（workspace 包 `packages/audio-capture-napi`）替代
+  传统的 arecord/parecord 子进程，语音输入（Groq STT）与 TTS（Edge TTS）据此工作。
 
 ---
 
@@ -321,7 +307,6 @@ Budget Reduction (工具结果大小限制)
   - 扩展机制: `src/services/mcp/`, `src/utils/hooks/`
   - 状态持久化: `src/utils/sessionStorage.ts`
   - 多 Provider: `src/server/proxy/`
-  - Friend VRM: `src/friend/`
 
 ---
 

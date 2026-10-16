@@ -8,7 +8,7 @@
 | 文档 | 说明 |
 |------|------|
 | [项目架构概览](architecture/overview.md) | 技术栈、入口流程、模块职责、架构亮点（Phase 1-12 单轨 Native LLM Runtime + REPL 3 层 + 89 tests） |
-| [核心数据流](architecture/data-flow.md) | 6 大核心数据流：用户输入、语音捕获、远程桥接、Friend 表情、Provider 代理（单轨 Native）、REPL 聚合 |
+| [核心数据流](architecture/data-flow.md) | 5 大核心数据流：用户输入、语音捕获、远程桥接、Provider 代理（单轨 Native）、REPL 聚合 |
 | [Agent 循环深度解析](architecture/agent-loop.md) | 678 行 | queryLoop 完整流程、StreamingToolExecutor、5 阶段 turn pipeline、恢复机制 |
 | [投机工具执行 spec-ptc](architecture/speculative-execution.md) | SpecStore/BudgetTracker 数据结构、流式 JSON 检测、claim 缓存回放 |
 | [设计哲学与架构原则](architecture/design-philosophy.md) | 329 行 | 5 大价值、13 设计原则、与 Claude Code arXiv paper 的映射 |
@@ -27,16 +27,6 @@
 | [AI 工具系统](tools/overview.md) | buildTool 框架、执行流程、权限系统、关键工具详解（含 Tavily/SearXNG、REPL 3 层契约） |
 | [工具参考大全](tools/tool-reference.md) | 所有 ~60+ AI 工具的完整参考表 |
 | [REPL Tool 深度解析](tools/repl-tool.md) | Bun node:vm 沙箱、ToolResult/ContextAggregator 3 层契约、isVirtual 不进 LLM、REPL≠SubAgent |
-
-### Friend VRM 伴侣
-| 文档 | 说明 |
-|------|------|
-| [系统总览](friend/overview.md) | 定位、组件、交互模式、架构图 |
-| [系统架构](friend/architecture.md) | FriendService、SSE、HTTP 服务器、TTS/STT/VAD 详细分析 |
-| [数据流](friend/data-flow.md) | 文字对话/F2 语音/情绪表情/SSE 事件 四种流 |
-| [情绪→3D 表情映射](friend/emotion-map.md) | 13 种情绪的 blend shape 组合、动作映射 |
-| [前端 3D 渲染](friend/frontend-3d.md) | Three.js、EmoteController、MotionController、LipSync、TextBubble |
-| [语音捕获与 VAD](friend/voice-vad.md) | Silero VAD 状态机、STT 提供者链、静音系统 |
 
 ### 语音
 | 文档 | 说明 |

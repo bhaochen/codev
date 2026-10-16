@@ -242,16 +242,11 @@ Bun 的编译时 `feature()` 函数允许在构建阶段消除未使用的代码
 
 `LogoV2/` 目录中的组件（`LogoV2.tsx`、`AnimatedClawd.tsx`、`Feed.tsx`、`WelcomeV2.tsx` 等）使用了 React Compiler (`react/compiler-runtime`) 自动记忆化输出。编译器将 `useMemo`/`useCallback` 模式自动化，减少手动优化的工作量。
 
-### 7.3 WASM 二进制文件
-
-VAD（Voice Activity Detection）服务 (`src/friend/voice/vad-service.ts`) 使用 `onnxruntime-web` 的 WASM 后端（而非 `onnxruntime-node` 原生插件），因为 Bun 不支持 Node-API 原生插件。WASM 二进制文件 (`onnxruntime-web`) 随 dist 打包。
-
-### 7.4 Build 脚本 (`scripts/build.ts`)
+### 7.3 Build 脚本 (`scripts/build.ts`)
 
 构建管道使用 Bun 原生打包器，生成单一可执行文件：
 
-1. **预构建 Friend VRM 前端**: 检查 `src/components/friend/frontend/dist/index.html` 是否存在，不存在时执行 `npm run build`。
-2. **主构建**: 使用 `bun build --compile --target bun --minify --bytecode` 生成单个可执行文件。`--minify` 减小二进制体积，`--bytecode` 编译为 Bun 字节码提升启动速度。
+1. **主构建**: 使用 `bun build --compile --target bun --minify --bytecode` 生成单个可执行文件。`--minify` 减小二进制体积，`--bytecode` 编译为 Bun 字节码提升启动速度。
 3. **编译时常量注入**:
    - `MACRO.VERSION` — 语义版本号（开发版附加 git SHA 和时间戳）。
    - `MACRO.BUILD_TIME` — ISO 8601 构建时间戳。
@@ -259,8 +254,8 @@ VAD（Voice Activity Detection）服务 (`src/friend/voice/vad-service.ts`) 使�
    - `MACRO.VERSION_CHANGELOG` — 最近的 git commit 日志或指向 GitHub 的 URL。
 4. **外部模块排除**: `@ant/*`、`audio-capture-napi`、`image-processor-napi`、`modifiers-napi`、`url-handler-napi` 通过 `--external` 排除捆绑，减小二进制体积并允许运行时加载原生模块。
 5. **环境变量定义**: `process.env.USER_TYPE='external'`、`process.env.CLAUDE_CODE_FORCE_FULL_LOGO='true'`、`process.env.CCR_FORCE_BUNDLE='true'` 等定义确保构建产物运行于正确模式。
-6. **完整特性集**: 使用 `--feature-set=dev-full` 启用全部实验特性（50+ feature flags），默认仅启用 `VOICE_MODE`。
-7. **输出产物**: 开发版本输出到 `./Codev`，发布版本输出到 `./dist/cli`。
+6. **完整特性集**: 默认启用全部实验特性（`scripts/features.ts` 的 `FULL_EXPERIMENTAL_FEATURES`，逐个以 `--feature=` 传入），并可通过额外 `--feature` 参数追加。
+7. **输出产物**: `./dist/codev`。
 
 ---
 
@@ -269,8 +264,6 @@ VAD（Voice Activity Detection）服务 (`src/friend/voice/vad-service.ts`) 使�
 ### 8.1 子进程管理
 
 - **音频采集** (`arecord` / `sox`) — 通过 `child_process.spawn` 管理，采样率 16kHz，16-bit PCM。
-- **Whisper STT** (`src/services/voice/whisperSTT.ts`) — 本地语音识别子进程，管理其生命周期并处理输出解析。
-- **Tauri 子进程** — 在 Friend 桌面模式下启动和管理 Tauri shell 进程。
 - **子进程超时** — `RipgrepTimeoutError`、`StallTimeoutError` 确保子进程不会无限期挂起。`cleanupRegistry.ts` 注册进程清理回调，在优雅关闭时统一终止。
 
 ### 8.2 定时器和超时
@@ -294,18 +287,10 @@ VAD（Voice Activity Detection）服务 (`src/friend/voice/vad-service.ts`) 使�
 
 ### 8.4 文件句柄管理
 
-- **SSE 客户端** — EventSource 连接在设置/清理生命周期中管理，使用 `AbortController` 确保断开。
-- **音频文件** — 语音录制生成临时 WAV 文件，`FriendService` 负责生命周期管理。
+- **SSE 客户端** — EventSource 连接在设置/清理生命周期中管理，使用 `AbortController` 确保断开（MCP SSE 传输）。
+- **音频文件** — 语音录制在内存中缓冲（Groq STT 流式上传，无临时文件）；Edge TTS 合成输出写入 `~/.claude/voice/`，临时输入文本在合成后清理。
 - **调试日志** — `BufferedWriter` 管理文件写入，`registerCleanup` 注册关闭回调。
 - **诊断事件** — `DiagnosticsService` 使用文件系统存储诊断事件，7 天保留期和 50MB 上限防止磁盘膨胀。
-
-### 8.5 VAD 内存状态管理
-
-`SileroVad` (`src/friend/voice/vad-service.ts`) 在 ONNX 推理会话中维护 LSTM 状态张量 (`stateH`、`stateC`)。每个音频帧（512 采样 / 32ms）处理后更新状态。关键优化：
-
-- **RMS 能量过滤**: 低于 `rmsThreshold`（默认 ~-48dBFS）的帧跳过 ONNX 推理，直接视为静音。在高噪声环境中可以减少约 60% 的推理次数。
-- **状态重置**: `reset()` 方法清空 LSTM 状态和累积缓冲区，用于会话间清理。
-- **预处理触发**: `preSpeechTriggerFrames`（默认 10 帧 / 320ms）过滤短时噪音爆发，避免误触发。
 
 ---
 

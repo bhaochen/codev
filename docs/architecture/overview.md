@@ -4,9 +4,8 @@
 
 Codev 是一个 AI CLI 智能代理，基于 Anthropic Claude Code 源代码构建，增强了对以下场景的支持：
 
-- **VRM 桌面伴侣**（Friend）：在同一进程中运行 HTTP/SSE 服务，驱动 3D VRM 角色的表情、语音和文本气泡
 - **多模型提供者**：单轨 Native LLM Runtime，Protocol Client 直连上游（OpenAI Chat / Anthropic Messages），支持数十种第三方模型
-- **语音对话**：基于 cpal（Rust 原生音频库）的进程内音频捕获，结合 Silero VAD（ONNX 实时语音活动检测）和多种 STT/TTS 引擎
+- **语音对话**：基于 cpal（Rust 原生音频库）的进程内音频捕获，结合 Groq Whisper 云端 STT 和 Edge TTS
 - **自动化模式**：目标系统（Goals）、后台任务（Background Tasks）和 MCP 工具集成
 - **REPL 批量引擎**：Bun `node:vm` 沙箱 + ToolResult/ContextAggregator 契约，一次调用批量执行多工具
 
@@ -15,11 +14,9 @@ Codev 是一个 AI CLI 智能代理，基于 Anthropic Claude Code 源代码构�
 | 类别 | 技术 |
 |------|------|
 | 运行时 | **Bun 1.3+**（JavaScript/TypeScript 运行时与打包器） |
-| 语言 | **TypeScript**（全仓库使用 strict 模式） |
+| 语言 | **TypeScript** |
 | 终端 UI | **Ink v6**（React 终端渲染框架）+ **React 19** |
-| 3D 渲染 | **Three.js**（VRM 前端使用，通过 {React} Three Fiber） |
-| 语音活动检测 | **onnxruntime-web (WASM)** — Silero VAD ONNX 模型（非 onnxruntime-node，避免 Bun 段错误） |
-| 桌面窗口 | **Tauri**（可选桌面窗口模式） |
+| 语音 | **audio-capture-napi**（cpal workspace 包，进程内捕获）+ **groq-sdk**（Whisper STT）+ **node-edge-tts**（TTS） |
 | 包管理 | **Bun** workspace（monorepo），`packageManager: bun@1.3.11` |
 | 构建 | Bun 内建打包 `scripts/build.ts`，支持 `feature()` 死代码消除 |
 
@@ -53,16 +50,7 @@ Ink REPL (screens/REPL.tsx)
 
 ## 架构亮点
 
-### 1. 同进程架构
-
-Friend VRM 服务与 CLI 运行在**同一 Bun 进程**中：
-
-- `friend/server.ts` 通过 `Bun.serve()` 监听 `127.0.0.1:3456`
-- SSE（Server-Sent Events）用于服务端到 VRM 前端的实时推送（表情、音频、文本气泡）
-- HTTP POST 用于 VRM 前端向 FriendService 发送消息
-- 消除了独立的子进程管理和 CLI SDK 会话的开销
-
-### 2. 模块化工具系统
+### 1. 模块化工具系统
 
 60+ AI 可调用工具通过 `buildTool()` 框架注册。核心工具包括：
 
@@ -70,14 +58,13 @@ Friend VRM 服务与 CLI 运行在**同一 Bun 进程**中：
 - **Web/搜索**: `WebFetchTool`, `WebSearchTool`
 - **任务管理**: `TaskCreateTool`, `TaskGetTool`, `TaskUpdateTool`, `TaskListTool`, `TaskStopTool`
 - **MCP**: `ListMcpResourcesTool`, `ReadMcpResourceTool`
-- **Friend 特有**: `FriendEmotionTool`（VRM 表情 + 心情管理）, `FriendScreenObserveTool`
 - **目标系统**: `GoalCreateTool`, `GoalGetTool`, `GoalUpdateTool`
 - **工作流**: `WorkflowTool`（通过 WORKFLOW_SCRIPTS feature flag）
 - **其他**: `AgentTool`, `SkillTool`, `TodoWriteTool`, `ToolSearchTool`, `ConfigTool` 等
 
 工具通过 `assembleToolPool()` 与 MCP 工具合并去重，统一提供给 AI 模型。
 
-### 3. 单轨 Native LLM Runtime（Phase 1-12 渐进式解耦，Tier2 已删除）
+### 2. 单轨 Native LLM Runtime（Phase 1-12 渐进式解耦，Tier2 已删除）
 
 > **术语统一**：`ProtocolRegistry ≡ ClientRegistry`（`src/services/llm/protocols/index.ts` 为唯一运行时源, `src/services/llm/clients/index.ts` 为薄 facade `getClientForRoute → getProtocolHandler`）。`Phase 1-12` = 架构演进主线，`P0-P6` 为早期内部编号（见下表映射）。
 
@@ -128,7 +115,7 @@ Agent → queryModel.ts:17 Facade → ModelRuntime.generate() → resolveRoute()
 
 详见 [Provider 多厂商认证](provider-auth.md)、[核心数据流](data-flow.md) 与 [System Prompt 组装逻辑](system-prompt-assembly.md)。架构演进方向见 [ADR: Agent Message Abstraction](adr-agent-message-abstraction.md)。
 
-### 4. REPL 3 层批量执行（P6.6 契约）
+### 3. REPL 3 层批量执行（P6.6 契约）
 
 ```
 Tool → ToolResult{ok,exitCode,stdout/stderr/data,outputPath,truncated} → ExecutionStore(innerMessages,isVirtual) → ContextAggregator → ContextResult{ok,tool_calls,calls:[{preview,summary,truncated,outputPath}],logs} → LLM API
@@ -138,7 +125,7 @@ Tool → ToolResult{ok,exitCode,stdout/stderr/data,outputPath,truncated} → Exe
 - `isVirtual` 的 `innerMessages` 仅 UI/history 可见（`src/utils/messages.ts:1999 normalizeMessagesForAPI` 过滤），真正进 LLM 的只有 `ContextResult` JSON。
 - `REPL != SubAgent`：REPL 是主 Agent 调用的**批量工具执行器**，无二次 LLM 调用；SubAgent 是独立会话（`AgentTool/task`）。
 
-### 5. Feature Flag 系统
+### 4. Feature Flag 系统
 
 通过 `bun:bundle` 的 `feature()` 函数实现编译期死代码消除：
 
@@ -159,9 +146,9 @@ const assistantModule = feature('KAIROS')
 |------|------|
 | `src/entrypoints/` | 程序入口点（cli.tsx bootstrap, init.ts 初始化） |
 | `src/main.tsx` | Commander CLI 定义、启动流程编排 |
-| `src/commands/` | 180+ 斜杠命令（`/clear`, `/commit`, `/config`, `/friend` 等） |
+| `src/commands/` | 180+ 斜杠命令（`/clear`, `/commit`, `/config`, `/voice` 等） |
 | `src/commands.ts` | 命令注册中心，从各模块加载并导出命令列表 |
-| `src/tools/` | 60+ AI 工具实现（Bash, Read, Edit, WebSearch, FriendEmotion 等） |
+| `src/tools/` | 60+ AI 工具实现（Bash, Read, Edit, WebSearch 等） |
 | `src/tools.ts` | 工具注册中心，`getAllBaseTools()` 与 `assembleToolPool()` |
 | `src/services/llm/` | **单轨 Native LLM Runtime**（`types.ts:22 LLMRoute`, `router/resolveRoute.ts:11`, `runtime/ModelRuntime.ts:10`, `clients/{openaiChat,anthropicMessages}.ts`, `auth/resolveAuth.ts:8`, `models/registry.ts:16`） |
 | `src/services/api/queryModel.ts` | LLM 稳定 Facade（`queryModel() → modelRuntime.generate()`） |
@@ -169,7 +156,6 @@ const assistantModule = feature('KAIROS')
 | `src/screens/` | 主要 UI 屏幕（REPL 主屏幕、设置向导等） |
 | `src/components/` | React 组件（App, PromptInput, 权限请求等） |
 | `src/hooks/` | React hooks（useMergedTools, useCommandQueue, useReplBridge 等） |
-| `src/friend/` | VRM 桌面伴侣服务（FriendService, SSE, TTS, VAD, STT） |
 | `src/server/` | HTTP/WebSocket 服务器（API 路由、MCP、H5 访问） |
 | `src/server/proxy/` | 服务端反向代理（Anthropic ↔ OpenAI 协议翻译，H5/远程备用路径） |
 | `src/bridge/` | 远程桥接（WebSocket ↔ claude.ai 远程会话） |
@@ -196,7 +182,7 @@ const assistantModule = feature('KAIROS')
 | `src/memdir/` | 记忆目录支持 |
 | `src/upstreamproxy/` | 上游代理支持 |
 | `src/remote/` | 远程控制支持 |
-| `native-modules/` | Rust/C++ 原生模块（cpal 音频捕获等） |
+| `packages/audio-capture-napi/` | cpal 音频捕获 workspace 原生包 |
 
 ## 数据流总览
 
@@ -240,26 +226,5 @@ const assistantModule = feature('KAIROS')
 │  │           → ContextAggregator → ContextResult JSON → LLM API       │
 │  └─────────────────────────────────────────────────┘                 │
 │                                                                      │
-│  ┌──────────────────────────────────────┐                            │
-│  │  FriendService (同进程)              │                            │
-│  │  ┌─────────┐  ┌──────────┐  ┌──────────────┐                     │
-│  │  │ Silero  │  │ STT      │  │  SSE Server  │                     │
-│  │  │ VAD     │──│ (Doubao/ │  │  :3456       │                     │
-│  │  │ (ONNX)  │  │ Whisper) │  └──────┬───────┘                     │
-│  │  └─────────┘  └──────────┘         │                             │
-│  └────────────────────────────────────┼─────────────────────────────┘
-│                                       │                              │
-└───────────────────────────────────────┼──────────────────────────────┘
-                                        │
-                                        ▼
-                   ┌─────────────────────────────────────┐
-                   │  VRM 前端 (Web/Desktop)              │
-                   │  ┌─────────────────────────────────┐ │
-                   │  │  SSE → VRMScene → TextBubble    │ │
-                   │  │        → EmoteController        │ │
-                   │  │        → MotionController       │ │
-                   │  │        → AudioPlayback          │ │
-                   │  └─────────────────────────────────┘ │
-                   │  HTTP POST → FriendService.sendText │ │
-                   └─────────────────────────────────────┘
+└──────────────────────────────────────────────────────────────────────┘
 ```

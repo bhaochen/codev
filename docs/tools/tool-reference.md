@@ -105,15 +105,6 @@
 
 ---
 
-## Friend 虚拟宠物
-
-| 工具名称 | 分类 | 用途描述 | 关键参数 |
-|----------|------|----------|----------|
-| **FriendEmotion** (FriendEmotionTool) | Friend | 控制 VRM 虚拟形象的表情和情绪状态。设置情绪类型、强度，调整自身心情指数 | `emotion` (必填, 如 happy/sad/angry), `intensity` (0-1, 默认 1), `mood_delta` (-3 到 +3) |
-| **FriendScreenObserve** (FriendScreenObserveTool) | Friend | 捕获当前桌面屏幕截图，供 LLM "观察" 用户桌面环境。返回图片路径 | 无参数 |
-
----
-
 ## 特殊工具
 
 | 工具名称 | 分类 | 用途描述 | 关键参数 |

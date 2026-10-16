@@ -11,11 +11,10 @@
 
 Codev 是从 Anthropic Claude Code fork 出来的 AI CLI 代理 (Agentic Coding Assistant)，运行在终端中，核心能力是理解自然语言开发指令并自动执行多步骤编码任务。
 
-**三个核心差异化:**
+**两个核心差异化:**
 
 1. **多 Provider 支持** — 不锁定 Anthropic API，可接入 OpenAI、NVIDIA NIM、opencode、vLLM 等第三方 LLM Provider
-2. **VRM 桌面伴侣 (Friend)** — 带 3D 虚拟角色 (VRM 模型)、情感表情、语音对话能力的同进程桌宠系统
-3. **语音对话** — 实时语音输入 (WASM VAD) + STT/TTS，支持端到端语音编程交互
+2. **语音对话** — 实时语音输入（cpal 进程内捕获 + Groq Whisper STT）+ Edge TTS，支持端到端语音编程交互
 
 **一句话概括:**
 
@@ -197,7 +196,10 @@ Agent → queryModel Facade(src/services/api/queryModel.ts:17) → ModelRuntime.
 
 ### Q: Friend VRM 系统为什么设计为同进程 + SSE?
 
-Friend 是 Codev 的 3D 桌面伴侣系统, 使用 VRM 模型 (3D 虚拟角色), 具备表情、动作、语音对话能力。
+> 历史案例：Friend VRM 伴侣功能已从代码库移除，此处保留作为同进程 vs 微服务
+> 架构选型的教学案例。
+
+Friend 是 Codev 曾有的 3D 桌面伴侣系统, 使用 VRM 模型 (3D 虚拟角色), 具备表情、动作、语音对话能力。
 
 **架构选择:**
 
@@ -461,7 +463,7 @@ fork 影子 VM 提前执行。
 
 ---
 
-### 设计一个实时语音聊天系统 (类似 Friend F2)
+### 设计一个实时语音聊天系统 (历史案例: 类似已移除的 Friend F2 语音通道)
 
 **需求分析:**
 
@@ -642,7 +644,7 @@ Agent Loop 简单 (~88 行)    扩展机制丰富
 
 ---
 
-### 同进程 vs 微服务 (Friend 系统的选择)
+### 同进程 vs 微服务 (历史案例: Friend 系统的选择)
 
 ```
 同进程                          微服务
@@ -711,7 +713,7 @@ Agent Loop 简单 (~88 行)    扩展机制丰富
 | 双向实时通信 | WebSocket | 全双工, 低延迟 |
 | 浏览器 → Server 流式上传 | WebSocket | SSE 只支持下行 |
 
-Friend VRM 的场景是 Agent → Avatar 的单向广播, SSE 是最优解。如果未来需要 Avatar → Agent 的控制 (如用户点击 VRM 触发动作), 那才需要 WebSocket。
+Friend VRM 的场景（历史案例，功能已移除）是 Agent → Avatar 的单向广播, SSE 是最优解。如果未来需要 Avatar → Agent 的控制 (如用户点击 VRM 触发动作), 那才需要 WebSocket。
 
 ### "为什么不用 onnxruntime-node?"
 
@@ -758,8 +760,7 @@ Friend VRM 的场景是 Agent → Avatar 的单向广播, SSE 是最优解。如
 1. **测试覆盖不足** — 无 CI/CD, 55 个测试文件对 ~512K 行代码几乎不可靠
 2. **Monorepo 膨胀** — ~1,900 文件, 构建产物 200MB, 模块边界模糊
 3. **ML 分类器的 17% FNR** — 虽然可以接受, 但累积使用会造成显著摩擦
-4. **同进程限制扩展** — Friend 系统无法独立部署, 难以支持多实例
-5. **依赖 Bun 生态** — Bun 的稳定性影响整个系统 (napi 问题, undici fetch 兼容性等)
+4. **依赖 Bun 生态** — Bun 的稳定性影响整个系统 (napi 问题, undici fetch 兼容性等)
 
 ---
 
@@ -778,7 +779,7 @@ Friend VRM 的场景是 Agent → Avatar 的单向广播, SSE 是最优解。如
  2 分钟: "Codev 是从 Claude Code fork 的 AI CLI 代理,
           核心增强是多 Provider 支持和 VRM 桌面伴侣,
           采用同进程 + SSE 架构实现低延迟语音对话"
-10 分钟: 深入 Agent Loop、权限系统、压缩管道、Friend 架构
+10 分钟: 深入 Agent Loop、权限系统、压缩管道、语音链路
 ```
 
 ### 把 Codev 经验映射到通用系统设计
