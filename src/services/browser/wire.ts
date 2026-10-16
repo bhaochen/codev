@@ -46,17 +46,6 @@ export const KEY_CODES = {
   Left: 105,
   Right: 106,
   Space: 57,
-  Tab: 15,
-  BackSpace: 14,
-  Insert: 110,
-  Home: 102,
-  End: 107,
-  PageUp: 104,
-  PageDown: 109,
-  Up: 103,
-  Down: 108,
-  Left: 105,
-  Right: 106,
   // Function keys
   F1: 59, F2: 60, F3: 61, F4: 62, F5: 63, F6: 64,
   F7: 65, F8: 66, F9: 67, F10: 68, F11: 87, F12: 88,
@@ -106,7 +95,7 @@ export class VirtualPointer {
   private shm: any;
   private display: any;
   private connected = false;
-  private onNamedSeat = false;
+  private namedSeat = false;
 
   async connect(): Promise<void> {
     if (this.connected) return;
@@ -117,7 +106,7 @@ export class VirtualPointer {
     // and only use wire protocol for button/axis events
 
     this.connected = true;
-    this.onNamedSeat = false;
+    this.namedSeat = false;
   }
 
   async disconnect(): Promise<void> {
@@ -146,7 +135,7 @@ export class VirtualPointer {
   }
 
   get onNamedSeat(): boolean {
-    return this.onNamedSeat;
+    return this.namedSeat;
   }
 
   async releaseHeld(): Promise<void> {
