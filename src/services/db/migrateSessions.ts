@@ -24,7 +24,7 @@ import { join, relative } from 'node:path'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 import { SessionStore } from './SessionStore.js'
 import { parseTranscriptFile } from '../../utils/sessionStorage.js'
-import { parseSessionPath } from './shadowWriter.js'
+import { parseSessionPath, mirrorExcludesSubagent } from './shadowWriter.js'
 import { logForDebugging } from '../../utils/debug.js'
 import type { Entry } from '../../types/logs.js'
 
@@ -93,13 +93,22 @@ export async function findSessionFiles(projectDir: string): Promise<SessionFile[
           // id + top-level project dir, identical to the shadow writer's.
           const parsed = parseSessionPath(fullPath)
           if (parsed?.kind === 'subagent') {
-            files.push({
-              filePath: fullPath,
-              sessionId: parsed.sessionId,
-              projectDir: parsed.projectDir,
-              isSubagent: true,
-              parentSessionId: parsed.parentSessionId,
-            })
+            if (mirrorExcludesSubagent(parsed.sessionId)) {
+              // Compaction subagents are not mirrored (see shadowWriter);
+              // skip them so a migration pass never re-imports what pruning
+              // removes.
+              logForDebugging(
+                `Skipping excluded compaction subagent: ${parsed.sessionId}`,
+              )
+            } else {
+              files.push({
+                filePath: fullPath,
+                sessionId: parsed.sessionId,
+                projectDir: parsed.projectDir,
+                isSubagent: true,
+                parentSessionId: parsed.parentSessionId,
+              })
+            }
           } else {
             logForDebugging(
               `Skipping subagent file outside the standard layout: ${fullPath}`,
@@ -228,15 +237,17 @@ export async function migrateSession(
 
 /**
  * Delete DB rows for sessions in `projectDir` whose top-level source JSONL no
- * longer exists. This cleans up two classes of orphan created by earlier
- * migration versions:
+ * longer exists, plus rows excluded by mirror policy. This cleans up:
  *   - rows keyed by a filename WITH the .jsonl extension (old sessionId bug),
  *   - subagent transcripts (sessionId/subagents/agent-*.jsonl) that were
- *     wrongly migrated as top-level sessions.
+ *     wrongly migrated as top-level sessions,
+ *   - compaction subagents (`agent-acompact-*`) that are excluded from the
+ *     mirror (their context duplicates the parent; see shadowWriter).
  *
  * Safe by construction: JSONL is the source of truth, SQLite is a rebuildable
  * cache, and a row whose source is gone can never be re-read correctly anyway
- * (an existing file is never touched — that row is left for the repair pass).
+ * (an existing file is never touched for the orphan case — that row is left for
+ * the repair pass; excluded rows are deleted regardless of file existence).
  */
 async function pruneOrphans(
   store: SessionStore,
@@ -255,6 +266,16 @@ async function pruneOrphans(
 
   for (const meta of metas) {
     try {
+      // Policy exclusion: compaction subagents are never mirrored, so the
+      // presence of their source file must not keep their rows. This
+      // self-heals a DB populated before the policy (or under
+      // CODEV_MIRROR_COMPACTION_SUBAGENTS=1).
+      if (mirrorExcludesSubagent(meta.id)) {
+        store.deleteSession(meta.id)
+        pruned++
+        logForDebugging(`  Pruned excluded compaction subagent ${meta.id}`)
+        continue
+      }
       // A DB key of "x.jsonl" produced by the old bug maps to
       // projects/<dir>/x.jsonl.jsonl (missing → pruned); any key whose real
       // source file exists is kept.

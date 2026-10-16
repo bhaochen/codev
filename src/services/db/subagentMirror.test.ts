@@ -18,6 +18,8 @@ import {
 import {
   flushShadowWrites,
   shadowAppendBatch,
+  isCompactionSubagentId,
+  mirrorExcludesSubagent,
   __setShadowStoreForTests,
   __resetShadowWriterForTests,
 } from './shadowWriter.js'
@@ -190,5 +192,132 @@ describe('subagent transcript mirroring (item 2)', () => {
     rmSync(realAgentFile)
     const fromDbNoFile = await sessionStorage.getAgentTranscript(AGENT as never)
     expect(fromDbNoFile).toEqual(fromFile)
+  })
+})
+
+describe('compaction subagents are excluded from the mirror', () => {
+  let dir: string
+  let store: SessionStore
+
+  const COMPACT_AGENT = 'acompact-abc123'
+  const COMPACT_SID = `${PARENT}/subagents/agent-${COMPACT_AGENT}`
+
+  function compactFile(): string {
+    return join(
+      dir,
+      'projects',
+      'proj',
+      PARENT,
+      'subagents',
+      `agent-${COMPACT_AGENT}.jsonl`,
+    )
+  }
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'subagent-compact-'))
+    process.env.CLAUDE_CONFIG_DIR = dir
+    process.env.CODEV_DB_PRIMARY = '1'
+    process.env.TEST_ENABLE_SHADOW_WRITER = '1'
+    process.env.TEST_ENABLE_TRANSCRIPT_CACHE = '1'
+    delete process.env.CODEV_MIRROR_COMPACTION_SUBAGENTS
+
+    mkdirSync(join(dir, 'projects', 'proj', PARENT, 'subagents'), {
+      recursive: true,
+    })
+
+    __resetSessionStoreForTests()
+    store = getSessionStore()
+    __setShadowStoreForTests(store)
+    __resetShadowWriterForTests()
+  })
+
+  afterEach(() => {
+    __setShadowStoreForTests(null)
+    __resetShadowWriterForTests()
+    __resetSessionStoreForTests()
+    delete process.env.CODEV_DB_PRIMARY
+    delete process.env.TEST_ENABLE_SHADOW_WRITER
+    delete process.env.TEST_ENABLE_TRANSCRIPT_CACHE
+    delete process.env.CLAUDE_CONFIG_DIR
+    delete process.env.CODEV_MIRROR_COMPACTION_SUBAGENTS
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('predicate matches only agent-acompact-* ids', () => {
+    expect(isCompactionSubagentId(COMPACT_SID)).toBe(true)
+    expect(isCompactionSubagentId(SID)).toBe(false)
+    expect(isCompactionSubagentId('nope')).toBe(false)
+    expect(mirrorExcludesSubagent(COMPACT_SID)).toBe(true)
+    // Escape hatch restores the legacy behavior.
+    process.env.CODEV_MIRROR_COMPACTION_SUBAGENTS = '1'
+    expect(mirrorExcludesSubagent(COMPACT_SID)).toBe(false)
+    delete process.env.CODEV_MIRROR_COMPACTION_SUBAGENTS
+  })
+
+  it('does not create rows for compaction subagent appends', async () => {
+    const line = JSON.stringify(sidechain(1, null, 'compaction attempt')) + '\n'
+    writeFileSync(compactFile(), line)
+    shadowAppendBatch(
+      compactFile(),
+      [sidechain(1, null, 'compaction attempt')],
+      Buffer.byteLength(line),
+    )
+    await flushShadowWrites()
+    expect(store.getSession(COMPACT_SID)).toBeNull()
+    expect(store.getMessageCount(COMPACT_SID)).toBe(0)
+  })
+
+  it('mirrors compaction subagents when CODEV_MIRROR_COMPACTION_SUBAGENTS=1', async () => {
+    process.env.CODEV_MIRROR_COMPACTION_SUBAGENTS = '1'
+    const line = JSON.stringify(sidechain(1, null, 'compaction attempt')) + '\n'
+    writeFileSync(compactFile(), line)
+    shadowAppendBatch(
+      compactFile(),
+      [sidechain(1, null, 'compaction attempt')],
+      Buffer.byteLength(line),
+    )
+    await flushShadowWrites()
+    const row = store.getSession(COMPACT_SID)
+    expect(row?.kind).toBe('subagent')
+    expect(row?.parentSessionId).toBe(PARENT)
+    expect(row?.messageCount).toBe(1)
+  })
+
+  it('migration skips compaction files and prunes pre-existing rows', async () => {
+    const projName = 'proj-compact'
+    const projDir = join(dir, 'projects', projName)
+    mkdirSync(join(projDir, PARENT, 'subagents'), { recursive: true })
+    writeFileSync(
+      join(projDir, `${PARENT}.jsonl`),
+      JSON.stringify(sidechain(1, null, 'main')) + '\n',
+    )
+    writeFileSync(
+      join(projDir, PARENT, 'subagents', `agent-${COMPACT_AGENT}.jsonl`),
+      JSON.stringify(sidechain(2, uid(1), 'compact')) + '\n',
+    )
+
+    const compactSid = `${PARENT}/subagents/agent-${COMPACT_AGENT}`
+    // Simulate a DB populated before the policy: the row exists and its
+    // source file exists (so the orphan rule alone would keep it).
+    store.createSession({
+      id: compactSid,
+      projectDir: projName,
+      kind: 'subagent',
+      parentSessionId: PARENT,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    })
+    expect(store.getSession(compactSid)).not.toBeNull()
+
+    const files = await findSessionFiles(projName)
+    expect(files.some(f => f.sessionId === compactSid)).toBe(false)
+
+    const result = await migrateAllSessions({
+      projectDir: projName,
+      _store: store,
+    })
+    expect(result.failed).toBe(0)
+    expect(result.pruned).toBeGreaterThanOrEqual(1)
+    expect(store.getSession(compactSid)).toBeNull()
   })
 })

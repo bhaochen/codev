@@ -2,16 +2,16 @@
 
 ## Overview
 
-Codev migrated session transcript storage from append-only JSONL files to a SQLite database (`~/.claude/sessions/sessions.sqlite`). This document describes the schema, migration process, performance characteristics, and trade-offs.
+Codev migrated session transcript storage from append-only JSONL files to a SQLite database (`~/.claude/sessions/sessions.db`). This document describes the schema, migration process, performance characteristics, and trade-offs.
 
 ---
 
 ## Database Location
 
 ```
-~/.claude/sessions/sessions.sqlite      # Main database (WAL mode)
-~/.claude/sessions/sessions.sqlite-shm  # Shared memory (WAL)
-~/.claude/sessions/sessions.sqlite-wal  # Write-ahead log
+~/.claude/sessions/sessions.db      # Main database (WAL mode)
+~/.claude/sessions/sessions.db-shm  # Shared memory (WAL)
+~/.claude/sessions/sessions.db-wal  # Write-ahead log
 ```
 
 ---
@@ -131,16 +131,17 @@ and tested:
 | C6 | ✅ | `662691b` | `/resume` listing supplements the dir scan with DB rows — sessions stay listed (with DB titles) even when the projects tree is gone |
 | D3 | ✅ | `2e4b127` | **Default flip**: primary mode ON by default; `CODEV_DB_PRIMARY=0` reverts to JSONL-as-truth |
 | ② | ✅ | `d8ac182` | **Subagent transcripts mirrored**: composite ids (`<sid>/subagents/…`, `kind='subagent'`, `parent_session_id`), migration 004, migration scanner walks subagent trees (v5), `getAgentTranscript` DB-first |
+| ②-A | ✅ | — | **Compaction subagents excluded from the mirror** (storage fix A): `agent-acompact-*` never mirrored (writer + scanner) and pruned by the migration pass; `CODEV_MIRROR_COMPACTION_SUBAGENTS=1` restores the old behavior |
 | D4 | ✅ | — | **Deferred export**: the append path no longer writes JSONL by default; the file is materialized on demand for external readers (hooks/statusline), `CODEV_SESSION_EXPORT=1` restores eager export |
 
 > **Open item after ②**: mirroring subagent transcripts literally re-stores
 > each parent's context once per subagent — ~94.5 % of the 9.19 GB payload is
 > redundant and the DB grew 124.8 MB → 11.13 GB. Worse, **93.6 % of that
 > payload (8.60 GB) is failed compaction retries** (`agent-acompact-*` that end
-> in an API/rate-limit error). The mirroring code is correct; the **storage
-> policy** (skip compaction subagents / content-addressed dedup / opt-in
-> mirroring / recording-layer delta / keep) is undecided. See "Case Study: Why
-> Mirror Subagent Transcripts Duplicates Context".
+> in an API/rate-limit error). **Fix A (exclude compaction subagents) is
+> implemented**; the remaining question is **fix B** — stop the recording layer
+> from persisting the full forked context (the 8.86 GB of subagent JSONL on
+> disk). See "Case Study: Why Mirror Subagent Transcripts Duplicates Context".
 
 ### DB-Primary Mode (current default)
 
@@ -218,6 +219,10 @@ Orphans pruned include the two artifacts of pre-v4 bugs:
   migrated as top-level sessions — subagent JSONL files on disk are untouched.
   (Item ② later mirrors subagent transcripts *deliberately*, as their own
   `kind='subagent'` rows — see the case study below for what that costs.)
+
+Pruning also enforces **mirror policy**: `agent-acompact-*` rows are deleted
+regardless of whether their file exists (they are never mirrored — fix A), so a
+migration pass self-heals any database populated before the policy.
 
 `VACUUM` runs when a pass changed data **or** when the freelist exceeds 20% of
 pages (reclaims space left behind by large prunes); vacuum failures are
@@ -333,9 +338,11 @@ The ② code path is correct (subagent transcripts read from rows, `kind='subage
 
 Options, cheapest/most-targeted first:
 
-1. **Skip `agent-acompact-*` mirroring** — these are ephemeral compaction
-   attempts; the durable summary is already in the parent (`isCompactSummary`).
-   Writer + migration scanner ignore that path; prune existing rows + `VACUUM`.
+1. **Skip `agent-acompact-*` mirroring** — ✅ **implemented**. These are
+   ephemeral compaction attempts; the durable summary is already in the parent
+   (`isCompactSummary`). The writer + migration scanner ignore that path and
+   pruning removes existing rows (`mirrorExcludesSubagent()` in `shadowWriter`;
+   set `CODEV_MIRROR_COMPACTION_SUBAGENTS=1` to restore the old behavior).
    Est. DB 11.13 GB → ~0.2 GB, **zero change to spawn/compaction semantics**.
 2. **Content-addressed dedup** — a `message_content` table keyed by content
    hash, with `messages` referencing it. Est. DB ≈ 0.6–0.7 GB; keeps every
@@ -430,8 +437,8 @@ Context" above for the breakdown and the storage-policy options.
 
 ### Open database
 ```bash
-sqlite3 ~/.claude/sessions/sessions.sqlite
-sqlite3 -header -column ~/.claude/sessions/sessions.sqlite  # pretty
+sqlite3 ~/.claude/sessions/sessions.db
+sqlite3 -header -column ~/.claude/sessions/sessions.db  # pretty
 ```
 
 ### Common queries
@@ -474,11 +481,11 @@ LIMIT 10;
 ### One-liners
 ```bash
 # Recent sessions
-sqlite3 -header -column ~/.claude/sessions/sessions.sqlite \
+sqlite3 -header -column ~/.claude/sessions/sessions.db \
   "SELECT id, project_dir, title, message_count FROM sessions ORDER BY updated_at DESC LIMIT 10;"
 
 # Largest sessions
-sqlite3 -header -column ~/.claude/sessions/sessions.sqlite \
+sqlite3 -header -column ~/.claude/sessions/sessions.db \
   "SELECT s.id, s.project_dir, s.title, m.msg_count 
    FROM sessions s JOIN (SELECT session_id, COUNT(*) msg_count FROM messages GROUP BY session_id) m 
    ON s.id = m.session_id ORDER BY m.msg_count DESC LIMIT 10;"
@@ -550,7 +557,7 @@ export kept current on every write path. Rollback is a flag, at any level:
    legacy path sees exactly the DB content. (Under D4 the files are not
    continuously written, so run this before rolling back.)
 3. **Full return**: with the files exported and the flag off, deleting
-   `~/.claude/sessions/sessions.sqlite*` loses nothing — everything rebuilds
+   `~/.claude/sessions/sessions.db*` loses nothing — everything rebuilds
    from the JSONL via the background migration.
 
 D4 (deferred export) is itself a flag: `CODEV_SESSION_EXPORT=1` restores

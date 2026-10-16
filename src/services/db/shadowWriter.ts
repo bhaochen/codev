@@ -24,9 +24,14 @@
  *         and metadata re-classification — cannot be derived incrementally).
  *     Any failed guard falls back to full resync; a fully-skipped flush leaves
  *     sync info stale so the next read repairs from the file.
- *   - Subagent transcripts (<session>/subagents/*.jsonl) are deliberately NOT
- *     mirrored (same policy as the bulk migration; agent transcripts are read
- *     from their files directly).
+ *   - Subagent transcripts (<session>/subagents/[.../]agent-*.jsonl) are
+ *     mirrored under composite ids (item ②) — EXCEPT compaction subagents
+ *     (`agent-acompact-*`). Each compaction attempt forks the parent's whole
+ *     context, failures (rate limits) are retried, and its only durable output
+ *     (the summary) already lands in the parent as an `isCompactSummary` entry,
+ *     so mirroring them stores the same context hundreds of times (measured:
+ *     93.6 % of the whole payload). See `isCompactionSubagentId`. Other agent
+ *     transcripts are served from rows (or, when absent, from the file).
  *
  * All db-layer imports are DYNAMIC: sessionStorage statically imports this
  * module (to hook the write paths), so a static import back would create a
@@ -162,6 +167,35 @@ export function parseSessionPath(jsonlPath: string): ParsedSessionPath | null {
   return null
 }
 
+/**
+ * Compaction subagents (`agent-acompact-*`) are ephemeral per-attempt
+ * sidechains: each attempt forks the parent's entire context, and failed
+ * attempts (API/rate-limit errors) are retried — every retry re-forks and
+ * re-persists the same context. Their only durable output (the summary) is
+ * already stored in the parent session as an `isCompactSummary` entry, so
+ * mirroring them only duplicates the parent's history.
+ *
+ * Pure predicate on the composite id (last path segment); shared by the
+ * writer, the migration scanner, and pruning so all three agree.
+ */
+export function isCompactionSubagentId(sessionId: string): boolean {
+  const name = sessionId.slice(sessionId.lastIndexOf('/') + 1)
+  return name.startsWith('agent-acompact-')
+}
+
+/**
+ * Mirror policy for a subagent transcript: `true` means "do not store rows for
+ * this subagent". Compaction subagents are excluded by default; set
+ * `CODEV_MIRROR_COMPACTION_SUBAGENTS=1` to mirror them anyway (legacy
+ * behavior, for anyone who needs the per-attempt transcripts in SQLite).
+ */
+export function mirrorExcludesSubagent(sessionId: string): boolean {
+  return (
+    isCompactionSubagentId(sessionId) &&
+    !isEnvTruthy(process.env.CODEV_MIRROR_COMPACTION_SUBAGENTS)
+  )
+}
+
 /** Boundary semantics (truncation + metadata re-classification) cannot be
  *  applied incrementally — any compact boundary in a batch forces a re-parse. */
 function isCompactBoundaryLike(entry: Entry): boolean {
@@ -290,6 +324,14 @@ export function shadowAppendBatch(
     const parsed = parseSessionPath(jsonlPath)
     if (!parsed) return
     const { sessionId } = parsed
+
+    // Compaction subagents are excluded from the mirror (see
+    // mirrorExcludesSubagent): they duplicate the parent's context and their
+    // output already lands in the parent. The file is still written; reads
+    // fall back to it.
+    if (parsed.kind === 'subagent' && mirrorExcludesSubagent(sessionId)) {
+      return
+    }
 
     ensureExitHook()
 
