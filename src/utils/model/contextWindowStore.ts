@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { getClaudeConfigHomeDir } from '../envUtils.js'
 import type { APIProvider } from './providers.js'
 
-type CatalogProvider = 'openrouter' | 'opencode' | 'nvidia'
+type CatalogProvider = 'openrouter' | 'opencode' | 'nvidia' | 'kiro'
 type ContextWindowEntry = {
   contextWindow: number
   promptLimit?: number

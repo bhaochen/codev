@@ -1,10 +1,13 @@
 import type { ModelName } from './model.js'
 import type { APIProvider } from './providers.js'
 
+// `kiro` is excluded: its model IDs come from the CodeWhisperer
+// ListAvailableModels catalog at runtime (kiroModels.ts), not from static
+// per-Claude-model constants — same situation as openai/opencode/nvidia.
 export type ModelConfig = Record<
   Exclude<
     APIProvider,
-    'openai' | 'opencode' | 'openrouter' | 'nvidia' | 'local'
+    'openai' | 'opencode' | 'openrouter' | 'nvidia' | 'local' | 'kiro'
   >,
   ModelName
 >
