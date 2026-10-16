@@ -8,8 +8,9 @@
  * - 重定向被拦截 URL 到 about:blank
  */
 
-import { BaseWatchdog, WatchdogEvent, WatchdogConfig } from "./watchdog.js";
-import { BrowserSessionService } from "../browserSession.js";
+import { BaseWatchdog } from "./watchdog.js";
+import type { WatchdogEvent, WatchdogConfig } from "./watchdog.js";
+import type { BrowserSessionService } from "../browserSession.js";
 
 export interface SecurityWatchdogConfig extends WatchdogConfig {
   /** 允许访问的域名列表 (支持 glob: *.example.com) */

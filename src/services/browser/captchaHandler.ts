@@ -12,7 +12,7 @@
  * - 可选：CDP 自定义事件（需浏览器扩展支持）
  */
 
-import { BrowserSessionService } from "./browserSession.js";
+import type { BrowserSessionService } from "./browserSession.js";
 
 export interface CaptchaConfig {
   /** 超时时间 (ms, 默认 120_000 = 2分钟) */

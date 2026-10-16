@@ -9,8 +9,9 @@
  * - 等
  */
 
-import { BaseWatchdog, WatchdogEvent, WatchdogConfig } from "./watchdog.js";
-import { BrowserSessionService } from "../browserSession.js";
+import { BaseWatchdog } from "./watchdog.js";
+import type { WatchdogEvent, WatchdogConfig } from "./watchdog.js";
+import type { BrowserSessionService } from "../browserSession.js";
 
 export interface PermissionsWatchdogConfig extends WatchdogConfig {
   /** 预授权的权限列表 */

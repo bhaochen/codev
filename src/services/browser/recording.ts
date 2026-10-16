@@ -17,7 +17,7 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { CdpClient } from "./cdp.js";
-import { BrowserSessionService } from "./browserSession.js";
+import type { BrowserSessionService } from "./browserSession.js";
 
 export interface RecordingConfig {
   /** 输出目录 */

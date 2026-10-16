@@ -7,8 +7,9 @@
  * - 自动保存到配置的下载目录
  */
 
-import { BaseWatchdog, WatchdogEvent, WatchdogConfig } from "./watchdog.js";
-import { BrowserSessionService } from "../browserSession.js";
+import { BaseWatchdog } from "./watchdog.js";
+import type { WatchdogEvent, WatchdogConfig } from "./watchdog.js";
+import type { BrowserSessionService } from "../browserSession.js";
 import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";

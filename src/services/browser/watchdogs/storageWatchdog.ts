@@ -7,8 +7,9 @@
  * - 支持加密存储 (可选)
  */
 
-import { BaseWatchdog, WatchdogEvent, WatchdogConfig } from "./watchdog.js";
-import { BrowserSessionService } from "../browserSession.js";
+import { BaseWatchdog } from "./watchdog.js";
+import type { WatchdogEvent, WatchdogConfig } from "./watchdog.js";
+import type { BrowserSessionService } from "../browserSession.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";

@@ -14,7 +14,7 @@
  * 4. 与现有 auto-compact 系统集成
  */
 
-import { getBrowserContextCompactor, BrowserContextCompactor, ContextArchive } from "./contextCompaction.js";
+import { getBrowserContextCompactor, BrowserContextCompactor, type ContextArchive } from "./contextCompaction.js";
 import type { BrowserOutput } from "../../tools/BrowserTool/BrowserTool.js";
 
 /** Browser 动作摘要条目 */

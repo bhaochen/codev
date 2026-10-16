@@ -9,7 +9,7 @@
  */
 
 import { EventEmitter } from "events";
-import { BrowserSessionService } from "../browserSession.js";
+import type { BrowserSessionService } from "../browserSession.js";
 
 export interface WatchdogConfig {
   /** 是否启用此 watchdog */
