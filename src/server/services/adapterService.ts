@@ -7,8 +7,8 @@
 
 import * as fs from 'fs/promises'
 import * as path from 'path'
-import * as os from 'os'
 import { ApiError } from '../middleware/errorHandler.js'
+import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 
 export type PairedUser = {
   userId: string | number
@@ -38,7 +38,7 @@ export type AdapterFileConfig = {
 }
 
 function getConfigPath(): string {
-  const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude')
+  const configDir = getClaudeConfigHomeDir()
   return path.join(configDir, 'adapters.json')
 }
 

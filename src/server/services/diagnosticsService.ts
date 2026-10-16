@@ -1,4 +1,5 @@
 import * as fs from 'node:fs/promises'
+import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { gzipSync } from 'node:zlib'
@@ -333,7 +334,7 @@ export class DiagnosticsService {
   }
 
   private getConfigDir(): string {
-    return process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude')
+    return getClaudeConfigHomeDir()
   }
 
   private formatConsoleArgs(args: unknown[]): string {

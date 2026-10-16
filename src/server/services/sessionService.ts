@@ -14,6 +14,7 @@ import {
   sanitizePath as sanitizePortablePath,
   SKIP_PRECOMPACT_THRESHOLD,
 } from '../../utils/sessionStoragePortable.js'
+import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 import type { FileHistorySnapshot } from '../../utils/fileHistory.js'
 import { findCanonicalGitRoot } from '../../utils/git.js'
 import { calculateUSDCost, MODEL_COSTS } from '../../utils/modelCost.js'
@@ -246,7 +247,7 @@ export class SessionService {
   // --------------------------------------------------------------------------
 
   private getConfigDir(): string {
-    return process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude')
+    return getClaudeConfigHomeDir()
   }
 
   private getProjectsDir(): string {

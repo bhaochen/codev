@@ -1,5 +1,5 @@
 import * as fs from 'node:fs/promises'
-import * as os from 'node:os'
+import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 import * as path from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { ApiError } from '../middleware/errorHandler.js'
@@ -10,7 +10,7 @@ export class ManagedSettingsService {
   private static writeLocks = new Map<string, Promise<void>>()
 
   private getConfigDir(): string {
-    return process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude')
+    return getClaudeConfigHomeDir()
   }
 
   private getSettingsPath(): string {

@@ -1,5 +1,5 @@
 import * as fs from 'fs/promises'
-import * as os from 'os'
+import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 import * as path from 'path'
 import { randomBytes } from 'node:crypto'
 import { normalizeLegacyDeepSeekManagedEnv } from '../../utils/providerManagedEnvCompat.js'
@@ -31,7 +31,7 @@ let migrationPromise: Promise<MigrationReport> | null = null
 let migrationConfigDir: string | null = null
 
 function getConfigDir(): string {
-  return process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude')
+  return getClaudeConfigHomeDir()
 }
 
 function isRecord(value: unknown): value is JsonObject {

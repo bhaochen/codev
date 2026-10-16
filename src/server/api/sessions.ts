@@ -29,6 +29,7 @@ import {
   getRepositoryContext,
   type CreateSessionRepositoryOptions,
 } from '../services/repositoryLaunchService.js'
+import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 import {
   executeSessionRewind,
   getSessionTurnCheckpointDiff,
@@ -447,7 +448,7 @@ function cleanupAdapterSessionMappings(sessionId: string): void {
   }
 
   function deleteAdapterSessionMappings(sessionId: string): string[] {
-    const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(process.env.HOME || '', '.claude')
+    const configDir = getClaudeConfigHomeDir()
     const filePath = path.join(configDir, 'adapter-sessions.json')
     try {
       const raw = readFileSync(filePath, 'utf8')

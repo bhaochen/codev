@@ -7,7 +7,6 @@
  */
 
 import * as fs from 'node:fs'
-import * as os from 'node:os'
 import * as path from 'node:path'
 import { sessionService } from './sessionService.js'
 import { diagnosticsService } from './diagnosticsService.js'
@@ -1049,10 +1048,7 @@ export class ConversationService {
   }
 
   private clearStaleLock(sessionId: string): boolean {
-    const lockDir = path.join(
-      process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'),
-      '.lock',
-    )
+    const lockDir = path.join(getClaudeConfigHomeDir(), '.lock')
     const lockFile = path.join(lockDir, sessionId)
     if (!fs.existsSync(lockFile)) {
       return false
@@ -1319,11 +1315,7 @@ export class ConversationService {
       return ''
     }
 
-    const uploadDir = path.join(
-      process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'),
-      'uploads',
-      sessionId,
-    )
+    const uploadDir = path.join(getClaudeConfigHomeDir(), 'uploads', sessionId)
     fs.mkdirSync(uploadDir, { recursive: true })
 
     const savedPaths: string[] = []
