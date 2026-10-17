@@ -1,7 +1,10 @@
 import { createHash, randomBytes } from 'crypto'
 
-// OpenCode v2.0.26+ required for free tier (since 2026-10-14)
-const OPENCODE_VERSION = '2.0.26'
+// OpenCode v2 free tier gates on the client fingerprint — the UA version is
+// anchored to the current CLI release (5104 policy, 2026-10-16). 2.0.26 was
+// rejected with 403 FreeTierError once 2.0.29 shipped (official CLI v1.19.3);
+// keep in lockstep with sst/opencode packages/cli version.
+const OPENCODE_VERSION = '2.0.29'
 const OPENCODE_CHANNEL = 'latest'
 const OPENCODE_CLIENT = 'cli'
 
