@@ -169,10 +169,53 @@ export function useNotifications(): {
         }
       }
 
-      // Only add to queue if not already present (prevent duplicates)
-      const queuedKeys = new Set(prev.notifications.queue.map(_ => _.key));
-      const shouldAdd = !queuedKeys.has(notif.key) && prev.notifications.current?.key !== notif.key;
-      if (!shouldAdd) return prev;
+      // Upsert semantics for a repeated key: the incoming notification is the
+      // newest state of that key, so REPLACE the displayed/queued one instead
+      // of dropping the update. Without this, a same-key notification whose
+      // text changed was silently discarded and the stale pill lingered until
+      // its timeout (e.g. /effort high → low kept showing "high").
+      if (prev.notifications.current?.key === notif.key) {
+        if (currentTimeoutId) {
+          clearTimeout(currentTimeoutId);
+          currentTimeoutId = null;
+        }
+        currentTimeoutId = setTimeout((setAppState, notifKey, processQueue) => {
+          currentTimeoutId = null;
+          setAppState(p => {
+            if (p.notifications.current?.key !== notifKey) {
+              return p;
+            }
+            return {
+              ...p,
+              notifications: {
+                queue: p.notifications.queue,
+                current: null
+              }
+            };
+          });
+          processQueue();
+        }, notif.timeoutMs ?? DEFAULT_TIMEOUT_MS, setAppState, notif.key, processQueue);
+        return {
+          ...prev,
+          notifications: {
+            current: notif,
+            queue: prev.notifications.queue
+          }
+        };
+      }
+      // Same key waiting in the queue (not shown yet): refresh it in place.
+      const queuedIdx = prev.notifications.queue.findIndex(_ => _.key === notif.key);
+      if (queuedIdx !== -1) {
+        const newQueue = [...prev.notifications.queue];
+        newQueue[queuedIdx] = notif;
+        return {
+          ...prev,
+          notifications: {
+            current: prev.notifications.current,
+            queue: newQueue
+          }
+        };
+      }
       const invalidatesCurrent = prev.notifications.current !== null && notif.invalidates?.includes(prev.notifications.current.key);
       if (invalidatesCurrent && currentTimeoutId) {
         clearTimeout(currentTimeoutId);
