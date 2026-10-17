@@ -140,7 +140,7 @@ and tested:
 | ② | ✅ | `d8ac182` | **Subagent transcripts mirrored**: composite ids (`<sid>/subagents/…`, `kind='subagent'`, `parent_session_id`), migration 004, migration scanner walks subagent trees (v5), `getAgentTranscript` DB-first |
 | ②-A | ✅ | `994ef17` | **Compaction subagents excluded from the mirror** (storage fix A): `agent-acompact-*` never mirrored (writer + scanner) and pruned by the migration pass; `CODEV_MIRROR_COMPACTION_SUBAGENTS=1` restores the old behavior |
 | ②-B | ✅ | — | **Recording fix**: compaction forks pass `skipTranscript: true` — no `agent-acompact-*` transcript is written anymore (context was redundant; summary stays in the parent). Historical files pending cleanup |
-| D4 | ✅ | — | **Deferred export**: the append path no longer writes JSONL by default; the file is materialized on demand for external readers (hooks/statusline), `CODEV_SESSION_EXPORT=1` restores eager export |
+| D4 | ✅ | — | **Deferred export, manual by default**: neither the append path nor hook/statusline execution writes JSONL; `CODEV_SESSION_EXPORT=on-read` materializes on demand for external readers, `=1` restores eager per-append export |
 
 > **Open item after ②**: mirroring subagent transcripts literally re-stores
 > each parent's context once per subagent — ~94.5 % of the 9.19 GB payload is
@@ -156,8 +156,17 @@ and tested:
 ```
 CODEV_DB_PRIMARY    unset/1  → SQLite is the session store of truth (default)
                     =0/false → legacy: JSONL source of truth + SQLite mirror
-CODEV_SESSION_EXPORT=1       → eager export: write the JSONL file on every
-                               append (the pre-D4 D3 behavior)
+CODEV_SESSION_EXPORT=manual  → default: DB-only. Nothing writes the JSONL
+                               export automatically — not the append path,
+                               not hook/statusline execution. The only
+                               writer is the exportSession CLI (`bun run
+                               src/services/db/exportSession.ts <id>|--all`)
+                    =on-read → materialize on demand, right before a hook /
+                               statusline that receives transcript_path runs
+                               (external file readers see a current file)
+                    =1       → eager export: write the JSONL file on every
+                               append (the pre-D4 D3 behavior) for continuous
+                               file watchers
 ```
 
 Behavior in primary mode:
@@ -182,11 +191,13 @@ append path from writing it at all:
 - Nothing is at risk — the rows are durable first (D1 ordering), and the file
   is reconstructable from them at any time.
 - External consumers get a file **on demand**, right before they read it:
-  - `utils/hooks.ts` calls `materializeExportForPath` for every hook/statusline
-    input that carries `transcript_path` (or `agent_transcript_path`) — the
-    file is complete and current for the command that is about to run.
-  - `bun run src/services/db/exportSession.ts <id>` (or `--all`) rewrites from
-    rows explicitly.
+  - **Default (`manual`)**: no automatic materialization at all — codev itself
+    reads rows everywhere (read-through cache, forks, listing, analytics), so
+    the export is written only by `bun run src/services/db/exportSession.ts
+    <id>` (or `--all`). Hook/statusline scripts that read `transcript_path`
+    see a stale or missing file unless the session runs with
+    `CODEV_SESSION_EXPORT=on-read`, which calls `materializeExportForPath`
+    for every such input (see `utils/hooks.ts`).
 - **Materialization cost**: a per-session watermark (last row seq + file size
   after we wrote it) makes the common case an append of only the missing rows.
   A full rewrite happens on the first touch in a process, after an external
@@ -194,7 +205,10 @@ append path from writing it at all:
   the boundary.
 - **Continuous file watchers** (an editor extension polling the path) should
   run the CLI/server with `CODEV_SESSION_EXPORT=1` to restore per-append
-  export writing.
+  export writing. Hook/statusline scripts that read `transcript_path` should
+  run with `=on-read` for on-demand materialization.
+- **Manual-only (default)**: with the flag unset nothing writes the export —
+  `~/.claude/projects` stays frozen between manual CLI exports.
 
 Residual trade-offs (documented, flag-gated): an export that fails before the
 process can repair it leaves the file lagging until the next materialization or
@@ -681,9 +695,11 @@ export kept current on every write path. Rollback is a flag, at any level:
    `~/.claude/sessions/sessions.db*` loses nothing — everything rebuilds
    from the JSONL via the background migration.
 
-D4 (deferred export) is itself a flag: `CODEV_SESSION_EXPORT=1` restores
-per-append export writing without touching the primary-mode read/write
-semantics, for external tools that watch the file.
+D4 (deferred export) is itself a flag: `CODEV_SESSION_EXPORT=on-read`
+materializes on demand before hook/statusline reads, `=1` restores per-append
+export writing, and the default (`manual`) writes the export only via the
+`exportSession` CLI — all without touching the primary-mode read/write
+semantics.
 
 No data loss path exists in either direction: the DB is flag-guarded, the
 export files are repaired from rows on append failure (eager mode) or

@@ -8,12 +8,16 @@
  * reconstructed on demand.
  *
  * Who still needs the file, and how they get it:
- *   - Hook scripts / statusline commands receive `transcript_path` (or
- *     `agent_transcript_path`) in their JSON input and read it themselves.
- *     `materializeExportForPath` is called right before such a command runs
- *     (see utils/hooks.ts), so the file exists and is current for them.
- *   - External tools (editors, the `sessions export` CLI) ask for a file
- *     explicitly — the CLI rewrites from rows.
+ *   - By default, NOBODY automatically: codev reads rows (read-through
+ *     cache / fork reads / listing), so the JSONL export is written only by
+ *     the explicit `exportSession` CLI (`bun run
+ *     src/services/db/exportSession.ts <id>|--all`). External file readers
+ *     see a stale or missing export — accepted trade-off.
+ *   - Hook scripts / statusline commands that read `transcript_path` (or
+ *     `agent_transcript_path`) from their JSON input: run with
+ *     `CODEV_SESSION_EXPORT=on-read` and `materializeExportForPath` is
+ *     called right before such a command runs (see utils/hooks.ts), so the
+ *     file exists and is current for them.
  *   - Anything that watches the file continuously (an IDE extension polling
  *     the path) should run with `CODEV_SESSION_EXPORT=1`, which restores the
  *     eager D3 behavior of writing the export on every append.
@@ -26,7 +30,6 @@
  */
 import { appendFileSync, mkdirSync, statSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { isEnvTruthy } from '../../utils/envUtils.js'
 import { isDbPrimaryMode } from '../../utils/sessionPersistence.js'
 import { parseSessionPath, resolveShadowStore } from './shadowWriter.js'
 
@@ -41,11 +44,45 @@ const dirtyPaths = new Set<string>()
 const watermarks = new Map<string, { seq: number; size: number }>()
 
 /**
- * D4 gate: primary mode with the eager-export escape hatch closed. Set
- * `CODEV_SESSION_EXPORT=1` to restore per-append export writing.
+ * Export policy (primary mode). The default is DB-only: nothing ever writes
+ * the JSONL export automatically — the append path defers (D4) and even the
+ * hook/statusline materialization is off, so `~/.claude/projects` stays a
+ * frozen, CLI-refreshed export. Opt back in with:
+ *
+ *   - `CODEV_SESSION_EXPORT=on-read` → materialize on demand, right before a
+ *     hook/statusline that receives `transcript_path` runs (the historical
+ *     D4 behavior), so external file readers see a current file.
+ *   - `CODEV_SESSION_EXPORT=1` (or `eager`) → per-append export writing (the
+ *     pre-D4 D3 behavior) for continuous file watchers.
+ *   - `manual` / `never` / `off` / anything else → the default: the only
+ *     writer is the explicit `exportSession` CLI
+ *     (`bun run src/services/db/exportSession.ts <id>|--all`).
+ */
+export type SessionExportMode = 'eager' | 'on-read' | 'manual'
+
+export function getSessionExportMode(): SessionExportMode {
+  const raw = (process.env.CODEV_SESSION_EXPORT ?? '').trim().toLowerCase()
+  if (raw === '1' || raw === 'true' || raw === 'eager' || raw === 'always') {
+    return 'eager'
+  }
+  if (
+    raw === 'on-read' ||
+    raw === 'on-demand' ||
+    raw === 'ondemand' ||
+    raw === 'hooks'
+  ) {
+    return 'on-read'
+  }
+  return 'manual'
+}
+
+/**
+ * D4 gate for the append path: primary mode and not writing the file on
+ * every append. Only `eager` writes per-append; both `on-read` and `manual`
+ * defer the file (rows are durable first either way).
  */
 export function isExportDeferred(): boolean {
-  return isDbPrimaryMode() && !isEnvTruthy(process.env.CODEV_SESSION_EXPORT)
+  return isDbPrimaryMode() && getSessionExportMode() !== 'eager'
 }
 
 /**
@@ -66,7 +103,10 @@ export function markExportDirty(jsonlPath: string): void {
 export async function materializeExportForPath(
   jsonlPath: string,
 ): Promise<boolean> {
-  if (!isExportDeferred()) return false
+  // Only the explicit on-read policy materializes (hooks/statusline). The
+  // default 'manual' and 'eager' modes both no-op here: manual defers to the
+  // exportSession CLI, eager already keeps the file current on every append.
+  if (getSessionExportMode() !== 'on-read') return false
   if (!jsonlPath) return false
 
   const isDirty = dirtyPaths.has(jsonlPath)

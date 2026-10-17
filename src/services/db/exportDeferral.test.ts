@@ -29,6 +29,7 @@ import {
 } from './shadowWriter.js'
 import { exportSessionToFile } from './exportSession.js'
 import {
+  getSessionExportMode,
   isExportDeferred,
   markExportDirty,
   materializeExportForPath,
@@ -63,6 +64,9 @@ describe('exportDeferral (D4)', () => {
     dir = mkdtempSync(join(tmpdir(), 'export-deferral-'))
     process.env.CLAUDE_CONFIG_DIR = dir
     process.env.CODEV_DB_PRIMARY = '1'
+    // Most tests exercise the on-demand materialization seam explicitly; the
+    // shipped default is 'manual' (CLI-only writer) — see the default test.
+    process.env.CODEV_SESSION_EXPORT = 'on-read'
     process.env.TEST_ENABLE_SHADOW_WRITER = '1'
     mkdirSync(join(dir, 'projects', 'proj'), { recursive: true })
     jsonl = join(dir, 'projects', 'proj', `${S1}.jsonl`)
@@ -90,13 +94,38 @@ describe('exportDeferral (D4)', () => {
     await flushShadowWrites()
   }
 
-  it('gate: deferred by default in primary mode, off with the escape hatch', () => {
+  it('gate: manual is the default; on-read and eager opt in', () => {
+    delete process.env.CODEV_SESSION_EXPORT
+    // Default: DB-only — appends defer AND hooks do not materialize.
     expect(isExportDeferred()).toBe(true)
+    expect(getSessionExportMode()).toBe('manual')
+    process.env.CODEV_SESSION_EXPORT = 'on-read'
+    expect(isExportDeferred()).toBe(true)
+    expect(getSessionExportMode()).toBe('on-read')
     process.env.CODEV_SESSION_EXPORT = '1'
     expect(isExportDeferred()).toBe(false)
-    delete process.env.CODEV_SESSION_EXPORT
+    expect(getSessionExportMode()).toBe('eager')
     process.env.CODEV_DB_PRIMARY = '0'
     expect(isExportDeferred()).toBe(false)
+  })
+
+  it('default (manual) mode: no automatic materialization, CLI export still works', async () => {
+    delete process.env.CODEV_SESSION_EXPORT
+    // The append path stays deferred (rows are still the record).
+    expect(isExportDeferred()).toBe(true)
+
+    await mirror([user(1, null, 'one'), user(2, uid(1), 'two')])
+    markExportDirty(jsonl)
+    // The hook seam (materializeExportForPath) refuses to write.
+    expect(await materializeExportForPath(jsonl)).toBe(false)
+    expect(existsSync(jsonl)).toBe(false)
+
+    // The explicit CLI (exportSessionToFile) is the only writer.
+    const result = exportSessionToFile(store, S1)
+    expect(result?.entries).toBe(2)
+    expect(existsSync(jsonl)).toBe(true)
+    const lines = readFileSync(jsonl, 'utf8').trim().split('\n')
+    expect(lines.map(l => JSON.parse(l).uuid)).toEqual([uid(1), uid(2)])
   })
 
   it('materializes a missing file from rows on demand', async () => {
@@ -167,6 +196,25 @@ describe('exportDeferral (D4)', () => {
     await mirror([user(1, null, 'one')])
     expect(await materializeExportForPath(jsonl)).toBe(false)
     expect(existsSync(jsonl)).toBe(false)
+  })
+
+  it('manual mode: no automatic materialization, CLI export still works', async () => {
+    process.env.CODEV_SESSION_EXPORT = 'manual'
+    // The append path stays deferred (rows are still the record).
+    expect(isExportDeferred()).toBe(true)
+
+    await mirror([user(1, null, 'one'), user(2, uid(1), 'two')])
+    markExportDirty(jsonl)
+    // The hook seam (materializeExportForPath) refuses to write.
+    expect(await materializeExportForPath(jsonl)).toBe(false)
+    expect(existsSync(jsonl)).toBe(false)
+
+    // The explicit CLI (exportSessionToFile) is the only writer.
+    const result = exportSessionToFile(store, S1)
+    expect(result?.entries).toBe(2)
+    expect(existsSync(jsonl)).toBe(true)
+    const lines = readFileSync(jsonl, 'utf8').trim().split('\n')
+    expect(lines.map(l => JSON.parse(l).uuid)).toEqual([uid(1), uid(2)])
   })
 
   it('ignores paths outside the projects root', async () => {

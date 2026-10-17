@@ -1963,12 +1963,14 @@ export function getUserPromptSubmitHookBlockingMessage(
  * @returns Async generator that yields progress messages and hook results
  */
 /**
- * D4: DB-primary deferred mode stops the append path from writing the JSONL
- * export, so a hook script that reads `transcript_path` (or statusline /
+ * D4: DB-primary mode never writes the JSONL export from the append path, so
+ * a hook script that reads `transcript_path` (or statusline /
  * `agent_transcript_path`) would otherwise see a missing or stale file.
- * Materialize the export(s) right before the command runs. No-op when export
- * is eager (`CODEV_SESSION_EXPORT=1`) or when the file is already current.
- * Best-effort: a failure must never block hook execution.
+ * Only the `CODEV_SESSION_EXPORT=on-read` policy materializes the export(s)
+ * right before the command runs. The default policy is manual — the
+ * `exportSession` CLI is the only writer — and `=1` (eager) keeps the file
+ * current on every append so there is nothing to materialize. Best-effort:
+ * a failure must never block hook execution.
  */
 async function materializeHookTranscripts(input: unknown): Promise<void> {
   try {
