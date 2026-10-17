@@ -24,6 +24,7 @@ import { openDatabaseSync } from './driver.js'
 import type { SqliteDatabase, SqlValue } from './driver.js'
 import { runMigrations } from './migrations/index.js'
 import { extractListingMeta, mergeListingMeta, type ListingMeta } from './listingProjection.js'
+import { jsonParse, jsonStringify } from '../../utils/slowOperations.js'
 
 // ============================================================================
 // Types
@@ -703,6 +704,43 @@ export class SessionStore {
         .query('SELECT DISTINCT scope FROM memory_files ORDER BY scope')
         .all() as Array<{ scope: string }>
     ).map(r => r.scope)
+  }
+
+  // =========================================================================
+  // Live session process registry (replaces <configHome>/sessions/<pid>.json)
+  // =========================================================================
+
+  /** The payload is stored whole (same shape as the old PID file). */
+  upsertSessionProcess(pid: number, data: Record<string, unknown>): void {
+    this.db.run(
+      `INSERT OR REPLACE INTO session_processes (pid, data_json, updated_at)
+       VALUES (?, ?, ?)`,
+      [pid, jsonStringify(data), Date.now()],
+    )
+  }
+
+  getSessionProcess(pid: number): Record<string, unknown> | null {
+    const row = this.db
+      .query('SELECT data_json FROM session_processes WHERE pid = ?')
+      .get(pid) as { data_json: string } | null
+    if (!row) return null
+    try {
+      return jsonParse(row.data_json) as Record<string, unknown>
+    } catch {
+      return null
+    }
+  }
+
+  listSessionProcessPids(): number[] {
+    return (
+      this.db
+        .query('SELECT pid FROM session_processes ORDER BY pid')
+        .all() as Array<{ pid: number }>
+    ).map(r => r.pid)
+  }
+
+  deleteSessionProcess(pid: number): void {
+    this.db.run('DELETE FROM session_processes WHERE pid = ?', [pid])
   }
 
   /**

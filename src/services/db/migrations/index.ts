@@ -20,6 +20,7 @@ import { migration005SessionActivity } from './005-session-activity.js'
 import { migration006PendingNotifications } from './006-pending-notifications.js'
 import { migration007BackgroundTasks } from './007-background-tasks.js'
 import { migration008MemoryFiles } from './008-memory-files.js'
+import { migration009SessionProcesses } from './009-session-processes.js'
 export interface Migration {
   id: string
   version: number
@@ -36,6 +37,7 @@ export const MIGRATIONS: readonly Migration[] = [
   migration006PendingNotifications,
   migration007BackgroundTasks,
   migration008MemoryFiles,
+  migration009SessionProcesses,
 ]
 
 function ensureMigrationsTable(db: SqliteDatabase): void {

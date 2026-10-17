@@ -1,6 +1,4 @@
 import { feature } from 'bun:bundle'
-import { chmod, mkdir, readdir, readFile, unlink, writeFile } from 'fs/promises'
-import { join } from 'path'
 import {
   getOriginalCwd,
   getSessionId,
@@ -8,18 +6,37 @@ import {
 } from '../bootstrap/state.js'
 import { registerCleanup } from './cleanupRegistry.js'
 import { logForDebugging } from './debug.js'
-import { getClaudeConfigHomeDir } from './envUtils.js'
-import { errorMessage, isFsInaccessible } from './errors.js'
+import { errorMessage } from './errors.js'
 import { isProcessRunning } from './genericProcessUtils.js'
 import { getPlatform } from './platform.js'
-import { jsonParse, jsonStringify } from './slowOperations.js'
 import { getAgentId } from './teammate.js'
 
 export type SessionKind = 'interactive' | 'bg' | 'daemon' | 'daemon-worker'
 export type SessionStatus = 'busy' | 'idle' | 'waiting'
 
-function getSessionsDir(): string {
-  return join(getClaudeConfigHomeDir(), 'sessions')
+/**
+ * Live-session registry, stored in the shared sessions DB
+ * (`session_processes` table — migration 009) instead of per-PID JSON files
+ * in `<configHome>/sessions/`. One row per live codev process, keyed by PID,
+ * payload identical to the old file. Clean exits delete the row; crashed
+ * sessions are swept by the same liveness probe the stale-file sweep used.
+ *
+ * The db layer is imported dynamically: this module sits under bootstrap /
+ * sessionStorage (which the db layer imports back — a static import would
+ * close a cycle).
+ */
+async function withStore<T>(
+  fn: (store: import('../services/db/SessionStore.js').SessionStore) => T,
+): Promise<T | null> {
+  try {
+    const { getSessionStore } = await import('../services/db/SessionStore.js')
+    return fn(getSessionStore())
+  } catch (e) {
+    logForDebugging(
+      `[concurrentSessions] session store unavailable: ${errorMessage(e)}`,
+    )
+    return null
+  }
 }
 
 /**
@@ -46,7 +63,7 @@ export function isBgSession(): boolean {
 }
 
 /**
- * Write a PID file for this session and register cleanup.
+ * Register this session in the process registry and register cleanup.
  *
  * Registers all top-level sessions — interactive CLI, SDK (vscode, desktop,
  * typescript, python, -p), bg/daemon spawns — so `claude ps` sees everything
@@ -60,79 +77,65 @@ export async function registerSession(): Promise<boolean> {
   if (getAgentId() != null) return false
 
   const kind: SessionKind = envSessionKind() ?? 'interactive'
-  const dir = getSessionsDir()
-  const pidFile = join(dir, `${process.pid}.json`)
 
   registerCleanup(async () => {
-    try {
-      await unlink(pidFile)
-    } catch {
-      // ENOENT is fine (already deleted or never written)
-    }
+    await withStore(store => {
+      store.deleteSessionProcess(process.pid)
+    })
   })
 
-  try {
-    await mkdir(dir, { recursive: true, mode: 0o700 })
-    await chmod(dir, 0o700)
-    await writeFile(
-      pidFile,
-      jsonStringify({
-        pid: process.pid,
-        sessionId: getSessionId(),
-        cwd: getOriginalCwd(),
-        startedAt: Date.now(),
-        kind,
-        entrypoint: process.env.CLAUDE_CODE_ENTRYPOINT,
-        ...(feature('UDS_INBOX')
-          ? { messagingSocketPath: process.env.CLAUDE_CODE_MESSAGING_SOCKET }
-          : {}),
-        ...(feature('BG_SESSIONS')
-          ? {
-              name: process.env.CLAUDE_CODE_SESSION_NAME,
-              logPath: process.env.CLAUDE_CODE_SESSION_LOG,
-              agent: process.env.CLAUDE_CODE_AGENT,
-            }
-          : {}),
-      }),
-    )
-    // --resume / /resume mutates getSessionId() via switchSession. Without
-    // this, the PID file's sessionId goes stale and `claude ps` sparkline
-    // reads the wrong transcript.
-    onSessionSwitch(id => {
-      void updatePidFile({ sessionId: id })
+  const registered = await withStore(store => {
+    store.upsertSessionProcess(process.pid, {
+      pid: process.pid,
+      sessionId: getSessionId(),
+      cwd: getOriginalCwd(),
+      startedAt: Date.now(),
+      kind,
+      entrypoint: process.env.CLAUDE_CODE_ENTRYPOINT,
+      ...(feature('UDS_INBOX')
+        ? { messagingSocketPath: process.env.CLAUDE_CODE_MESSAGING_SOCKET }
+        : {}),
+      ...(feature('BG_SESSIONS')
+        ? {
+            name: process.env.CLAUDE_CODE_SESSION_NAME,
+            logPath: process.env.CLAUDE_CODE_SESSION_LOG,
+            agent: process.env.CLAUDE_CODE_AGENT,
+          }
+        : {}),
     })
     return true
-  } catch (e) {
-    logForDebugging(`[concurrentSessions] register failed: ${errorMessage(e)}`)
-    return false
-  }
+  })
+  if (!registered) return false
+
+  // --resume / /resume mutates getSessionId() via switchSession. Without
+  // this, the registry row's sessionId goes stale and `claude ps` sparkline
+  // reads the wrong transcript.
+  onSessionSwitch(id => {
+    void updateSessionProcess({ sessionId: id })
+  })
+  return true
 }
 
 /**
- * Update this session's name in its PID registry file so ListPeers
- * can surface it. Best-effort: silently no-op if name is falsy, the
- * file doesn't exist (session not registered), or read/write fails.
+ * Patch this session's registry row (read-modify-write of data_json).
+ * Best-effort: silently no-ops when the session isn't registered or the
+ * store is unavailable.
  */
-async function updatePidFile(patch: Record<string, unknown>): Promise<void> {
-  const pidFile = join(getSessionsDir(), `${process.pid}.json`)
-  try {
-    const data = jsonParse(await readFile(pidFile, 'utf8')) as Record<
-      string,
-      unknown
-    >
-    await writeFile(pidFile, jsonStringify({ ...data, ...patch }))
-  } catch (e) {
-    logForDebugging(
-      `[concurrentSessions] updatePidFile failed: ${errorMessage(e)}`,
-    )
-  }
+async function updateSessionProcess(
+  patch: Record<string, unknown>,
+): Promise<void> {
+  await withStore(store => {
+    const existing = store.getSessionProcess(process.pid)
+    if (!existing) return
+    store.upsertSessionProcess(process.pid, { ...existing, ...patch })
+  })
 }
 
 export async function updateSessionName(
   name: string | undefined,
 ): Promise<void> {
   if (!name) return
-  await updatePidFile({ name })
+  await updateSessionProcess({ name })
 }
 
 /**
@@ -144,7 +147,7 @@ export async function updateSessionName(
 export async function updateSessionBridgeId(
   bridgeSessionId: string | null,
 ): Promise<void> {
-  await updatePidFile({ bridgeSessionId })
+  await updateSessionProcess({ bridgeSessionId })
 }
 
 /**
@@ -157,34 +160,20 @@ export async function updateSessionActivity(patch: {
   waitingFor?: string
 }): Promise<void> {
   if (!feature('BG_SESSIONS')) return
-  await updatePidFile({ ...patch, updatedAt: Date.now() })
+  await updateSessionProcess({ ...patch, updatedAt: Date.now() })
 }
 
 /**
  * Count live concurrent CLI sessions (including this one).
- * Filters out stale PID files (crashed sessions) and deletes them.
- * Returns 0 on any error (conservative).
+ * Filters out rows whose process is gone (crashed sessions) and deletes
+ * them. Returns 0 on any error (conservative).
  */
 export async function countConcurrentSessions(): Promise<number> {
-  const dir = getSessionsDir()
-  let files: string[]
-  try {
-    files = await readdir(dir)
-  } catch (e) {
-    if (!isFsInaccessible(e)) {
-      logForDebugging(`[concurrentSessions] readdir failed: ${errorMessage(e)}`)
-    }
-    return 0
-  }
+  const rows = await withStore(store => store.listSessionProcessPids())
+  if (rows === null) return 0
 
   let count = 0
-  for (const file of files) {
-    // Strict filename guard: only `<pid>.json` is a candidate. parseInt's
-    // lenient prefix-parsing means `2026-03-14_notes.md` would otherwise
-    // parse as PID 2026 and get swept as stale — silent user data loss.
-    // See anthropics/claude-code#34210.
-    if (!/^\d+\.json$/.test(file)) continue
-    const pid = parseInt(file.slice(0, -5), 10)
+  for (const pid of rows) {
     if (pid === process.pid) {
       count++
       continue
@@ -192,12 +181,14 @@ export async function countConcurrentSessions(): Promise<number> {
     if (isProcessRunning(pid)) {
       count++
     } else if (getPlatform() !== 'wsl') {
-      // Stale file from a crashed session — sweep it. Skip on WSL: if
-      // ~/.claude/sessions/ is shared with Windows-native Claude (symlink
+      // Stale row from a crashed session — sweep it. Skip on WSL: if
+      // the sessions DB is shared with Windows-native Claude (symlink
       // or CLAUDE_CONFIG_DIR), a Windows PID won't be probeable from WSL
-      // and we'd falsely delete a live session's file. This is just
+      // and we'd falsely delete a live session's row. This is just
       // telemetry so conservative undercount is acceptable.
-      void unlink(join(dir, file)).catch(() => {})
+      await withStore(store => {
+        store.deleteSessionProcess(pid)
+      })
     }
   }
   return count
