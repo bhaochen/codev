@@ -37,6 +37,16 @@ export async function scanMemoryFiles(
   signal: AbortSignal,
 ): Promise<MemoryHeader[]> {
   try {
+    // Mirror restore before scanning: the dream/recall paths read topic files
+    // directly and would otherwise see an empty dir after a projects wipe.
+    try {
+      const { restoreMemoryDirIfMissing } = await import(
+        '../services/db/memoryMirror.js'
+      )
+      await restoreMemoryDirIfMissing(memoryDir)
+    } catch {
+      // Mirror unavailable — scan whatever is on disk.
+    }
     const entries = await readdir(memoryDir, { recursive: true })
     const mdFiles = entries.filter(
       f => f.endsWith('.md') && basename(f) !== 'MEMORY.md',

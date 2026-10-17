@@ -493,6 +493,16 @@ export function initExtractMemories(): void {
     } finally {
       inProgress = false
 
+      // Mirror the (possibly changed) memory dir into SQLite — the forked
+      // agent wrote through the raw file tools, so this is the only choke
+      // point where codev knows memory changed. Best-effort, never throws.
+      try {
+        const { syncMemoryDirFromDisk } = await import('../db/memoryMirror.js')
+        void syncMemoryDirFromDisk(getAutoMemPath())
+      } catch {
+        // Mirror unavailable — files remain the live truth.
+      }
+
       // If a call arrived while we were running, run a trailing extraction
       // with the latest stashed context. The trailing run will compute its
       // newMessageCount relative to the cursor we just advanced — so it only

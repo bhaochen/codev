@@ -18,6 +18,7 @@ import { buildTool, type ToolDef } from '../../Tool.js'
 import { agentFileConflictMessage, checkAgentFileClaim } from '../../utils/agentFileClaims.js'
 import { getCwd } from '../../utils/cwd.js'
 import { partialViewRefusal, unreadFileRefusal } from '../../utils/readHistory.js'
+import { isAutoMemPath } from '../../memdir/paths.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { countLinesChanged, getPatchForDisplay } from '../../utils/diff.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
@@ -323,6 +324,16 @@ export const FileWriteTool = buildTool({
     // files), which silently corrupted e.g. bash scripts with \r on Linux when
     // overwriting a CRLF file or when binaries in cwd poisoned the repo sample.
     writeTextContent(fullFilePath, content, enc, 'LF')
+
+    // DB-primary memory durability: auto-memory writes are mirrored into
+    // SQLite before the tool returns, so the projects tree can be wiped at
+    // any moment without losing memory. Best-effort — never fails the write.
+    if (isAutoMemPath(fullFilePath)) {
+      const { persistMemoryFile } = await import(
+        '../../services/db/memoryMirror.js'
+      )
+      await persistMemoryFile(fullFilePath, content)
+    }
 
     // Notify LSP servers about file modification (didChange) and save (didSave)
     const lspManager = getLspServerManager()

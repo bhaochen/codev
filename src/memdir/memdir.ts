@@ -126,6 +126,17 @@ export const DIRS_EXIST_GUIDANCE =
  * try/catch needed for the happy path.
  */
 export async function ensureMemoryDirExists(memoryDir: string): Promise<void> {
+  // Mirror restore BEFORE mkdir: if the projects tree was wiped (or this is a
+  // new machine), the DB mirror rebuilds MEMORY.md + topic files first so the
+  // model sees its memories instead of an empty dir. Best-effort, never throws.
+  try {
+    const { restoreMemoryDirIfMissing } = await import(
+      '../services/db/memoryMirror.js'
+    )
+    await restoreMemoryDirIfMissing(memoryDir)
+  } catch {
+    // No mirror (fresh DB / disabled) — proceed with the empty dir.
+  }
   const fs = getFsImplementation()
   try {
     await fs.mkdir(memoryDir)

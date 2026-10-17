@@ -89,6 +89,15 @@ let storeResolveFailed = false
  */
 export const resolveShadowStore = resolveStore
 
+/**
+ * Synchronous variant for the process-exit path (memoryMirror's exit sync),
+ * where awaiting is not an option. Returns only already-open stores — it
+ * never opens the database itself, so it is safe (and cheap) to call at exit.
+ */
+export function resolveShadowStoreSync(): SessionStore | null {
+  return injectedStore ?? defaultStore
+}
+
 async function resolveStore(): Promise<SessionStore | null> {
   if (injectedStore) return injectedStore
   if (defaultStore) return defaultStore

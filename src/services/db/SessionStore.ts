@@ -627,6 +627,84 @@ export class SessionStore {
     this.db.exec('VACUUM;')
   }
 
+  // =========================================================================
+  // Memory file mirror
+  // =========================================================================
+
+  /**
+   * Atomically replace the mirrored file set for one memory scope. The
+   * caller passes the COMPLETE on-disk listing (see memoryMirror.ts), so a
+   * full replace in one transaction is both simpler and strictly correct:
+   * rows can never claim a file the disk no longer has.
+   */
+  replaceMemoryFiles(
+    scope: string,
+    files: Array<{ relPath: string; content: string }>,
+  ): void {
+    const now = Date.now()
+    this.db.transaction(() => {
+      this.db.run('DELETE FROM memory_files WHERE scope = ?', [scope])
+      const stmt = this.db.prepare(
+        `INSERT OR REPLACE INTO memory_files (scope, rel_path, content, updated_at)
+         VALUES (?, ?, ?, ?)`,
+      )
+      for (const f of files) {
+        stmt.run(scope, f.relPath, f.content, now)
+      }
+    })()
+  }
+
+  /**
+   * Upsert ONE mirrored file without touching its siblings. This is the
+   * per-write seam used by the file tools (DB-primary durability: the row is
+   * durable before the tool returns), while replaceMemoryFiles is the
+   * reconciliation path for whole-directory syncs.
+   */
+  upsertMemoryFile(scope: string, relPath: string, content: string): void {
+    this.db.run(
+      `INSERT OR REPLACE INTO memory_files (scope, rel_path, content, updated_at)
+       VALUES (?, ?, ?, ?)`,
+      [scope, relPath, content, Date.now()],
+    )
+  }
+
+  deleteMemoryFile(scope: string, relPath: string): void {
+    this.db.run('DELETE FROM memory_files WHERE scope = ? AND rel_path = ?', [
+      scope,
+      relPath,
+    ])
+  }
+
+  getMemoryFiles(scope: string): Array<{
+    relPath: string
+    content: string
+    updatedAt: number
+  }> {
+    const rows = this.db
+      .query(
+        `SELECT rel_path, content, updated_at FROM memory_files
+         WHERE scope = ? ORDER BY rel_path`,
+      )
+      .all(scope) as Array<{
+      rel_path: string
+      content: string
+      updated_at: number
+    }>
+    return rows.map(r => ({
+      relPath: r.rel_path,
+      content: r.content,
+      updatedAt: r.updated_at,
+    }))
+  }
+
+  listMemoryScopes(): string[] {
+    return (
+      this.db
+        .query('SELECT DISTINCT scope FROM memory_files ORDER BY scope')
+        .all() as Array<{ scope: string }>
+    ).map(r => r.scope)
+  }
+
   /**
    * Fraction of allocated pages that are on the freelist (0..1). A delete
    * without VACUUM leaves pages on the freelist: the file does not shrink and

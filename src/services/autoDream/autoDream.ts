@@ -233,6 +233,14 @@ ${sessionIds.map(id => `- ${id}`).join('\n')}`
       })
 
       completeDreamTask(taskId, setAppState)
+      // Mirror the consolidated memory dir into SQLite — the forked agent
+      // rewrote topic files + MEMORY.md through the raw file tools. Best-effort.
+      try {
+        const { syncMemoryDirFromDisk } = await import('../db/memoryMirror.js')
+        void syncMemoryDirFromDisk(memoryRoot)
+      } catch {
+        // Mirror unavailable — files remain the live truth.
+      }
       // Inline completion summary in the main transcript (same surface as
       // extractMemories's "Saved N memories" message).
       const dreamState = context.toolUseContext.getAppState().tasks?.[taskId]

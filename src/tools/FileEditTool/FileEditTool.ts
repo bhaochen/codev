@@ -50,6 +50,7 @@ import {
 } from '../../utils/permissions/filesystem.js'
 import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js'
 import { matchWildcardPattern } from '../../utils/permissions/shellRuleMatching.js'
+import { isAutoMemPath } from '../../memdir/paths.js'
 import { validateInputForSettingsFileEdit } from '../../utils/settings/validateEditTool.js'
 import { NOTEBOOK_EDIT_TOOL_NAME } from '../NotebookEditTool/constants.js'
 import {
@@ -516,6 +517,15 @@ export const FileEditTool = buildTool({
 
     // 5. Write to disk
     writeTextContent(absoluteFilePath, updatedFile, encoding, endings)
+
+    // DB-primary memory durability: see FileWriteTool — auto-memory edits are
+    // mirrored into SQLite before the tool returns. Best-effort, never throws.
+    if (isAutoMemPath(absoluteFilePath)) {
+      const { persistMemoryFile } = await import(
+        '../../services/db/memoryMirror.js'
+      )
+      await persistMemoryFile(absoluteFilePath, updatedFile)
+    }
 
     // Notify LSP servers about file modification (didChange) and save (didSave)
     const lspManager = getLspServerManager()
