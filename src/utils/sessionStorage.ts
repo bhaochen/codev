@@ -326,11 +326,56 @@ export async function writeAgentMetadata(
   metadata: AgentMetadata,
 ): Promise<void> {
   await writeJsonAtomic(getAgentMetadataPath(agentId), metadata)
+  // DB-primary durability: the sidecar file is a compatibility export; the
+  // row (kind='subagent', composite transcript id) carries the metadata so
+  // resume works after the projects tree is deleted. Best-effort — a spawn
+  // must never fail on mirror problems.
+  if (shouldSkipSessionPersistence()) return
+  try {
+    const compositeId = agentMetadataCompositeId(agentId)
+    if (!compositeId) return
+    const { getSessionStore } = await import('../services/db/SessionStore.js')
+    const store = getSessionStore()
+    store.ensureSession(compositeId, getSessionProjectDir() ?? getProjectDir(getOriginalCwd()), {
+      kind: 'subagent',
+      parentSessionId: getSessionId(),
+    })
+    const existing = store.getSession(compositeId)
+    store.updateSession(compositeId, {
+      metadata: { ...(existing?.metadata ?? {}), agentMetadata: metadata },
+    })
+  } catch (e) {
+    logForDebugging(`agent metadata mirror failed: ${String(e)}`)
+  }
+}
+
+/** `<sessionId>/subagents[/subdir]/agent-<agentId>` — the DB row id the
+ * subagent transcript mirror uses (see shadowWriter.parseSessionPath). */
+function agentMetadataCompositeId(agentId: AgentId): string | null {
+  const sessionId = getSessionId()
+  if (!sessionId) return null
+  const subdir = agentTranscriptSubdirs.get(agentId)
+  return `${sessionId}/subagents/${subdir ? `${subdir}/` : ''}agent-${agentId}`
 }
 
 export async function readAgentMetadata(
   agentId: AgentId,
 ): Promise<AgentMetadata | null> {
+  // DB first (survives a deleted projects tree), then the sidecar file for
+  // rows that predate the mirror or sessions whose store is unavailable.
+  if (!shouldSkipSessionPersistence()) {
+    try {
+      const compositeId = agentMetadataCompositeId(agentId)
+      if (compositeId) {
+        const { getSessionStore } = await import('../services/db/SessionStore.js')
+        const meta = getSessionStore().getSession(compositeId)?.metadata
+          ?.agentMetadata as AgentMetadata | undefined
+        if (meta && typeof meta === 'object') return meta
+      }
+    } catch {
+      // Fall through to the sidecar read.
+    }
+  }
   const path = getAgentMetadataPath(agentId)
   try {
     const raw = await readFile(path, 'utf-8')
