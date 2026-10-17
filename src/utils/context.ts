@@ -7,7 +7,7 @@ import { resolveAntModel } from './model/antModels.js'
 import { getModelCapability } from './model/modelCapabilities.js'
 import { MODEL_CONTEXT_WINDOWS_ENV_KEY } from './model/modelContextWindows.js'
 import { getAPIProvider } from './model/providers.js'
-import { getOpencodeModelContextWindow } from './model/opencodeModels.js'
+import { getOpencodeModelContextWindow, getOpencodeModelNativeWindow } from './model/opencodeModels.js'
 import { getNvidiaModelContextWindow } from './model/nvidiaModels.js'
 import { getOpenRouterModelContextWindow } from './model/openRouterModels.js'
 import { getStoredProviderContextWindow } from './model/contextWindowStore.js'
@@ -143,6 +143,15 @@ export function getContextWindowForModel(
     } catch {
       // Invalid JSON in env var, silently fall through
     }
+  }
+
+  // Model-native adaptation: the same model body may be served by several
+  // providers with different deployment caps (a free tier can publish less
+  // than the body supports). The body itself supports the largest window any
+  // host serves — adapt to the model, not the tier.
+  if (provider === 'opencode') {
+    const native = getOpencodeModelNativeWindow(model)
+    if (native) return native
   }
 
   // Provider gateways may cap differently from the model's native host, so
