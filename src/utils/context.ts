@@ -122,6 +122,29 @@ export function getContextWindowForModel(
 
   const provider = getAPIProvider()
 
+  // Explicit user configuration wins over everything below (catalogs,
+  // capability data, 1M detection): ~/.claude/settings.json
+  // modelContextWindows / CLAUDE_CODE_MODEL_CONTEXT_WINDOWS env var.
+  // Remote provider catalogs are third-party best-guesses and mislist
+  // variants (e.g. a free tier published at 200k while the gateway serves
+  // the model's full window) — settings/env is the user's correction path,
+  // so it must outrank them. Settings take precedence over env var.
+  const settingsContextWindows = getInitialSettings().modelContextWindows
+  if (settingsContextWindows && Object.keys(settingsContextWindows).length > 0) {
+    const result = resolveContextWindowFromRecord(model, settingsContextWindows)
+    if (result !== undefined) return result
+  }
+  const modelContextWindowsRaw = process.env[MODEL_CONTEXT_WINDOWS_ENV_KEY]
+  if (modelContextWindowsRaw) {
+    try {
+      const modelContextWindows: Record<string, number> = JSON.parse(modelContextWindowsRaw)
+      const result = resolveContextWindowFromRecord(model, modelContextWindows)
+      if (result !== undefined) return result
+    } catch {
+      // Invalid JSON in env var, silently fall through
+    }
+  }
+
   // Provider gateways may cap differently from the model's native host, so
   // their catalogue wins over shared capability data and 1M beta overrides.
   const providerCatalogWindow = getProviderCatalogContextWindow(model, provider)
@@ -163,25 +186,6 @@ export function getContextWindowForModel(
     const antModel = resolveAntModel(model)
     if (antModel?.contextWindow) {
       return antModel.contextWindow
-    }
-  }
-
-  // Read model context windows from settings (~/.claude/settings.json modelContextWindows)
-  // or from CLAUDE_CODE_MODEL_CONTEXT_WINDOWS env var.
-  // Settings take precedence over env var.
-  const settingsContextWindows = getInitialSettings().modelContextWindows
-  if (settingsContextWindows && Object.keys(settingsContextWindows).length > 0) {
-    const result = resolveContextWindowFromRecord(model, settingsContextWindows)
-    if (result !== undefined) return result
-  }
-  const modelContextWindowsRaw = process.env[MODEL_CONTEXT_WINDOWS_ENV_KEY]
-  if (modelContextWindowsRaw) {
-    try {
-      const modelContextWindows: Record<string, number> = JSON.parse(modelContextWindowsRaw)
-      const result = resolveContextWindowFromRecord(model, modelContextWindows)
-      if (result !== undefined) return result
-    } catch {
-      // Invalid JSON in env var, silently fall through
     }
   }
 

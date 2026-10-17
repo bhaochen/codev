@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -9,6 +9,7 @@ import {
   resetContextWindowStoreForTests,
 } from './contextWindowStore.js'
 import { getContextWindowForModel } from '../context.js'
+import { resetSettingsCache } from '../settings/settingsCache.js'
 
 describe('provider context window store', () => {
   let configDir = ''
@@ -85,6 +86,31 @@ describe('provider context window store', () => {
     expect(getContextWindowForModel(model)).toBe(250_000)
     process.env.CLAUDE_CODE_API_PROVIDER = 'nvidia'
     expect(getContextWindowForModel(model)).toBe(200_000)
+  })
+
+  it('user settings override the provider catalog and persisted store', async () => {
+    await useTemporaryConfigDir()
+    previousExplicitProvider = process.env.CLAUDE_CODE_API_PROVIDER
+    previousBetterClawdProvider = process.env.BETTER_CLAWD_API_PROVIDER
+    delete process.env.BETTER_CLAWD_API_PROVIDER
+    process.env.CLAUDE_CODE_API_PROVIDER = 'opencode'
+
+    // Catalog/store list 200k for this variant (a free-tier mislisting).
+    const model = 'acme/deepseek-v4.1-flash-free'
+    recordProviderContextWindows('opencode', [
+      { id: model, contextWindow: 200_000 },
+    ])
+    await flushContextWindowStoreForTests()
+
+    // The user explicitly corrects it in settings.json — the override must
+    // win over both the live catalog and the persisted store.
+    await writeFile(
+      join(configDir, 'settings.json'),
+      JSON.stringify({ modelContextWindows: { [model]: 1_000_000 } }),
+    )
+    resetSettingsCache()
+
+    expect(getContextWindowForModel(model)).toBe(1_000_000)
   })
 
   it('ignores invalid or unknown cache entries', async () => {
