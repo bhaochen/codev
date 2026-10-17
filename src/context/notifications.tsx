@@ -175,6 +175,16 @@ export function useNotifications(): {
       // text changed was silently discarded and the stale pill lingered until
       // its timeout (e.g. /effort high → low kept showing "high").
       if (prev.notifications.current?.key === notif.key) {
+        // Content-identical re-add: no-op (returns prev, so a caller whose
+        // effect re-fires spuriously cannot churn the timer or loop renders
+        // — the old drop behavior incidentally guarded this).
+        if (
+          'text' in notif &&
+          'text' in prev.notifications.current &&
+          prev.notifications.current.text === notif.text
+        ) {
+          return prev;
+        }
         if (currentTimeoutId) {
           clearTimeout(currentTimeoutId);
           currentTimeoutId = null;
@@ -206,6 +216,10 @@ export function useNotifications(): {
       // Same key waiting in the queue (not shown yet): refresh it in place.
       const queuedIdx = prev.notifications.queue.findIndex(_ => _.key === notif.key);
       if (queuedIdx !== -1) {
+        const existing = prev.notifications.queue[queuedIdx]!;
+        if ('text' in notif && 'text' in existing && existing.text === notif.text) {
+          return prev;
+        }
         const newQueue = [...prev.notifications.queue];
         newQueue[queuedIdx] = notif;
         return {
