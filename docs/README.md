@@ -15,6 +15,7 @@
 | [安全与权限系统](architecture/safety-and-permissions.md) | 867 行 | 7 种权限模式、Deny-first 规则引擎、Auto-mode ML 分类器、授权流水线 |
 | [Provider 多厂商认证](architecture/provider-auth.md) | **Phase 1-12 正交解耦**：Route 4字段、ProtocolRegistry、Provider≠Protocol、ModelResolver、Auth Strategy、Transport/Framing、ModelRegistry `local>models.dev` + XDG 24h 缓存 (89 tests) |
 | [Session 存储迁移 JSONL→SQLite](architecture/session-storage-migration.md) | Schema、3 版本迁移、读透缓存、量化基准（+13% 空间、366× UUID 查找、55× 尾部读取、6× 写入慢）、权衡、SQL 查询手册 |
+| [Skill 注入与匹配机制](architecture/skill-system-mechanism.md) | 四阶段管线：目录扫描、skill_listing 增量注入（字节会计/resume 抑制）、skill_discovery 语义发现（turn-0/write-pivot 演进）、session 0 调试陷阱、成本模型、SKILL.md 撰写实践 |
 | [开发指南](development.md) | 本地开发、测试 (`bun test src/services/llm`), 新增 Provider 6 步, 调试与构建 |
 | [跨切面关注点](architecture/cross-cutting.md) | 254 行 | 错误处理层次、遥测系统、性能优化策略 |
 

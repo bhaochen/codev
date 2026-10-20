@@ -154,6 +154,86 @@ Transparency (丢失细节, LLM 可能遗忘关键上下文)
 
 ---
 
+### Q: Skill 注入管线是怎么设计的? (增量注入 + prompt cache 经济学)
+
+技能从磁盘 SKILL.md 到被模型使用经过四阶段: 目录扫描 → 常驻列表(skill_listing) → 语义发现(skill_discovery) → Skill 工具展开。
+前两个阶段的设计完全围绕 **LLM API 的 prompt cache 计费规则**: 前缀字节一致则按缓存价(约 1/10)计费, 任何字节变化从变化点起全部失效。
+
+**增量注入 (sentSkillNames, attachments.ts:2710):**
+
+```typescript
+const agentKey = toolUseContext.agentId ?? ''     // ① 线程隔离
+let sent = sentSkillNames.get(agentKey)           //    主线程/每个子代理独立记账
+const newSkills = allCommands.filter(cmd => !sent.has(cmd.name))  // ② 只发没发过的
+if (newSkills.length === 0) return []             // ③ 无新增 → 零字节静默
+const isInitial = sent.size === 0                 // ④ 首批全量 vs 增量
+```
+
+- ① agentKey 隔离: 子代理上下文独立, 共享 Set 会导致子代理永远看不到列表
+- ② 增量 = 追加而非重写: 新建 skill 后下一轮只注入一行, 既有行字节不变 (cache 不 bust)
+- ③④ 组合下, 全量列表是**一次性成本** (首轮注入后进 cache 为缓存价), 此后每轮增量趋近于零
+
+**resume 抑制 (suppressNext):** `claude --resume` 时 transcript 已有旧列表, 不抑制会导致列表出现两次。
+恢复后首次调用把现状全部标记"已发"并返回空。
+
+**字节稳定性 (创建时固化模式):** relevant_memories 的 header 字段注释是最佳教材——
+"saved 3 days ago" 重算 Date.now() 变 "4 days ago" → 字节变化 → 前缀 cache bust → 炸掉前面几万 token。
+修复: header 在 attachment 创建时计算一次存入, 渲染只读。
+**通用原则: 所有带时间/计数/状态的注入内容都要在创建时固化。**
+
+**追问: 为什么 skill_listing 不每轮重算?** —— 列表内容静态, 重算字节相同没问题; 但重算调用
+Date.now()/上下文读取有 CPU 成本, 且与其他动态内容混在同一 attachment 管线, 统一固化模式更可维护。
+
+---
+
+### Q: Skill 语义发现的触发时机为什么要从阻塞式改成 write-pivot 预取?
+
+需求: 让"这条消息可能用到的 skill"与消息出现在**同一轮** (注入晚了就失去意义)。
+
+**旧方案 (已替换):** `assistant_turn` 信号——每轮阻塞式匹配。生产数据: **97% 的调用一无所获**
+(大部分轮次用户在连续对话, 不需要新 skill), 每轮白白阻塞 250-573ms。
+
+**新方案 (双路径):**
+
+| 路径 | 触发 | 阻塞性 |
+|------|------|--------|
+| turn-0 | 会话首条输入 | **阻塞** ("the one signal where there's no prior work to hide under"——没有先前工作可供隐藏预取) |
+| write-pivot 预取 | 对话转向写操作时 (findWritePivot guard) | **后台**——模型流式输出/工具执行的空窗内运行, turn 收尾消费 |
+
+预取及时率 **>98%** ("AKI@250ms / Haiku@573ms vs turn durations of 2-30s", query.ts:1709)。
+模式: **用免费空闲窗口买掉同步延迟**——与 memory prefetch 共用同一套基础设施 (pendingMemoryPrefetch 与 pendingSkillPrefetch 并列消费)。
+
+**匹配引擎性质:** 双通道语义匹配 (ant-internal 闭源):
+AKI = 内部语义检索索引服务 (embedding 检索); Haiku = 小模型实时相关性判断。
+均工作在语义层——"GPU 直通"能命中 description 写作 "passthrough" 的 skill, 靠语义相似度而非字面重合。
+
+**追问: 外部构建 (feature 关闭) 下 skill 还能用吗?** —— 能。skill_listing 不依赖该 feature,
+降级为**全量列表模式**: 全部 skill 常驻上下文, 模型自主选择 (无漏检风险, 代价 ~2K tokens 常驻)。
+此时 description 措辞是唯一的召回杠杆——罗列用户真实会说的同义表达是关键实践。
+
+---
+
+### Q: 为什么 guest agent 里改不了 Windows 显示设置? (session 0 陷阱)
+
+Windows 自 Vista 起将服务隔离在 **Session 0** (无交互桌面), 用户桌面在 Session 1+。
+qemu-guest-agent 以 SYSTEM 服务运行在 session 0, guest-exec 派生的子进程继承该会话——
+**user32 显示拓扑 API (EnumDisplayDevices/ChangeDisplaySettingsEx) 看不到、也改不了用户会话的显示环境**。
+
+实测对照 (GPU 直通排障实测):
+
+| 执行环境 | EnumDisplayDevices | ChangeDisplaySettingsEx |
+|----------|--------------------|--------------------------|
+| guest agent (session 0) | 首调即 false, 循环零输出 | 无效 |
+| 计划任务 /IT (交互令牌) | 正常枚举 | 生效 |
+
+解法: `schtasks /create /ru <user> /it …` + `schtasks /run` —— /IT (interactive token)
+使任务运行于已登录用户的会话。
+
+**通用教训: 不是系统坏了, 是执行环境选错了。** 远程运维 Windows 时的分层选择:
+guest agent (session 0, 适合服务/注册表/文件操作) → 计划任务 /IT (用户会话, 适合显示/GUI/交互上下文)。
+
+---
+
 ### Q: 单轨 Native LLM Runtime 如何实现？（Phase 1-12 渐进式正交解耦，P0-P6 为旧编号）
 
 > **1-12 ↔ P0-P6 映射**: `P0`清Client分支=`Phase1 Registry声明`/`P1`内联protocol=`Phase2 Responses拆分`/`P2`最小Route=`Phase4 Route抽象`/`P3`显式auth=`Phase7 Auth Strategy`/`P4` registry=`Phase11 ModelRegistry`/`P5`测试锁死=`Phase5 Transport`/`P6` Facade剿灭=`Phase5-6`直连+free兜底。当前以 `Phase 1-12` 为准，`ProtocolRegistry≡ClientRegistry` (`protocols/index.ts` 唯一源)
@@ -742,6 +822,15 @@ Friend VRM 的场景（历史案例，功能已移除）是 Agent → Avatar 的
 1. **规则先行** — 过期检测和词法相关性在 judge 之前跑, 能精确判定的绝不问模型
 2. **便宜的先行** — 层叠按成本排序, 每层只处理上一层没把握的题, 贵模型只付灰区
 3. **全程 fail-open** — judge 挂了/慢/没配/不确定, 任何一种都退回摘要, 压缩本身不会失败
+
+### "Skill 系统为什么不把所有技能内容都塞进系统提示?"
+
+分层回答:
+
+1. **Token 经济**: 技能正文是提示词, 几十个全量塞入每轮白付。列表 (name + description) 只占 ~2K tokens 且走增量注入 (sentSkillNames 记账, 只发新增), 正文按需通过 Skill 工具展开。
+2. **字节稳定性**: 列表在 attachment 创建时生成并固化, 增量为追加模式——既有行字节不变, prompt cache 永久命中。若全量塞正文, 任何技能更新都会从该处 bust 整个缓存。
+3. **信任边界**: 列表里的 description 是模型"看到"的元数据; 正文是模型"执行"的指令。分离让模型先按意图选择, 再展开指令——与 MCP tools 的 name+schema 分离同构。
+4. **反作弊场景 (实测)**: 腾讯 ACE 等反作弊检测系统状态 (如测试签名模式)。这也约束了辅助驱动的选择——优先微软 attestation 签名的驱动 (正常模式可加载), 而非需要 testsigning 的自签名版本。
 
 ### "如何测试一个 AI Agent 系统?"
 

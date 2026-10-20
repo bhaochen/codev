@@ -242,6 +242,9 @@ CLI 入口由 **Commander.js** 解析命令行参数，随后启动 **REPL**（�
 - `getSkillToolCommands()`：获取所有可被模型调用的 prompt 类型命令
 - `getSlashCommandToolSkills()`：获取斜杠命令可用的技能列表
 
+> 模型如何"看到"技能（`skill_listing` 常驻列表 + `skill_discovery` 语义发现的注入管线）、
+> 外部构建的全量列表模式、SKILL.md 撰写实践，见 [Skill 注入与匹配机制](../architecture/skill-system-mechanism.md)。
+
 ---
 
 ## 工作流系统
