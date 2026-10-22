@@ -322,11 +322,30 @@ in the terminal:
   terminal size.
 - **Python kernel** is persistent: run cells, keep state across calls, and let
   Matplotlib figures render directly into the conversation, next to the page the
-  browser is driving.
+  browser is driving. Load a dataframe once, then keep querying it for free —
+  variables, imports and parsed data survive between cells, so the same kernel
+  can drive a real analysis instead of a throwaway script.
 
 <table align="center">
   <tr>
     <td><img src="assets/browser_python_kernel.png"></td>
+  </tr>
+</table>
+
+#### 📊 Data Analysis in the Kernel
+
+One session, many cells: `pandas` reads the parquet datasets, the state carries
+forward, and each cell renders its `matplotlib` figures inline — multi-panel
+layouts, CJK fonts and log-scale axes all included.
+
+<table align="center">
+  <tr>
+    <td><img src="assets/python_kernel_plot.png"></td>
+    <td><img src="assets/python_kernel_plot2.png"></td>
+  </tr>
+  <tr>
+    <td><img src="assets/python_kernel_plot3.png"></td>
+    <td><img src="assets/python_kernel_plot4.png"></td>
   </tr>
 </table>
 
