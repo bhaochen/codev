@@ -1396,6 +1396,11 @@ async function main(): Promise<void> {
   type ReadHelpers = {
     readCut(text: string, start: number, budget: number): number;
     findAnchor(text: string, offset: number, anchor: string, radius: number): number;
+    splitPassages(text: string): string[];
+    pickPassages(text: string, query: string, budget: number): {
+      content: string;
+      matches: number;
+    };
   };
   const reader = new Function(`return {${READ_HELPERS_JS}};`)() as ReadHelpers;
 
@@ -1437,6 +1442,51 @@ async function main(): Promise<void> {
     // Copies end at 3, 11 and 19; an old offset of 18 is nearest the last.
     const text = "END one END two END three";
     assert(reader.findAnchor(text, 18, "END", 4000) === 19, `got ${reader.findAnchor(text, 18, "END", 4000)}`);
+  });
+
+  console.log("query passages (READ_HELPERS_JS):");
+
+  test("only passages matching the query come back, in page order", () => {
+    const text = [
+      "A navigation menu with unrelated links.",
+      "Reinforcement learning trains a policy from reward.",
+      "A footer with legal text.",
+      "Self-improvement uses reinforcement learning at scale.",
+    ].join("\n\n");
+    const picked = reader.pickPassages(text, "reinforcement learning", 4000);
+    assert(picked.matches === 2, `matched ${picked.matches}`);
+    assert(
+      picked.content.indexOf("trains a policy") < picked.content.indexOf("at scale"),
+      picked.content,
+    );
+    assert(!picked.content.includes("legal text"), picked.content);
+    assert(!picked.content.includes("navigation menu"), picked.content);
+  });
+
+  test("CJK queries match without spaces", () => {
+    const text = "第一段讲无关内容。\n\n第二段讲强化学习的方法。\n\n第三段讲别的。";
+    const picked = reader.pickPassages(text, "强化学习", 4000);
+    assert(picked.matches === 1, `matched ${picked.matches}`);
+    assert(picked.content.includes("强化学习"), picked.content);
+  });
+
+  test("the passage budget is respected, and a miss reports zero", () => {
+    const text = `${"x".repeat(2000)} needled ${"y".repeat(2000)}\n\nneedle again`;
+    const picked = reader.pickPassages(text, "needle", 600);
+    assert(picked.matches === 1, `matched ${picked.matches}`);
+    assert(picked.content.length <= 600, `returned ${picked.content.length} chars`);
+    const miss = reader.pickPassages(text, "absent-term", 600);
+    assert(miss.matches === 0 && miss.content === "", JSON.stringify(miss));
+  });
+
+  test("long paragraphs split at sentence boundaries", () => {
+    const text = `${"Sentence one. ".repeat(120)}`;
+    const passages = reader.splitPassages(text);
+    assert(passages.length > 1, `split into ${passages.length}`);
+    assert(
+      passages.every(passage => passage.length <= 1200),
+      `longest passage ${Math.max(...passages.map(passage => passage.length))}`,
+    );
   });
 
   console.log("picked elements:");

@@ -92,6 +92,20 @@ export interface ReadResult {
   stale?: boolean;
   /** The page shifted by this many characters since the last read; the place was re-found. */
   shift?: number;
+  /** Query mode: the query that selected the passages. */
+  query?: string;
+  /** Query mode: how many passages matched and were returned (0 = no match). */
+  matches?: number;
+  /**
+   * Approximate length of all readable text in the scope. Unlike `total`, this
+   * is not capped by the extraction slice, so callers can decide whether a
+   * page is large enough to summarize before paging through it.
+   */
+  pageChars?: number;
+  /** True when the result was served from the short-lived extraction cache. */
+  cached?: boolean;
+  /** How old the cached extraction is, in milliseconds. */
+  cachedAgeMs?: number;
 }
 
 /** Structured result returned by every in-page action helper. */
@@ -663,6 +677,78 @@ export const READ_HELPERS_JS = `
       at = region.indexOf(anchor, at + 1);
     }
     return best;
+  },
+  // Query mode: one readable passage per paragraph, splitting any paragraph
+  // that is too long at sentence boundaries so a hit does not drag the whole
+  // page in with it.
+  splitPassages(text) {
+    const out = [];
+    const ends = '.!?' + String.fromCharCode(0x3002, 0xff01, 0xff1f);
+    const blocks = String(text || '').split(/\\n{2,}/);
+    for (const block of blocks) {
+      const clean = block.trim();
+      if (!clean) continue;
+      if (clean.length <= 1200) { out.push(clean); continue; }
+      let buf = '';
+      let i = 0;
+      while (i < clean.length) {
+        let end = i;
+        while (end < clean.length && ends.indexOf(clean[end]) === -1) end++;
+        if (end < clean.length) end++;
+        const sentence = clean.slice(i, end);
+        i = end;
+        if (sentence.length > 1200) {
+          if (buf) { out.push(buf); buf = ''; }
+          for (let j = 0; j < sentence.length; j += 1000) out.push(sentence.slice(j, j + 1000));
+        } else if (buf.length + sentence.length > 1000) {
+          if (buf) out.push(buf);
+          buf = sentence;
+        } else {
+          buf += sentence;
+        }
+      }
+      if (buf.trim()) out.push(buf.trim());
+    }
+    return out;
+  },
+  // Rank passages by query term frequency (whole-phrase matches weigh more)
+  // and keep the best ones up to the character budget, in page order.
+  pickPassages(text, query, budget) {
+    const q = String(query || '').toLowerCase().trim();
+    const tokens = [];
+    for (const token of q.split(/\\s+/)) {
+      if (token && tokens.indexOf(token) === -1) tokens.push(token);
+    }
+    const passages = this.splitPassages(text);
+    const scored = [];
+    for (let i = 0; i < passages.length; i++) {
+      const lower = passages[i].toLowerCase();
+      let score = 0;
+      for (const token of tokens) {
+        let at = lower.indexOf(token);
+        while (at !== -1) { score++; at = lower.indexOf(token, at + token.length); }
+      }
+      if (tokens.length > 1 && lower.indexOf(q) !== -1) score += tokens.length * 2;
+      if (score > 0) scored.push({ i, text: passages[i], score });
+    }
+    scored.sort((a, b) => b.score - a.score || a.i - b.i);
+    const chosen = [];
+    let used = 0;
+    for (const passage of scored) {
+      const cost = passage.text.length + 4;
+      if (used + cost > budget) continue;
+      chosen.push(passage);
+      used += cost;
+      if (chosen.length >= 12) break;
+    }
+    if (chosen.length === 0 && scored.length > 0) {
+      return { content: scored[0].text.slice(0, budget), matches: 1 };
+    }
+    chosen.sort((a, b) => a.i - b.i);
+    return {
+      content: chosen.map(p => p.text).join('\\n\\n' + String.fromCharCode(0x2026) + '\\n\\n'),
+      matches: chosen.length,
+    };
   },
 `;
 
@@ -1618,7 +1704,9 @@ ${READ_HELPERS_JS}
   // A page ends at a paragraph or sentence boundary. With an anchor (the text
   // that ended the previous page) the read continues from wherever that text
   // is now, so content that moved in between is neither repeated nor skipped.
-  readPage(selector, offset, maxChars, anchor) {
+  // A query switches to passage mode: rank the whole document in-page and
+  // return only the matching passages, so the model never receives the rest.
+  readPage(selector, offset, maxChars, anchor, query) {
     let root = null;
     if (selector) {
       try { root = document.querySelector(selector); } catch (e) { return { success: false, error: 'Invalid selector: ' + selector }; }
@@ -1632,12 +1720,16 @@ ${READ_HELPERS_JS}
       }
     }
     if (!root) return { success: false, error: 'Page has no readable body yet.' };
+    let pageChars = 0;
+    try { pageChars = String(root.innerText || root.textContent || '').length; } catch (e) { pageChars = 0; }
     const FENCE = String.fromCharCode(96, 96, 96);
     const SKIP = selector ? 'script,style,noscript,template,svg' : 'script,style,noscript,template,svg,nav,header,footer,aside';
     const READ_RADIUS = 4000;
     const start = Math.max(0, Number(offset || 0));
     const budget = Number(maxChars || 6000);
-    const want = start + budget + 2000 + (anchor ? READ_RADIUS : 0);
+    const q = typeof query === 'string' ? query.trim().toLowerCase() : '';
+    // Query mode ranks the whole document, so it cannot stop at a slice.
+    const want = q ? Infinity : start + budget + 2000 + (anchor ? READ_RADIUS : 0);
     const parts = [];
     let len = 0;
     let nodes = 0;
@@ -1749,18 +1841,22 @@ ${READ_HELPERS_JS}
     serialize(root, 0);
     const text = parts.join('').replace(/\\n{3,}/g, '\\n\\n').trim();
     const total = text.length;
+    if (q) {
+      const picked = this.pickPassages(text, q, budget);
+      return { success: true, url: location.href, title: document.title, content: picked.content, total, complete: !stopped, offset: 0, query: q, matches: picked.matches, pageChars };
+    }
     let from = Math.min(start, total);
     let shift = 0;
     if (anchor) {
       const found = this.findAnchor(text, start, String(anchor), READ_RADIUS);
       // The text already read is gone: the page was rewritten in between, and
       // two versions must not be stitched into one.
-      if (found < 0) return { success: true, stale: true, url: location.href, title: document.title, total, complete: !stopped };
+      if (found < 0) return { success: true, stale: true, url: location.href, title: document.title, total, complete: !stopped, pageChars };
       shift = found - start;
       from = found;
     }
     const end = this.readCut(text, from, budget);
-    return { success: true, url: location.href, title: document.title, content: text.slice(from, end), total, complete: !stopped, offset: from, shift: shift || undefined };
+    return { success: true, url: location.href, title: document.title, content: text.slice(from, end), total, complete: !stopped, offset: from, shift: shift || undefined, pageChars };
   }
 });
 `;

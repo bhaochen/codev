@@ -23,9 +23,13 @@ import {
   getBrowserSession,
   normalizeUrlForNavigation,
   type BrowserActionOutcome,
+  type ObservationDiff,
   type TabInfo,
 } from '../../services/browser/browserSession.js'
-import type { ObservedState } from '../../services/browser/pageScripts.js'
+import type {
+  InteractiveElement,
+  ObservedState,
+} from '../../services/browser/pageScripts.js'
 import { formatEffect, isMutatingAction } from '../../services/browser/effects.js'
 import { formatExtract } from '../../services/browser/extract.js'
 import {
@@ -58,13 +62,22 @@ import { getCwd } from '../../utils/cwd.js'
 import { lazySchema } from '../../utils/lazySchema.js'
 import { BROWSER_TOOL_NAME } from './constants.js'
 import { getBrowserContextManager } from '../../services/browser/browserContextCompaction.js'
+import {
+  READ_AUTO_SUMMARY_THRESHOLD_CHARS,
+  READ_MAX_CHARS_PER_CALL,
+  READ_MIN_CHARS,
+  SUMMARY_DEFAULT_MAX_CHARS,
+  SUMMARY_INPUT_MAX_CHARS,
+} from '../../services/browser/readLimits.js'
+import { queryHaiku } from '../../services/llm/query/haiku.js'
+import { asSystemPrompt } from '../../utils/systemPromptType.js'
 
 const DESCRIPTION =
   'Drive a real Chrome/Edge browser: read a page the cheap way (HTTP first, browser only when needed), observe numbered elements, click, fill, type, drag, upload, run JS, measure what actually rendered, extract structured data with provenance, watch for console/network errors, record and replay flows, screenshot, let the user point at the element they mean, and manage tabs. Every action reports what it actually changed. One tool, one action per call.'
 
 const PROMPT = `Operate a real Chromium browser (Chrome, Edge, or Brave) through the DevTools protocol. Unlike WebBrowser/InspectSite (static HTML fetch), this runs JavaScript: it works on React/Vue/SPA pages, clicks and types through real trusted input, reads the rendered DOM (including same-origin iframes), extracts page content as markdown, runs JS in the page, watches console/network (great for debugging web apps you are developing), uploads files, and handles tabs, dialogs, and downloads.
 
-THE ONE RULE THAT PREVENTS ERRORS: every call is { "action": "<name>", ...params for that action }. Pick exactly one action. Provide only that action's params. Do NOT nest params under an extra "args" object. Most actions return a fresh page observation, so continue from the returned state instead of guessing.
+THE ONE RULE THAT PREVENTS ERRORS: every call is { "action": "<name>", ...params for that action }. Pick exactly one action. Provide only that action's params. Do NOT nest params under an extra "args" object. Most actions return a fresh page observation (after the first, only what changed), so continue from the returned state instead of guessing.
 
 EVIDENCE — THE PART THAT KEEPS YOU HONEST:
 - Every result carries an "Effect:" line: step number, whether the url changed, whether it is still the same document, how the interactive DOM moved, and how long it took. It is proof the action did something.
@@ -77,8 +90,8 @@ THE LOOP:
 1. open — launch/attach the browser (once per session). Optionally pass url to land somewhere immediately.
 2. observe — the page as numbered interactive elements (ref @N, role, text). Always observe before acting on a page you have not seen. Elements inside same-origin iframes are included (marked [iframe]) and work like any other ref.
 3. read — the page CONTENT as markdown when you need to actually read something (articles, docs, search results, prices). observe finds what to act on; read is how you read.
-4. Act on a ref from the latest observation: click, fill, type, hover, press, drag, upload, scroll. Each returns the new observation.
-5. Repeat until done. Refs are only valid for the most recent observation of the current tab; after the DOM changes, use the refs from the observation you just received.
+4. Act on a ref from the latest observation: click, fill, type, hover, press, drag, upload, scroll. Each returns what changed since the previous observation.
+5. Repeat until done. Observations after an action show only what changed (+ added, ~ changed, - not shown now); unchanged elements keep their existing @refs, so older refs in this conversation stay usable. An element that is merely off-screen may still work by its old ref; a detached one fails stale. Use observe when you need the complete list again.
 
 HOW TO TARGET THINGS — READ THIS, IT IS THE #1 SOURCE OF WASTED STEPS:
 Act by @ref (from the latest observation) or by text. These are precise: the tool knows exactly which element you mean. NEVER guess (x, y) coordinates to find or reach a button, link, close-X, or menu. Coordinates are blind — you cannot see where things are, so guessing them clicks the wrong element (a nav link, a different product) and destroys your progress. Coordinates are ONLY for a canvas/map/video/drawing surface that has no DOM element, and only after a screenshot shows you exactly where to click.
@@ -98,7 +111,7 @@ SEE / READ:
 - measure — no params. MEASURED FACTS about what rendered: viewport, painted background/text colors by area, fonts that fell back because they never loaded, WCAG contrast failures with real ratios, broken and oversized images, elements overflowing the viewport, running animations, landmark boxes. This is how you check a UI without inventing it.
 - extract — { fields, container?, limit? } STRUCTURED SCRAPING WITH PROVENANCE. { "container": "article.product", "fields": { "name": ".title", "price": ".price", "link": "a@href" } }. Every value comes back with the selector that produced it, plus warnings you cannot get any other way: a selector that matched nothing, one that matched the same value in every row (it is reaching outside the row), one that matched several elements, and links that are really login/redirect/wishlist URLs rather than item URLs. If the container matches nothing you get the page's actual repeating structures to choose from. Nothing outside that table came from the page — do not fill gaps from memory.
 - observe — no params. url, title, elements as "@N tag \\"text\\" [role]", and scroll state. Form fields are named by their label. State shows when it applies: (checked)/(unchecked), (expanded)/(collapsed), (selected), (current page), (pressed)/(not pressed), (required), (invalid), (disabled).
-- read — { selector?, maxChars?, offset? }. Rendered page as markdown with [text](url) links. Defaults to the main content area; selector scopes it (e.g. "#docs"); long pages report total length — page through with the offset each reply gives. maxChars defaults to 4000 and is capped at 12000. Paging is budgeted: one document can return about 24000 characters and one browser session about 96000, after which further reads are refused (reason read_budget) — switch to a narrower selector or extract instead of paging on. Pages end at a paragraph or sentence. If the page shifted between two reads the reply re-finds your place; if the text you read is gone, it says so (reason stale_read) instead of stitching two versions together.
+- read — { selector?, maxChars?, offset?, query?, summary?, raw?, refresh? }. Rendered page as markdown with [text](url) links. Defaults to the main content area; selector scopes it (e.g. "#docs"); long pages report total length — page through with the offset each reply gives. maxChars defaults to 4000 and is capped at 12000. Paging is budgeted: one document can return about 24000 characters and one browser session about 96000, after which further reads are refused (reason read_budget). Pages end at a paragraph or sentence. Large pages (over 20000 characters) are summarized automatically with a cheap model unless raw:true or an offset is given; the raw text never enters your context. query returns only passages matching your terms (ranked in-page, ignores offset); if nothing matches, the page is summarized with the query as focus instead of making you page through it. summary:true forces a digest (combine with query to focus it). Repeating the same page+query read with no action in between (inside 60s) returns a short cached note; refresh:true forces a fresh read. Prefer query/summary over paging when you know what you need. If the page shifted between two reads the reply re-finds your place; if the text you read is gone, it says so (reason stale_read) instead of stitching two versions together.
 - pick — { text?: "Point at the price you mean" } hands the visible browser to the user: whatever their pointer is over is outlined, and the element they click (the link, button or heading it sits in) comes back as @N (first in the list, marked (picked)) with its tag, selector and text. Tell the user to click once the bar starting "Tau:" shows at the top of the page; a click before that reaches the page itself. Esc cancels; it waits up to 2 minutes for a person. While it waits the page does not react to the pointer, so to pick inside a menu that opens on hover, hover it open first, then pick. Use it only when the target is genuinely ambiguous or the user means "this one" on the page, never to explore. Not available while the browser is headless.
 - screenshot — optional { full: true } whole page, { ref: N } one element, { annotate: true } @N badges over the last observation, { path: "shot.png" } save to a file instead of returning into context (use path when the user wants the image, not you).
 - console — { level?, filter?, limit?, clear? }. This tab's console messages + uncaught exceptions. level: error|warn|info|log|all.
@@ -330,6 +343,31 @@ const inputSchema = lazySchema(() =>
       .min(0)
       .optional()
       .describe('For read: continue from this character offset (pagination).'),
+    query: z
+      .string()
+      .max(500)
+      .optional()
+      .describe(
+        'For read: return only passages matching this query (in-page ranking, ignores offset). Use it instead of paging when you know what you are looking for.',
+      ),
+    summary: z
+      .boolean()
+      .optional()
+      .describe(
+        'For read: summarize the page with a cheap model and return only the digest; the raw page never enters context. Combine with query to focus the digest. Large pages are summarized automatically even without this flag.',
+      ),
+    raw: z
+      .boolean()
+      .optional()
+      .describe(
+        'For read: return the page text even when it is large; disables automatic summarization.',
+      ),
+    refresh: z
+      .boolean()
+      .optional()
+      .describe(
+        'For read: ignore the short-lived extraction cache and read the page again.',
+      ),
     full: z
       .boolean()
       .optional()
@@ -655,30 +693,57 @@ function validateBrowserInput(input: Input): ValidationResult {
 }
 
 /** Renders the observed interactive elements as a compact, ref-addressable list. */
+function formatElement(el: InteractiveElement): string {
+  const label = el.text || el.aria || el.placeholder || ''
+  const parts = [`@${el.id}`, el.tag]
+  if (el.role && el.role !== el.tag) parts.push(`[${el.role}]`)
+  if (label) parts.push(`"${label}"`)
+  if (el.value) parts.push(`= "${el.value}"`)
+  if (el.checked !== undefined) parts.push(el.checked ? '(checked)' : '(unchecked)')
+  if (el.pressed !== undefined) parts.push(el.pressed ? '(pressed)' : '(not pressed)')
+  if (el.expanded !== undefined) parts.push(el.expanded ? '(expanded)' : '(collapsed)')
+  if (el.selected) parts.push('(selected)')
+  if (el.current) parts.push(el.current === 'true' ? '(current)' : `(current ${el.current})`)
+  if (el.required) parts.push('(required)')
+  if (el.invalid) parts.push('(invalid)')
+  if (el.disabled) parts.push('(disabled)')
+  if (el.picked) parts.push('(picked)')
+  if (el.frame) parts.push('[iframe]')
+  if (el.repeatNote) parts.push(`(+${el.repeatNote} more similar)`)
+  return parts.join(' ')
+}
+
 function formatElements(observation: ObservedState): string {
   if (observation.interactive_elements.length === 0) {
     return '(no interactive elements found)'
   }
-  const lines = observation.interactive_elements.map(el => {
-    const label = el.text || el.aria || el.placeholder || ''
-    const parts = [`@${el.id}`, el.tag]
-    if (el.role && el.role !== el.tag) parts.push(`[${el.role}]`)
-    if (label) parts.push(`"${label}"`)
-    if (el.value) parts.push(`= "${el.value}"`)
-    if (el.checked !== undefined) parts.push(el.checked ? '(checked)' : '(unchecked)')
-    if (el.pressed !== undefined) parts.push(el.pressed ? '(pressed)' : '(not pressed)')
-    if (el.expanded !== undefined) parts.push(el.expanded ? '(expanded)' : '(collapsed)')
-    if (el.selected) parts.push('(selected)')
-    if (el.current) parts.push(el.current === 'true' ? '(current)' : `(current ${el.current})`)
-    if (el.required) parts.push('(required)')
-    if (el.invalid) parts.push('(invalid)')
-    if (el.disabled) parts.push('(disabled)')
-    if (el.picked) parts.push('(picked)')
-    if (el.frame) parts.push('[iframe]')
-    if (el.repeatNote) parts.push(`(+${el.repeatNote} more similar)`)
-    return parts.join(' ')
-  })
+  return observation.interactive_elements.map(formatElement).join('\n')
+}
+
+function formatObservationDiff(diff: ObservationDiff): string {
+  if (diff.full) return ''
+  const lines: string[] = []
+  for (const el of diff.added) lines.push(`+ ${formatElement(el)}`)
+  for (const el of diff.changed) lines.push(`~ ${formatElement(el)}`)
+  for (const id of diff.removed) lines.push(`- @${id} (not shown now)`)
+  if (lines.length === 0) {
+    return `(unchanged: all ${diff.total} interactive elements keep their existing @refs)`
+  }
+  lines.push(
+    `(${diff.unchanged} unchanged element(s) keep their existing @refs; + added, ~ changed, - not shown now)`,
+  )
   return lines.join('\n')
+}
+
+function observationText(
+  observation: ObservedState,
+  fullObservation?: boolean,
+): string {
+  if (!fullObservation) {
+    const diff = getBrowserSession().getObservationDiff(observation)
+    if (diff && !diff.full) return formatObservationDiff(diff)
+  }
+  return formatElements(observation)
 }
 
 function formatTabs(tabs: TabInfo[]): string {
@@ -695,6 +760,7 @@ function outcomeToOutput(
   action: Input['action'],
   outcome: BrowserActionOutcome,
   extraMessage?: string,
+  options?: { fullObservation?: boolean },
 ): BrowserOutput {
   const obs = outcome.observation
   const messageParts: string[] = []
@@ -709,7 +775,13 @@ function outcomeToOutput(
     ok: outcome.ok,
     message: messageParts.filter(Boolean).join(' ') || (outcome.ok ? 'Done.' : 'Failed.'),
     ...(outcome.reason ? { reason: outcome.reason } : {}),
-    ...(obs ? { url: obs.url, title: obs.title, elementsText: formatElements(obs) } : {}),
+    ...(obs
+      ? {
+          url: obs.url,
+          title: obs.title,
+          elementsText: observationText(obs, options?.fullObservation),
+        }
+      : {}),
     warnings: outcome.warnings,
   }
 }
@@ -786,6 +858,10 @@ function summarize(input: Partial<Input>): string {
     case 'flow':
       return `Flow ${input.mode ?? 'list'}${input.name ? ` "${input.name}"` : ''}`
     case 'read':
+      if (input.summary)
+        return `Summarize page${input.query ? ` for "${input.query}"` : ''}`
+      if (input.query)
+        return `Read passages matching "${input.query}"`
       return input.selector
         ? `Read page (${input.selector})`
         : input.offset
@@ -882,6 +958,153 @@ async function runGet(
     ...(result.text !== undefined ? { pageText: result.text } : {}),
     ...(result.reason ? { reason: result.reason } : {}),
     warnings: result.warnings,
+  }
+}
+
+const PAGE_SUMMARY_PROMPT = `You summarize a single web page for a coding agent that cannot afford to read the whole thing.
+
+Return a faithful, compact digest in plain text:
+- Open with one sentence saying what the page is (article, docs, release notes, issue thread, product page).
+- Then give the facts that answer the focus, with exact numbers, names, versions, URLs and code identifiers preserved verbatim.
+- Include dates, caveats, or signs the page is partial/truncated.
+- Do not invent, do not give advice, and do not describe this task.
+- Fit within the requested character limit.`
+
+/** Summarize a page with the small fast model; the raw text never reaches the caller. */
+async function runReadSummary(
+  input: Input,
+  context: ToolUseContext,
+  options?: { auto?: boolean; passages?: boolean },
+): Promise<BrowserOutput> {
+  const session = getBrowserSession()
+  const signal = context.abortController.signal
+  const focus = input.query?.trim()
+  const limit = Math.min(
+    Math.max(input.maxChars ?? SUMMARY_DEFAULT_MAX_CHARS, READ_MIN_CHARS),
+    READ_MAX_CHARS_PER_CALL,
+  )
+  const cacheQuery = {
+    selector: input.selector,
+    query: input.query,
+    maxChars: limit,
+  }
+  if (!input.refresh) {
+    const cached = session.getCachedSummary(cacheQuery)
+    if (cached) {
+      session.noteSummaryOutput(cached.digest.length, input.selector)
+      const ageSec = Math.max(1, Math.round(cached.ageMs / 1000))
+      return {
+        action: 'read',
+        ok: true,
+        message: `Summarized ${cached.title || cached.url || 'the page'}${focus ? ` for "${focus}"` : ''} (cached ${ageSec}s ago; pass refresh:true to re-summarize).`,
+        ...(cached.url ? { url: cached.url } : {}),
+        ...(cached.title ? { title: cached.title } : {}),
+        pageText: cached.digest,
+        warnings: session.drainSessionNotes(),
+      }
+    }
+  }
+  let raw = await session.readForSummary({
+    selector: input.selector,
+    query: input.query,
+    maxChars: SUMMARY_INPUT_MAX_CHARS,
+    passages: options?.passages,
+  })
+  // A focused search that found nothing should still answer from the whole
+  // page instead of making the caller retry without the query.
+  if (
+    raw.success &&
+    raw.query &&
+    !raw.content?.trim() &&
+    options?.passages !== false
+  ) {
+    raw = await session.readForSummary({
+      selector: input.selector,
+      query: input.query,
+      maxChars: SUMMARY_INPUT_MAX_CHARS,
+      passages: false,
+    })
+  }
+  if (!raw.success) {
+    return errorOutput('read', raw.error ?? 'Could not read the page.', raw.reason)
+  }
+  if (!raw.content?.trim()) {
+    return errorOutput(
+      'read',
+      focus
+        ? `No text on the page could be summarized for "${focus}".`
+        : 'The page has no readable text to summarize.',
+      focus ? 'no_query_match' : undefined,
+    )
+  }
+
+  let response
+  try {
+    response = await queryHaiku({
+      systemPrompt: asSystemPrompt([PAGE_SUMMARY_PROMPT]),
+      userPrompt: [
+        `Page: ${raw.title || '(untitled)'}`,
+        `URL: ${raw.url || session.getLastKnownUrl() || '(unknown)'}`,
+        ...(focus ? [`Focus: ${focus}`] : []),
+        ...(raw.complete === false
+          ? ['Note: extraction stopped before the end of the page; say so if coverage matters.']
+          : []),
+        '',
+        'Content:',
+        raw.content,
+        '',
+        `Write the digest in under ${limit} characters.`,
+      ].join('\n'),
+      signal,
+      options: {
+        querySource: 'browser_read_summary',
+        agents: [],
+        isNonInteractiveSession: context.options.isNonInteractiveSession,
+        hasAppendSystemPrompt: false,
+        mcpTools: [],
+      },
+    })
+  } catch (error) {
+    if (signal.aborted) throw error
+    const message = error instanceof Error ? error.message : String(error)
+    return errorOutput(
+      'read',
+      `Page summary failed: ${message}. Read again without summary, optionally with a query, instead.`,
+      'summary_failed',
+    )
+  }
+
+  const digest = response.message.content
+    .filter(block => block.type === 'text')
+    .map(block => (block.type === 'text' ? block.text : ''))
+    .join('')
+    .trim()
+  if (!digest) {
+    return errorOutput(
+      'read',
+      'The summarizer returned no text. Read without summary instead.',
+      'summary_failed',
+    )
+  }
+  const clipped =
+    digest.length > limit ? `${digest.slice(0, limit).trimEnd()}…` : digest
+  session.noteSummaryOutput(clipped.length, input.selector)
+  session.noteSummaryDigest(
+    cacheQuery,
+    clipped,
+    raw.url,
+    raw.title,
+  )
+  return {
+    action: 'read',
+    ok: true,
+    message: options?.auto
+      ? `The page is large, so I summarized it automatically instead of paging it in${focus ? ` (focus: "${focus}")` : ''}. Use raw:true if you need the full text.`
+      : `Summarized ${raw.title || raw.url || 'the page'}${focus ? ` for "${focus}"` : ''}.`,
+    ...(raw.url ? { url: raw.url } : {}),
+    ...(raw.title ? { title: raw.title } : {}),
+    pageText: clipped,
+    warnings: session.drainSessionNotes(),
   }
 }
 
@@ -1087,13 +1310,18 @@ async function runActionInner(
           observation.interactive_elements = frameElements
         }
       }
-      return outcomeToOutput('observe', { ok: true, observation, warnings })
+      return outcomeToOutput('observe', { ok: true, observation, warnings }, undefined, {
+        fullObservation: true,
+      })
     }
     case 'read': {
+      if (input.summary) return runReadSummary(input, context)
       const result = await session.readPage({
         selector: input.selector,
         offset: input.offset,
         maxChars: input.maxChars,
+        query: input.query,
+        refresh: input.refresh,
       })
       if (!result.success) {
         return errorOutput('read', result.error ?? 'Could not read the page.', result.reason)
@@ -1105,21 +1333,57 @@ async function runActionInner(
           'stale_read',
         )
       }
+      // Large pages are summarized by default: the raw text is an input to
+      // the summarizer, not something the main model pages through. The probe
+      // read above is refunded because its text is discarded.
+      const totalSize =
+        result.pageChars ?? result.total ?? result.content?.length ?? 0
+      if (
+        !input.raw &&
+        input.offset === undefined &&
+        !input.query &&
+        totalSize > READ_AUTO_SUMMARY_THRESHOLD_CHARS
+      ) {
+        session.refundRead(result.content?.length ?? 0)
+        return runReadSummary(input, context, { auto: true })
+      }
+      // A query that found nothing is a signal the ranking missed synonyms,
+      // not that the page is empty: summarize the whole page with the query
+      // as focus instead of making the model page through it.
+      if (
+        !input.raw &&
+        input.query &&
+        result.matches === 0
+      ) {
+        session.refundRead(result.content?.length ?? 0)
+        return runReadSummary(input, context, { auto: true, passages: false })
+      }
       const shifted = result.shift
         ? `The page shifted by ${Math.abs(result.shift)} characters since your last read; I found your place again and continued from there.`
+        : ''
+      const cached = result.cached
+        ? `Same page and query as a read ${Math.max(1, Math.round((result.cachedAgeMs ?? 0) / 1000))}s ago; that result is already above, so this is a short reminder (pass refresh:true to re-read).`
         : ''
       const shown = result.content?.length ?? 0
       const total = result.total ?? shown
       const from = result.offset ?? 0
       const more = from + shown < total
-      const range =
-        total > shown
+      const range = result.query
+        ? result.matches
+          ? `${result.matches} passage(s) matched "${result.query}".`
+          : `No passages matched "${result.query}". Try different terms, or read without query to page through the page.`
+        : total > shown
           ? `Characters ${from}–${from + shown} of ${result.complete === false ? 'at least ' : ''}${total}.${more ? ` Continue with { "action": "read", "offset": ${from + shown} }.` : ''}`
           : ''
       return {
         action: 'read',
         ok: true,
-        message: [`Read ${result.title || result.url || 'page'}.`, shifted, range]
+        message: [
+          `Read ${result.title || result.url || 'page'}.`,
+          cached,
+          shifted,
+          range,
+        ]
           .filter(Boolean)
           .join(' '),
         url: result.url,

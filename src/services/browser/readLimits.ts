@@ -33,3 +33,36 @@ export const READ_MAX_CHARS_PER_SESSION = 96_000
 
 /** Remaining-budget value below which a read result carries a warning. */
 export const READ_BUDGET_WARNING_CHARS = 4_000
+
+/**
+ * How much raw page text a summary call may feed to the small summarizer
+ * model. This text stays in the tool process and never enters the main model's
+ * context, so it is not charged against the read budget.
+ */
+export const SUMMARY_INPUT_MAX_CHARS = 60_000
+
+/** Default length of the digest returned by a summary read. */
+export const SUMMARY_DEFAULT_MAX_CHARS = 3_000
+
+/**
+ * Pages longer than this are summarized automatically instead of being paged
+ * into the conversation. Mirrors WebFetch: the raw page is an input to the
+ * summarizer, not something the main model reads by default.
+ */
+export const READ_AUTO_SUMMARY_THRESHOLD_CHARS = 20_000
+
+/** How long a query/summary extraction stays reusable. */
+export const READ_EXTRACTION_CACHE_TTL_MS = 60_000
+
+/** Most extraction results kept per browser session. */
+export const READ_EXTRACTION_CACHE_MAX_ENTRIES = 32
+
+/**
+ * Repeated query reads of the same page inside the TTL return a short stub
+ * instead of the passages again: the earlier result is already in the
+ * conversation, and re-sending it only grows the context.
+ */
+export const READ_CACHE_STUB_THRESHOLD_CHARS = 1_200
+
+/** Characters of the earlier query result repeated in a cache stub. */
+export const READ_CACHE_PREVIEW_CHARS = 400

@@ -55,11 +55,16 @@ import {
 } from "./pageScripts.js";
 import {
   READ_BUDGET_WARNING_CHARS,
+  READ_CACHE_PREVIEW_CHARS,
+  READ_CACHE_STUB_THRESHOLD_CHARS,
   READ_DEFAULT_MAX_CHARS,
+  READ_EXTRACTION_CACHE_MAX_ENTRIES,
+  READ_EXTRACTION_CACHE_TTL_MS,
   READ_MAX_CHARS_PER_CALL,
   READ_MAX_CHARS_PER_DOCUMENT,
   READ_MAX_CHARS_PER_SESSION,
   READ_MIN_CHARS,
+  SUMMARY_INPUT_MAX_CHARS,
 } from "./readLimits.js";
 import { WatchdogManager } from "./watchdogs/watchdog.js";
 import { SecurityWatchdog } from "./watchdogs/securityWatchdog.js";
@@ -73,6 +78,21 @@ export interface TabInfo {
   url: string;
   title: string;
   active: boolean;
+}
+
+/**
+ * What changed in the interactive element set since the previous observation.
+ * Unchanged elements keep their refs, so a diff can omit them without making
+ * older @N references stale.
+ */
+export interface ObservationDiff {
+  /** Too much changed (or the page was replaced): show the full list instead. */
+  full: boolean;
+  added: InteractiveElement[];
+  changed: InteractiveElement[];
+  removed: number[];
+  unchanged: number;
+  total: number;
 }
 
 export interface BrowserActionOutcome {
@@ -125,6 +145,34 @@ export function resolveClickTarget(
     };
   }
   return null;
+}
+
+/**
+ * Fields that make an element "the same thing" across observations. Geometry
+ * is deliberately excluded: scrolling moves every element, but nothing the
+ * model needs to know about changed.
+ */
+function observationSignature(el: InteractiveElement): string {
+  return JSON.stringify([
+    el.tag,
+    el.text,
+    el.role,
+    el.href,
+    el.placeholder,
+    el.aria,
+    el.value,
+    el.pressed,
+    el.checked,
+    el.disabled,
+    el.expanded,
+    el.selected,
+    el.current,
+    el.required,
+    el.invalid,
+    el.frame,
+    el.picked,
+    el.repeatNote,
+  ]);
 }
 
 export interface ConsoleEntry {
@@ -713,6 +761,23 @@ class BrowserSessionService {
   private readSessionChars = 0;
   private readDocumentKey?: string;
   private readDocumentChars = 0;
+  /** The last observation, kept so the next one can report only what changed. */
+  private lastObservedState?: ObservedState;
+  private lastObservedTargetId?: string;
+  private lastObservationDiff?: ObservationDiff;
+  /**
+   * Short-lived extraction cache (WebFetch-style). Query reads and summaries
+   * reuse the same page+query answer so a retry does not pay to extract it
+   * again. Navigation and tab changes clear it.
+   */
+  private extractionCache = new Map<
+    string,
+    { at: number; result: ReadResult }
+  >();
+  private summaryCache = new Map<
+    string,
+    { at: number; digest: string; url?: string; title?: string }
+  >();
 
   isRunning(): boolean {
     return !!this.client?.isOpen;
@@ -1227,6 +1292,7 @@ class BrowserSessionService {
     await client.send("Target.activateTarget", { targetId: tab.targetId });
     this.activeTargetId = tab.targetId;
     this.coordClicks = [];
+    this.clearExtractionCache();
     await this.getActiveSession();
     return this.listTabs();
   }
@@ -1240,6 +1306,7 @@ class BrowserSessionService {
     await client.send("Target.activateTarget", { targetId });
     this.activeTargetId = targetId;
     this.coordClicks = [];
+    this.clearExtractionCache();
     await this.getActiveSession();
     if (url) await this.navigate(url);
   }
@@ -1268,6 +1335,7 @@ class BrowserSessionService {
     this.inflight.delete(tab.targetId);
     if (this.activeTargetId === tab.targetId) {
       this.activeTargetId = undefined;
+      this.clearExtractionCache();
       await this.ensureActiveTarget();
     }
     return this.listTabs();
@@ -1300,6 +1368,7 @@ class BrowserSessionService {
     await this.waitForSettle(signal);
     this.lastKnownUrl = target;
     this.coordClicks = [];
+    this.clearExtractionCache();
   }
 
   async goBack(signal?: AbortSignal): Promise<void> {
@@ -1319,6 +1388,7 @@ class BrowserSessionService {
       sessionId,
     );
     await this.waitForSettle(signal);
+    this.clearExtractionCache();
   }
 
   async observe(signal?: AbortSignal): Promise<{
@@ -1345,6 +1415,9 @@ class BrowserSessionService {
       throw new Error("Could not observe the page (no DOM available yet).");
     }
     raw.interactive_elements = prunePayloadElements(raw.interactive_elements);
+    // An observation follows an action, so anything extracted before it may be
+    // stale. Reads never call observe, so a repeated read still hits the cache.
+    this.clearExtractionCache();
     await this.callPageTools<PageActionResult>(
       "setObservedIds(" +
         JSON.stringify(raw.interactive_elements.map((el) => el.id)) +
@@ -1357,6 +1430,10 @@ class BrowserSessionService {
     );
     this.cachedElementsTargetId = this.activeTargetId;
     this.lastKnownUrl = raw.url;
+
+    this.lastObservationDiff = this.computeObservationDiff(raw);
+    this.lastObservedState = raw;
+    this.lastObservedTargetId = this.activeTargetId;
 
     const warnings: string[] = [];
     const blocker = detectBlocker(raw);
@@ -1763,33 +1840,172 @@ class BrowserSessionService {
   }
 
   /**
-   * Extracts the rendered page (or a selector within it) as compact markdown.
-   * This is the model's reading channel — articles, docs, search results —
-   * with offset/maxChars pagination for long pages.
+   * Compares the fresh observation with the previous one for the same tab and
+   * URL. Returns undefined when there is nothing meaningful to diff against
+   * (first look, navigation, tab switch); callers then show the full list.
    */
-  async readPage(options: {
-    selector?: string;
-    offset?: number;
-    maxChars?: number;
-  }): Promise<ReadResult> {
-    const requested = clampNumber(
-      Number(options.maxChars),
-      READ_MIN_CHARS,
-      READ_MAX_CHARS_PER_CALL,
-      READ_DEFAULT_MAX_CHARS,
-    );
-    const offset = Math.max(0, Number(options.offset) || 0);
-    const selector = options.selector ?? null;
+  private computeObservationDiff(
+    observation: ObservedState,
+  ): ObservationDiff | undefined {
+    const previous = this.lastObservedState;
+    if (!previous) return undefined;
+    if (previous.url !== observation.url) return undefined;
+    if (this.lastObservedTargetId !== this.activeTargetId) return undefined;
 
-    // Paging the same huge document used to grow the conversation one 6k slice
-    // at a time until the provider dropped the request. Budget both the
-    // document and the browser session, and refuse with actionable advice
-    // instead of returning more text.
-    const documentKey = `${this.activeTargetId ?? "none"}|${this.lastKnownUrl ?? ""}|${selector ?? "*"}`;
-    if (documentKey !== this.readDocumentKey) {
-      this.readDocumentKey = documentKey;
+    const previousById = new Map(
+      previous.interactive_elements.map((el) => [el.id, el]),
+    );
+    const currentIds = new Set<number>();
+    const added: InteractiveElement[] = [];
+    const changed: InteractiveElement[] = [];
+    for (const el of observation.interactive_elements) {
+      currentIds.add(el.id);
+      const before = previousById.get(el.id);
+      if (!before) added.push(el);
+      else if (observationSignature(before) !== observationSignature(el)) {
+        changed.push(el);
+      }
+    }
+    const removed = previous.interactive_elements
+      .filter((el) => !currentIds.has(el.id))
+      .map((el) => el.id);
+    const total = observation.interactive_elements.length;
+    const unchanged = total - added.length - changed.length;
+    const changedCount = added.length + changed.length + removed.length;
+    // A wholesale replacement is more useful as a full list than as a diff.
+    const full =
+      total === 0 ||
+      (changedCount > 0 && unchanged === 0) ||
+      changedCount > Math.max(12, total * 0.5);
+    return {
+      full,
+      added,
+      changed,
+      removed,
+      unchanged,
+      total,
+    };
+  }
+
+  /**
+   * The diff for the observation the caller is about to render, or undefined
+   * when that observation is not the latest one (show the full list).
+   */
+  getObservationDiff(observation: ObservedState): ObservationDiff | undefined {
+    return observation === this.lastObservedState
+      ? this.lastObservationDiff
+      : undefined;
+  }
+
+  private extractionKey(
+    kind: "read" | "summary",
+    selector: string | null,
+    query: string,
+    maxChars: number,
+  ): string {
+    return [
+      kind,
+      this.activeTargetId ?? "none",
+      this.lastKnownUrl ?? "",
+      selector ?? "*",
+      query,
+      maxChars,
+    ].join("\u0000");
+  }
+
+  private getCachedRead(
+    key: string,
+  ): { result: ReadResult; ageMs: number } | undefined {
+    const entry = this.extractionCache.get(key);
+    if (!entry) return undefined;
+    const ageMs = Date.now() - entry.at;
+    if (ageMs > READ_EXTRACTION_CACHE_TTL_MS) {
+      this.extractionCache.delete(key);
+      return undefined;
+    }
+    // Refresh recency so a repeatedly used entry survives eviction.
+    this.extractionCache.delete(key);
+    this.extractionCache.set(key, entry);
+    return { result: entry.result, ageMs };
+  }
+
+  private setCachedRead(key: string, result: ReadResult): void {
+    if (this.extractionCache.size >= READ_EXTRACTION_CACHE_MAX_ENTRIES) {
+      const oldest = this.extractionCache.keys().next().value;
+      if (oldest !== undefined) this.extractionCache.delete(oldest);
+    }
+    this.extractionCache.set(key, { at: Date.now(), result });
+  }
+
+  /** A digest from the same page + query inside the TTL, if one exists. */
+  getCachedSummary(options: {
+    selector?: string | null;
+    query?: string;
+    maxChars: number;
+  }): { digest: string; url?: string; title?: string; ageMs: number } | undefined {
+    const key = this.extractionKey(
+      "summary",
+      options.selector ?? null,
+      options.query?.trim() || "",
+      options.maxChars,
+    );
+    const entry = this.summaryCache.get(key);
+    if (!entry) return undefined;
+    const ageMs = Date.now() - entry.at;
+    if (ageMs > READ_EXTRACTION_CACHE_TTL_MS) {
+      this.summaryCache.delete(key);
+      return undefined;
+    }
+    return { digest: entry.digest, url: entry.url, title: entry.title, ageMs };
+  }
+
+  noteSummaryDigest(
+    options: { selector?: string | null; query?: string; maxChars: number },
+    digest: string,
+    url?: string,
+    title?: string,
+  ): void {
+    const key = this.extractionKey(
+      "summary",
+      options.selector ?? null,
+      options.query?.trim() || "",
+      options.maxChars,
+    );
+    if (this.summaryCache.size >= READ_EXTRACTION_CACHE_MAX_ENTRIES) {
+      const oldest = this.summaryCache.keys().next().value;
+      if (oldest !== undefined) this.summaryCache.delete(oldest);
+    }
+    this.summaryCache.set(key, { at: Date.now(), digest, url, title });
+  }
+
+  private clearExtractionCache(): void {
+    this.extractionCache.clear();
+    this.summaryCache.clear();
+  }
+
+  private documentKeyFor(selector: string | null): string {
+    return `${this.activeTargetId ?? "none"}|${this.lastKnownUrl ?? ""}|${selector ?? "*"}`;
+  }
+
+  private syncReadDocument(selector: string | null): void {
+    const key = this.documentKeyFor(selector);
+    if (key !== this.readDocumentKey) {
+      this.readDocumentKey = key;
       this.readDocumentChars = 0;
     }
+  }
+
+  /**
+   * Paging the same huge document used to grow the conversation one slice at a
+   * time until the provider dropped the request. Budget both the document and
+   * the browser session, and refuse with actionable advice instead of returning
+   * more text.
+   */
+  private reserveReadChars(
+    selector: string | null,
+    requested: number,
+  ): { maxChars: number } | { error: ReadResult } {
+    this.syncReadDocument(selector);
     const documentLeft = READ_MAX_CHARS_PER_DOCUMENT - this.readDocumentChars;
     const sessionLeft = READ_MAX_CHARS_PER_SESSION - this.readSessionChars;
     const budgetLeft = Math.min(documentLeft, sessionLeft);
@@ -1799,17 +2015,110 @@ class BrowserSessionService {
           ? `this browser session (${READ_MAX_CHARS_PER_SESSION} characters)`
           : `this page (${READ_MAX_CHARS_PER_DOCUMENT} characters)`;
       return {
-        success: false,
-        reason: "read_budget",
-        error: `Read budget for ${exhausted} is used up, so no more page text will be returned. Stop paging: use "extract" for the fields you need, re-read with a narrower selector, or use "get" on a specific URL.`,
+        error: {
+          success: false,
+          reason: "read_budget",
+          error: `Read budget for ${exhausted} is used up, so no more page text will be returned. Stop paging: use "extract" for the fields you need, re-read with a narrower selector, or use "get" on a specific URL.`,
+        },
       };
     }
-    const maxChars = Math.min(requested, budgetLeft);
+    return { maxChars: Math.min(requested, budgetLeft) };
+  }
+
+  /** Undo a charge for text that was fetched but not shown (auto-summary). */
+  refundRead(chars: number): void {
+    const n = Math.max(0, chars);
+    this.readSessionChars = Math.max(0, this.readSessionChars - n);
+    this.readDocumentChars = Math.max(0, this.readDocumentChars - n);
+    // The discarded slice is not a paging position the model ever saw.
+    this.lastRead = undefined;
+  }
+
+  private chargeRead(chars: number): void {
+    this.readSessionChars += chars;
+    this.readDocumentChars += chars;
+    const remaining = Math.min(
+      READ_MAX_CHARS_PER_DOCUMENT - this.readDocumentChars,
+      READ_MAX_CHARS_PER_SESSION - this.readSessionChars,
+    );
+    if (remaining < READ_MIN_CHARS) {
+      this.sessionNotes.push(
+        "Read budget exhausted: further read calls will be refused. Use extract, get, or a narrower selector for anything else.",
+      );
+    } else if (remaining < READ_BUDGET_WARNING_CHARS) {
+      this.sessionNotes.push(
+        `Only ${remaining} characters of read budget remain; prefer extract or a narrower selector instead of paging on.`,
+      );
+    }
+  }
+
+  /**
+   * Extracts the rendered page (or a selector within it) as compact markdown.
+   * This is the model's reading channel — articles, docs, search results —
+   * with offset/maxChars pagination for long pages. A query switches to passage
+   * mode: the whole document is ranked in-page and only matching passages are
+   * returned, so irrelevant text never reaches the context window.
+   */
+  async readPage(options: {
+    selector?: string;
+    offset?: number;
+    maxChars?: number;
+    query?: string;
+    /** Bypass the short-lived extraction cache. */
+    refresh?: boolean;
+  }): Promise<ReadResult> {
+    const requested = clampNumber(
+      Number(options.maxChars),
+      READ_MIN_CHARS,
+      READ_MAX_CHARS_PER_CALL,
+      READ_DEFAULT_MAX_CHARS,
+    );
+    const offset = Math.max(0, Number(options.offset) || 0);
+    const selector = options.selector ?? null;
+    const query = options.query?.trim() || null;
+
+    // Repeating the same page+query usually means the earlier passages are
+    // already in the conversation. Hand back a stub (or the short result)
+    // instead of paying for the same extraction again.
+    const cacheKey =
+      query && offset === 0
+        ? this.extractionKey("read", selector, query, requested)
+        : undefined;
+    if (cacheKey && !options.refresh) {
+      const cached = this.getCachedRead(cacheKey);
+      if (cached) {
+        const ageSec = Math.max(1, Math.round(cached.ageMs / 1000));
+        const previousContent = cached.result.content ?? "";
+        const content =
+          previousContent.length > READ_CACHE_STUB_THRESHOLD_CHARS
+            ? [
+                `[cached ${ageSec}s ago] The same ${cached.result.matches ?? 0} passage(s) matched "${query}" on this page, and that result is already in this conversation.`,
+                "",
+                previousContent.slice(0, READ_CACHE_PREVIEW_CHARS) +
+                  (previousContent.length > READ_CACHE_PREVIEW_CHARS ? "…" : ""),
+                "",
+                'Pass "refresh": true if you need the full passages again.',
+              ].join("\n")
+            : previousContent;
+        if (content) this.chargeRead(content.length);
+        return {
+          ...cached.result,
+          content,
+          cached: true,
+          cachedAgeMs: cached.ageMs,
+        };
+      }
+    }
+
+    const reserved = this.reserveReadChars(selector, requested);
+    if ("error" in reserved) return reserved.error;
+    const maxChars = reserved.maxChars;
 
     // Reading on from exactly where the last read of this tab ended: hand the
     // page the text that ended it, so a shift in between is caught.
     const previous = this.lastRead;
     const anchor =
+      !query &&
       previous &&
       offset > 0 &&
       previous.next === offset &&
@@ -1818,13 +2127,18 @@ class BrowserSessionService {
         ? previous.anchor
         : null;
     const result = await this.callPageTools<ReadResult>(
-      `readPage(${JSON.stringify(selector)}, ${offset}, ${maxChars}, ${JSON.stringify(anchor)})`,
+      `readPage(${JSON.stringify(selector)}, ${offset}, ${maxChars}, ${JSON.stringify(anchor)}, ${JSON.stringify(query)})`,
       { timeoutMs: 25_000 },
     );
     if (result?.url) this.lastKnownUrl = result.url;
     const targetId = this.activeTargetId;
+    // Query mode is not a position in the document, so it cannot seed paging.
     this.lastRead =
-      result?.success && !result.stale && result.content && targetId
+      !result?.query &&
+      result?.success &&
+      !result.stale &&
+      result.content &&
+      targetId
         ? {
             targetId,
             selector,
@@ -1833,23 +2147,52 @@ class BrowserSessionService {
           }
         : undefined;
     if (result?.success && !result.stale && result.content) {
-      this.readSessionChars += result.content.length;
-      this.readDocumentChars += result.content.length;
-      const remaining = Math.min(
-        READ_MAX_CHARS_PER_DOCUMENT - this.readDocumentChars,
-        READ_MAX_CHARS_PER_SESSION - this.readSessionChars,
-      );
-      if (remaining < READ_MIN_CHARS) {
-        this.sessionNotes.push(
-          "Read budget exhausted: further read calls will be refused. Use extract, get, or a narrower selector for anything else.",
-        );
-      } else if (remaining < READ_BUDGET_WARNING_CHARS) {
-        this.sessionNotes.push(
-          `Only ${remaining} characters of read budget remain; prefer extract or a narrower selector instead of paging on.`,
-        );
-      }
+      this.chargeRead(result.content.length);
+    }
+    if (cacheKey && result?.success && !result.stale && result.query) {
+      this.setCachedRead(cacheKey, result);
     }
     return result ?? { success: false, error: "Read produced no result." };
+  }
+
+  /**
+   * Extract page text for a one-off summarizer call. The raw text stays in the
+   * tool process and never reaches the main model, so it is not charged against
+   * the read budget; the digest returned to the model is charged separately via
+   * noteSummaryOutput.
+   */
+  async readForSummary(options: {
+    selector?: string;
+    query?: string;
+    maxChars?: number;
+    /**
+     * Rank passages by query in-page before summarizing. Set false to give the
+     * summarizer the whole document with the query as focus (used when a
+     * passage search found nothing).
+     */
+    passages?: boolean;
+  }): Promise<ReadResult> {
+    const selector = options.selector ?? null;
+    const query = options.query?.trim() || null;
+    const passages = options.passages ?? true;
+    const maxChars = clampNumber(
+      Number(options.maxChars),
+      READ_MIN_CHARS,
+      SUMMARY_INPUT_MAX_CHARS,
+      SUMMARY_INPUT_MAX_CHARS,
+    );
+    const result = await this.callPageTools<ReadResult>(
+      `readPage(${JSON.stringify(selector)}, 0, ${maxChars}, null, ${JSON.stringify(passages ? query : null)})`,
+      { timeoutMs: 45_000 },
+    );
+    if (result?.url) this.lastKnownUrl = result.url;
+    return result ?? { success: false, error: "Read produced no result." };
+  }
+
+  /** Charge the digest a summary read actually returned to the model. */
+  noteSummaryOutput(chars: number, selector?: string | null): void {
+    this.syncReadDocument(selector ?? null);
+    this.chargeRead(Math.max(0, chars));
   }
 
   /**
@@ -2036,6 +2379,8 @@ class BrowserSessionService {
         awaitPromise: true,
         timeoutMs: 20_000,
       });
+      // Arbitrary JS can rewrite the DOM; never hand back a pre-eval extraction.
+      this.clearExtractionCache();
       return { ok: true, value: serialize(value) };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -2045,6 +2390,7 @@ class BrowserSessionService {
             `(async () => { ${js} })()`,
             { awaitPromise: true, timeoutMs: 20_000 },
           );
+          this.clearExtractionCache();
           return { ok: true, value: serialize(value) };
         } catch (retryError) {
           const retryMessage =
@@ -2389,6 +2735,7 @@ class BrowserSessionService {
       sessionId,
     );
     await this.waitForSettle(signal);
+    this.clearExtractionCache();
   }
 
   /** Reloads the current page; hard=true bypasses the cache (dev loop). */
@@ -2403,6 +2750,7 @@ class BrowserSessionService {
     await client.send("Page.reload", { ignoreCache: hard }, sessionId);
     await loadFired;
     await this.waitForSettle(signal);
+    this.clearExtractionCache();
   }
 
   /**
@@ -3499,6 +3847,10 @@ class BrowserSessionService {
     this.readSessionChars = 0;
     this.readDocumentKey = undefined;
     this.readDocumentChars = 0;
+    this.lastObservedState = undefined;
+    this.lastObservedTargetId = undefined;
+    this.lastObservationDiff = undefined;
+    this.clearExtractionCache();
     this.watchCursor = 0;
     // Detach watchdogs
     this.watchdogManager?.detachAll();
