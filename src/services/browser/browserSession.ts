@@ -53,6 +53,14 @@ import {
   type StateExplanation,
   type StealthPlatform,
 } from "./pageScripts.js";
+import {
+  READ_BUDGET_WARNING_CHARS,
+  READ_DEFAULT_MAX_CHARS,
+  READ_MAX_CHARS_PER_CALL,
+  READ_MAX_CHARS_PER_DOCUMENT,
+  READ_MAX_CHARS_PER_SESSION,
+  READ_MIN_CHARS,
+} from "./readLimits.js";
 import { WatchdogManager } from "./watchdogs/watchdog.js";
 import { SecurityWatchdog } from "./watchdogs/securityWatchdog.js";
 import { PermissionsWatchdog } from "./watchdogs/permissionsWatchdog.js";
@@ -697,6 +705,14 @@ class BrowserSessionService {
     next: number;
     anchor: string;
   };
+  /**
+   * Read budget, so paging a huge page cannot keep growing the conversation.
+   * Document scope resets on navigation/selector change; session scope lasts
+   * until the browser is reopened.
+   */
+  private readSessionChars = 0;
+  private readDocumentKey?: string;
+  private readDocumentChars = 0;
 
   isRunning(): boolean {
     return !!this.client?.isOpen;
@@ -1756,9 +1772,40 @@ class BrowserSessionService {
     offset?: number;
     maxChars?: number;
   }): Promise<ReadResult> {
-    const maxChars = clampNumber(Number(options.maxChars), 500, 30_000, 6_000);
+    const requested = clampNumber(
+      Number(options.maxChars),
+      READ_MIN_CHARS,
+      READ_MAX_CHARS_PER_CALL,
+      READ_DEFAULT_MAX_CHARS,
+    );
     const offset = Math.max(0, Number(options.offset) || 0);
     const selector = options.selector ?? null;
+
+    // Paging the same huge document used to grow the conversation one 6k slice
+    // at a time until the provider dropped the request. Budget both the
+    // document and the browser session, and refuse with actionable advice
+    // instead of returning more text.
+    const documentKey = `${this.activeTargetId ?? "none"}|${this.lastKnownUrl ?? ""}|${selector ?? "*"}`;
+    if (documentKey !== this.readDocumentKey) {
+      this.readDocumentKey = documentKey;
+      this.readDocumentChars = 0;
+    }
+    const documentLeft = READ_MAX_CHARS_PER_DOCUMENT - this.readDocumentChars;
+    const sessionLeft = READ_MAX_CHARS_PER_SESSION - this.readSessionChars;
+    const budgetLeft = Math.min(documentLeft, sessionLeft);
+    if (budgetLeft < READ_MIN_CHARS) {
+      const exhausted =
+        sessionLeft <= documentLeft
+          ? `this browser session (${READ_MAX_CHARS_PER_SESSION} characters)`
+          : `this page (${READ_MAX_CHARS_PER_DOCUMENT} characters)`;
+      return {
+        success: false,
+        reason: "read_budget",
+        error: `Read budget for ${exhausted} is used up, so no more page text will be returned. Stop paging: use "extract" for the fields you need, re-read with a narrower selector, or use "get" on a specific URL.`,
+      };
+    }
+    const maxChars = Math.min(requested, budgetLeft);
+
     // Reading on from exactly where the last read of this tab ended: hand the
     // page the text that ended it, so a shift in between is caught.
     const previous = this.lastRead;
@@ -1785,6 +1832,23 @@ class BrowserSessionService {
             anchor: result.content.slice(-64),
           }
         : undefined;
+    if (result?.success && !result.stale && result.content) {
+      this.readSessionChars += result.content.length;
+      this.readDocumentChars += result.content.length;
+      const remaining = Math.min(
+        READ_MAX_CHARS_PER_DOCUMENT - this.readDocumentChars,
+        READ_MAX_CHARS_PER_SESSION - this.readSessionChars,
+      );
+      if (remaining < READ_MIN_CHARS) {
+        this.sessionNotes.push(
+          "Read budget exhausted: further read calls will be refused. Use extract, get, or a narrower selector for anything else.",
+        );
+      } else if (remaining < READ_BUDGET_WARNING_CHARS) {
+        this.sessionNotes.push(
+          `Only ${remaining} characters of read budget remain; prefer extract or a narrower selector instead of paging on.`,
+        );
+      }
+    }
     return result ?? { success: false, error: "Read produced no result." };
   }
 
@@ -3432,6 +3496,9 @@ class BrowserSessionService {
     this.failureStreak.clear();
     this.headless = false;
     this.lastRead = undefined;
+    this.readSessionChars = 0;
+    this.readDocumentKey = undefined;
+    this.readDocumentChars = 0;
     this.watchCursor = 0;
     // Detach watchdogs
     this.watchdogManager?.detachAll();

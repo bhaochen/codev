@@ -12,6 +12,13 @@ import {
   type BrowserSessionService,
   type TabActivityProbe,
 } from "./browserSession.js";
+import type { ReadResult } from "./pageScripts.js";
+import {
+  READ_DEFAULT_MAX_CHARS,
+  READ_MAX_CHARS_PER_CALL,
+  READ_MAX_CHARS_PER_DOCUMENT,
+  READ_MAX_CHARS_PER_SESSION,
+} from "./readLimits.js";
 
 let passed = 0;
 let failed = 0;
@@ -80,6 +87,8 @@ function fakeClient(
 type SessionHarness = {
   client?: FakeClient;
   activeTargetId?: string;
+  lastKnownUrl?: string;
+  readPage: BrowserSessionService["readPage"];
   activityBindingName: string;
   sessions: Map<string, string>;
   sessionToTarget: Map<string, string>;
@@ -253,6 +262,116 @@ async function main(): Promise<void> {
 
     assert(session.activeTargetId === "tab-a", "background tab must not hijack focus");
     assert(session.sessionNotes.length === 0, "rejected report must stay silent");
+  });
+
+  console.log("read budget:");
+
+  function readSession(url = "https://read.test/") {
+    const expressions: string[] = [];
+    const session = freshSession();
+    session.activeTargetId = "tab-read";
+    session.lastKnownUrl = url;
+    session.sessions.set("tab-read", "session-read");
+    session.fullyPreparedTargets.add("tab-read");
+    session.client = fakeClient((call) => {
+      if (call.method === "Runtime.evaluate") {
+        const expression = String(call.params?.expression ?? "");
+        expressions.push(expression);
+        const match = expression.match(
+          /readPage\((?:null|"[^"]*"), \d+, (\d+), /,
+        );
+        const budget = match ? Number(match[1]) : READ_DEFAULT_MAX_CHARS;
+        const result: ReadResult = {
+          success: true,
+          url,
+          title: "Read",
+          content: "x".repeat(budget),
+          total: 1_000_000,
+          offset: 0,
+          complete: false,
+        };
+        return { result: { value: result } };
+      }
+      return {};
+    });
+    return { session, expressions };
+  }
+
+  await testAsync("read defaults to the smaller page slice", async () => {
+    const { session, expressions } = readSession();
+    await session.readPage({});
+    const last = expressions.at(-1) ?? "";
+    assert(
+      last.includes(`readPage(null, 0, ${READ_DEFAULT_MAX_CHARS}, null)`),
+      last,
+    );
+  });
+
+  await testAsync("maxChars cannot exceed the per-call ceiling", async () => {
+    const { session, expressions } = readSession();
+    await session.readPage({ maxChars: 999_999 });
+    const last = expressions.at(-1) ?? "";
+    assert(last.includes(`, ${READ_MAX_CHARS_PER_CALL},`), last);
+  });
+
+  await testAsync("stops paging one document after its budget", async () => {
+    const { session, expressions } = readSession();
+    const perRead = READ_MAX_CHARS_PER_CALL;
+    const reads = Math.ceil(READ_MAX_CHARS_PER_DOCUMENT / perRead);
+    for (let i = 0; i < reads; i++) {
+      const result = await session.readPage({ maxChars: perRead });
+      assert(result.success, `read ${i}: ${JSON.stringify(result)}`);
+    }
+    const evaluations = expressions.length;
+    const refused = await session.readPage({ maxChars: perRead });
+    assert(
+      !refused.success && refused.reason === "read_budget",
+      JSON.stringify(refused),
+    );
+    assert(
+      expressions.length === evaluations,
+      "a refused read must not evaluate the page again",
+    );
+    assert(
+      (refused.error ?? "").includes("page"),
+      String(refused.error),
+    );
+  });
+
+  await testAsync("session budget spans documents", async () => {
+    const { session, expressions } = readSession();
+    const readsPerDocument = Math.ceil(
+      READ_MAX_CHARS_PER_DOCUMENT / READ_MAX_CHARS_PER_CALL,
+    );
+    const documents = Math.ceil(
+      READ_MAX_CHARS_PER_SESSION / READ_MAX_CHARS_PER_DOCUMENT,
+    );
+    for (let document = 0; document < documents; document++) {
+      session.lastKnownUrl = `https://read.test/${document}`;
+      for (let i = 0; i < readsPerDocument; i++) {
+        const result = await session.readPage({
+          maxChars: READ_MAX_CHARS_PER_CALL,
+        });
+        assert(
+          result.success,
+          `document ${document} read ${i}: ${JSON.stringify(result)}`,
+        );
+      }
+    }
+    session.lastKnownUrl = "https://read.test/next";
+    const refused = await session.readPage({ maxChars: READ_MAX_CHARS_PER_CALL });
+    assert(
+      !refused.success && refused.reason === "read_budget",
+      JSON.stringify(refused),
+    );
+    assert(
+      (refused.error ?? "").includes("browser session"),
+      String(refused.error),
+    );
+    assert(
+      expressions.length === documents * readsPerDocument,
+      `${expressions.length} evaluations`,
+    );
   });
 
   console.log("attachment coalescing:");

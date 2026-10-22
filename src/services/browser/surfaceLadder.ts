@@ -13,6 +13,11 @@
 
 import { fetchHttpRung, formatRung, type Rung } from "./httpRung.js";
 import type { ReadResult } from "./pageScripts.js";
+import {
+  READ_DEFAULT_MAX_CHARS,
+  READ_MAX_CHARS_PER_CALL,
+  READ_MIN_CHARS,
+} from "./readLimits.js";
 
 /** The slice of the browser session the ladder needs. */
 export interface LadderSessionLike {
@@ -59,7 +64,10 @@ export async function runSurfaceLadder(
 ): Promise<LadderResult> {
   const now = options.now ?? Date.now;
   const surface = options.surface ?? "auto";
-  const maxChars = Math.min(Math.max(options.maxChars ?? 6000, 500), 30_000);
+  const maxChars = Math.min(
+    Math.max(options.maxChars ?? READ_DEFAULT_MAX_CHARS, READ_MIN_CHARS),
+    READ_MAX_CHARS_PER_CALL,
+  );
   const target = options.url;
   const isFile = target.startsWith("file://");
   const warnings: string[] = [];

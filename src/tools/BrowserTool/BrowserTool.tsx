@@ -94,11 +94,11 @@ The tool BLOCKS repeated blind coordinate clicks on purpose (reason "coordinate_
 CLOSING MODALS / POPUPS / OVERLAYS: use { "action": "dismiss" }. It finds the topmost dialog/popup/drawer/lightbox and clicks its close control (or sends Escape). Do NOT hunt for the X with coordinates. Cookie/consent banners are auto-dismissed on observe.
 
 SEE / READ:
-- get — { url, surface?, maxChars? } READ A PAGE THE CHEAP WAY. Fetches over HTTP first and only starts the browser when the bytes prove it is needed (empty SPA shell, bot wall, 403/429, timeout). The reply always says which rung answered ("rung=http" or "rung=chromium · escalated from http: ..."). Use this instead of open+navigate+read for anything you only want to READ. surface: "http" or "chromium" forces one rung.
+- get — { url, surface?, maxChars? } READ A PAGE THE CHEAP WAY. Fetches over HTTP first and only starts the browser when the bytes prove it is needed (empty SPA shell, bot wall, 403/429, timeout). The reply always says which rung answered ("rung=http" or "rung=chromium · escalated from http: ..."). Use this instead of open+navigate+read for anything you only want to READ. surface: "http" or "chromium" forces one rung. maxChars defaults to 4000 and is capped at 12000.
 - measure — no params. MEASURED FACTS about what rendered: viewport, painted background/text colors by area, fonts that fell back because they never loaded, WCAG contrast failures with real ratios, broken and oversized images, elements overflowing the viewport, running animations, landmark boxes. This is how you check a UI without inventing it.
 - extract — { fields, container?, limit? } STRUCTURED SCRAPING WITH PROVENANCE. { "container": "article.product", "fields": { "name": ".title", "price": ".price", "link": "a@href" } }. Every value comes back with the selector that produced it, plus warnings you cannot get any other way: a selector that matched nothing, one that matched the same value in every row (it is reaching outside the row), one that matched several elements, and links that are really login/redirect/wishlist URLs rather than item URLs. If the container matches nothing you get the page's actual repeating structures to choose from. Nothing outside that table came from the page — do not fill gaps from memory.
 - observe — no params. url, title, elements as "@N tag \\"text\\" [role]", and scroll state. Form fields are named by their label. State shows when it applies: (checked)/(unchecked), (expanded)/(collapsed), (selected), (current page), (pressed)/(not pressed), (required), (invalid), (disabled).
-- read — { selector?, maxChars?, offset? }. Rendered page as markdown with [text](url) links. Defaults to the main content area; selector scopes it (e.g. "#docs"); long pages report total length — page through with the offset each reply gives. Pages end at a paragraph or sentence. If the page shifted between two reads the reply re-finds your place; if the text you read is gone, it says so (reason stale_read) instead of stitching two versions together.
+- read — { selector?, maxChars?, offset? }. Rendered page as markdown with [text](url) links. Defaults to the main content area; selector scopes it (e.g. "#docs"); long pages report total length — page through with the offset each reply gives. maxChars defaults to 4000 and is capped at 12000. Paging is budgeted: one document can return about 24000 characters and one browser session about 96000, after which further reads are refused (reason read_budget) — switch to a narrower selector or extract instead of paging on. Pages end at a paragraph or sentence. If the page shifted between two reads the reply re-finds your place; if the text you read is gone, it says so (reason stale_read) instead of stitching two versions together.
 - pick — { text?: "Point at the price you mean" } hands the visible browser to the user: whatever their pointer is over is outlined, and the element they click (the link, button or heading it sits in) comes back as @N (first in the list, marked (picked)) with its tag, selector and text. Tell the user to click once the bar starting "Tau:" shows at the top of the page; a click before that reaches the page itself. Esc cancels; it waits up to 2 minutes for a person. While it waits the page does not react to the pointer, so to pick inside a menu that opens on hover, hover it open first, then pick. Use it only when the target is genuinely ambiguous or the user means "this one" on the page, never to explore. Not available while the browser is headless.
 - screenshot — optional { full: true } whole page, { ref: N } one element, { annotate: true } @N badges over the last observation, { path: "shot.png" } save to a file instead of returning into context (use path when the user wants the image, not you).
 - console — { level?, filter?, limit?, clear? }. This tab's console messages + uncaught exceptions. level: error|warn|info|log|all.
@@ -319,9 +319,11 @@ const inputSchema = lazySchema(() =>
       .number()
       .int()
       .min(500)
-      .max(30_000)
+      .max(12_000)
       .optional()
-      .describe('For read: max characters to return. Default 6000.'),
+      .describe(
+        'For read/get: max characters to return. Default 4000, hard cap 12000.',
+      ),
     offset: z
       .number()
       .int()
@@ -1790,8 +1792,9 @@ export const BrowserTool = buildTool({
   searchHint: 'control real chrome browser click type navigate dom automation',
   // Kept modest on purpose: a browsing session appends one observation per
   // action, so an outlier huge page is spilled to disk (retrievable) rather
-  // than left to saturate the window. Typical observations are well under
-  // this; the ceiling exists for read with an explicit large maxChars.
+  // than left to saturate the window. Read itself is capped well below this
+  // (see readLimits.ts); the ceiling protects observations and multi-result
+  // actions from saturating the context window.
   maxResultSizeChars: 32_000,
   shouldDefer: true,
   async description() {
