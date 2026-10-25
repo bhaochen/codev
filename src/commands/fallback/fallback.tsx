@@ -668,7 +668,13 @@ function FallbackPanel({
             description: 'Remove every configured target',
           },
         ]
-      : []),
+      : [
+          {
+            label: 'Add provider and model…',
+            value: { type: 'add' } as PanelAction,
+            description: 'Choose a provider and model to add',
+          },
+        ]),
     {
       label: 'Done',
       value: { type: 'done' } as PanelAction,
