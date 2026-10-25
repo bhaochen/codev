@@ -179,7 +179,7 @@ export async function* queryOpenAIChat(
     )
     let isFree = model.includes('free') || model.includes('contributor')
     // Hardcoded fallback for known free models (in case catalog fetch hasn't completed)
-    const KNOWN_FREE_MODELS = new Set(['big-pickle', 'deepseek-v4-flash-free', 'nemotron-3-super-free'])
+    const KNOWN_FREE_MODELS = new Set(['big-pickle', 'deepseek-v4-flash-free', 'nemotron-3-super-free', 'nemotron-3-ultra-free'])
     if (KNOWN_FREE_MODELS.has(model)) {
       isFree = true
     }
