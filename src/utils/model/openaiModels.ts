@@ -134,34 +134,53 @@ async function fetchCodexModels(): Promise<ModelOption[]> {
 /**
  * Fetch the OpenAI-compatible `/models` catalog (API-key / self-hosted
  * endpoints). The standard `{ data: [{ id, ... }] }` envelope is expected.
+ * Falls back to env var ANTHROPIC_CUSTOM_MODEL_OPTION if /models fails.
  */
 async function fetchOpenAICompatibleModels(): Promise<ModelOption[]> {
   const apiKey = getOpenAIApiKey()
   if (!apiKey) return []
 
   const baseUrl = getOpenAIBaseUrl().replace(/\/+$/, '')
-  const res = await fetch(`${baseUrl}/models`, {
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      accept: 'application/json',
-    },
-    signal: AbortSignal.timeout(15_000),
-  })
-  if (!res.ok) return []
+  try {
+    const res = await fetch(`${baseUrl}/models`, {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        accept: 'application/json',
+      },
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (res.ok) {
+      const payload = (await res.json()) as {
+        data?: { id?: string }[]
+      }
+      const entries = payload.data ?? []
 
-  const payload = (await res.json()) as {
-    data?: { id?: string }[]
+      const options: ModelOption[] = []
+      for (const entry of entries) {
+        const modelId = entry.id?.trim()
+        if (!modelId) continue
+        // Don't filter by gpt-5 prefix for custom endpoints - allow any model
+        const option = toModelOption(modelId, modelId)
+        if (option) options.push(option)
+      }
+      if (options.length > 0) return options.sort((a, b) => a.value.localeCompare(b.value))
+    }
+  } catch {
+    // Ignore fetch errors, fall through to env var fallback
   }
-  const entries = payload.data ?? []
 
-  const options: ModelOption[] = []
-  for (const entry of entries) {
-    const modelId = entry.id?.trim()
-    if (!modelId) continue
-    const option = toModelOption(modelId, modelId)
-    if (option) options.push(option)
+  // Fallback: use ANTHROPIC_CUSTOM_MODEL_OPTION if set (for non-OpenAI models via proxy)
+  const customModel = process.env.ANTHROPIC_CUSTOM_MODEL_OPTION
+  if (customModel) {
+    return [{
+      value: customModel,
+      label: process.env.ANTHROPIC_CUSTOM_MODEL_OPTION_NAME ?? customModel,
+      description: process.env.ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION ?? `Custom model (${customModel})`,
+      descriptionForModel: `Custom model (${customModel})`,
+    }]
   }
-  return options.sort((a, b) => a.value.localeCompare(b.value))
+
+  return []
 }
 
 export async function fetchOpenAIModels(): Promise<ModelOption[]> {
