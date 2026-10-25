@@ -398,6 +398,16 @@ export async function saveOpenAIApiKey(apiKey: string): Promise<void> {
   clearStoredProviderCache()
 }
 
+export async function saveOpenAIBaseUrl(baseUrl: string): Promise<void> {
+  saveGlobalConfig(current => ({
+    ...current,
+    openAiBaseUrl: baseUrl,
+  }))
+  // Clear provider cache so it will be re-read on next access
+  const { clearStoredProviderCache } = await import('./model/providers.js')
+  clearStoredProviderCache()
+}
+
 export async function saveOpenRouterApiKey(apiKey: string): Promise<void> {
   if (!apiKey || typeof apiKey !== 'string') {
     throw new Error(

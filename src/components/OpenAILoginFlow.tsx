@@ -1,13 +1,15 @@
 import * as React from 'react'
 import { useState, useEffect } from 'react'
 import { Box, Text } from '../ink.js'
-import {
+import { 
   importOpenAIAuthFromCodexCache,
   runCodexLogin,
   saveOpenAIApiKey,
+  saveOpenAIBaseUrl,
   saveOpenAIAuthTokens,
   getOpenAIApiKey,
 } from '../utils/auth.js'
+import { getOpenAIBaseUrl } from '../utils/model/providers.js'
 import {
   requestChatGPTDeviceCode,
   completeChatGPTDeviceLogin,
@@ -22,7 +24,7 @@ type OpenAILoginFlowProps = {
   startingMessage?: string
 }
 
-type LoginMode = 'menu' | 'api_key' | 'access_token' | 'chatgpt_device'
+type LoginMode = 'menu' | 'api_key' | 'api_key_baseurl' | 'access_token' | 'chatgpt_device'
 
 export function OpenAILoginFlow({
   onDone,
@@ -34,6 +36,7 @@ export function OpenAILoginFlow({
   const [inputValue, setInputValue] = useState('')
   const [cursorOffset, setCursorOffset] = useState(0)
   const [existingApiKey, setExistingApiKey] = useState<string | null>(null)
+  const [existingBaseUrl, setExistingBaseUrl] = useState<string | null>(null)
   const [deviceCode, setDeviceCode] = useState<ChatGPTDeviceCode | null>(null)
   const [deviceError, setDeviceError] = useState<string | null>(null)
 
@@ -41,6 +44,10 @@ export function OpenAILoginFlow({
     const key = getOpenAIApiKey()
     if (key) {
       setExistingApiKey(key)
+    }
+    const baseUrl = getOpenAIBaseUrl()
+    if (baseUrl && baseUrl !== 'https://api.openai.com/v1') {
+      setExistingBaseUrl(baseUrl)
     }
   }, [])
 
@@ -193,25 +200,59 @@ export function OpenAILoginFlow({
     }
     
     const trimmed = value?.trim() || ''
-    const keyToSave = mode === 'api_key' ? (trimmed || existingApiKey) : trimmed
     
-    if (!keyToSave) {
+    if (mode === 'api_key') {
+      const keyToSave = trimmed || existingApiKey
+      if (!keyToSave) {
+        return
+      }
+      setIsBusy(true)
+      setStatus(null)
+      try {
+        await saveOpenAIApiKey(keyToSave)
+        // After saving API key, ask for base URL
+        setInputValue(existingBaseUrl || '')
+        setCursorOffset((existingBaseUrl || '').length)
+        setMode('api_key_baseurl')
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : String(error))
+      } finally {
+        setIsBusy(false)
+      }
+      return
+    }
+    
+    if (mode === 'api_key_baseurl') {
+      const baseUrl = trimmed || existingBaseUrl || 'https://api.openai.com/v1'
+      setIsBusy(true)
+      setStatus(null)
+      try {
+        await saveOpenAIBaseUrl(baseUrl)
+        onDone()
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : String(error))
+      } finally {
+        setIsBusy(false)
+      }
       return
     }
 
-    setIsBusy(true)
-    setStatus(null)
-    try {
-      if (mode === 'api_key') {
-        await saveOpenAIApiKey(keyToSave)
-      } else {
-        saveOpenAIAuthTokens({ accessToken: keyToSave })
+    if (mode === 'access_token') {
+      const keyToSave = trimmed
+      if (!keyToSave) {
+        return
       }
-      onDone()
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error))
-    } finally {
-      setIsBusy(false)
+      setIsBusy(true)
+      setStatus(null)
+      try {
+        saveOpenAIAuthTokens({ accessToken: keyToSave })
+        onDone()
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : String(error))
+      } finally {
+        setIsBusy(false)
+      }
+      return
     }
   }
 
@@ -255,18 +296,22 @@ export function OpenAILoginFlow({
     )
   }
 
-  if (mode === 'api_key' || mode === 'access_token') {
-    const prompt =
-      mode === 'api_key'
+  if (mode === 'api_key' || mode === 'access_token' || mode === 'api_key_baseurl') {
+    const isBaseUrlMode = mode === 'api_key_baseurl'
+    const prompt = isBaseUrlMode
+      ? 'Enter OpenAI base URL (or press Enter for default):'
+      : mode === 'api_key'
         ? 'Paste your OpenAI API key:'
         : 'Paste your Codex access token:'
 
     return (
       <Box flexDirection="column" gap={1}>
         <Text>
-          {mode === 'api_key'
-            ? 'OpenAI API keys use standard platform billing.'
-            : 'Codex access tokens are cached by Codex after ChatGPT login.'}
+          {isBaseUrlMode
+            ? 'Base URL for OpenAI-compatible APIs (e.g., Azure, proxies). Press Enter for default.'
+            : mode === 'api_key'
+              ? 'OpenAI API keys use standard platform billing.'
+              : 'Codex access tokens are cached by Codex after ChatGPT login.'}
         </Text>
         <Box>
           <Text>{prompt}</Text>
@@ -275,16 +320,23 @@ export function OpenAILoginFlow({
             onChange={setInputValue}
             onSubmit={handleSubmit}
             onExit={() => {
-              setMode('menu')
+              if (mode === 'api_key_baseurl') {
+                // Go back to API key input
+                setMode('api_key')
+                setInputValue(existingApiKey || '')
+                setCursorOffset((existingApiKey || '').length)
+              } else {
+                setMode('menu')
+              }
               setInputValue('')
               setCursorOffset(0)
             }}
             cursorOffset={cursorOffset}
             onChangeCursorOffset={setCursorOffset}
             columns={72}
-            mask="*"
+            mask={isBaseUrlMode ? undefined : '*'}
             focus={true}
-            placeholder={mode === 'api_key' ? existingApiKey || undefined : undefined}
+            placeholder={isBaseUrlMode ? (existingBaseUrl || 'https://api.openai.com/v1') : mode === 'api_key' ? existingApiKey || undefined : undefined}
           />
         </Box>
         {status ? <Text color="error">{status}</Text> : null}

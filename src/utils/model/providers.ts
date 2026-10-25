@@ -2,6 +2,7 @@ import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from 
 import { isEnvTruthy } from '../envUtils.js'
 import { getForcedProvider } from '../forcedProvider.js'
 import { getGlobalClaudeFile } from '../env.js'
+import { getGlobalConfig } from '../config.js'
 
 export type APIProvider =
   | 'firstParty'
@@ -265,7 +266,8 @@ export function getOpenRouterBaseUrl(): string {
 }
 
 export function getOpenAIBaseUrl(): string {
-  return process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1'
+  const config = getGlobalConfig()
+  return config.openAiBaseUrl ?? process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1'
 }
 
 export function getAPIProvider(): APIProvider | null {

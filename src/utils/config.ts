@@ -198,6 +198,7 @@ export type GlobalConfig = {
   openAiRefreshToken?: string
   openAiTokenExpiresAt?: number
   openAiWorkspaceId?: string
+  openAiBaseUrl?: string
   
   // Local model configuration
   localBaseUrl?: string
@@ -681,6 +682,7 @@ export const GLOBAL_CONFIG_KEYS = [
   'openRouterApiKey',
   'openAiApiKey',
   'openAiAccessToken',
+  'openAiBaseUrl',
   'localBaseUrl',
   'localModelName',
   'localModelContextWindow',
