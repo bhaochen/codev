@@ -18,7 +18,7 @@ import type { LLMRoute } from '../types.js'
 import type { LLMRequest } from '../runtime/types.js'
 import type { Credential } from '../auth/strategies.js'
 import { getOpenCodeApiKey } from '../../../utils/auth.js'
-import { getOpencodeModelMaxTokens, getCachedOpencodeModels } from '../../../utils/model/opencodeModels.js'
+import { getOpencodeModelMaxTokens, getCachedOpencodeModels, getOpencodeModelProviderApi } from '../../../utils/model/opencodeModels.js'
 import {
   getInferenceBaseUrl,
   getSessionIdForRequest,
@@ -58,13 +58,19 @@ export class OpenCodeAdapter implements ProviderAdapter {
 
   getEndpoint(route: LLMRoute, request: LLMRequest): string {
     const configured = route.endpoint
+    const model = request.model
     if (this.isFreeTier()) {
       // Free tier moved to /inference/v1 (OpenCode v2); /zen/v1 answers every
       // free request with 403 FreeTierError.
-      const base = configured
-        ? getInferenceBaseUrl(configured)
-        : `${INFERENCE_BASE}/chat/completions`
-      return base
+      // Use model-specific provider API endpoint from catalog (e.g., /inference/openai/v1, /inference/anthropic/v1)
+      const modelProviderApi = getOpencodeModelProviderApi(model)
+      const base = modelProviderApi
+        ? modelProviderApi
+        : configured
+          ? getInferenceBaseUrl(configured)
+          : `${INFERENCE_BASE}/chat/completions`
+      // Ensure the endpoint includes the chat/completions path
+      return base.endsWith('/chat/completions') ? base : `${base.replace(/\/$/, '')}/chat/completions`
     }
     // PAYG keeps /zen/v1 — normalize away any accidental /inference rewrite.
     const base = configured ?? `${ZEN_BASE}/chat/completions`

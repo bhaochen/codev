@@ -21,6 +21,7 @@ type CachedOpencodeModel = {
   promptLimit?: number
   maxTokens?: number
   reasoningOptions?: string[]
+  providerApi?: string
 }
 
 /**
@@ -160,6 +161,7 @@ export async function fetchOpencodeModels(): Promise<void> {
           promptLimit: config.limit?.input,
           maxTokens: config.limit?.output,
           reasoningOptions,
+          providerApi: config.provider?.api,
         })
       }
 
@@ -219,6 +221,12 @@ export function getOpencodeModelReasoningOptions(modelId: string): string[] | un
   if (!cachedModels) return undefined
   const model = cachedModels.find(m => m.id === modelId)
   return model?.reasoningOptions
+}
+
+export function getOpencodeModelProviderApi(modelId: string): string | undefined {
+  if (!cachedModels) return undefined
+  const model = cachedModels.find(m => m.id === modelId)
+  return model?.providerApi
 }
 
 function getOpencodeUserAgent(): string {
