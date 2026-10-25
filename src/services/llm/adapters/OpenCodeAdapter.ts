@@ -11,13 +11,14 @@
  * - Force stream=true for free tier
  * - Tool choice: "auto" for Responses, undefined for chat (never "none")
  * - Placeholder system note for injected tools
+ * - Reasoning models (nemotron-3-ultra-free, etc.): enable thinking with reasoning_content field
  */
 import type { ProviderAdapter } from './ProviderAdapter.js'
 import type { LLMRoute } from '../types.js'
 import type { LLMRequest } from '../runtime/types.js'
 import type { Credential } from '../auth/strategies.js'
 import { getOpenCodeApiKey } from '../../../utils/auth.js'
-import { getOpencodeModelMaxTokens } from '../../../utils/model/opencodeModels.js'
+import { getOpencodeModelMaxTokens, getCachedOpencodeModels } from '../../../utils/model/opencodeModels.js'
 import {
   getInferenceBaseUrl,
   getSessionIdForRequest,
@@ -102,7 +103,21 @@ export class OpenCodeAdapter implements ProviderAdapter {
     return headers
   }
 
-  supportsCapability(capability: 'reasoning_details' | 'prompt_cache'): boolean {
+  isReasoningModel(model: string): boolean {
+    try {
+      const models = getCachedOpencodeModels()
+      const hit = models.find(m => m.id === model)
+      return hit?.reasoning === true
+    } catch {
+      // Fallback: check model name pattern
+      return model.includes('nemotron-3-ultra') || model.includes('nemotron-3-super')
+    }
+  }
+
+  supportsCapability(capability: 'reasoning_details' | 'prompt_cache' | 'reasoning', model?: string): boolean {
+    if (capability === 'reasoning' || capability === 'reasoning_details') {
+      return model ? this.isReasoningModel(model) : false
+    }
     return false
   }
 
@@ -193,6 +208,14 @@ export class OpenCodeAdapter implements ProviderAdapter {
       } else if (protocol === 'chat' && body.tool_choice === 'none') {
         delete (body as Record<string, unknown>).tool_choice
       }
+    }
+
+    // Enable thinking for reasoning models (e.g., nemotron-3-ultra-free)
+    // These models use the reasoning_content field for streaming reasoning output
+    if (this.isReasoningModel(route.model)) {
+      body.thinking = { type: 'enabled' }
+      body.enable_thinking = true
+      body.chat_template_kwargs = { thinking: true, enable_thinking: true }
     }
 
     return body
