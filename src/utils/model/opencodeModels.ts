@@ -21,7 +21,6 @@ type CachedOpencodeModel = {
   promptLimit?: number
   maxTokens?: number
   reasoningOptions?: string[]
-  providerApi?: string
 }
 
 /**
@@ -39,16 +38,6 @@ let nativeWindows: Map<string, number> | null = null
 
 let cachedModels: CachedOpencodeModel[] | null = null
 let fetchPromise: Promise<void> | null = null
-
-/** Wait for the OpenCode model catalog to be fetched. */
-export async function waitForOpencodeModels(): Promise<void> {
-  if (cachedModels && cachedModels.length > 0) return
-  if (fetchPromise) {
-    await fetchPromise
-    return
-  }
-  await fetchOpencodeModels()
-}
 
 /** Normalize a model id to its base identity for cross-section matching. */
 export function normalizeModelBaseId(id: string): string {
@@ -171,7 +160,6 @@ export async function fetchOpencodeModels(): Promise<void> {
           promptLimit: config.limit?.input,
           maxTokens: config.limit?.output,
           reasoningOptions,
-          providerApi: config.provider?.api,
         })
       }
 
@@ -231,12 +219,6 @@ export function getOpencodeModelReasoningOptions(modelId: string): string[] | un
   if (!cachedModels) return undefined
   const model = cachedModels.find(m => m.id === modelId)
   return model?.reasoningOptions
-}
-
-export function getOpencodeModelProviderApi(modelId: string): string | undefined {
-  if (!cachedModels) return undefined
-  const model = cachedModels.find(m => m.id === modelId)
-  return model?.providerApi
 }
 
 function getOpencodeUserAgent(): string {

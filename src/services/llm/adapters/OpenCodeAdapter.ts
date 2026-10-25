@@ -18,7 +18,7 @@ import type { LLMRoute } from '../types.js'
 import type { LLMRequest } from '../runtime/types.js'
 import type { Credential } from '../auth/strategies.js'
 import { getOpenCodeApiKey } from '../../../utils/auth.js'
-import { getOpencodeModelMaxTokens, getCachedOpencodeModels, getOpencodeModelProviderApi, waitForOpencodeModels } from '../../../utils/model/opencodeModels.js'
+import { getOpencodeModelMaxTokens, getCachedOpencodeModels } from '../../../utils/model/opencodeModels.js'
 import {
   getInferenceBaseUrl,
   getSessionIdForRequest,
@@ -58,22 +58,14 @@ export class OpenCodeAdapter implements ProviderAdapter {
 
   async getEndpoint(route: LLMRoute, request: LLMRequest): Promise<string> {
     const configured = route.endpoint
-    const model = request.model
     if (this.isFreeTier()) {
       // Free tier moved to /inference/v1 (OpenCode v2); /zen/v1 answers every
-      // free request with 403 FreeTierError.
-      // Use model-specific provider API endpoint from catalog (e.g., /inference/openai/v1, /inference/anthropic/v1)
-      let modelProviderApi = getOpencodeModelProviderApi(model)
-      if (!modelProviderApi) {
-        // Catalog not ready yet - wait for it to be fetched
-        await waitForOpencodeModels()
-        modelProviderApi = getOpencodeModelProviderApi(model)
-      }
-      const base = modelProviderApi
-        ? modelProviderApi
-        : configured
-          ? getInferenceBaseUrl(configured)
-          : `${INFERENCE_BASE}/chat/completions`
+      // free request with 403 FreeTierError (PR #4842).
+      // The free tier gate ONLY accepts /inference/v1/* — NOT /inference/openai/v1 etc.
+      // Catalog's provider.api is for PAYG/keyed access, not the keyless free tier.
+      const base = configured
+        ? getInferenceBaseUrl(configured)
+        : `${INFERENCE_BASE}/chat/completions`
       // Ensure the endpoint includes the chat/completions path
       return base.endsWith('/chat/completions') ? base : `${base.replace(/\/$/, '')}/chat/completions`
     }
