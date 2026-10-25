@@ -16,16 +16,6 @@ export interface ModelPricing {
 
 // Default pricing table — can be overridden by remote config
 const DEFAULT_PRICING: ModelPricing[] = [
-  // OpenCode free models
-  { provider: 'opencode', model: 'big-pickle', inputPerMillion: 0, outputPerMillion: 0, cacheReadPerMillion: 0, cacheWritePerMillion: 0 },
-  { provider: 'opencode', model: 'cat-jam-free', inputPerMillion: 0, outputPerMillion: 0, cacheReadPerMillion: 0, cacheWritePerMillion: 0 },
-  { provider: 'opencode', model: 'ling-3.1-flash-free', inputPerMillion: 0, outputPerMillion: 0, cacheReadPerMillion: 0, cacheWritePerMillion: 0 },
-  { provider: 'opencode', model: 'nemotron-3-super-free', inputPerMillion: 0, outputPerMillion: 0, cacheReadPerMillion: 0, cacheWritePerMillion: 0 },
-  { provider: 'opencode', model: 'nemotron-3-ultra-free', inputPerMillion: 0, outputPerMillion: 0, cacheReadPerMillion: 0, cacheWritePerMillion: 0 },
-  
-  // NVIDIA NIM (free tier)
-  { provider: 'nvidia', model: 'deepseek-ai/deepseek-v4.1-flash', inputPerMillion: 0, outputPerMillion: 0, cacheReadPerMillion: 0, cacheWritePerMillion: 0 },
-  
   // OpenRouter free models
   { provider: 'openrouter', model: 'meta-llama/llama-3.3-70b-instruct:free', inputPerMillion: 0, outputPerMillion: 0, cacheReadPerMillion: 0, cacheWritePerMillion: 0 },
 ]

@@ -109,8 +109,8 @@ export class OpenCodeAdapter implements ProviderAdapter {
       const hit = models.find(m => m.id === model)
       return hit?.reasoning === true
     } catch {
-      // Fallback: check model name pattern
-      return model.includes('nemotron-3-ultra') || model.includes('nemotron-3-super')
+      // No hardcoded fallback - if catalog not available, assume not a reasoning model
+      return false
     }
   }
 

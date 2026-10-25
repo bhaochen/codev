@@ -175,15 +175,7 @@ export async function fetchOpencodeModels(): Promise<void> {
       )
     } catch (error) {
       console.error('[opencodeModels] Error in dynamic TUI flow simulation:', error)
-      if (!cachedModels) {
-        // 网络极端崩溃情况下的硬编码兜底保护
-        cachedModels = [
-          { id: 'big-pickle', name: 'Big Pickle', isFree: true, contextWindow: 200_000, maxTokens: 32_000 },
-          { id: 'deepseek-v4-flash-free', name: 'DeepSeek V4 Flash Free', isFree: true, contextWindow: 200_000, maxTokens: 32_000 },
-          { id: 'nemotron-3-super-free', name: 'Nemotron 3 Super Free', isFree: true, contextWindow: 200_000, maxTokens: 32_000 },
-          { id: 'nemotron-3-ultra-free', name: 'Nemotron 3 Ultra Free', isFree: true, contextWindow: 1_000_000, maxTokens: 128_000 },
-        ]
-      }
+      // No hardcoded fallback - if network fails, return empty array and let callers handle it
     } finally {
       fetchPromise = null
     }
