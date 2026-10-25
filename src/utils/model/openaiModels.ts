@@ -159,9 +159,15 @@ async function fetchOpenAICompatibleModels(): Promise<ModelOption[]> {
       for (const entry of entries) {
         const modelId = entry.id?.trim()
         if (!modelId) continue
-        // Don't filter by gpt-5 prefix for custom endpoints - allow any model
-        const option = toModelOption(modelId, modelId)
-        if (option) options.push(option)
+        // For custom endpoints, don't filter by gpt-5 prefix - allow any model
+        const context = getOpenAIContextWindowForModel(modelId) ?? undefined
+        const contextSuffix = context ? ` · ${context.toLocaleString()} context` : ''
+        options.push({
+          value: modelId,
+          label: modelId,
+          description: `${modelId}${contextSuffix}`,
+          descriptionForModel: `OpenAI-compatible model (${modelId})${contextSuffix}`,
+        })
       }
       if (options.length > 0) return options.sort((a, b) => a.value.localeCompare(b.value))
     }
