@@ -1013,7 +1013,7 @@ export async function* queryOpenAIResponses(
     if (adapter) {
       adapter.transformRequestBody(body as unknown as Record<string, string | boolean | object>, route, adapterRequest)
     }
-    const wireEndpoint = adapter ? adapter.getEndpoint(route, adapterRequest) : endpoint
+    const wireEndpoint = adapter ? await adapter.getEndpoint(route, adapterRequest) : endpoint
     logForDebugging(
       `[OpenAIResponses] provider=${route.provider} model=${model} endpoint=${wireEndpoint} tools=${body.tools?.length ?? 0} items=${body.input.length} reasoning=${body.reasoning ? 'on' : 'off'}`,
     )

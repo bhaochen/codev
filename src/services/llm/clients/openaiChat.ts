@@ -240,7 +240,7 @@ export async function* queryOpenAIChat(
         } as any
 
         // Get rewritten endpoint for free tier (inference/v1)
-        finalEndpoint = adapter.getEndpoint(route, adapterRequest)
+        finalEndpoint = await adapter.getEndpoint(route, adapterRequest)
 
         // Get adapter headers
         adapterHeaders = adapter.buildHeaders(route, adapterRequest)
@@ -376,7 +376,7 @@ export async function* queryOpenAIChat(
         model = fallbackModel
         const adapter = getOpencodeAdapter()
         if (adapter) {
-          finalEndpoint = adapter.getEndpoint(route, { model, context: { ...context, model } } as any)
+          finalEndpoint = await adapter.getEndpoint(route, { model, context: { ...context, model } } as any)
         }
         response = await sendRequest(recovery ? buildRecoveryBody() : body)
         if (response.ok) {

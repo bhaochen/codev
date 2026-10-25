@@ -18,7 +18,7 @@ import type { LLMRoute } from '../types.js'
 import type { LLMRequest } from '../runtime/types.js'
 import type { Credential } from '../auth/strategies.js'
 import { getOpenCodeApiKey } from '../../../utils/auth.js'
-import { getOpencodeModelMaxTokens, getCachedOpencodeModels, getOpencodeModelProviderApi } from '../../../utils/model/opencodeModels.js'
+import { getOpencodeModelMaxTokens, getCachedOpencodeModels, getOpencodeModelProviderApi, waitForOpencodeModels } from '../../../utils/model/opencodeModels.js'
 import {
   getInferenceBaseUrl,
   getSessionIdForRequest,
@@ -56,14 +56,19 @@ export class OpenCodeAdapter implements ProviderAdapter {
     return { type: 'bearer', token: 'public' }
   }
 
-  getEndpoint(route: LLMRoute, request: LLMRequest): string {
+  async getEndpoint(route: LLMRoute, request: LLMRequest): Promise<string> {
     const configured = route.endpoint
     const model = request.model
     if (this.isFreeTier()) {
       // Free tier moved to /inference/v1 (OpenCode v2); /zen/v1 answers every
       // free request with 403 FreeTierError.
       // Use model-specific provider API endpoint from catalog (e.g., /inference/openai/v1, /inference/anthropic/v1)
-      const modelProviderApi = getOpencodeModelProviderApi(model)
+      let modelProviderApi = getOpencodeModelProviderApi(model)
+      if (!modelProviderApi) {
+        // Catalog not ready yet - wait for it to be fetched
+        await waitForOpencodeModels()
+        modelProviderApi = getOpencodeModelProviderApi(model)
+      }
       const base = modelProviderApi
         ? modelProviderApi
         : configured

@@ -40,6 +40,16 @@ let nativeWindows: Map<string, number> | null = null
 let cachedModels: CachedOpencodeModel[] | null = null
 let fetchPromise: Promise<void> | null = null
 
+/** Wait for the OpenCode model catalog to be fetched. */
+export async function waitForOpencodeModels(): Promise<void> {
+  if (cachedModels && cachedModels.length > 0) return
+  if (fetchPromise) {
+    await fetchPromise
+    return
+  }
+  await fetchOpencodeModels()
+}
+
 /** Normalize a model id to its base identity for cross-section matching. */
 export function normalizeModelBaseId(id: string): string {
   let s = id.trim().toLowerCase()
