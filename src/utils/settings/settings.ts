@@ -523,12 +523,18 @@ export function updateSettingsForSource(
         JSON.stringify(database),
       )
       const filePath = getSettingsFilePathForSource(source)!
-      getFsImplementation().mkdirSync(dirname(filePath))
-      markInternalWrite(filePath)
-      writeFileSyncAndFlush_DEPRECATED(
-        filePath,
-        jsonStringify(definitions, null, 2) + '\n',
-      )
+      if (Object.keys(definitions).length > 0) {
+        getFsImplementation().mkdirSync(dirname(filePath))
+        markInternalWrite(filePath)
+        writeFileSyncAndFlush_DEPRECATED(
+          filePath,
+          jsonStringify(definitions, null, 2) + '\n',
+        )
+      } else {
+        // Remove the definitions file when it no longer holds any editable
+        // keys so a fresh install has no stray JSON copy on disk.
+        getFsImplementation().rmSync(filePath, { force: true })
+      }
       resetSettingsCache()
       return { error: null }
     } catch (error) {
