@@ -19,10 +19,7 @@ import type { PromptInputMode, VimMode } from '../../types/textInputTypes.js';
 import type { AutoUpdaterResult } from '../../utils/autoUpdater.js';
 import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
 import { isUndercover } from '../../utils/undercover.js';
-import { getMessagesAfterCompactBoundary } from '../../utils/messages.js';
-import { tokenCountFromLastAPIResponse } from '../../utils/tokens.js';
-import { getContextWindowForModel } from '../../utils/context.js';
-import { getSdkBetas } from '../../bootstrap/state.js';
+import { getSessionContextUsage } from '../../utils/sessionContextUsage.js';
 import { CoordinatorTaskPanel, useCoordinatorTaskCount } from '../CoordinatorAgentStatus.js';
 import { CtxProgressBar } from '../CtxProgressBar.js';
 import { getLastAssistantMessageId, StatusLine, statusLineShouldDisplay } from '../StatusLine.js';
@@ -112,11 +109,12 @@ function PromptInputFooter({
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
   const lastAssistantMessageId = useMemo(() => getLastAssistantMessageId(messages), [messages]);
-  const tokenUsage = useMemo(
-    () => tokenCountFromLastAPIResponse(getMessagesAfterCompactBoundary(messages)),
-    [messages],
-  );
   const mainLoopModel = useMainLoopModel();
+  const contextUsage = useMemo(
+    () => getSessionContextUsage(messages, mainLoopModel),
+    [messages, mainLoopModel],
+  );
+  const tokenUsage = contextUsage.usedTokens ?? 0;
   const isNarrow = columns < 80;
   // In fullscreen the bottom slot is flexShrink:0, so every row here is a row
   // stolen from the ScrollBox. Drop the optional StatusLine first. Non-fullscreen
@@ -155,13 +153,12 @@ function PromptInputFooter({
         <Box flexDirection="column" flexShrink={isNarrow ? 0 : 1}>
           {mode === 'prompt' && !isShort && !exitMessage.show && !isPasting && statusLineShouldDisplay(settings) && <StatusLine messagesRef={messagesRef} lastAssistantMessageId={lastAssistantMessageId} vimMode={vimMode} />}
           <PromptInputFooterLeftSide exitMessage={exitMessage} vimMode={vimMode} mode={mode} hiddenBashInput={hiddenBashInput} toolPermissionContext={toolPermissionContext} suppressHint={suppressHint} isLoading={isLoading} tasksSelected={pillSelected} teamsSelected={teamsSelected} teammateFooterIndex={teammateFooterIndex} tmuxSelected={tmuxSelected} isPasting={isPasting} isSearching={isSearching} historyQuery={historyQuery} setHistoryQuery={setHistoryQuery} historyFailedMatch={historyFailedMatch} onOpenTasksDialog={onOpenTasksDialog} />
-          {apiKeyStatus !== 'invalid' && apiKeyStatus !== 'missing' && tokenUsage > 0 && (() => {
+          {apiKeyStatus !== 'invalid' && apiKeyStatus !== 'missing' && tokenUsage > 0 && (
             // The bar reports the model's own window, not the smaller
             // compaction-effective window: the marker shows where auto-compact
             // fires, the denominator shows what the model actually serves.
-            const contextWindowTokens = getContextWindowForModel(mainLoopModel, getSdkBetas());
-            return <CtxProgressBar currentTokens={tokenUsage} contextWindowTokens={contextWindowTokens} compactionTargetTokens={getAutoCompactThreshold(mainLoopModel)} utilizationPct={Math.round((tokenUsage / Math.max(1, contextWindowTokens)) * 100)} />;
-          })()}
+            <CtxProgressBar currentTokens={tokenUsage} contextWindowTokens={contextUsage.contextWindowSize} compactionTargetTokens={getAutoCompactThreshold(mainLoopModel)} utilizationPct={contextUsage.usedPercentage ?? 0} />
+          )}
         </Box>
         <Box flexShrink={1} gap={1}>
           {isFullscreen ? null : <Notifications apiKeyStatus={apiKeyStatus} autoUpdaterResult={autoUpdaterResult} debug={debug} isAutoUpdating={isAutoUpdating} verbose={verbose} messages={messages} onAutoUpdaterResult={onAutoUpdaterResult} onChangeIsUpdating={onChangeIsUpdating} ideSelection={ideSelection} mcpClients={mcpClients} isInputWrapped={isInputWrapped} isNarrow={isNarrow} />}

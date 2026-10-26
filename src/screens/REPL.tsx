@@ -162,6 +162,7 @@ import {
   type SpinnerMode,
 } from '../components/Spinner.js'
 import { getSystemPrompt } from '../constants/prompts.js'
+import { measureContextBaseline } from '../utils/analyzeContext.js'
 import { buildEffectiveSystemPrompt } from '../utils/systemPrompt.js'
 import { getSystemContext, getUserContext } from '../context.js'
 import { getMemoryFiles } from '../utils/claudemd.js'
@@ -3245,6 +3246,20 @@ export function REPL({
     setToolUseConfirmQueue,
     setToolPermissionContext,
   )
+
+  // Measure how much context the session already holds - system prompt and
+  // tool definitions - so the status line can report it before the first
+  // response arrives instead of showing 0. Estimated locally, so this issues
+  // no requests; the store skips work it has already done, so the dependency
+  // list re-running costs nothing after the first pass.
+  useEffect(() => {
+    void measureContextBaseline(
+      mainLoopModel,
+      tools,
+      async () => toolPermissionContext,
+      agentDefinitions,
+    )
+  }, [mainLoopModel, tools, agentDefinitions, toolPermissionContext])
 
   const requestPrompt = useCallback(
     (title: string, toolInputSummary?: string | null) =>

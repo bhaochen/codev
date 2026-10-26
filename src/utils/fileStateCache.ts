@@ -1,4 +1,5 @@
 import { LRUCache } from 'lru-cache'
+import type { SeenRange } from './rangeDedup.js'
 import { normalize } from 'path'
 
 export type FileState = {
@@ -12,6 +13,8 @@ export type FileState = {
   // Edit/Write must require an explicit Read first. `content` here holds the
   // RAW disk bytes (for getChangedFiles diffing), not what the model saw.
   isPartialView?: boolean
+  // Ranges of lines already shown in prior Read results, used for range dedup.
+  seenRanges?: readonly SeenRange[]
 }
 
 // Default max entries for read file state caches

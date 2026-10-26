@@ -135,7 +135,10 @@ export function messageTokenCountFromLastAPIResponse(
   return 0
 }
 
-export function getCurrentUsage(messages: Message[]): {
+export function getCurrentUsage(
+  messages: Message[],
+  options: { skipUnmeasured?: boolean } = {},
+): {
   input_tokens: number
   output_tokens: number
   cache_creation_input_tokens: number
@@ -145,6 +148,18 @@ export function getCurrentUsage(messages: Message[]): {
     const message = messages[i]
     const usage = message ? getTokenUsage(message) : undefined
     if (usage) {
+      // Some providers publish content blocks before the request's trailing
+      // usage frame. Their provisional zero counters are not a new context
+      // measurement; keep looking for the last real prompt measurement.
+      if (
+        options.skipUnmeasured &&
+        usage.input_tokens +
+          (usage.cache_creation_input_tokens ?? 0) +
+          (usage.cache_read_input_tokens ?? 0) <=
+          0
+      ) {
+        continue
+      }
       return {
         input_tokens: usage.input_tokens,
         output_tokens: usage.output_tokens,

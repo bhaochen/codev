@@ -60,6 +60,11 @@ import { jsonStringify } from './slowOperations.js'
 import { buildEffectiveSystemPrompt } from './systemPrompt.js'
 import type { Theme } from './theme.js'
 import { getCurrentUsage } from './tokens.js'
+import {
+  beginContextBaselineRefresh,
+  setContextBaselineTokens,
+  shouldRefreshContextBaseline,
+} from './contextBaseline.js'
 
 const RESERVED_CATEGORY_NAME = 'Autocompact buffer'
 const MANUAL_COMPACT_BUFFER_NAME = 'Compact buffer'
@@ -1031,6 +1036,73 @@ async function approximateMessageTokens(
 
   breakdown.totalTokens = approximateMessageTokens ?? 0
   return breakdown
+}
+
+/**
+ * Measure and cache the context a session carries before any conversation.
+ *
+ * Deliberately estimates locally instead of reusing analyzeContextUsage: that
+ * function counts tokens through the API (with a fallback) at several call
+ * sites, which would put network requests on every session launch for what is
+ * only a status-line reading. This uses the same local estimator the API path
+ * already falls back to, so it costs nothing and cannot fail because a
+ * provider is unreachable.
+ *
+ * Covers what every request carries ahead of the conversation: the system
+ * prompt, every tool definition (MCP servers' included), and the memory files
+ * prepended as user context. The result is a slight under-count, which is the
+ * safe direction: the caller uses it as a floor, and a floor that is a little
+ * low still beats reporting zero.
+ *
+ * Best-effort throughout: any failure leaves the previous measurement (or
+ * none) in place, so the status line degrades to the behaviour it had before
+ * this existed rather than to an error.
+ */
+export async function measureContextBaseline(
+  model: string,
+  tools: Tools,
+  getToolPermissionContext: () => Promise<ToolPermissionContext>,
+  agentDefinitions: AgentDefinitionsResult,
+): Promise<void> {
+  // Everything is inside the try: this is called with `void` from a React
+  // effect, so anything escaping would surface as an unhandled rejection
+  // rather than a failed measurement.
+  try {
+    // Keyed by the model the session actually runs, which is what the status
+    // line looks the value up by; the two must agree or every lookup misses.
+    const runtimeModel = getRuntimeMainLoopModel({
+      permissionMode: (await getToolPermissionContext()).mode,
+      mainLoopModel: model,
+    })
+    if (!shouldRefreshContextBaseline(runtimeModel)) return
+    beginContextBaselineRefresh(runtimeModel)
+    // getUserContext only reads memory files, and startup has already begun
+    // it: this awaits the same memoized result the first request will use.
+    const [systemPrompt, userContext] = await Promise.all([
+      getSystemPrompt(tools, runtimeModel),
+      getUserContext(),
+    ])
+    const toolSchemas = await Promise.all(
+      tools.map(tool =>
+        toolToAPISchema(tool, {
+          getToolPermissionContext,
+          tools,
+          agents: agentDefinitions?.activeAgents ?? [],
+          model: runtimeModel,
+        }),
+      ),
+    )
+    const tokens =
+      roughTokenCountEstimation(systemPrompt.join(' ')) +
+      roughTokenCountEstimation(Object.values(userContext).join('\n')) +
+      roughTokenCountEstimation(jsonStringify(toolSchemas)) +
+      (toolSchemas.length > 0 ? TOOL_TOKEN_COUNT_OVERHEAD : 0)
+    setContextBaselineTokens(runtimeModel, tokens)
+  } catch (error) {
+    logForDebugging(
+      `[contextBaseline] measurement failed: ${error instanceof Error ? error.message : 'unknown'}`,
+    )
+  }
 }
 
 export async function analyzeContextUsage(
