@@ -125,10 +125,8 @@ export function getDefaultSonnetModel(): ModelName {
   if (process.env.ANTHROPIC_DEFAULT_SONNET_MODEL) {
     return process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
   }
-  // Default to Sonnet 4.5 for 3P since they may not have 4.6 yet
-  if (getAPIProvider() !== 'firstParty') {
-    return getModelStrings().sonnet45
-  }
+  // 9router is the sole gateway; it owns upstream provider selection, so the
+  // 3P availability-lag carve-out no longer applies — always prefer 4.6.
   return getModelStrings().sonnet46
 }
 
