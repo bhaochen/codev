@@ -4,7 +4,7 @@ type Env = Readonly<Record<string, string | undefined>>
  * Names the judge kernel is configured under, all of them codev's own.
  *
  * The judge is reached over the same protocols whatever it is called, so nothing here depends on another tool:
- * a judge is named `CODEV_JUDGE_*` in the environment and configured under `judge` in `~/.claude/settings.json`.
+ * a judge is named `CODEV_JUDGE_*` in the environment and configured under `judge` in `~/.local/share/codev/settings.json`.
  */
 
 const PREFIX = "CODEV_JUDGE";

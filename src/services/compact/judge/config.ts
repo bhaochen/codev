@@ -163,7 +163,7 @@ export interface ConfigSource {
 }
 
 /**
- * The `judge` key of `~/.claude/settings.json`, then environment overrides:
+ * The `judge` key of `~/.local/share/codev/settings.json`, then environment overrides:
  *   CODEV_JUDGE        comma-separated tiers, e.g. "local" or "local,jev"; "off" disables the kernel
  *   CODEV_JUDGE_MODE   default mode for every decision
  *

@@ -4,7 +4,6 @@ import * as path from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { ApiError } from '../middleware/errorHandler.js'
 import { normalizeJsonObject, readRecoverableJsonFile } from './recoverableJsonFile.js'
-import { ensurePersistentStorageUpgraded } from './persistentStorageMigrations.js'
 
 export class ManagedSettingsService {
   private static writeLocks = new Map<string, Promise<void>>()
@@ -54,7 +53,6 @@ export class ManagedSettingsService {
   }
 
   async readSettings(): Promise<Record<string, unknown>> {
-    await ensurePersistentStorageUpgraded()
     return readRecoverableJsonFile({
       filePath: this.getSettingsPath(),
       label: 'managed settings',

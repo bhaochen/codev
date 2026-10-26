@@ -1,20 +1,15 @@
-import { appendFile, writeFile } from 'fs/promises'
-import { join } from 'path'
 import { getProjectRoot, getSessionId } from './bootstrap/state.js'
 import { registerCleanup } from './utils/cleanupRegistry.js'
 import type { HistoryEntry, PastedContent } from './utils/config.js'
 import { logForDebugging } from './utils/debug.js'
-import { getClaudeConfigHomeDir, isEnvTruthy } from './utils/envUtils.js'
-import { getErrnoCode } from './utils/errors.js'
-import { readLinesReverse } from './utils/fsOperations.js'
-import { lock } from './utils/lockfile.js'
+import { isEnvTruthy } from './utils/envUtils.js'
 import {
   hashPastedText,
   retrievePastedText,
   storePastedText,
 } from './utils/pasteStore.js'
 import { sleep } from './utils/sleep.js'
-import { jsonParse, jsonStringify } from './utils/slowOperations.js'
+import { getSessionStore } from './services/db/SessionStore.js'
 
 const MAX_HISTORY_ITEMS = 100
 const MAX_PASTED_CONTENT_LENGTH = 1024
@@ -99,10 +94,6 @@ export function expandPastedTextRefs(
   return expanded
 }
 
-function deserializeLogEntry(line: string): LogEntry {
-  return jsonParse(line) as LogEntry
-}
-
 async function* makeLogEntryReader(): AsyncGenerator<LogEntry> {
   const currentSession = getSessionId()
 
@@ -111,34 +102,15 @@ async function* makeLogEntryReader(): AsyncGenerator<LogEntry> {
     yield pendingEntries[i]!
   }
 
-  // Read from global history file (shared across all projects)
-  const historyPath = join(getClaudeConfigHomeDir(), 'history.jsonl')
-
-  try {
-    for await (const line of readLinesReverse(historyPath)) {
-      try {
-        const entry = deserializeLogEntry(line)
-        // removeLastFromHistory slow path: entry was flushed before removal,
-        // so filter here so both getHistory (Up-arrow) and makeHistoryReader
-        // (ctrl+r search) skip it consistently.
-        if (
-          entry.sessionId === currentSession &&
-          skippedTimestamps.has(entry.timestamp)
-        ) {
-          continue
-        }
-        yield entry
-      } catch (error) {
-        // Not a critical error - just skip malformed lines
-        logForDebugging(`Failed to parse history line: ${error}`)
-      }
+  for (const row of getSessionStore().listPromptHistory({ limit: 1000 })) {
+    const entry = row.data as unknown as LogEntry
+    if (
+      entry.sessionId === currentSession &&
+      skippedTimestamps.has(entry.timestamp)
+    ) {
+      continue
     }
-  } catch (e: unknown) {
-    const code = getErrnoCode(e)
-    if (code === 'ENOENT') {
-      return
-    }
-    throw e
+    yield entry
   }
 }
 
@@ -288,41 +260,28 @@ let lastAddedEntry: LogEntry | null = null
 // pending buffer. Session-scoped (module state resets on process restart).
 const skippedTimestamps = new Set<number>()
 
-// Core flush logic - writes pending entries to disk
+// Core flush logic - commits pending entries to SQLite.
 async function immediateFlushHistory(): Promise<void> {
   if (pendingEntries.length === 0) {
     return
   }
 
-  let release
   try {
-    const historyPath = join(getClaudeConfigHomeDir(), 'history.jsonl')
-
-    // Ensure the file exists before acquiring lock (append mode creates if missing)
-    await writeFile(historyPath, '', {
-      encoding: 'utf8',
-      mode: 0o600,
-      flag: 'a',
+    const store = getSessionStore()
+    const batch = pendingEntries
+    store.transaction(() => {
+      for (const entry of batch) {
+        store.appendPromptHistory({
+          timestamp: entry.timestamp,
+          project: entry.project,
+          sessionId: entry.sessionId,
+          data: entry as unknown as Record<string, unknown>,
+        })
+      }
     })
-
-    release = await lock(historyPath, {
-      stale: 10000,
-      retries: {
-        retries: 3,
-        minTimeout: 50,
-      },
-    })
-
-    const jsonLines = pendingEntries.map(entry => jsonStringify(entry) + '\n')
-    pendingEntries = []
-
-    await appendFile(historyPath, jsonLines.join(''), { mode: 0o600 })
+    pendingEntries = pendingEntries.filter(entry => !batch.includes(entry))
   } catch (error) {
     logForDebugging(`Failed to write prompt history: ${error}`)
-  } finally {
-    if (release) {
-      await release()
-    }
   }
 }
 

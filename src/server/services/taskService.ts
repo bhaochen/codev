@@ -1,13 +1,11 @@
 /**
  * TaskService — CLI Task V2 的读取与查询
  *
- * 任务信息存储在 ~/.claude/tasks/<task_list_id>/ 目录下，每个任务一个 JSON 文件。
+ * Task list state is persisted as SQLite documents in codev.db.
  * Task list ID 可以是 session ID、team name 等。
  */
 
-import * as fs from 'fs/promises'
-import * as path from 'path'
-import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
+import { getSessionStore } from '../../services/db/SessionStore.js'
 
 export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'failed'
 
@@ -35,114 +33,51 @@ export type TaskListSummary = {
 }
 
 export class TaskService {
-  private getConfigDir(): string {
-    return getClaudeConfigHomeDir()
-  }
-
-  private getTasksDir(): string {
-    return path.join(this.getConfigDir(), 'tasks')
-  }
-
-  /** 列出所有 task list (目录) */
+  /** 列出所有 task list */
   async listTaskLists(): Promise<TaskListSummary[]> {
-    const tasksDir = this.getTasksDir()
-    try {
-      const entries = await fs.readdir(tasksDir, { withFileTypes: true })
-      const results: TaskListSummary[] = []
-
-      for (const entry of entries) {
-        if (!entry.isDirectory()) continue
-        const tasks = await this.getTasksForList(entry.name)
-        if (tasks.length === 0) continue
-
-        results.push({
-          id: entry.name,
-          taskCount: tasks.length,
-          completedCount: tasks.filter((t) => t.status === 'completed').length,
-          inProgressCount: tasks.filter((t) => t.status === 'in_progress').length,
-          pendingCount: tasks.filter((t) => t.status === 'pending').length,
-        })
-      }
-
-      return results
-    } catch (err: any) {
-      if (err.code === 'ENOENT') return []
-      throw err
-    }
+    return getSessionStore().listAppDocuments('task-lists').flatMap(({ key, content }) => {
+      const tasks = this.parseTaskList(content, key)
+      if (tasks.length === 0) return []
+      return [{
+        id: key,
+        taskCount: tasks.length,
+        completedCount: tasks.filter(task => task.status === 'completed').length,
+        inProgressCount: tasks.filter(task => task.status === 'in_progress').length,
+        pendingCount: tasks.filter(task => task.status === 'pending').length,
+      }]
+    })
   }
 
   /** 获取指定 task list 的所有任务 */
   async getTasksForList(taskListId: string): Promise<TaskInfo[]> {
-    const listDir = path.join(this.getTasksDir(), taskListId)
-    try {
-      const entries = await fs.readdir(listDir)
-      const tasks: TaskInfo[] = []
-
-      for (const filename of entries) {
-        if (!filename.endsWith('.json')) continue
-        try {
-          const raw = await fs.readFile(path.join(listDir, filename), 'utf-8')
-          const data = JSON.parse(raw)
-          const task = this.parseTaskFile(data, taskListId)
-          if (task) tasks.push(task)
-        } catch {
-          // skip unparseable files
-        }
-      }
-
-      // Sort by numeric ID
-      return tasks.sort((a, b) => {
-        const numA = parseInt(a.id, 10)
-        const numB = parseInt(b.id, 10)
-        if (!isNaN(numA) && !isNaN(numB)) return numA - numB
-        return a.id.localeCompare(b.id)
-      })
-    } catch (err: any) {
-      if (err.code === 'ENOENT') return []
-      throw err
-    }
+    const key = taskListId.replace(/[^a-zA-Z0-9_-]/g, '-')
+    const content = getSessionStore().getAppDocument('task-lists', key)
+    return content ? this.parseTaskList(content, taskListId) : []
   }
 
   /** 列出所有任务（跨所有 task list） */
   async listTasks(): Promise<TaskInfo[]> {
-    const tasksDir = this.getTasksDir()
     const allTasks: TaskInfo[] = []
-
-    const scan = async (directory: string, taskListId: string): Promise<void> => {
-      let entries
-      try {
-        entries = await fs.readdir(directory, { withFileTypes: true })
-      } catch (err: any) {
-        if (err.code === 'ENOENT') return
-        throw err
-      }
-
-      for (const entry of entries) {
-        const entryPath = path.join(directory, entry.name)
-        if (entry.isDirectory()) {
-          await scan(entryPath, taskListId || entry.name)
-          continue
-        }
-        if (!entry.isFile() || !entry.name.endsWith('.json')) continue
-        try {
-          const task = this.parseTaskFile(
-            JSON.parse(await fs.readFile(entryPath, 'utf-8')),
-            taskListId,
-          )
-          if (task) allTasks.push(task)
-        } catch {
-          // Skip malformed task files.
-        }
-      }
+    for (const { key, content } of getSessionStore().listAppDocuments('task-lists')) {
+      allTasks.push(...this.parseTaskList(content, key))
     }
-
-    await scan(tasksDir, '')
     return allTasks.sort((a, b) => {
       const createdA = Number(a.metadata?.createdAt ?? 0)
       const createdB = Number(b.metadata?.createdAt ?? 0)
       if (createdA !== createdB) return createdB - createdA
       return a.id.localeCompare(b.id)
     })
+  }
+
+  private parseTaskList(content: string, taskListId: string): TaskInfo[] {
+    try {
+      const data = JSON.parse(content) as { tasks?: unknown[] }
+      return Array.isArray(data.tasks)
+        ? data.tasks.map(task => this.parseTaskFile(task, taskListId)).filter((task): task is TaskInfo => task !== null)
+        : []
+    } catch {
+      return []
+    }
   }
 
   /** 获取单个任务详情 */

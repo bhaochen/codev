@@ -16,7 +16,6 @@ import path from 'node:path'
 import { ensureDesktopCliLauncherInstalled } from './services/desktopCliLauncherService.js'
 import { enableConfigs } from '../utils/config.js'
 import { diagnosticsService } from './services/diagnosticsService.js'
-import { ensurePersistentStorageUpgraded } from './services/persistentStorageMigrations.js'
 import { refreshModelCapabilities } from '../utils/model/modelCapabilities.js'
 import { handleStaticH5Request } from './staticH5.js'
 import { classifyH5Request, shouldBlockDisabledH5Access, shouldRequireH5Token } from './h5AccessPolicy.js'
@@ -145,7 +144,6 @@ export function startServer(port = PORT, host = HOST) {
       idleTimeout: 60,
 
       async fetch(req, server) {
-        await ensurePersistentStorageUpgraded()
         const url = new URL(req.url)
         const origin = req.headers.get('Origin')
         const clientAddress = server.requestIP(req)?.address ?? null
@@ -334,7 +332,7 @@ export function startServer(port = PORT, host = HOST) {
     throw new Error(message, { cause: error })
   }
 
-  // Start watching ~/.claude/teams/ for real-time WebSocket push
+  // Start watching ~/.local/share/codev/teams/ for real-time WebSocket push
   teamWatcher.start()
 
   // Start the cron scheduler to execute scheduled tasks

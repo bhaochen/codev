@@ -122,18 +122,19 @@ export const DIRS_EXIST_GUIDANCE =
  * (once per session via systemPromptSection cache) so the model can always
  * write without checking existence first. FsOperations.mkdir is recursive
  * by default and already swallows EEXIST, so the full parent chain
- * (~/.claude/projects/<slug>/memory/) is created in one call with no
+ * (~/.local/share/codev/projects/<slug>/memory/) is created in one call with no
  * try/catch needed for the happy path.
  */
 export async function ensureMemoryDirExists(memoryDir: string): Promise<void> {
-  // Mirror restore BEFORE mkdir: if the projects tree was wiped (or this is a
-  // new machine), the DB mirror rebuilds MEMORY.md + topic files first so the
-  // model sees its memories instead of an empty dir. Best-effort, never throws.
+  // Restore DB rows before mkdir, then import/reconcile existing files. This
+  // backfills memory written by older versions or external tools into codev.db.
+  // Best-effort, never throws.
   try {
-    const { restoreMemoryDirIfMissing } = await import(
+    const { restoreMemoryDirIfMissing, syncMemoryDirFromDisk } = await import(
       '../services/db/memoryMirror.js'
     )
     await restoreMemoryDirIfMissing(memoryDir)
+    await syncMemoryDirFromDisk(memoryDir)
   } catch {
     // No mirror (fresh DB / disabled) — proceed with the empty dir.
   }

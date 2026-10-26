@@ -1,11 +1,11 @@
 /**
- * TeamService — 读取 CLI 生成的 Agent Teams 配置
+ * TeamService — reads agent team metadata from codev.db
  *
- * Team 配置存储在 ~/.claude/teams/{name}/config.json
+ * Team metadata is stored in the teams namespace in codev.db.
  * 成员 transcript 存储为 JSONL 文件:
- *   - 有 sessionId 的成员: ~/.claude/projects/{project}/{sessionId}.jsonl
- *   - in-process 成员 (无 sessionId): ~/.claude/projects/{project}/{leadSessionId}/subagents/agent-*.jsonl
- * 成员发现: config.json + inboxes/ 目录 (解决并发写入丢失成员的问题)
+ *   - 有 sessionId 的成员: ~/.local/share/codev/projects/{project}/{sessionId}.jsonl
+ *   - in-process 成员 (无 sessionId): ~/.local/share/codev/projects/{project}/{leadSessionId}/subagents/agent-*.jsonl
+ * Member discovery combines database metadata with inbox directories.
  */
 
 import * as fs from 'fs/promises'
@@ -13,6 +13,11 @@ import * as path from 'path'
 import { ApiError } from '../middleware/errorHandler.js'
 import { writeToMailbox } from '../../utils/teammateMailbox.js'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
+import { getSessionStore } from '../../services/db/SessionStore.js'
+
+function teamDocumentKey(name: string): string {
+  return name.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()
+}
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -95,30 +100,18 @@ export class TeamService {
   // ── List all teams ──────────────────────────────────────────────────────
 
   async listTeams(): Promise<TeamSummary[]> {
-    const teamsDir = this.getTeamsDir()
-
-    try {
-      await fs.access(teamsDir)
-    } catch {
-      return []
-    }
-
-    const entries = await fs.readdir(teamsDir, { withFileTypes: true })
     const teams: TeamSummary[] = []
-
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue
-
+    for (const { key, content } of getSessionStore().listAppDocuments('teams')) {
       try {
-        const config = await this.loadTeamConfig(entry.name)
+        const config = JSON.parse(content) as TeamFileRaw
         // Include inbox-discovered members in the count
-        const inboxNames = await this.discoverInboxMembers(entry.name)
+        const inboxNames = await this.discoverInboxMembers(key)
         const configNames = new Set(config.members.map((m) => m.name))
         const extraCount = inboxNames.filter((n) => !configNames.has(n)).length
         const summary = this.toSummary(config)
         summary.memberCount += extraCount
         summary.activeMemberCount += extraCount // assume running if newly discovered
-        teams.push(summary)
+        teams.push({ ...summary, name: config.name || key })
       } catch {
         // Skip malformed team directories
       }
@@ -146,7 +139,7 @@ export class TeamService {
     }))
 
     // Discover members from inboxes/ that aren't in config.json (race condition fix)
-    const inboxNames = await this.discoverInboxMembers(name)
+    const inboxNames = await this.discoverInboxMembers(teamDocumentKey(name))
     const configNames = new Set(config.members.map((m) => m.name))
 
     for (const inboxName of inboxNames) {
@@ -279,17 +272,21 @@ export class TeamService {
       )
     }
 
-    const teamDir = path.join(this.getTeamsDir(), name)
+    getSessionStore().deleteAppDocument('teams', teamDocumentKey(name))
+    getSessionStore().deleteAppDocument('task-lists', teamDocumentKey(name))
+    const teamDir = path.join(this.getTeamsDir(), teamDocumentKey(name))
     await fs.rm(teamDir, { recursive: true, force: true })
   }
 
   // ── Internal helpers ────────────────────────────────────────────────────
 
   private async loadTeamConfig(name: string): Promise<TeamFileRaw> {
-    const configPath = path.join(this.getTeamsDir(), name, 'config.json')
-
     try {
-      const raw = await fs.readFile(configPath, 'utf-8')
+      const raw = getSessionStore().getAppDocument(
+        'teams',
+        teamDocumentKey(name),
+      )
+      if (!raw) throw new Error('missing')
       return JSON.parse(raw) as TeamFileRaw
     } catch {
       throw ApiError.notFound(`Team not found: ${name}`)
@@ -410,7 +407,7 @@ export class TeamService {
     return [...discovered]
   }
 
-  /** Search ~/.claude/projects/ for a JSONL file matching the sessionId. */
+  /** Search ~/.local/share/codev/projects/ for a JSONL file matching the sessionId. */
   private async findTranscriptFile(
     sessionId: string,
   ): Promise<string | null> {
@@ -443,7 +440,7 @@ export class TeamService {
 
   /**
    * Search subagents directory for a specific member's transcript.
-   * Path: ~/.claude/projects/{project}/{leadSessionId}/subagents/agent-*.jsonl
+   * Path: ~/.local/share/codev/projects/{project}/{leadSessionId}/subagents/agent-*.jsonl
    *
    * Matches by reading the first user message and checking for the member name
    * in the `<teammate-message>` content (e.g., "你是 **security-reviewer**").

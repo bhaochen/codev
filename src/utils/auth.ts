@@ -38,10 +38,10 @@ import {
   type AccountInfo,
   checkHasTrustDialogAccepted,
   getGlobalConfig,
+  getGlobalConfigSnapshot,
   saveGlobalConfig,
 } from './config.js'
 import { logAntError, logForDebugging } from './debug.js'
-import { getGlobalClaudeFile } from './env.js'
 import {
   getClaudeConfigHomeDir,
   isBareMode,
@@ -77,7 +77,7 @@ const DEFAULT_API_KEY_HELPER_TTL = 5 * 60 * 1000
 
 /**
  * CCR and Claude Desktop spawn the CLI with OAuth and should never fall back
- * to the user's ~/.claude/settings.json API-key config (apiKeyHelper,
+ * to the user's ~/.local/share/codev/settings.json API-key config (apiKeyHelper,
  * env.ANTHROPIC_API_KEY, env.ANTHROPIC_AUTH_TOKEN). Those settings exist for
  * the user's terminal CLI, not managed sessions. Without this guard, a user
  * who runs `claude` in their terminal with an API key sees every CCD session
@@ -150,15 +150,10 @@ export function getOpenRouterApiKeyWithSource(): {
     : { key: null, source: 'none' }
 }
 
-// Read authProvider directly from file to bypass cache
+// Read authProvider from SQLite directly during early startup.
 export function getConfiguredAuthProviderFromFile(): 'anthropic' | 'openrouter' | 'openai' | 'local' | 'opencode' | 'nvidia' | 'kiro' | null {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { readFileSync } = require('fs') as typeof import('fs')
-    const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
-    const config = JSON.parse(raw) as {
-      authProvider?: 'anthropic' | 'openrouter' | 'openai' | 'local' | 'opencode' | 'nvidia' | 'kiro'
-    }
+    const config = getGlobalConfigSnapshot()
 
     if (config.authProvider) {
       return config.authProvider
@@ -262,14 +257,7 @@ export function getOpenCodeModelName(): null | string {
   }
   // Fallback: read config file directly in case getGlobalConfig() is stale
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { readFileSync } = require('fs') as typeof import('fs')
-    const { getGlobalClaudeFile } = require('./env.js') as typeof import('./env.js')
-    const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
-    const fileConfig = JSON.parse(raw) as {
-      authProvider?: string
-      openCodeModelName?: string
-    }
+    const fileConfig = getGlobalConfigSnapshot()
     if (fileConfig.authProvider === 'opencode' && fileConfig.openCodeModelName) {
       return fileConfig.openCodeModelName
     }
@@ -311,12 +299,7 @@ export async function saveLocalModelConfig(baseUrl: string, modelName: string, c
 
 export function getLocalModelName(): string | null {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { readFileSync } = require('fs') as typeof import('fs')
-    const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
-    const config = JSON.parse(raw) as {
-      localModelName?: string
-    }
+    const config = getGlobalConfigSnapshot()
 
     // Return the stored value regardless of the active authProvider so the
     // /login Local screen can pre-fill it after switching providers.
@@ -332,12 +315,7 @@ export function getLocalModelName(): string | null {
 
 export function getLocalBaseUrl(): string | null {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { readFileSync } = require('fs') as typeof import('fs')
-    const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
-    const config = JSON.parse(raw) as {
-      localBaseUrl?: string
-    }
+    const config = getGlobalConfigSnapshot()
 
     // Return the stored value regardless of the active authProvider so the
     // /login Local screen can pre-fill it after switching providers.
@@ -353,12 +331,7 @@ export function getLocalBaseUrl(): string | null {
 
 export function getLocalModelContextWindowConfig(): number | null {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { readFileSync } = require('fs') as typeof import('fs')
-    const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
-    const config = JSON.parse(raw) as {
-      localModelContextWindow?: number
-    }
+    const config = getGlobalConfigSnapshot()
 
     // Return the stored value regardless of the active authProvider so the
     // /login Local screen can pre-fill it after switching providers.
@@ -1024,7 +997,7 @@ export function refreshAwsAuth(awsAuthRefresh: string): Promise<boolean> {
               'AWS auth refresh timed out after 3 minutes. Run your auth command manually in a separate terminal.',
             )
           : chalk.red(
-              'Error running awsAuthRefresh (in settings or ~/.claude.json):',
+              'Error running awsAuthRefresh (in settings or ~/.local/share/codev/config.json):',
             )
         // biome-ignore lint/suspicious/noConsole:: intentional console output
         console.error(message)
@@ -1102,7 +1075,7 @@ async function getAwsCredsFromCredentialExport(): Promise<{
       }
     } catch (e) {
       const message = chalk.red(
-        'Error getting AWS credentials from awsCredentialExport (in settings or ~/.claude.json):',
+        'Error getting AWS credentials from awsCredentialExport (in settings or ~/.local/share/codev/config.json):',
       )
       if (e instanceof Error) {
         // biome-ignore lint/suspicious/noConsole:: intentional console output
@@ -1292,7 +1265,7 @@ export function refreshGcpAuth(gcpAuthRefresh: string): Promise<boolean> {
               'GCP auth refresh timed out after 3 minutes. Run your auth command manually in a separate terminal.',
             )
           : chalk.red(
-              'Error running gcpAuthRefresh (in settings or ~/.claude.json):',
+              'Error running gcpAuthRefresh (in settings or ~/.local/share/codev/config.json):',
             )
         // biome-ignore lint/suspicious/noConsole:: intentional console output
         console.error(message)

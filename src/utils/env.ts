@@ -9,11 +9,17 @@ import { which } from './which.js'
 type Platform = 'win32' | 'darwin' | 'linux'
 
 // Config and data paths
-// Memoized per CLAUDE_CONFIG_DIR; resolution logic is shared with the server
-// (see resolveGlobalConfigFilePath) so both always agree on the path.
+// Resolution logic is shared with the server so both always agree on the path.
 export const getGlobalClaudeFile = memoize(
   (): string => resolveGlobalConfigFilePath(),
-  () => process.env.CLAUDE_CONFIG_DIR,
+  () =>
+    [
+      process.env.CODEV_DATA_DIR,
+      process.env.CODEV_CONFIG_DIR,
+      process.env.CLAUDE_CONFIG_DIR,
+      process.env.XDG_DATA_HOME,
+      process.env.HOME,
+    ].join('\0'),
 )
 
 const hasInternetAccess = memoize(async (): Promise<boolean> => {

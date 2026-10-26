@@ -21,6 +21,8 @@ import { migration006PendingNotifications } from './006-pending-notifications.js
 import { migration007BackgroundTasks } from './007-background-tasks.js'
 import { migration008MemoryFiles } from './008-memory-files.js'
 import { migration009SessionProcesses } from './009-session-processes.js'
+import { migration010AppDocuments } from './010-app-documents.js'
+import { migration011PromptHistory } from './011-prompt-history.js'
 export interface Migration {
   id: string
   version: number
@@ -38,6 +40,8 @@ export const MIGRATIONS: readonly Migration[] = [
   migration007BackgroundTasks,
   migration008MemoryFiles,
   migration009SessionProcesses,
+  migration010AppDocuments,
+  migration011PromptHistory,
 ]
 
 function ensureMigrationsTable(db: SqliteDatabase): void {

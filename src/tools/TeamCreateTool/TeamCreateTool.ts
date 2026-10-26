@@ -17,7 +17,6 @@ import { getResolvedTeammateMode } from '../../utils/swarm/backends/registry.js'
 import { TEAM_LEAD_NAME } from '../../utils/swarm/constants.js'
 import type { TeamFile } from '../../utils/swarm/teamHelpers.js'
 import {
-  getTeamFilePath,
   readTeamFile,
   registerTeamForSessionCleanup,
   sanitizeName,
@@ -51,7 +50,7 @@ type InputSchema = ReturnType<typeof inputSchema>
 
 export type Output = {
   team_name: string
-  team_file_path: string
+  team_storage: string
   lead_agent_id: string
 }
 
@@ -152,7 +151,7 @@ export const TeamCreateTool: Tool<InputSchema, Output> = buildTool({
         getDefaultMainLoopModel(),
     )
 
-    const teamFilePath = getTeamFilePath(finalTeamName)
+    const teamStorage = `codev.db#teams/${sanitizeName(finalTeamName)}`
 
     const teamFile: TeamFile = {
       name: finalTeamName,
@@ -195,7 +194,7 @@ export const TeamCreateTool: Tool<InputSchema, Output> = buildTool({
       ...prev,
       teamContext: {
         teamName: finalTeamName,
-        teamFilePath,
+        teamStorageKey: teamStorage,
         leadAgentId,
         teammates: {
           [leadAgentId]: {
@@ -230,7 +229,7 @@ export const TeamCreateTool: Tool<InputSchema, Output> = buildTool({
     return {
       data: {
         team_name: finalTeamName,
-        team_file_path: teamFilePath,
+        team_storage: teamStorage,
         lead_agent_id: leadAgentId,
       },
     }

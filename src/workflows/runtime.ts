@@ -130,7 +130,7 @@ export class WorkflowRuntime {
     const entry = discovered.workflows.find(wf => wf.name === name)
     if (!entry) {
       const known = discovered.workflows.map(wf => wf.name).join(', ')
-      throw new Error(known ? `Unknown workflow "${name}". Available: ${known}` : `No workflows found. Put *.workflow.ts files in .claude/workflows/ or ~/.claude/workflows/.`)
+      throw new Error(known ? `Unknown workflow "${name}". Available: ${known}` : `No workflows found. Put *.workflow.ts files in .claude/workflows/ or ~/.local/share/codev/workflows/.`)
     }
     const workflow = await loadWorkflow(entry.path)
 

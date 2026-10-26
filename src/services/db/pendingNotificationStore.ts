@@ -22,7 +22,7 @@
  *   never break the queue. Under bun test the store is a no-op unless a
  *   test explicitly injects a backend via __setPendingNotificationStoreForTests.
  */
-import { mkdirSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 import { getNodeEnv } from '../../utils/sessionStorage.js'
@@ -55,7 +55,7 @@ export interface NotificationPersistence {
 let cachedDb: SqliteDatabase | null = null
 
 function defaultStorePath(): string {
-  return join(getClaudeConfigHomeDir(), 'sessions', 'sessions.db')
+  return join(getClaudeConfigHomeDir(), 'codev.db')
 }
 
 function getDb(): SqliteDatabase | null {
@@ -68,6 +68,14 @@ function getDb(): SqliteDatabase | null {
     // notification mirror independent of SessionStore's lifecycle.
     const db = openDatabaseSync(path)
     runMigrations(db)
+    for (const file of [path, `${path}-wal`, `${path}-shm`]) {
+      if (!existsSync(file)) continue
+      try {
+        chmodSync(file, 0o600)
+      } catch {
+        // Windows ACLs do not map cleanly to POSIX mode bits.
+      }
+    }
     cachedDb = db
     return db
   } catch (error) {

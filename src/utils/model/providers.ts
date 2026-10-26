@@ -1,5 +1,5 @@
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../services/analytics/index.js'
-import { getGlobalClaudeFile } from '../env.js'
+import { getGlobalConfigSnapshot } from '../config.js'
 
 export type APIProvider =
   | 'firstParty'
@@ -39,33 +39,7 @@ function getStoredProviderPreference(): APIProvider | null {
   }
 
   try {
-    // Read the global config file directly so provider selection works even
-    // before the guarded config loader is enabled during startup.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { readFileSync } = require('fs') as typeof import('fs')
-    const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
-    const config = JSON.parse(raw) as {
-      authProvider?:
-        | 'anthropic'
-        | 'openrouter'
-        | 'openai'
-        | 'local'
-        | 'opencode'
-        | 'nvidia'
-        | 'kiro'
-      openRouterApiKey?: string
-      openAiApiKey?: string
-      openAiAccessToken?: string
-      localBaseUrl?: string
-      localModelName?: string
-      openCodeApiKey?: string
-      openCodeModelName?: string
-      nvidiaApiKey?: string
-      kiroAccessToken?: string
-      kiroRefreshToken?: string
-      kiroProfileArn?: string
-      kiroRegion?: string
-    }
+    const config = getGlobalConfigSnapshot()
 
     let result: APIProvider | null
     switch (config.authProvider) {

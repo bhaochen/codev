@@ -46,7 +46,7 @@ const watermarks = new Map<string, { seq: number; size: number }>()
 /**
  * Export policy (primary mode). The default is DB-only: nothing ever writes
  * the JSONL export automatically — the append path defers (D4) and even the
- * hook/statusline materialization is off, so `~/.claude/projects` stays a
+ * hook/statusline materialization is off, so `~/.local/share/codev/projects` stays a
  * frozen, CLI-refreshed export. Opt back in with:
  *
  *   - `CODEV_SESSION_EXPORT=on-read` → materialize on demand, right before a

@@ -21,7 +21,7 @@ import { SettingsService } from '../services/settingsService.js'
 import { diagnosticsService } from '../services/diagnosticsService.js'
 import { deriveTitle, generateTitle, saveAiTitle } from '../services/titleService.js'
 import { parseSlashCommand } from '../../utils/slashCommandParsing.js'
-import { resolveGlobalConfigFilePath } from '../../utils/globalConfigPath.js'
+import { getGlobalConfigSnapshot } from '../../utils/config.js'
 import {
   COMMAND_NAME_TAG,
   LOCAL_COMMAND_STDERR_TAG,
@@ -1738,7 +1738,7 @@ function resolveDesktopThinkingMode(
 }
 
 /**
- * Read CLI's ~/.claude.json directly to check authProvider.
+ * Read CLI's ~/.local/share/codev/config.json directly to check authProvider.
  * Bypasses getGlobalConfig cache since this runs in the server process
  * and needs to reflect changes made by CLI's /login command.
  */
@@ -1751,13 +1751,7 @@ function readCliGlobalConfig(): {
   localBaseUrl?: string
   localModelName?: string
 } | null {
-  const configPath = resolveGlobalConfigFilePath()
-  try {
-    const raw = fs.readFileSync(configPath, 'utf-8')
-    return JSON.parse(raw)
-  } catch {
-    return null
-  }
+  return getGlobalConfigSnapshot()
 }
 
 async function buildSessionStartupDiagnosticMessage(

@@ -1,19 +1,19 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'fs'
-import { mkdir, readFile, rm, writeFile } from 'fs/promises'
+import { mkdirSync } from 'fs'
+import { mkdir, readFile, rm } from 'fs/promises'
 import { join } from 'path'
 import { z } from 'zod/v4'
 import { getSessionCreatedTeams } from '../../bootstrap/state.js'
 import { logForDebugging } from '../debug.js'
 import { getTeamsDir } from '../envUtils.js'
-import { errorMessage, getErrnoCode } from '../errors.js'
+import { errorMessage } from '../errors.js'
 import { execFileNoThrowWithCwd } from '../execFileNoThrow.js'
 import { gitExe } from '../git.js'
 import { lazySchema } from '../lazySchema.js'
 import type { PermissionMode } from '../permissions/PermissionMode.js'
-import * as lockfile from '../lockfile.js'
 import { jsonParse, jsonStringify } from '../slowOperations.js'
 import { getTasksDir, notifyTasksUpdated } from '../tasks.js'
 import { getAgentName, getTeamName, isTeammate } from '../teammate.js'
+import { getSessionStore } from '../../services/db/SessionStore.js'
 import { type BackendType, isPaneBackend } from './backends/types.js'
 import { TEAM_LEAD_NAME } from './constants.js'
 
@@ -45,7 +45,7 @@ export const inputSchema = lazySchema(() =>
 // Output types for different operations
 export type SpawnTeamOutput = {
   team_name: string
-  team_file_path: string
+  team_storage: string
   lead_agent_id: string
 }
 
@@ -118,23 +118,15 @@ export function getTeamDir(teamName: string): string {
 }
 
 /**
- * Gets the path to a team's config.json file
- */
-export function getTeamFilePath(teamName: string): string {
-  return join(getTeamDir(teamName), 'config.json')
-}
-
-/**
- * Reads a team file by name (sync — for sync contexts like React render paths)
+ * Reads a team record by name (sync — for sync contexts like React render paths)
  * @internal Exported for team discovery UI
  */
 // sync IO: called from sync context
 export function readTeamFile(teamName: string): TeamFile | null {
   try {
-    const content = readFileSync(getTeamFilePath(teamName), 'utf-8')
-    return jsonParse(content) as TeamFile
+    const content = getSessionStore().getAppDocument('teams', sanitizeName(teamName))
+    return content ? jsonParse(content) as TeamFile : null
   } catch (e) {
-    if (getErrnoCode(e) === 'ENOENT') return null
     logForDebugging(
       `[TeammateTool] Failed to read team file for ${teamName}: ${errorMessage(e)}`,
     )
@@ -143,16 +135,15 @@ export function readTeamFile(teamName: string): TeamFile | null {
 }
 
 /**
- * Reads a team file by name (async — for tool handlers and other async contexts)
+ * Reads a team record by name (async — for tool handlers and other async contexts)
  */
 export async function readTeamFileAsync(
   teamName: string,
 ): Promise<TeamFile | null> {
   try {
-    const content = await readFile(getTeamFilePath(teamName), 'utf-8')
-    return jsonParse(content) as TeamFile
+    const content = getSessionStore().getAppDocument('teams', sanitizeName(teamName))
+    return content ? jsonParse(content) as TeamFile : null
   } catch (e) {
-    if (getErrnoCode(e) === 'ENOENT') return null
     logForDebugging(
       `[TeammateTool] Failed to read team file for ${teamName}: ${errorMessage(e)}`,
     )
@@ -161,17 +152,17 @@ export async function readTeamFileAsync(
 }
 
 /**
- * Writes a team file (sync — for sync contexts)
+ * Writes a team record (sync — for sync contexts)
  */
 // sync IO: called from sync context
 function writeTeamFile(teamName: string, teamFile: TeamFile): void {
   const teamDir = getTeamDir(teamName)
   mkdirSync(teamDir, { recursive: true })
-  writeFileSync(getTeamFilePath(teamName), jsonStringify(teamFile, null, 2))
+  getSessionStore().upsertAppDocument('teams', sanitizeName(teamName), jsonStringify(teamFile))
 }
 
 /**
- * Writes a team file (async — for tool handlers)
+ * Writes a team record (async — for tool handlers)
  */
 export async function writeTeamFileAsync(
   teamName: string,
@@ -179,7 +170,7 @@ export async function writeTeamFileAsync(
 ): Promise<void> {
   const teamDir = getTeamDir(teamName)
   await mkdir(teamDir, { recursive: true })
-  await writeFile(getTeamFilePath(teamName), jsonStringify(teamFile, null, 2))
+  getSessionStore().upsertAppDocument('teams', sanitizeName(teamName), jsonStringify(teamFile))
 }
 
 /**
@@ -192,44 +183,23 @@ export async function mutateTeamFileAsync(
   mutator: (teamFile: TeamFile) => TeamFile | void,
 ): Promise<TeamFile> {
   const teamDir = getTeamDir(teamName)
-  const teamFilePath = getTeamFilePath(teamName)
-  const lockFilePath = `${teamFilePath}.lock`
-
   await mkdir(teamDir, { recursive: true })
-  // Ensure the file exists (create if not, ignore if already exists)
-  try {
-    await writeFile(teamFilePath, '{}', { encoding: 'utf-8', flag: 'wx' })
-  } catch (e) {
-    if (getErrnoCode(e) !== 'EEXIST') {
-      throw e
-    }
-  }
-
-  const release = await lockfile.lock(teamFilePath, {
-    lockfilePath: lockFilePath,
-    retries: {
-      retries: 10,
-      minTimeout: 5,
-      maxTimeout: 100,
-    },
-  })
-
-  try {
-    const current = await readTeamFileAsync(teamName)
+  let next: TeamFile | null = null
+  getSessionStore().updateAppDocument('teams', sanitizeName(teamName), raw => {
+    const current = raw ? jsonParse(raw) as TeamFile : null
     if (!current || !Array.isArray(current.members)) {
       throw new Error(`Team "${teamName}" does not exist`)
     }
 
-    const next = mutator(current) ?? current
-    await writeFile(teamFilePath, jsonStringify(next, null, 2))
-    return next as TeamFile
-  } finally {
-    await release()
-  }
+    next = mutator(current) ?? current
+    return jsonStringify(next)
+  })
+  if (!next) throw new Error(`Team "${teamName}" does not exist`)
+  return next
 }
 
 /**
- * Removes a teammate from the team file by agent ID or name.
+ * Removes a teammate from the team record by agent ID or name.
  * Used by the leader when processing shutdown approvals.
  */
 export function removeTeammateFromTeamFile(
@@ -704,7 +674,7 @@ export async function cleanupTeamDirectories(teamName: string): Promise<void> {
     await destroyWorktree(worktreePath)
   }
 
-  // Clean up team directory (~/.claude/teams/{team-name}/)
+  // Clean up team directory (~/.local/share/codev/teams/{team-name}/)
   const teamDir = getTeamDir(teamName)
   try {
     await rm(teamDir, { recursive: true, force: true })
@@ -715,12 +685,14 @@ export async function cleanupTeamDirectories(teamName: string): Promise<void> {
     )
   }
 
-  // Clean up tasks directory (~/.claude/tasks/{taskListId}/)
+  // Clean up tasks directory (~/.local/share/codev/tasks/{taskListId}/)
   // The leader and teammates all store tasks under the sanitized team name.
   const tasksDir = getTasksDir(sanitizedName)
   try {
     await rm(tasksDir, { recursive: true, force: true })
     logForDebugging(`[TeammateTool] Cleaned up tasks directory: ${tasksDir}`)
+    getSessionStore().deleteAppDocument('task-lists', sanitizedName)
+    getSessionStore().deleteAppDocument('teams', sanitizedName)
     notifyTasksUpdated()
   } catch (error) {
     logForDebugging(

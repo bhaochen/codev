@@ -137,18 +137,14 @@ class TasksV2Store {
 
     this.#notify()
 
-    // Schedule fallback poll only when there are incomplete tasks that
-    // need monitoring. When all tasks are completed (or there are none),
-    // the fs.watch watcher and onTasksUpdated callback are sufficient to
-    // detect new activity — no need to keep polling and re-rendering.
+    // Poll across processes because task state is shared through codev.db;
+    // fs.watch remains only as a prompt same-machine refresh signal.
     if (this.#pollTimer) {
       clearTimeout(this.#pollTimer)
       this.#pollTimer = null
     }
-    if (hasIncomplete) {
-      this.#pollTimer = setTimeout(this.#debouncedFetch, FALLBACK_POLL_MS)
-      this.#pollTimer.unref()
-    }
+    this.#pollTimer = setTimeout(this.#debouncedFetch, FALLBACK_POLL_MS)
+    this.#pollTimer.unref()
   }
 
   #onHideTimerFired(scheduledForTaskListId: string): void {

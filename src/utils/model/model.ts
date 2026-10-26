@@ -32,6 +32,7 @@ import { type ModelAlias, isModelAlias } from './aliases.js'
 import { ALL_MODEL_CONFIGS, type ModelKey } from './configs.js'
 import { getAntModelOverrideConfig, resolveAntModel } from './antModels.js'
 import { capitalize } from '../stringUtils.js'
+import { getGlobalConfigSnapshot } from '../config.js'
 
 export type ModelShortName = string
 export type ModelName = string
@@ -188,14 +189,7 @@ export function getDefaultMainLoopModelSetting(): ModelName | ModelAlias {
   // If getAPIProvider() returns null, check the config file directly
   if (!isOpenRouterProvider && apiProvider === null) {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { readFileSync } = require('fs') as typeof import('fs')
-      const { getGlobalClaudeFile } = require('./env.js') as unknown as { getGlobalClaudeFile: () => string }
-      const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
-      const config = JSON.parse(raw) as {
-        authProvider?: string
-        openRouterApiKey?: string
-      }
+      const config = getGlobalConfigSnapshot()
       isOpenRouterProvider = config.authProvider === 'openrouter' && !!config.openRouterApiKey
     } catch {
       // Ignore errors, fall through to default behavior
@@ -228,14 +222,7 @@ export function getDefaultMainLoopModelSetting(): ModelName | ModelAlias {
   // If getAPIProvider() returns null, check the config file directly
   if (!isLocalProvider && apiProvider === null) {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { readFileSync } = require('fs') as typeof import('fs')
-      const { getGlobalClaudeFile } = require('./env.js') as unknown as { getGlobalClaudeFile: () => string }
-      const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
-      const config = JSON.parse(raw) as {
-        authProvider?: string
-        localBaseUrl?: string
-      }
+      const config = getGlobalConfigSnapshot()
       isLocalProvider = config.authProvider === 'local' && !!config.localBaseUrl
     } catch {
       // Ignore errors, fall through to default behavior
@@ -256,14 +243,7 @@ export function getDefaultMainLoopModelSetting(): ModelName | ModelAlias {
   let isOpenCodeProvider = apiProvider === 'opencode'
   if (!isOpenCodeProvider) {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { readFileSync } = require('fs') as typeof import('fs')
-      const { getGlobalClaudeFile } = require('./env.js') as unknown as { getGlobalClaudeFile: () => string }
-      const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
-      const config = JSON.parse(raw) as {
-        authProvider?: string
-        openCodeModelName?: string
-      }
+      const config = getGlobalConfigSnapshot()
       isOpenCodeProvider = config.authProvider === 'opencode'
     } catch {
       // Ignore errors, fall through to default behavior

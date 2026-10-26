@@ -12,7 +12,7 @@
 import { randomUUID } from "crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
-import { homedir } from "os";
+import { getClaudeConfigHomeDir } from "../../utils/envUtils.js";
 
 /** 压缩后的上下文存档 */
 export interface ContextArchive {
@@ -70,7 +70,7 @@ const DEFAULT_CONFIG: Required<ContextCompactionConfig> = {
   maxTokens: 80_000,
   triggerThreshold: 0.75,
   retainTurns: 2,
-  archiveDir: join(homedir(), ".codev", "browser-context"),
+  archiveDir: join(getClaudeConfigHomeDir(), "browser-context"),
   summarizer: undefined as any,
 };
 

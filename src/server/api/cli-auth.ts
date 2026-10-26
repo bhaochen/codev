@@ -1,14 +1,13 @@
 /**
  * CLI Auth Provider REST API
  *
- * GET  /api/cli-auth          — read current CLI auth provider config from ~/.claude.json
- * PUT  /api/cli-auth          — update CLI auth provider config in ~/.claude.json
+ * GET  /api/cli-auth          — read current CLI auth provider config from ~/.local/share/codev/config.json
+ * PUT  /api/cli-auth          — update CLI auth provider config in ~/.local/share/codev/config.json
  * POST /api/cli-auth/invalidate — invalidate the cliProviderModelCache
  */
 
-import { readFileSync, writeFileSync } from 'node:fs'
 import { ApiError, errorResponse } from '../middleware/errorHandler.js'
-import { resolveGlobalConfigFilePath } from '../../utils/globalConfigPath.js'
+import { getSessionStore } from '../../services/db/SessionStore.js'
 
 type AuthProvider = 'anthropic' | 'openai' | 'openrouter' | 'local' | 'opencode' | 'nvidia'
 
@@ -24,16 +23,10 @@ type CliAuthConfig = {
   localModelName?: string
 }
 
-// Single source of truth for the global config path, shared with the CLI so
-// the desktop server reads/writes exactly the file the CLI does (see
-// resolveGlobalConfigFilePath for the legacy / OAuth-suffix precedence).
-function getClaudeJsonPath(): string {
-  return resolveGlobalConfigFilePath()
-}
-
 function readCliAuthConfig(): CliAuthConfig {
   try {
-    const raw = readFileSync(getClaudeJsonPath(), 'utf8')
+    const raw = getSessionStore().getAppDocument('config', 'global')
+    if (!raw) return { authProvider: null }
     const config = JSON.parse(raw) as Record<string, unknown>
     return {
       authProvider: (config.authProvider as AuthProvider) || null,
@@ -52,14 +45,10 @@ function readCliAuthConfig(): CliAuthConfig {
 }
 
 function writeCliAuthConfig(updates: Partial<CliAuthConfig>): void {
-  const filePath = getClaudeJsonPath()
-  let config: Record<string, unknown> = {}
-  try {
-    const raw = readFileSync(filePath, 'utf8')
-    config = JSON.parse(raw) as Record<string, unknown>
-  } catch {
-    // file doesn't exist yet, start fresh
-  }
+  getSessionStore().updateAppDocument('config', 'global', raw => {
+  let config: Record<string, unknown> = raw
+    ? JSON.parse(raw) as Record<string, unknown>
+    : {}
 
   if (updates.authProvider !== undefined) {
     config.authProvider = updates.authProvider || undefined
@@ -105,7 +94,8 @@ function writeCliAuthConfig(updates: Partial<CliAuthConfig>): void {
     config.localModelName = updates.localModelName || undefined
   }
 
-  writeFileSync(filePath, JSON.stringify(config, null, 2) + '\n')
+  return JSON.stringify(config)
+  })
 }
 
 export async function handleCliAuthApi(

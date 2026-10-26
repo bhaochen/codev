@@ -752,8 +752,7 @@ export type TeamContextAttachment = {
   agentId: string
   agentName: string
   teamName: string
-  teamConfigPath: string
-  taskListPath: string
+  teamMembers: string[]
 }
 
 /**
@@ -3837,9 +3836,15 @@ function getTeamContextAttachment(messages: Message[]): Attachment[] {
     return []
   }
 
-  const configDir = getClaudeConfigHomeDir()
-  const teamConfigPath = `${configDir}/teams/${teamName}/config.json`
-  const taskListPath = `${configDir}/tasks/${teamName}/`
+  let teamMembers: string[] = []
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { readTeamFile } = require('./swarm/teamHelpers.js') as
+      typeof import('./swarm/teamHelpers.js')
+    teamMembers = (readTeamFile(teamName)?.members ?? []).map(member => member.name)
+  } catch {
+    // Team state may not be available during early startup.
+  }
 
   return [
     {
@@ -3847,8 +3852,7 @@ function getTeamContextAttachment(messages: Message[]): Attachment[] {
       agentId,
       agentName: agentName || agentId,
       teamName,
-      teamConfigPath,
-      taskListPath,
+      teamMembers,
     },
   ]
 }

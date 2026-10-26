@@ -10,7 +10,7 @@ const statusline = {
   aliases: [],
   name: 'statusline',
   progressMessage: 'setting up statusLine',
-  allowedTools: [AGENT_TOOL_NAME, 'Read(~/**)', 'Edit(~/.claude/settings.json)'],
+  allowedTools: [AGENT_TOOL_NAME, 'Read(~/**)', 'Edit(~/.local/share/codev/settings.json)'],
   source: 'builtin',
   disableNonInteractive: true,
   async getPromptForCommand(args): Promise<AgentContentBlock[]> {

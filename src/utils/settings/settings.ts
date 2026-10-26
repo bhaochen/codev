@@ -309,11 +309,70 @@ export function getRelativeSettingsFilePathForSource(
 export function getSettingsForSource(
   source: SettingSource,
 ): SettingsJson | null {
+  // SQLite updates may come from another process, so don't serve a stale
+  // process-local snapshot for the DB-backed user settings document.
+  if (source === 'userSettings') {
+    return getSettingsForSourceUncached(source)
+  }
   const cached = getCachedSettingsForSource(source)
   if (cached !== undefined) return cached
   const result = getSettingsForSourceUncached(source)
   setCachedSettingsForSource(source, result)
   return result
+}
+
+const FILE_BACKED_USER_SETTING_KEYS = ['hooks', 'mcpServers'] as const
+
+function getUserSettingsDocumentKey(): string {
+  return getUserSettingsFilePath()
+}
+
+function splitUserSettings(settings: SettingsJson): {
+  database: SettingsJson
+  definitions: SettingsJson
+} {
+  const database = { ...settings }
+  const definitions: SettingsJson = {}
+  for (const key of FILE_BACKED_USER_SETTING_KEYS) {
+    if (key in database) {
+      definitions[key] = database[key]
+      delete database[key]
+    }
+  }
+  return { database, definitions }
+}
+
+function readUserSettingsFromDatabase(): SettingsJson {
+  try {
+    // Delay DB loading to avoid settings → SessionStore → session utility cycles.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getSessionStore } = require('../../services/db/SessionStore.js') as
+      typeof import('../../services/db/SessionStore.js')
+    const raw = getSessionStore().getAppDocument(
+      'settings',
+      getUserSettingsDocumentKey(),
+    )
+    if (!raw) return {}
+    const parsed: unknown = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as SettingsJson
+      : {}
+  } catch (error) {
+    logForDebugging(`Could not read user settings from codev.db: ${error}`)
+    return {}
+  }
+}
+
+function readFileBackedUserDefinitions(): SettingsJson {
+  const filePath = getSettingsFilePathForSource('userSettings')
+  if (!filePath) return {}
+  const { settings } = parseSettingsFile(filePath)
+  if (!settings) return {}
+  const definitions: SettingsJson = {}
+  for (const key of FILE_BACKED_USER_SETTING_KEYS) {
+    if (key in settings) definitions[key] = settings[key]
+  }
+  return definitions
 }
 
 function getSettingsForSourceUncached(
@@ -342,6 +401,13 @@ function getSettingsForSourceUncached(
     }
 
     return null
+  }
+
+  if (source === 'userSettings') {
+    const databaseSettings = readUserSettingsFromDatabase()
+    const definitions = readFileBackedUserDefinitions()
+    const combined = { ...databaseSettings, ...definitions }
+    return Object.keys(combined).length > 0 ? combined : null
   }
 
   const settingsFilePath = getSettingsFilePathForSource(source)
@@ -422,6 +488,52 @@ export function updateSettingsForSource(
     (source as unknown) === 'flagSettings'
   ) {
     return { error: null }
+  }
+
+  if (source === 'userSettings') {
+    try {
+      // Use the same merge/delete semantics as file-backed project settings,
+      // but keep ordinary preferences in SQLite and editable definitions in
+      // the canonical settings file.
+      const existing = getSettingsForSourceUncached(source) || {}
+      const updated = mergeWith(
+        existing,
+        settings,
+        (
+          _objValue: unknown,
+          srcValue: unknown,
+          key: string | number | symbol,
+          object: Record<string | number | symbol, unknown>,
+        ) => {
+          if (srcValue === undefined && object && typeof key === 'string') {
+            delete object[key]
+            return undefined
+          }
+          if (Array.isArray(srcValue)) return srcValue
+          return undefined
+        },
+      ) as SettingsJson
+      const { database, definitions } = splitUserSettings(updated)
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getSessionStore } = require('../../services/db/SessionStore.js') as
+        typeof import('../../services/db/SessionStore.js')
+      getSessionStore().upsertAppDocument(
+        'settings',
+        getUserSettingsDocumentKey(),
+        JSON.stringify(database),
+      )
+      const filePath = getSettingsFilePathForSource(source)!
+      getFsImplementation().mkdirSync(dirname(filePath))
+      markInternalWrite(filePath)
+      writeFileSyncAndFlush_DEPRECATED(
+        filePath,
+        jsonStringify(definitions, null, 2) + '\n',
+      )
+      resetSettingsCache()
+      return { error: null }
+    } catch (error) {
+      return { error: error instanceof Error ? error : new Error(String(error)) }
+    }
   }
 
   // Create the folder if needed
@@ -985,6 +1097,11 @@ export function rawSettingsContainsKey(key: string): boolean {
   for (const source of getEnabledSettingSources()) {
     // Skip policySettings - we only care about user-configured settings
     if (source === 'policySettings') {
+      continue
+    }
+
+    if (source === 'userSettings') {
+      if (key in (getSettingsForSourceUncached(source) || {})) return true
       continue
     }
 

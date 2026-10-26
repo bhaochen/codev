@@ -175,7 +175,7 @@ export function buildInheritedEnvMap(): Record<string, string> {
   const envMap: Record<string, string> = {}
 
   // Only hardcode these if NOT already set in process env — the user may
-  // have them in ~/.claude/settings.json env, tmux set-environment, etc.
+  // have them in ~/.local/share/codev/settings.json env, tmux set-environment, etc.
   if (!process.env.CLAUDECODE) {
     envMap.CLAUDECODE = '1'
   }

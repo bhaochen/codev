@@ -49,7 +49,7 @@ export const call: LocalCommandCall = async (rawArgs, context) => {
         const lines: string[] = []
         if (discovered.workflows.length === 0) {
           lines.push(
-            '未发现 workflow。放置文件到 .claude/workflows/*.workflow.ts 或 ~/.claude/workflows/。',
+            '未发现 workflow。放置文件到 .claude/workflows/*.workflow.ts 或 ~/.local/share/codev/workflows/。',
           )
         } else {
           lines.push('workflows:')

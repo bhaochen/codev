@@ -137,6 +137,10 @@ export function useTaskListWatcher({
     const tasksDir = getTasksDir(taskListId)
 
     let watcher: FSWatcher | null = null
+    const pollTimer = setInterval(() => {
+      void checkForTasksRef.current()
+    }, 5000)
+    pollTimer.unref?.()
 
     const debouncedCheck = (): void => {
       if (debounceTimerRef.current) {
@@ -171,6 +175,7 @@ export function useTaskListWatcher({
       if (watcher) {
         watcher.close()
       }
+      clearInterval(pollTimer)
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current)
       }

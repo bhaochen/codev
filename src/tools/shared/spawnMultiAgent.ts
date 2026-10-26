@@ -488,7 +488,7 @@ async function handleSpawnSplitPane(
     teamContext: {
       ...prev.teamContext,
       teamName: teamName ?? prev.teamContext?.teamName ?? 'default',
-      teamFilePath: prev.teamContext?.teamFilePath ?? '',
+      teamStorageKey: prev.teamContext?.teamStorageKey ?? '',
       leadAgentId: prev.teamContext?.leadAgentId ?? '',
       teammates: {
         ...(prev.teamContext?.teammates || {}),
@@ -697,7 +697,7 @@ async function handleSpawnSeparateWindow(
     teamContext: {
       ...prev.teamContext,
       teamName: teamName ?? prev.teamContext?.teamName ?? 'default',
-      teamFilePath: prev.teamContext?.teamFilePath ?? '',
+      teamStorageKey: prev.teamContext?.teamStorageKey ?? '',
       leadAgentId: prev.teamContext?.leadAgentId ?? '',
       teammates: {
         ...(prev.teamContext?.teammates || {}),
@@ -993,7 +993,7 @@ async function handleSpawnInProcess(
       teamContext: {
         ...prev.teamContext,
         teamName: teamName ?? prev.teamContext?.teamName ?? 'default',
-        teamFilePath: prev.teamContext?.teamFilePath ?? '',
+        teamStorageKey: prev.teamContext?.teamStorageKey ?? '',
         leadAgentId,
         teammates: {
           ...existingTeammates,

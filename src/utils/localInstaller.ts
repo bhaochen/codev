@@ -28,7 +28,11 @@ export function getLocalClaudePath(): string {
  */
 export function isRunningFromLocalInstallation(): boolean {
   const execPath = process.argv[1] || ''
-  return execPath.includes('/.claude/local/node_modules/')
+  const currentPath = join(getLocalInstallDir(), 'node_modules')
+  return (
+    execPath.includes(`${currentPath}/`) ||
+    execPath.includes('/.claude/local/node_modules/')
+  )
 }
 
 /**

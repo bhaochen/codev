@@ -137,7 +137,7 @@ export function modelSupportsMaxEffort(model: string): boolean {
 
 /**
  * Resolve per-model effort configuration, merging:
- * 1. ~/.claude/settings.json modelEffortConfigs (user settings)
+ * 1. ~/.local/share/codev/settings.json modelEffortConfigs (user settings)
  * 2. CLAUDE_CODE_MODEL_EFFORT_CONFIGS env var
  * Settings take precedence over env var.
  */

@@ -13,7 +13,7 @@
  * Migration: Existing JSONL files are migrated on first access.
  * The JSONL file is kept as backup until migration is verified.
  */
-import { mkdirSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { UUID } from 'crypto'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
@@ -81,6 +81,11 @@ export interface MessageQueryOptions {
   entryTypes?: string[]
 }
 
+export interface PromptHistoryOptions {
+  project?: string
+  limit?: number
+}
+
 // ============================================================================
 // Session Store
 // ============================================================================
@@ -99,6 +104,14 @@ export class SessionStore {
     // also works on plain Node ≥22.5.
     const db = openDatabaseSync(path)
     runMigrations(db)
+    for (const file of [path, `${path}-wal`, `${path}-shm`]) {
+      if (!existsSync(file)) continue
+      try {
+        chmodSync(file, 0o600)
+      } catch {
+        // Windows ACLs do not map cleanly to POSIX mode bits.
+      }
+    }
     return new SessionStore(db)
   }
 
@@ -706,6 +719,92 @@ export class SessionStore {
     ).map(r => r.scope)
   }
 
+  getAppDocument(namespace: string, key: string): string | null {
+    const row = this.db
+      .query(
+        'SELECT content FROM app_documents WHERE namespace = ? AND document_key = ?',
+      )
+      .get(namespace, key) as { content: string } | null
+    return row?.content ?? null
+  }
+
+  upsertAppDocument(namespace: string, key: string, content: string): void {
+    this.db.run(
+      `INSERT OR REPLACE INTO app_documents
+       (namespace, document_key, content, updated_at) VALUES (?, ?, ?, ?)`,
+      [namespace, key, content, Date.now()],
+    )
+  }
+
+  listAppDocuments(namespace: string): Array<{ key: string; content: string }> {
+    const rows = this.db.query(
+      'SELECT document_key, content FROM app_documents WHERE namespace = ? ORDER BY document_key',
+    ).all(namespace) as Array<{ document_key: string; content: string }>
+    return rows.map(row => ({ key: row.document_key, content: row.content }))
+  }
+
+  deleteAppDocument(namespace: string, key: string): void {
+    this.db.run(
+      'DELETE FROM app_documents WHERE namespace = ? AND document_key = ?',
+      [namespace, key],
+    )
+  }
+
+  updateAppDocument(
+    namespace: string,
+    key: string,
+    update: (current: string | null) => string | null,
+  ): string | null {
+    return this.transaction(() => {
+      const current = this.getAppDocument(namespace, key)
+      const next = update(current)
+      if (next !== null && next !== current) {
+        this.upsertAppDocument(namespace, key, next)
+      }
+      return next
+    })
+  }
+
+  appendPromptHistory(entry: {
+    timestamp: number
+    project: string
+    sessionId?: string
+    data: Record<string, unknown>
+  }): void {
+    this.db.run(
+      `INSERT INTO prompt_history (timestamp, project, session_id, data_json)
+       VALUES (?, ?, ?, ?)`,
+      [entry.timestamp, entry.project, entry.sessionId ?? null, jsonStringify(entry.data)],
+    )
+  }
+
+  listPromptHistory(options: PromptHistoryOptions = {}): Array<{
+    timestamp: number
+    project: string
+    sessionId?: string
+    data: Record<string, unknown>
+  }> {
+    const projectClause = options.project ? 'WHERE project = ?' : ''
+    const params = options.project
+      ? [options.project, options.limit ?? 1000]
+      : [options.limit ?? 1000]
+    const rows = this.db.query(
+      `SELECT timestamp, project, session_id, data_json FROM prompt_history
+       ${projectClause} ORDER BY timestamp DESC, id DESC LIMIT ?`,
+    ).all(...params) as Array<{
+      timestamp: number
+      project: string
+      session_id: string | null
+      data_json: string
+    }>
+    return rows.map(row => ({
+      timestamp: row.timestamp,
+      project: row.project,
+      ...(row.session_id ? { sessionId: row.session_id } : {}),
+      data: jsonParse(row.data_json) as Record<string, unknown>,
+    }))
+  }
+
   // =========================================================================
   // Live session process registry (replaces <configHome>/sessions/<pid>.json)
   // =========================================================================
@@ -812,10 +911,8 @@ function rowToSessionMeta(row: Record<string, unknown>): SessionMeta {
 }
 
 function defaultStorePath(): string {
-  // Named `sessions.db` (renamed from `sessions.sqlite`); the directory is
-  // already `sessions/`, so the file name stays short. See
-  // docs/architecture/session-storage-migration.md for the rename/rollback.
-  return join(getClaudeConfigHomeDir(), 'sessions', 'sessions.db')
+  // One database owns session transcripts, memory mirrors, and app state.
+  return join(getClaudeConfigHomeDir(), 'codev.db')
 }
 
 // Singleton instance

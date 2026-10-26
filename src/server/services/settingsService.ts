@@ -1,9 +1,7 @@
 /**
- * Settings Service — 读写用户级和项目级设置文件
+ * Settings Service — 用户偏好写入 codev.db，项目设置仍为项目文件
  *
- * 设置文件为 JSON 格式：
- *   - 用户级: ~/.claude/settings.json
- *   - 项目级: {projectRoot}/.claude/settings.json
+ * 全局 hooks 与 MCP 定义保留在用户 settings.json，项目设置保留在项目文件。
  *
  * 合并策略：Object.assign({}, userSettings, projectSettings)
  */
@@ -13,9 +11,9 @@ import { randomBytes } from 'node:crypto'
 import * as path from 'path'
 import { ApiError } from '../middleware/errorHandler.js'
 import { normalizeJsonObject, readRecoverableJsonFile } from './recoverableJsonFile.js'
-import { ensurePersistentStorageUpgraded } from './persistentStorageMigrations.js'
 import { resetSettingsCache } from '../../utils/settings/settingsCache.js'
-import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
+import { getSettingsForSource, updateSettingsForSource } from '../../utils/settings/settings.js'
+import type { SettingsJson } from '../../utils/settings/types.js'
 
 const VALID_PERMISSION_MODES = [
   'default',
@@ -35,16 +33,6 @@ export class SettingsService {
     this.projectRoot = projectRoot
   }
 
-  /** 配置目录，支持通过环境变量覆盖（便于测试） */
-  private getConfigDir(): string {
-    return getClaudeConfigHomeDir()
-  }
-
-  /** 用户级设置文件路径 */
-  private getUserSettingsPath(): string {
-    return path.join(this.getConfigDir(), 'settings.json')
-  }
-
   /** 项目级设置文件路径 */
   private getProjectSettingsPath(projectRoot?: string): string {
     const root = projectRoot || this.projectRoot
@@ -60,7 +48,6 @@ export class SettingsService {
 
   /** 安全读取 JSON 文件，文件不存在时返回空对象 */
   private async readJsonFile(filePath: string): Promise<Record<string, unknown>> {
-    await ensurePersistentStorageUpgraded()
     return readRecoverableJsonFile({
       filePath,
       label: 'settings',
@@ -83,7 +70,7 @@ export class SettingsService {
 
   /** 获取用户级设置 */
   async getUserSettings(): Promise<Record<string, unknown>> {
-    return this.readJsonFile(this.getUserSettingsPath())
+    return (getSettingsForSource('userSettings') ?? {}) as Record<string, unknown>
   }
 
   /** 获取项目级设置 */
@@ -152,12 +139,11 @@ export class SettingsService {
 
   /** 更新用户级设置（浅合并） */
   async updateUserSettings(settings: Record<string, unknown>): Promise<void> {
-    const filePath = this.getUserSettingsPath()
-    await this.withWriteLock(filePath, async () => {
-      const current = await this.readJsonFile(filePath)
-      const merged = Object.assign({}, current, settings)
-      await this.writeJsonFile(filePath, merged)
-    })
+    const result = updateSettingsForSource('userSettings', settings as SettingsJson)
+    if (result.error) {
+      throw ApiError.internal(`Failed to update user settings: ${result.error.message}`)
+    }
+    resetSettingsCache()
   }
 
   /** 更新项目级设置（浅合并） */

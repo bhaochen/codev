@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite'
 import type { SQLQueryBindings } from 'bun:sqlite'
-import { mkdirSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { getClaudeConfigHomeDir } from '../utils/envUtils.js'
 import { generateWordSlug } from '../utils/words.js'
@@ -9,7 +9,7 @@ import type { RunStatus, WorkflowSnapshot } from './types.js'
 export const ACTIVE_STATUSES: readonly RunStatus[] = ['running', 'paused', 'waiting']
 
 export function defaultStorePath(): string {
-  return join(getClaudeConfigHomeDir(), 'workflows', 'state.sqlite')
+  return join(getClaudeConfigHomeDir(), 'codev.db')
 }
 
 export type NewRun = {
@@ -113,6 +113,15 @@ export class WorkflowStore {
     const db = new Database(path, { create: true })
     db.exec('PRAGMA journal_mode = WAL;')
     db.exec(SCHEMA)
+    importLegacyWorkflowDatabase(db, path)
+    for (const file of [path, `${path}-wal`, `${path}-shm`]) {
+      if (!existsSync(file)) continue
+      try {
+        chmodSync(file, 0o600)
+      } catch {
+        // Windows ACLs do not map cleanly to POSIX mode bits.
+      }
+    }
     return new WorkflowStore(db)
   }
 
@@ -218,5 +227,69 @@ export class WorkflowStore {
       type: row.type,
       data: row.data_json === null ? null : (JSON.parse(row.data_json) as Record<string, unknown>),
     }))
+  }
+}
+
+/** Merge the former standalone workflow database into codev.db once. */
+function importLegacyWorkflowDatabase(db: Database, targetPath: string): void {
+  const legacyPath = join(
+    getClaudeConfigHomeDir(),
+    'workflows',
+    'state.sqlite',
+  )
+  if (!existsSync(legacyPath) || legacyPath === targetPath) return
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS codev_imports (
+      source TEXT PRIMARY KEY,
+      imported_at INTEGER NOT NULL
+    );
+  `)
+  const imported = db
+    .query('SELECT 1 FROM codev_imports WHERE source = ?')
+    .get(legacyPath)
+  if (imported) return
+
+  const escapedPath = legacyPath.replaceAll("'", "''")
+  db.exec(`ATTACH DATABASE '${escapedPath}' AS legacy_workflows`)
+  try {
+    const hasRuns = db
+      .query(
+        "SELECT 1 FROM legacy_workflows.sqlite_master WHERE type = 'table' AND name = 'runs'",
+      )
+      .get()
+    if (hasRuns) {
+      db.exec('BEGIN IMMEDIATE')
+      try {
+        db.exec(`
+          INSERT OR IGNORE INTO main.runs
+            (id, workflow_name, source_path, status, session_id, owner_lease,
+             input_json, snapshot_json, created_at, updated_at)
+          SELECT id, workflow_name, source_path, status, session_id, owner_lease,
+                 input_json, snapshot_json, created_at, updated_at
+          FROM legacy_workflows.runs;
+        `)
+        const hasEvents = db
+          .query(
+            "SELECT 1 FROM legacy_workflows.sqlite_master WHERE type = 'table' AND name = 'run_events'",
+          )
+          .get()
+        if (hasEvents) {
+          db.exec(`
+            INSERT OR IGNORE INTO main.run_events (seq, run_id, at, type, data_json)
+            SELECT seq, run_id, at, type, data_json FROM legacy_workflows.run_events;
+          `)
+        }
+        db.query(
+          'INSERT OR REPLACE INTO codev_imports (source, imported_at) VALUES (?, ?)',
+        ).run(legacyPath, Date.now())
+        db.exec('COMMIT')
+      } catch (error) {
+        db.exec('ROLLBACK')
+        throw error
+      }
+    }
+  } finally {
+    db.exec('DETACH DATABASE legacy_workflows')
   }
 }

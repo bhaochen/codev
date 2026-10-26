@@ -1,12 +1,12 @@
 /**
- * TeamWatcher -- monitors ~/.claude/teams/ for changes and pushes
+ * TeamWatcher -- monitors ~/.local/share/codev/teams/ for changes and pushes
  * real-time updates to all connected WebSocket clients.
  *
  * Uses polling (setInterval) rather than fs.watch for cross-platform reliability.
  * Detects three kinds of events:
- *   - team_created  : a new team directory with config.json appears
- *   - team_update   : an existing team's config.json content changes
- *   - team_deleted  : a previously-seen team directory disappears
+ *   - team_created  : a new team record appears in codev.db
+ *   - team_update   : an existing team record changes
+ *   - team_deleted  : a previously-seen team record disappears
  */
 
 import * as fs from 'fs'
@@ -14,6 +14,7 @@ import * as path from 'path'
 import { sendToSession, getActiveSessionIds } from '../ws/handler.js'
 import type { ServerMessage, TeamMemberStatus } from '../ws/events.js'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
+import { getSessionStore } from '../../services/db/SessionStore.js'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -59,34 +60,24 @@ export class TeamWatcher {
   private check(): void {
     const teamsDir = getTeamsDir()
 
-    let entries: fs.Dirent[]
+    let documents: Array<{ key: string; content: string }>
     try {
-      entries = fs.readdirSync(teamsDir, { withFileTypes: true })
+      documents = getSessionStore().listAppDocuments('teams')
     } catch {
-      // teams directory doesn't exist yet -- nothing to watch
-      // If we previously knew about teams, they are now all "deleted"
-      for (const [name] of this.lastSnapshots) {
-        this.broadcast({ type: 'team_deleted', teamName: name })
-      }
-      this.lastSnapshots.clear()
       return
     }
 
     const currentTeamNames = new Set<string>()
 
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue
-      const teamName = entry.name
-      currentTeamNames.add(teamName)
-
-      const configPath = path.join(teamsDir, teamName, 'config.json')
-      let content: string
+    for (const { key: teamKey, content } of documents) {
+      let config: Record<string, unknown>
       try {
-        content = fs.readFileSync(configPath, 'utf-8')
+        config = JSON.parse(content) as Record<string, unknown>
       } catch {
-        // config.json not readable (missing / permissions) -- skip
         continue
       }
+      const teamName = typeof config.name === 'string' ? config.name : teamKey
+      currentTeamNames.add(teamName)
 
       const lastContent = this.lastSnapshots.get(teamName)
 
@@ -98,10 +89,9 @@ export class TeamWatcher {
         // Team config changed -- extract member statuses and broadcast
         this.lastSnapshots.set(teamName, content)
         try {
-          const config = JSON.parse(content)
           const members = this.extractMemberStatuses(config)
           // Merge inbox-discovered members that are missing from config
-          const inboxMembers = this.discoverInboxMembers(teamsDir, teamName, config)
+          const inboxMembers = this.discoverInboxMembers(teamsDir, teamKey, teamName, config)
           const subagentMembers = this.discoverSubagentMembers(teamsDir, config)
           const allMembers = [...members, ...inboxMembers, ...subagentMembers]
           this.broadcast({ type: 'team_update', teamName, members: allMembers })
@@ -163,10 +153,11 @@ export class TeamWatcher {
    */
   private discoverInboxMembers(
     teamsDir: string,
+    teamKey: string,
     teamName: string,
     config: Record<string, unknown>,
   ): TeamMemberStatus[] {
-    const inboxDir = path.join(teamsDir, teamName, 'inboxes')
+    const inboxDir = path.join(teamsDir, teamKey, 'inboxes')
     const configMembers = Array.isArray(config.members) ? config.members : []
     const configNames = new Set(
       configMembers.map((m: Record<string, unknown>) => m.name as string),

@@ -1,19 +1,14 @@
 import { feature } from 'bun:bundle'
-import { randomBytes } from 'crypto'
-import { open } from 'fs/promises'
-import { join } from 'path'
 import type { ModelUsage } from '../entrypoints/agentSdkTypes.js'
 import { logForDebugging } from './debug.js'
-import { getClaudeConfigHomeDir } from './envUtils.js'
 import { errorMessage } from './errors.js'
-import { getFsImplementation } from './fsOperations.js'
 import { logError } from './log.js'
 import { jsonParse, jsonStringify } from './slowOperations.js'
 import type { DailyActivity, DailyModelTokens, SessionStats } from './stats.js'
+import { getSessionStore } from '../services/db/SessionStore.js'
 
 export const STATS_CACHE_VERSION = 3
 const MIN_MIGRATABLE_VERSION = 1
-const STATS_CACHE_FILENAME = 'stats-cache.json'
 
 /**
  * Simple in-memory lock to prevent concurrent cache operations.
@@ -72,10 +67,6 @@ export type PersistedStatsCache = {
   totalSpeculationTimeSavedMs: number
   // Shot distribution: map of shot count → number of sessions (ant-only)
   shotDistribution?: { [shotCount: number]: number }
-}
-
-export function getStatsCachePath(): string {
-  return join(getClaudeConfigHomeDir(), STATS_CACHE_FILENAME)
 }
 
 function getEmptyCache(): PersistedStatsCache {
@@ -145,11 +136,9 @@ function migrateStatsCache(
  * Returns an empty cache if the file doesn't exist or is invalid.
  */
 export async function loadStatsCache(): Promise<PersistedStatsCache> {
-  const fs = getFsImplementation()
-  const cachePath = getStatsCachePath()
-
   try {
-    const content = await fs.readFile(cachePath, { encoding: 'utf-8' })
+    const content = getSessionStore().getAppDocument('cache', 'stats')
+    if (!content) return getEmptyCache()
     const parsed = jsonParse(content) as PersistedStatsCache
 
     // Validate version
@@ -208,48 +197,18 @@ export async function loadStatsCache(): Promise<PersistedStatsCache> {
 }
 
 /**
- * Save the stats cache to disk atomically.
- * Uses a temp file + rename pattern to prevent corruption.
+ * Save the rebuildable stats cache in the unified database.
  */
 export async function saveStatsCache(
   cache: PersistedStatsCache,
 ): Promise<void> {
-  const fs = getFsImplementation()
-  const cachePath = getStatsCachePath()
-  const tempPath = `${cachePath}.${randomBytes(8).toString('hex')}.tmp`
-
   try {
-    // Ensure the directory exists
-    const configDir = getClaudeConfigHomeDir()
-    try {
-      await fs.mkdir(configDir)
-    } catch {
-      // Directory already exists or other error - proceed
-    }
-
-    // Write to temp file with fsync for atomic write safety
-    const content = jsonStringify(cache, null, 2)
-    const handle = await open(tempPath, 'w', 0o600)
-    try {
-      await handle.writeFile(content, { encoding: 'utf-8' })
-      await handle.sync()
-    } finally {
-      await handle.close()
-    }
-
-    // Atomic rename
-    await fs.rename(tempPath, cachePath)
+    getSessionStore().upsertAppDocument('cache', 'stats', jsonStringify(cache))
     logForDebugging(
-      `Stats cache saved successfully (lastComputedDate: ${cache.lastComputedDate})`,
+      `Stats cache saved to codev.db (lastComputedDate: ${cache.lastComputedDate})`,
     )
   } catch (error) {
     logError(error)
-    // Clean up temp file
-    try {
-      await fs.unlink(tempPath)
-    } catch {
-      // Ignore cleanup errors
-    }
   }
 }
 

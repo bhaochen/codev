@@ -3554,12 +3554,12 @@ You are a teammate in team "${attachment.teamName}".
 - Name: ${attachment.agentName}
 
 **Team Resources:**
-- Team config: ${attachment.teamConfigPath}
-- Task list: ${attachment.taskListPath}
+- Team state is shared through Codev's team and task tools.
+- Teammates: ${attachment.teamMembers.join(', ') || 'use the task owner names shown by TaskList'}
 
 **Team Leader:** The team lead's name is "team-lead". Send updates and completion notifications to them.
 
-Read the team config to discover your teammates' names. Check the task list periodically. Create new tasks when work should be divided. Mark tasks resolved when complete.
+Check the task list periodically. Create new tasks when work should be divided. Mark tasks resolved when complete.
 
 **IMPORTANT:** Always refer to teammates by their NAME (e.g., "team-lead", "analyzer", "researcher"), never by UUID. When messaging, use the name directly:
 

@@ -32,7 +32,7 @@ import {
   type ModelSetting,
 } from './model.js'
 import { has1mContext } from '../context.js'
-import { getGlobalConfig } from '../config.js'
+import { getGlobalConfig, getGlobalConfigSnapshot } from '../config.js'
 
 // @[MODEL LAUNCH]: Update all the available and default model option strings below.
 
@@ -89,17 +89,8 @@ export function getDefaultOptionForUser(fastMode = false): ModelOption {
   // Check if we should use local model
   let localModelName: string | null = null
   if (isLocal || provider === null) {
-    // Try to get local model name from file
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { readFileSync } = require('fs') as typeof import('fs')
-      const { getGlobalClaudeFile } = require('../env.js') as typeof import('../env.js')
-      const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
-      const config = JSON.parse(raw) as {
-        authProvider?: string
-        localBaseUrl?: string
-        localModelName?: string
-      }
+      const config = getGlobalConfigSnapshot()
       if (config.authProvider === 'local' && config.localBaseUrl && config.localModelName) {
         localModelName = config.localModelName
       }
@@ -123,14 +114,7 @@ export function getDefaultOptionForUser(fastMode = false): ModelOption {
   // Fallback: when provider cache is stale (null), check config file directly
   if (provider === null) {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { readFileSync } = require('fs') as typeof import('fs')
-      const { getGlobalClaudeFile } = require('../env.js') as typeof import('../env.js')
-      const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
-      const fileConfig = JSON.parse(raw) as {
-        authProvider?: string
-        openCodeModelName?: string
-      }
+      const fileConfig = getGlobalConfigSnapshot()
       if (fileConfig.authProvider === 'opencode') {
         const currentModel = fileConfig.openCodeModelName || 'big-pickle'
         const displayName = resolveOpencodeDisplayName(currentModel)

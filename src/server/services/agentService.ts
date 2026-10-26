@@ -1,7 +1,7 @@
 /**
  * AgentService — Agent 定义的增删改查
  *
- * Agent 定义存储在 ~/.claude/agents/ 目录下，每个 Agent 一个 YAML 文件。
+ * Agent 定义存储在 ~/.local/share/codev/agents/ 目录下，每个 Agent 一个 YAML 文件。
  * 也支持 .md 文件（YAML frontmatter 格式）。
  */
 

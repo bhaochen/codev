@@ -1,17 +1,40 @@
 import memoize from 'lodash-es/memoize.js'
 import { homedir } from 'os'
+import { chmodSync, mkdirSync } from 'node:fs'
 import { join } from 'path'
+import { getXDGDataHome } from './xdg.js'
 
-// Memoized: 150+ callers, many on hot paths. Keyed off CLAUDE_CONFIG_DIR so
-// tests that change the env var get a fresh value without explicit cache.clear.
-export const getClaudeConfigHomeDir = memoize(
-  (): string => {
-    return (
-      process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude')
-    ).normalize('NFC')
-  },
-  () => process.env.CLAUDE_CONFIG_DIR,
+function resolveAppDataDir(): string {
+  const explicit =
+    process.env.CODEV_DATA_DIR ??
+    process.env.CODEV_CONFIG_DIR ??
+    process.env.CLAUDE_CONFIG_DIR
+  const target = (
+    explicit ?? join(getXDGDataHome({ homedir: homedir() }), 'codev')
+  ).normalize('NFC')
+  mkdirSync(target, { recursive: true, mode: 0o700 })
+  try {
+    chmodSync(target, 0o700)
+  } catch {
+    // Windows ACLs do not map cleanly to POSIX mode bits.
+  }
+  return target
+}
+
+// Memoized: many callers use this on hot paths. The key includes every path
+// override so tests and embedded clients can switch data roots safely.
+export const getClaudeConfigHomeDir = memoize(resolveAppDataDir, () =>
+  [
+    process.env.CLAUDE_CONFIG_DIR,
+    process.env.CODEV_CONFIG_DIR,
+    process.env.CODEV_DATA_DIR,
+    process.env.XDG_DATA_HOME,
+    process.env.HOME,
+  ].join('\0'),
 )
+
+/** Preferred name for new code; the old export remains a source-compatible alias. */
+export const getCodevDataDir = getClaudeConfigHomeDir
 
 export function getTeamsDir(): string {
   return join(getClaudeConfigHomeDir(), 'teams')
@@ -78,13 +101,9 @@ export function getBareModeLevel(): BareModeLevel | null {
 
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { readFileSync } = require('fs') as typeof import('fs')
-    const { getGlobalClaudeFile } = require('./env.js') as typeof import('./env.js')
-    const raw = readFileSync(getGlobalClaudeFile(), 'utf8')
-    const config = JSON.parse(raw) as {
-      bareModeLevel?: string
-      bareModeEnabled?: boolean
-    }
+    const { getGlobalConfigSnapshot } = require('./config.js') as
+      typeof import('./config.js')
+    const config = getGlobalConfigSnapshot()
     if (BARE_MODE_LEVELS.includes(config.bareModeLevel as BareModeLevel)) {
       return config.bareModeLevel as BareModeLevel
     }

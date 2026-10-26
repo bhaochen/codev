@@ -123,7 +123,7 @@ export function getContextWindowForModel(
   const provider = getAPIProvider()
 
   // Explicit user configuration wins over everything below (catalogs,
-  // capability data, 1M detection): ~/.claude/settings.json
+  // capability data, 1M detection): ~/.local/share/codev/settings.json
   // modelContextWindows / CLAUDE_CODE_MODEL_CONTEXT_WINDOWS env var.
   // Remote provider catalogs are third-party best-guesses and mislist
   // variants (e.g. a free tier published at 200k while the gateway serves

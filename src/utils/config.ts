@@ -1,6 +1,5 @@
 import { feature } from 'bun:bundle'
 import { randomBytes } from 'crypto'
-import { unwatchFile, watchFile } from 'fs'
 import memoize from 'lodash-es/memoize.js'
 import pickBy from 'lodash-es/pickBy.js'
 import { basename, dirname, join, resolve } from 'path'
@@ -238,9 +237,9 @@ export type GlobalConfig = {
   welcomeLogoMode?: 'auto' | 'condensed' | 'full'
   // Controls whether the terminal uses the alternate screen.
   fullscreenMode?: 'auto' | 'fullscreen' | 'window'
-  // Timestamp when changelog was last fetched (content stored in ~/.claude/cache/changelog.md)
+  // Timestamp when changelog was last fetched (content stored in ~/.local/share/codev/cache/changelog.md)
   changelogLastFetched?: number
-  // @deprecated - Migrated to ~/.claude/cache/changelog.md. Keep for migration support.
+  // @deprecated - Migrated to ~/.local/share/codev/cache/changelog.md. Keep for migration support.
   cachedChangelog?: string
   mcpServers?: Record<string, McpServerConfig>
   // claude.ai MCP connectors that have successfully connected at least once.
@@ -949,7 +948,7 @@ let configCacheHits = 0
 let configCacheMisses = 0
 // Session-total count of actual disk writes to the global config file.
 // Exposed for ant-only dev diagnostics (see inc-4552) so anomalous write
-// rates surface in the UI before they corrupt ~/.claude.json.
+// rates surface in the UI before they corrupt ~/.local/share/codev/config.json.
 let globalConfigWriteCount = 0
 
 export function getGlobalConfigWriteCount(): number {
@@ -1063,44 +1062,41 @@ function removeProjectHistory(
 // fs.watchFile poll interval for detecting writes from other instances (ms)
 const CONFIG_FRESHNESS_POLL_MS = 1000
 let freshnessWatcherStarted = false
+let freshnessWatcher: ReturnType<typeof setInterval> | null = null
 
-// fs.watchFile polls stat on the libuv threadpool and only calls us when mtime
-// changed — a stalled stat never blocks the main thread.
 function startGlobalConfigFreshnessWatcher(): void {
   if (freshnessWatcherStarted || process.env.NODE_ENV === 'test') return
   freshnessWatcherStarted = true
-  const file = getGlobalClaudeFile()
-  watchFile(
-    file,
-    { interval: CONFIG_FRESHNESS_POLL_MS, persistent: false },
-    curr => {
-      // Our own writes fire this too — the write-through's Date.now()
-      // overshoot makes cache.mtime > file mtime, so we skip the re-read.
-      // Bun/Node also fire with curr.mtimeMs=0 when the file doesn't exist
-      // (initial callback or deletion) — the <= handles that too.
-      if (curr.mtimeMs <= globalConfigCache.mtime) return
-      void getFsImplementation()
-        .readFile(file, { encoding: 'utf-8' })
-        .then(content => {
-          // A write-through may have advanced the cache while we were reading;
-          // don't regress to the stale snapshot watchFile stat'd.
-          if (curr.mtimeMs <= globalConfigCache.mtime) return
-          const parsed = safeParseJSON(stripBOM(content))
-          if (parsed === null || typeof parsed !== 'object') return
-          globalConfigCache = {
-            config: migrateConfigFields({
-              ...createDefaultGlobalConfig(),
-              ...(parsed as Partial<GlobalConfig>),
-            }),
-            mtime: curr.mtimeMs,
-          }
-          lastReadFileStats = { mtime: curr.mtimeMs, size: curr.size }
-        })
-        .catch(() => {})
-    },
-  )
+  let lastContent: string | null = null
+  const readDocument = (): string | null => {
+    try {
+      const { getSessionStore } = require('../services/db/SessionStore.js') as
+        typeof import('../services/db/SessionStore.js')
+      return getSessionStore().getAppDocument('config', 'global')
+    } catch {
+      return null
+    }
+  }
+  lastContent = readDocument()
+  freshnessWatcher = setInterval(() => {
+    const content = readDocument()
+    if (content === null || content === lastContent) return
+    lastContent = content
+    const parsed = safeParseJSON(content)
+    if (parsed === null || typeof parsed !== 'object') return
+    globalConfigCache = {
+      config: migrateConfigFields({
+        ...createDefaultGlobalConfig(),
+        ...(parsed as Partial<GlobalConfig>),
+      }),
+      mtime: Date.now(),
+    }
+    lastReadFileStats = null
+  }, CONFIG_FRESHNESS_POLL_MS)
+  freshnessWatcher.unref?.()
   registerCleanup(async () => {
-    unwatchFile(file)
+    if (freshnessWatcher) clearInterval(freshnessWatcher)
+    freshnessWatcher = null
     freshnessWatcherStarted = false
   })
 }
@@ -1126,27 +1122,16 @@ export function getGlobalConfig(): GlobalConfig {
     return globalConfigCache.config
   }
 
-  // Slow path: startup load. Sync I/O here is acceptable because it runs
-  // exactly once, before any UI is rendered. Stat before read so any race
-  // self-corrects (old mtime + new content → watcher re-reads next tick).
+  // Slow path: startup load. Read from DB (the sole durable store for global config).
   configCacheMisses++
   try {
-    let stats: { mtimeMs: number; size: number } | null = null
-    try {
-      stats = getFsImplementation().statSync(getGlobalClaudeFile())
-    } catch {
-      // File doesn't exist
-    }
     const config = migrateConfigFields(
       getConfig(getGlobalClaudeFile(), createDefaultGlobalConfig),
     )
     globalConfigCache = {
       config,
-      mtime: stats?.mtimeMs ?? Date.now(),
+      mtime: Date.now(),
     }
-    lastReadFileStats = stats
-      ? { mtime: stats.mtimeMs, size: stats.size }
-      : null
     startGlobalConfigFreshnessWatcher()
     return config
   } catch {
@@ -1155,6 +1140,24 @@ export function getGlobalConfig(): GlobalConfig {
       getConfig(getGlobalClaudeFile(), createDefaultGlobalConfig),
     )
   }
+}
+
+/** Read the persisted global config during early startup, before config gates open. */
+export function getGlobalConfigSnapshot(): GlobalConfig {
+  try {
+    const content = readGlobalConfigFromDatabase(getGlobalClaudeFile())
+    if (content) {
+      const parsed = jsonParse(content) as Partial<GlobalConfig>
+      return migrateConfigFields({ ...createDefaultGlobalConfig(), ...parsed })
+    }
+  } catch (error) {
+    logForDebugging(`Could not read config snapshot from codev.db: ${error}`)
+  }
+  const mcpServers = readEditableMcpServers(getGlobalClaudeFile())
+  return migrateConfigFields({
+    ...createDefaultGlobalConfig(),
+    ...(mcpServers ? { mcpServers } : {}),
+  })
 }
 
 /**
@@ -1190,6 +1193,16 @@ function saveConfig<A extends object>(
   config: A,
   defaultConfig: A,
 ): void {
+  if (file === getGlobalClaudeFile() && process.env.NODE_ENV !== 'test') {
+    const filteredConfig = pickBy(
+      config,
+      (value, key) =>
+        jsonStringify(value) !== jsonStringify(defaultConfig[key as keyof A]),
+    )
+    persistGlobalConfigDocument(file, jsonStringify(filteredConfig))
+    globalConfigWriteCount++
+    return
+  }
   // Ensure the directory exists before writing the config file
   const dir = dirname(file)
   const fs = getFsImplementation()
@@ -1203,16 +1216,75 @@ function saveConfig<A extends object>(
       jsonStringify(value) !== jsonStringify(defaultConfig[key as keyof A]),
   )
   // Write config file with secure permissions - mode only applies to new files
+  const serialized = jsonStringify(filteredConfig, null, 2)
   writeFileSyncAndFlush_DEPRECATED(
     file,
-    jsonStringify(filteredConfig, null, 2),
+    serialized,
     {
       encoding: 'utf-8',
       mode: 0o600,
     },
   )
   if (file === getGlobalClaudeFile()) {
+    persistGlobalConfigDocument(file, serialized)
     globalConfigWriteCount++
+  }
+}
+
+/** Persist global config in SQLite and keep editable MCP definitions in mcp.json. */
+function persistGlobalConfigDocument(file: string, content: string): void {
+  if (file !== getGlobalClaudeFile() || process.env.NODE_ENV === 'test') return
+  try {
+    const parsed = jsonParse(content) as Record<string, unknown>
+    const mcpServers = parsed.mcpServers
+    delete parsed.mcpServers
+    const mcpPath = join(dirname(file), 'mcp.json')
+    const fs = getFsImplementation()
+    fs.mkdirSync(dirname(mcpPath))
+    writeFileSyncAndFlush_DEPRECATED(
+      mcpPath,
+      jsonStringify({ mcpServers: mcpServers ?? {} }, null, 2),
+      { encoding: 'utf-8', mode: 0o600 },
+    )
+    const { getSessionStore } = require('../services/db/SessionStore.js') as
+      typeof import('../services/db/SessionStore.js')
+    getSessionStore().upsertAppDocument('config', 'global', jsonStringify(parsed))
+  } catch (error) {
+    logForDebugging(`Could not persist global config: ${error}`)
+  }
+}
+
+function readEditableMcpServers(file: string): Record<string, McpServerConfig> | undefined {
+  try {
+    const raw = getFsImplementation().readFileSync(
+      join(dirname(file), 'mcp.json'),
+      { encoding: 'utf-8' },
+    )
+    const parsed = jsonParse(raw) as { mcpServers?: unknown }
+    return parsed.mcpServers && typeof parsed.mcpServers === 'object'
+      ? parsed.mcpServers as Record<string, McpServerConfig>
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function readGlobalConfigFromDatabase(file: string): string | null {
+  if (file !== getGlobalClaudeFile() || process.env.NODE_ENV === 'test') {
+    return null
+  }
+  try {
+    const { getSessionStore } = require('../services/db/SessionStore.js') as
+      typeof import('../services/db/SessionStore.js')
+    const content = getSessionStore().getAppDocument('config', 'global')
+    if (content === null) return null
+    const config = jsonParse(content) as Record<string, unknown>
+    const mcpServers = readEditableMcpServers(file)
+    if (mcpServers) config.mcpServers = mcpServers
+    return jsonStringify(config)
+  } catch (error) {
+    logForDebugging(`Could not read global config from codev.db: ${error}`)
+    return null
   }
 }
 
@@ -1228,6 +1300,35 @@ function saveConfigWithLock<A extends object>(
   mergeFn: (current: A) => A,
 ): boolean {
   const defaultConfig = createDefault()
+  if (file === getGlobalClaudeFile() && process.env.NODE_ENV !== 'test') {
+    const { getSessionStore } = require('../services/db/SessionStore.js') as
+      typeof import('../services/db/SessionStore.js')
+    const store = getSessionStore()
+    let didWrite = false
+    store.transaction(() => {
+      const stored = store.getAppDocument('config', 'global')
+      let currentConfig = createDefault()
+      if (stored !== null) {
+        try {
+          currentConfig = { ...createDefault(), ...jsonParse(stored) }
+        } catch (error) {
+          logForDebugging(`Invalid global config in codev.db: ${error}`, { level: 'error' })
+        }
+      }
+      if (wouldLoseAuthState(currentConfig)) return
+      const mergedConfig = mergeFn(currentConfig)
+      if (mergedConfig === currentConfig) return
+      const filteredConfig = pickBy(
+        mergedConfig,
+        (value, key) =>
+          jsonStringify(value) !== jsonStringify(defaultConfig[key as keyof A]),
+      )
+      persistGlobalConfigDocument(file, jsonStringify(filteredConfig))
+      didWrite = true
+    })
+    if (didWrite) globalConfigWriteCount++
+    return didWrite
+  }
   const dir = dirname(file)
   const fs = getFsImplementation()
 
@@ -1288,7 +1389,7 @@ function saveConfigWithLock<A extends object>(
     const currentConfig = getConfig(file, createDefault)
     if (file === getGlobalClaudeFile() && wouldLoseAuthState(currentConfig)) {
       logForDebugging(
-        'saveConfigWithLock: re-read config is missing auth that cache has; refusing to write to avoid wiping ~/.claude.json. See GH #3117.',
+        'saveConfigWithLock: re-read config is missing auth that cache has; refusing to write to avoid wiping ~/.local/share/codev/config.json. See GH #3117.',
         { level: 'error' },
       )
       logEvent('tengu_config_auth_loss_prevented', {})
@@ -1309,10 +1410,11 @@ function saveConfigWithLock<A extends object>(
       (value, key) =>
         jsonStringify(value) !== jsonStringify(defaultConfig[key as keyof A]),
     )
+    const serialized = jsonStringify(filteredConfig, null, 2)
 
     // Create timestamped backup of existing config before writing
     // We keep multiple backups to prevent data loss if a reset/corrupted config
-    // overwrites a good backup. Backups are stored in ~/.claude/backups/ to
+    // overwrites a good backup. Backups are stored in ~/.local/share/codev/backups/ to
     // keep the home directory clean.
     try {
       const fileBase = basename(file)
@@ -1380,18 +1482,19 @@ function saveConfigWithLock<A extends object>(
       // No file to backup or backup failed, continue with write
     }
 
-    // Write config file with secure permissions - mode only applies to new files
+    if (file === getGlobalClaudeFile()) {
+      persistGlobalConfigDocument(file, serialized)
+      globalConfigWriteCount++
+      return true
+    }
     writeFileSyncAndFlush_DEPRECATED(
       file,
-      jsonStringify(filteredConfig, null, 2),
+      serialized,
       {
         encoding: 'utf-8',
         mode: 0o600,
       },
     )
-    if (file === getGlobalClaudeFile()) {
-      globalConfigWriteCount++
-    }
     return true
   } finally {
     if (release) {
@@ -1433,7 +1536,7 @@ export function enableConfigs(): void {
 
 /**
  * Returns the directory where config backup files are stored.
- * Uses ~/.claude/backups/ to keep the home directory clean.
+ * Uses ~/.local/share/codev/backups/ to keep the home directory clean.
  */
 function getConfigBackupDir(): string {
   return join(getClaudeConfigHomeDir(), 'backups')
@@ -1441,7 +1544,7 @@ function getConfigBackupDir(): string {
 
 /**
  * Find the most recent backup file for a given config file.
- * Checks ~/.claude/backups/ first, then falls back to the legacy location
+ * Checks ~/.local/share/codev/backups/ first, then falls back to the legacy location
  * (next to the config file) for backwards compatibility.
  * Returns the full path to the most recent backup, or null if none exist.
  */
@@ -1506,6 +1609,23 @@ function getConfig<A>(
 
   const fs = getFsImplementation()
 
+  if (file === getGlobalClaudeFile() && process.env.NODE_ENV !== 'test') {
+    const stored = readGlobalConfigFromDatabase(file)
+    if (stored !== null) {
+      try {
+        return { ...createDefault(), ...jsonParse(stored) }
+      } catch (error) {
+        logForDebugging(`Global config document in codev.db is invalid: ${error}`, { level: 'error' })
+        return createDefault()
+      }
+    }
+    const mcpServers = readEditableMcpServers(file)
+    return {
+      ...createDefault(),
+      ...(mcpServers ? { mcpServers } : {}),
+    }
+  }
+
   try {
     const fileContent = fs.readFileSync(file, {
       encoding: 'utf-8',
@@ -1513,6 +1633,7 @@ function getConfig<A>(
     try {
       // Strip BOM before parsing - PowerShell 5.x adds BOM to UTF-8 files
       const parsedConfig = jsonParse(stripBOM(fileContent))
+      persistGlobalConfigDocument(file, fileContent)
       return {
         ...createDefault(),
         ...parsedConfig,
@@ -1527,6 +1648,18 @@ function getConfig<A>(
     // Handle file not found - check for backup and return default
     const errCode = getErrnoCode(error)
     if (errCode === 'ENOENT') {
+      const databaseConfig = readGlobalConfigFromDatabase(file)
+      if (databaseConfig !== null) {
+        try {
+          const parsedConfig = jsonParse(stripBOM(databaseConfig))
+          return { ...createDefault(), ...parsedConfig }
+        } catch (dbError) {
+          logForDebugging(
+            `Global config document in codev.db is invalid: ${dbError}`,
+            { level: 'error' },
+          )
+        }
+      }
       const backupPath = findMostRecentBackup(file)
       if (backupPath) {
         process.stderr.write(

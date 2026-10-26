@@ -21,7 +21,7 @@
  *     codev knows memory changed: extractMemories completion, autoDream
  *     consolidation, and the process-exit hook.
  *   - `restoreMemoryDirIfMissing` — rows → disk: when the harness touches a
- *     memory dir whose MEMORY.md is gone (user wiped ~/.claude/projects, new
+ *     memory dir whose MEMORY.md is gone (user wiped the projects data, new
  *     machine, disk loss), rebuild every row's file. Called from the memory
  *     read path (ensureMemoryDirExists, scanMemoryFiles).
  *

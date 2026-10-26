@@ -10,7 +10,7 @@ import type { AppState } from '../../state/AppState.js'
 import { logForDebugging } from '../debug.js'
 import { logError } from '../log.js'
 import { getDynamicTeamContext } from '../teammate.js'
-import { getTeamFilePath, readTeamFile } from './teamHelpers.js'
+import { readTeamFile, sanitizeName } from './teamHelpers.js'
 
 /**
  * Computes the initial teamContext for AppState.
@@ -46,7 +46,7 @@ export function computeInitialTeamContext():
     return undefined
   }
 
-  const teamFilePath = getTeamFilePath(teamName)
+  const teamStorageKey = `codev.db#teams/${sanitizeName(teamName)}`
 
   const isLeader = !agentId
 
@@ -56,7 +56,7 @@ export function computeInitialTeamContext():
 
   return {
     teamName,
-    teamFilePath,
+    teamStorageKey,
     leadAgentId: teamFile.leadAgentId,
     selfAgentId: agentId,
     selfAgentName: agentName,
@@ -97,14 +97,14 @@ export function initializeTeammateContextFromSession(
   }
   const agentId = member?.agentId
 
-  const teamFilePath = getTeamFilePath(teamName)
+  const teamStorageKey = `codev.db#teams/${sanitizeName(teamName)}`
 
   // Set teamContext in AppState
   setAppState(prev => ({
     ...prev,
     teamContext: {
       teamName,
-      teamFilePath,
+      teamStorageKey,
       leadAgentId: teamFile.leadAgentId,
       selfAgentId: agentId,
       selfAgentName: agentName,

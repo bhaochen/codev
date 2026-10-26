@@ -2,7 +2,7 @@
  * CLI Proxy API — proxies chat requests for desktop WebView.
  *
  * Desktop WebView cannot call provider APIs directly due to CORS restrictions.
- * This endpoint reads auth config from ~/.claude.json and proxies the request
+ * This endpoint reads auth config from ~/.local/share/codev/config.json and proxies the request
  * server-side (no CORS).
  *
  * POST /api/cli-proxy/messages — Anthropic Messages API (streaming/non-streaming)

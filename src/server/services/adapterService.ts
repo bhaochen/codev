@@ -1,14 +1,11 @@
 /**
  * Adapter Service — 读写 IM Adapter 配置文件
  *
- * 配置文件：~/.claude/adapters.json
- * 原子写入：先写临时文件，再 rename
+ * Adapter configuration is persisted in codev.db.
  */
 
-import * as fs from 'fs/promises'
-import * as path from 'path'
 import { ApiError } from '../middleware/errorHandler.js'
-import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
+import { getSessionStore } from '../../services/db/SessionStore.js'
 
 export type PairedUser = {
   userId: string | number
@@ -37,11 +34,6 @@ export type AdapterFileConfig = {
   }
 }
 
-function getConfigPath(): string {
-  const configDir = getClaudeConfigHomeDir()
-  return path.join(configDir, 'adapters.json')
-}
-
 function maskSecret(value: string | undefined): string | undefined {
   if (!value) return value
   if (value.length <= 4) return '****'
@@ -55,14 +47,12 @@ function isMasked(value: string | undefined): boolean {
 class AdapterService {
   /** 读取原始配置（不脱敏） */
   async getRawConfig(): Promise<AdapterFileConfig> {
+    const raw = getSessionStore().getAppDocument('adapter', 'config')
+    if (!raw) return {}
     try {
-      const raw = await fs.readFile(getConfigPath(), 'utf-8')
       return JSON.parse(raw) as AdapterFileConfig
-    } catch (err: unknown) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        return {}
-      }
-      throw ApiError.internal(`Failed to read adapter config: ${err}`)
+    } catch (err) {
+      throw ApiError.internal(`Failed to read adapter config from codev.db: ${err}`)
     }
   }
 
@@ -80,42 +70,28 @@ class AdapterService {
 
   /** 更新配置（浅合并，敏感字段如果是脱敏值则保留原值） */
   async updateConfig(patch: Partial<AdapterFileConfig>): Promise<void> {
-    const current = await this.getRawConfig()
-
-    // 保留已存储的密钥（如果前端传回的是脱敏值）
-    if (patch.dingtalk && isMasked(patch.dingtalk.clientSecret)) {
-      patch.dingtalk.clientSecret = current.dingtalk?.clientSecret
-    }
-    if (patch.pairing && isMasked(patch.pairing.code ?? undefined)) {
-      patch.pairing.code = current.pairing?.code
-    }
-
-    const merged: AdapterFileConfig = {
-      ...current,
-      ...patch,
-      dingtalk: patch.dingtalk ? { ...current.dingtalk, ...patch.dingtalk } : current.dingtalk,
-      pairing: patch.pairing !== undefined ? { ...current.pairing, ...patch.pairing } : current.pairing,
-    }
-
-    await this.writeConfig(merged)
-  }
-
-  private async writeConfig(data: AdapterFileConfig): Promise<void> {
-    const filePath = getConfigPath()
-    const dir = path.dirname(filePath)
-    await fs.mkdir(dir, { recursive: true, mode: 0o700 })
-
-    const tmpFile = `${filePath}.tmp.${Date.now()}`
     try {
-      await fs.writeFile(tmpFile, JSON.stringify(data, null, 2) + '\n', {
-        encoding: 'utf-8',
-        mode: 0o600,
+      getSessionStore().updateAppDocument('adapter', 'config', raw => {
+        let current: AdapterFileConfig = {}
+        if (raw) current = JSON.parse(raw) as AdapterFileConfig
+        const safePatch = structuredClone(patch)
+        // Keep secrets when the UI submits the masked value returned by GET.
+        if (safePatch.dingtalk && isMasked(safePatch.dingtalk.clientSecret)) {
+          safePatch.dingtalk.clientSecret = current.dingtalk?.clientSecret
+        }
+        if (safePatch.pairing && isMasked(safePatch.pairing.code ?? undefined)) {
+          safePatch.pairing.code = current.pairing?.code
+        }
+        const merged: AdapterFileConfig = {
+          ...current,
+          ...safePatch,
+          dingtalk: safePatch.dingtalk ? { ...current.dingtalk, ...safePatch.dingtalk } : current.dingtalk,
+          pairing: safePatch.pairing !== undefined ? { ...current.pairing, ...safePatch.pairing } : current.pairing,
+        }
+        return JSON.stringify(merged)
       })
-      await fs.rename(tmpFile, filePath)
-      await fs.chmod(filePath, 0o600).catch(() => {})
     } catch (err) {
-      await fs.unlink(tmpFile).catch(() => {})
-      throw ApiError.internal(`Failed to write adapter config: ${err}`)
+      throw ApiError.internal(`Failed to write adapter config to codev.db: ${err}`)
     }
   }
 }

@@ -30,9 +30,8 @@ Create a new team to coordinate multiple agents working on a project. Teams have
 }
 \`\`\`
 
-This creates:
-- A team file at \`~/.claude/teams/{team-name}/config.json\`
-- A corresponding task list directory at \`~/.claude/tasks/{team-name}/\`
+This creates team metadata and task state in \`codev.db\`, plus a team
+coordination directory for inbox and message files.
 
 ## Team Workflow
 
@@ -73,10 +72,9 @@ Teammates go idle after every turn—this is completely normal and expected. A t
 
 ## Discovering Team Members
 
-Teammates can read the team config file to discover other team members:
-- **Team config location**: \`~/.claude/teams/{team-name}/config.json\`
-
-The config file contains a \`members\` array with each teammate's:
+Team metadata is shared through Codev's database. The team context supplied
+at startup contains teammate names, and task ownership is visible in TaskList.
+The team record contains each teammate's:
 - \`name\`: Human-readable name (**always use this** for messaging and task assignment)
 - \`agentId\`: Unique identifier (for reference only - do not use for communication)
 - \`agentType\`: Role/type of the agent
@@ -85,14 +83,9 @@ The config file contains a \`members\` array with each teammate's:
 - \`to\` when sending messages
 - Identifying task owners
 
-Example of reading team config:
-\`\`\`
-Use the Read tool to read ~/.claude/teams/{team-name}/config.json
-\`\`\`
-
 ## Task List Coordination
 
-Teams share a task list that all teammates can access at \`~/.claude/tasks/{team-name}/\`.
+Teams share a task list stored in \`codev.db\`.
 
 Teammates should:
 1. Check TaskList periodically, **especially after completing each task**, to find available work or see newly unblocked tasks

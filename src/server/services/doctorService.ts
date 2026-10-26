@@ -3,7 +3,6 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import type { Dirent } from 'node:fs'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
-import { resolveGlobalConfigFilePath } from '../../utils/globalConfigPath.js'
 import { diagnosticsService } from './diagnosticsService.js'
 
 export type DoctorItemKind = 'json' | 'jsonl' | 'directory'
@@ -86,13 +85,11 @@ export class DoctorService {
   private readonly configDir: string
   private readonly homeDir: string
   private readonly projectRoot?: string
-  private readonly usesConfigDirOverride: boolean
 
   constructor(options: DoctorServiceOptions = {}) {
     this.configDir = options.configDir || getClaudeConfigHomeDir()
     this.homeDir = options.homeDir || inferHomeDir(this.configDir)
     this.projectRoot = options.projectRoot
-    this.usesConfigDirOverride = Boolean(options.configDir || process.env.CLAUDE_CONFIG_DIR)
   }
 
   async getReport(): Promise<DoctorReport> {
@@ -160,26 +157,6 @@ export class DoctorService {
 
   private async buildTargets(): Promise<DoctorTarget[]> {
     const targets: DoctorTarget[] = [
-      this.jsonTarget('user-settings', 'User settings', 'user', path.join(this.configDir, 'settings.json')),
-      this.jsonTarget(
-        'providers',
-        'Managed providers',
-        'user',
-        path.join(this.configDir, 'providers', 'providers.json'),
-      ),
-      this.jsonTarget(
-        'provider-settings',
-        'Managed provider settings',
-        'user',
-        path.join(this.configDir, 'providers', 'settings.json'),
-      ),
-      this.jsonTarget('adapters', 'Adapters config', 'user', path.join(this.configDir, 'adapters.json')),
-      this.jsonTarget(
-        'adapter-sessions',
-        'Adapter sessions',
-        'user',
-        path.join(this.configDir, 'adapter-sessions.json'),
-      ),
       this.directoryTarget('user-skills', 'User skills', 'user', path.join(this.configDir, 'skills')),
       this.directoryTarget('teams', 'Teams', 'user', path.join(this.configDir, 'teams')),
       this.directoryTarget('plugins', 'Plugins', 'user', path.join(this.configDir, 'plugins')),
@@ -377,7 +354,7 @@ export class DoctorService {
       return this.withAlias('<project>', filePath, this.projectRoot)
     }
     if (isWithinRoot(filePath, this.configDir)) {
-      return this.withAlias('~/.claude', filePath, this.configDir)
+      return this.withAlias('~/.local/share/codev', filePath, this.configDir)
     }
     if (isWithinRoot(filePath, this.homeDir)) {
       return this.withAlias('~', filePath, this.homeDir)
@@ -389,7 +366,7 @@ export class DoctorService {
     let sanitized = diagnosticsService.sanitizeString(value)
     const replacements: Array<[string | undefined, string]> = [
       [this.projectRoot, '<project>'],
-      [this.configDir, '~/.claude'],
+      [this.configDir, '~/.local/share/codev'],
       [this.homeDir, '~'],
     ]
 
@@ -401,13 +378,7 @@ export class DoctorService {
   }
 
   private getUserMcpConfigPath(): string {
-    // Same resolver the CLI uses: an explicit config dir (options.configDir or
-    // CLAUDE_CONFIG_DIR) is honored, otherwise the default home is used, and in
-    // both cases the legacy `.config.json` location and the OAuth filename
-    // suffix are respected.
-    return resolveGlobalConfigFilePath(
-      this.usesConfigDirOverride ? this.configDir : undefined,
-    )
+    return path.join(this.configDir, 'mcp.json')
   }
 
   private async listJsonlFiles(rootDir: string): Promise<string[]> {

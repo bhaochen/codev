@@ -10,8 +10,8 @@
 
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
+import { getCodevDataDir } from '../../utils/envUtils.js'
 
 // ---------------------------------------------------------------------------
 // Public contracts
@@ -144,7 +144,7 @@ export class EdgeTTSProvider implements TTSProvider {
   async synthesize(text: string): Promise<SynthesisResult> {
     const trimmed = text.trim()
     if (!trimmed) return { error: 'empty text' }
-    const outPath = path.join(os.homedir(), '.claude', 'voice', `tts_${Date.now()}.mp3`)
+    const outPath = path.join(getCodevDataDir(), 'voice', `tts_${Date.now()}.mp3`)
     await new Promise((resolve) => {
       const w = spawn('mkdir', ['-p', path.dirname(outPath)])
       w.on('close', () => resolve(undefined))

@@ -4,11 +4,10 @@
  * Periodically checks all scheduled tasks and executes those whose cron
  * expression matches the current time. Tasks are run by spawning a CLI
  * subprocess with the task's prompt. Execution history is persisted to
- * ~/.claude/scheduled_tasks_log.json.
+ * codev.db.
  */
 
-import * as fs from 'fs/promises'
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
 import * as path from 'path'
 import * as os from 'os'
 import * as crypto from 'crypto'
@@ -18,7 +17,7 @@ import {
   buildClaudeCliArgs,
   resolveClaudeCliLauncher,
 } from '../../utils/desktopBundledCli.js'
-import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
+import { getSessionStore } from '../../services/db/SessionStore.js'
 import { getProcessEnvWithTerminalShellEnvironment } from '../../utils/terminalShellEnvironment.js'
 import { attributionHeaderEnvForModel } from './attributionHeaderPolicy.js'
 
@@ -170,38 +169,19 @@ export function cronMatches(cronExpr: string, date: Date): boolean {
 
 type RunsFile = { runs: TaskRun[] }
 
-function getLogFilePath(): string {
-  const configDir = getClaudeConfigHomeDir()
-  return path.join(configDir, 'scheduled_tasks_log.json')
-}
-
 async function readRunsFile(): Promise<RunsFile> {
-  try {
-    const raw = await fs.readFile(getLogFilePath(), 'utf-8')
-    const parsed = JSON.parse(raw) as RunsFile
-    if (!Array.isArray(parsed.runs)) return { runs: [] }
-    return parsed
-  } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      return { runs: [] }
-    }
-    throw err
-  }
+  const raw = getSessionStore().getAppDocument('scheduled-tasks', 'runs')
+  if (!raw) return { runs: [] }
+  const parsed = JSON.parse(raw) as RunsFile
+  return Array.isArray(parsed.runs) ? parsed : { runs: [] }
 }
 
 async function writeRunsFile(data: RunsFile): Promise<void> {
-  const filePath = getLogFilePath()
-  const dir = path.dirname(filePath)
-  await fs.mkdir(dir, { recursive: true })
-
-  const tmpFile = `${filePath}.tmp.${Date.now()}`
-  try {
-    await fs.writeFile(tmpFile, JSON.stringify(data, null, 2) + '\n', 'utf-8')
-    await fs.rename(tmpFile, filePath)
-  } catch (err) {
-    await fs.unlink(tmpFile).catch(() => {})
-    throw err
-  }
+  getSessionStore().upsertAppDocument(
+    'scheduled-tasks',
+    'runs',
+    JSON.stringify(data),
+  )
 }
 
 /** Append a run to the log and trim to keep at most MAX_RUNS_PER_TASK per task. */
