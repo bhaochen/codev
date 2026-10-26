@@ -964,10 +964,10 @@ async function* queryLoop(
           queryCheckpoint('query_api_streaming_end')
           if (selectedFallback) {
             logForDebugging(
-              `[Fallback] Switching to ${selectedFallback.provider}/${selectedFallback.model} after provider error`,
+              `[Fallback] Switching to ${selectedFallback.model} after gateway error`,
             )
             yield createSystemMessage(
-              `Provider request failed; retrying with ${selectedFallback.provider}/${selectedFallback.model}`,
+              `Gateway request failed; retrying with ${selectedFallback.model}`,
               'warning',
             )
             continue

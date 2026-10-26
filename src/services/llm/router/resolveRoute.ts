@@ -5,19 +5,16 @@
  */
 import type { LLMRoute } from '../types.js'
 import { getProviderDef } from '../providers/index.js'
-import { resolveProviderContext } from './resolveProvider.js'
 import { resolveModel } from './resolveModel.js'
 import { buildRoute, normalizeRouteInput, type RouteInput } from '../route/Route.js'
 
 export type ResolveRouteInput = RouteInput
 
 export function resolveRoute(input: ResolveRouteInput): LLMRoute {
-  const { rawModel, overrideProvider, overrideProtocol, overrideEndpoint } = normalizeRouteInput(input)
-  const { provider: defaultProvider } = resolveProviderContext()
-  const provider =
-    overrideProvider === 'anthropic'
-      ? 'firstParty'
-      : overrideProvider ?? defaultProvider
+  const { rawModel } = normalizeRouteInput(input)
+  // All model inference goes through the local 9router gateway. Upstream
+  // providers and protocols are selected by 9router from this model ID.
+  const provider = 'openai'
   const model = resolveModel(provider, rawModel)
   const def = getProviderDef(provider) as {
     defaultProtocol?: LLMRoute['protocol']
@@ -25,7 +22,6 @@ export function resolveRoute(input: ResolveRouteInput): LLMRoute {
     defaultEndpoint?: string
     endpoint?: string
   }
-  // Phase 9: Provider.defaultProtocol 为默认值,Route 显式覆盖优先
   const defaultProtocol = def.defaultProtocol ?? def.protocol!
   const defaultEndpoint = def.defaultEndpoint ?? def.endpoint
   return buildRoute({
@@ -33,7 +29,5 @@ export function resolveRoute(input: ResolveRouteInput): LLMRoute {
     model,
     protocol: defaultProtocol,
     endpoint: defaultEndpoint,
-    overrideProtocol,
-    overrideEndpoint,
   })
 }

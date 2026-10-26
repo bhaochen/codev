@@ -214,14 +214,6 @@ export type ApiKeySource =
   | '/login managed key'
   | 'none'
 
-export type OpenAIApiKeySource =
-  | 'OPENAI_API_KEY'
-  | 'OPENAI_ACCESS_TOKEN'
-  | 'CODEX_ACCESS_TOKEN'
-  | '/login managed OpenAI auth'
-  | '/login managed OpenAI key'
-  | 'none'
-
 export type OpenRouterApiKeySource =
   | 'OPENROUTER_API_KEY'
   | 'ANTHROPIC_AUTH_TOKEN'
@@ -238,38 +230,6 @@ export function hasAnthropicApiKeyAuth(): boolean {
     skipRetrievingKeyFromApiKeyHelper: true,
   })
   return key !== null && source !== 'none'
-}
-
-export function getOpenAIApiKey(): null | string {
-  return getOpenAIApiKeyWithSource().key
-}
-
-export function getOpenAIApiKeyWithSource(): {
-  key: null | string
-  source: OpenAIApiKeySource
-} {
-  if (process.env.OPENAI_API_KEY) {
-    return { key: process.env.OPENAI_API_KEY, source: 'OPENAI_API_KEY' }
-  }
-  if (process.env.OPENAI_ACCESS_TOKEN) {
-    return {
-      key: process.env.OPENAI_ACCESS_TOKEN,
-      source: 'OPENAI_ACCESS_TOKEN',
-    }
-  }
-  if (process.env.CODEX_ACCESS_TOKEN) {
-    return { key: process.env.CODEX_ACCESS_TOKEN, source: 'CODEX_ACCESS_TOKEN' }
-  }
-
-  const accessToken = getGlobalConfig().openAiAccessToken
-  if (accessToken) {
-    return { key: accessToken, source: '/login managed OpenAI auth' }
-  }
-
-  const key = getGlobalConfig().openAiApiKey
-  return key
-    ? { key, source: '/login managed OpenAI key' }
-    : { key: null, source: 'none' }
 }
 
 export function getOpenRouterApiKey(): null | string {
@@ -307,17 +267,6 @@ export function getOpenRouterApiKeyWithSource(): {
     : { key: null, source: 'none' }
 }
 
-export function getConfiguredAuthProvider(): 'anthropic' | 'openrouter' | 'openai' | 'local' | 'opencode' | 'nvidia' | 'kiro' | null {
-  // First try to get from cache for performance
-  const storedProvider = getGlobalConfig().authProvider
-  if (storedProvider) {
-    return storedProvider
-  }
-
-  // No explicit authProvider configured, return null
-  return null
-}
-
 // Read authProvider directly from file to bypass cache
 export function getConfiguredAuthProviderFromFile(): 'anthropic' | 'openrouter' | 'openai' | 'local' | 'opencode' | 'nvidia' | 'kiro' | null {
   try {
@@ -339,73 +288,9 @@ export function getConfiguredAuthProviderFromFile(): 'anthropic' | 'openrouter' 
   return null
 }
 
-export type OpenAIAuthTokens = {
-  accessToken: string
-  refreshToken?: string | null
-  expiresAt?: number | null
-  workspaceId?: string | null
-  lastRefresh?: string | number | null
-}
-
-export function getOpenAIAuthTokens(): OpenAIAuthTokens | null {
-  const config = getGlobalConfig()
-  if (!config.openAiAccessToken) {
-    return null
-  }
-
-  return {
-    accessToken: config.openAiAccessToken,
-    refreshToken: config.openAiRefreshToken,
-    expiresAt: config.openAiTokenExpiresAt,
-    workspaceId: config.openAiWorkspaceId,
-  }
-}
-
-export function saveOpenAIAuthTokens(tokens: OpenAIAuthTokens): void {
-  saveGlobalConfig(current => ({
-    ...current,
-    authProvider: 'openai',
-    openAiApiKey: undefined,
-    openAiAccessToken: tokens.accessToken,
-    openAiRefreshToken: tokens.refreshToken ?? undefined,
-    openAiTokenExpiresAt: tokens.expiresAt ?? undefined,
-    openAiWorkspaceId: tokens.workspaceId ?? undefined,
-  }))
-}
-
 function isValidApiKey(apiKey: string): boolean {
   // Only allow alphanumeric characters, dashes, and underscores
   return /^[a-zA-Z0-9-_]+$/.test(apiKey)
-}
-
-export async function saveOpenAIApiKey(apiKey: string): Promise<void> {
-  if (!isValidApiKey(apiKey)) {
-    throw new Error(
-      'Invalid API key format. API key must contain only alphanumeric characters, dashes, and underscores.',
-    )
-  }
-  saveGlobalConfig(current => ({
-    ...current,
-    authProvider: 'openai',
-    openAiApiKey: apiKey,
-    openAiAccessToken: undefined,
-    openAiRefreshToken: undefined,
-    openAiTokenExpiresAt: undefined,
-    openAiWorkspaceId: undefined,
-  }))
-  // Clear provider cache so it will be re-read on next access
-  const { clearStoredProviderCache } = await import('./model/providers.js')
-  clearStoredProviderCache()
-}
-
-export async function saveOpenAIBaseUrl(baseUrl: string): Promise<void> {
-  saveGlobalConfig(current => ({
-    ...current,
-    openAiBaseUrl: baseUrl,
-  }))
-  // Clear provider cache so it will be re-read on next access
-  const { clearStoredProviderCache } = await import('./model/providers.js')
-  clearStoredProviderCache()
 }
 
 export async function saveOpenRouterApiKey(apiKey: string): Promise<void> {
@@ -912,84 +797,6 @@ async function tryDetectFromIDE(): Promise<KiroAutoDetectResult> {
   } catch {
     // If any unexpected error occurs, return failure
     return { found: false, error: 'Unexpected error during IDE detection' }
-  }
-}
-
-function getCodexHomeDir(): string {
-  return process.env.CODEX_HOME || join(homedir(), '.codex')
-}
-
-export async function importOpenAIAuthFromCodexCache(): Promise<OpenAIAuthTokens> {
-  const authFilePath = join(getCodexHomeDir(), 'auth.json')
-  const raw = await readFile(authFilePath, 'utf8')
-  const parsed = jsonParse(raw) as {
-    auth_mode?: string
-    tokens?: {
-      access_token?: string
-      refresh_token?: string
-      expires_at?: number | string
-    }
-    workspace_id?: string
-    last_refresh?: string | number
-  }
-
-  const accessToken = parsed.tokens?.access_token
-  if (!accessToken) {
-    throw new Error(
-      `Codex auth cache at ${authFilePath} does not contain an access token.`,
-    )
-  }
-
-  const expiresAtRaw = parsed.tokens?.expires_at
-  const expiresAt =
-    typeof expiresAtRaw === 'number'
-      ? expiresAtRaw
-      : typeof expiresAtRaw === 'string'
-        ? Date.parse(expiresAtRaw)
-        : undefined
-
-  const tokens = {
-    accessToken,
-    refreshToken: parsed.tokens?.refresh_token,
-    expiresAt: Number.isFinite(expiresAt) ? expiresAt : undefined,
-    workspaceId: parsed.workspace_id,
-    lastRefresh: parsed.last_refresh,
-  } satisfies OpenAIAuthTokens
-
-  saveOpenAIAuthTokens(tokens)
-  return tokens
-}
-
-export async function runCodexLogin(opts?: {
-  deviceAuth?: boolean
-}): Promise<OpenAIAuthTokens> {
-  const args = ['login']
-  if (opts?.deviceAuth) {
-    args.push('--device-auth')
-  }
-
-  const result = await execa('codex', args, {
-    stdio: 'inherit',
-    reject: false,
-  })
-  if (result.exitCode !== 0) {
-    throw new Error(`codex ${args.join(' ')} exited with code ${result.exitCode}`)
-  }
-
-  return importOpenAIAuthFromCodexCache()
-}
-
-export async function refreshOpenAIAuthTokenIfNeeded(): Promise<boolean> {
-  const tokens = getOpenAIAuthTokens()
-  if (!tokens?.expiresAt || Date.now() < tokens.expiresAt) {
-    return false
-  }
-
-  try {
-    await importOpenAIAuthFromCodexCache()
-    return true
-  } catch {
-    return false
   }
 }
 
@@ -2340,11 +2147,9 @@ async function checkAndRefreshOAuthTokenIfNeededImpl(
 }
 
 export function isClaudeAISubscriber(): boolean {
-  if (!isAnthropicAuthEnabled()) {
-    return false
-  }
-
-  return shouldUseClaudeAIAuth(getClaudeAIOAuthTokens()?.scopes)
+  // Model inference is delegated to 9router; local Claude subscriptions do
+  // not gate models, commands, quota state, or fallback behavior anymore.
+  return false
 }
 
 /**

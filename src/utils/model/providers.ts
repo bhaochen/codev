@@ -1,5 +1,4 @@
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../services/analytics/index.js'
-import { getForcedProvider } from '../forcedProvider.js'
 import { getGlobalClaudeFile } from '../env.js'
 
 export type APIProvider =
@@ -268,10 +267,8 @@ export function getOpenAIBaseUrl(): string {
 }
 
 export function getAPIProvider(): APIProvider | null {
-  // Legacy /login credentials and provider environment settings are not used
-  // to choose a backend: 9router owns upstream provider selection by model ID.
-  // Agent-scoped pins are retained for callers that explicitly use them.
-  return getForcedProvider() ?? 'openai'
+  // 9router owns upstream provider selection by model ID.
+  return 'openai'
 }
 
 export function getAPIProviderForStatsig(): AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS {

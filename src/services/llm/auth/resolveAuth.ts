@@ -1,10 +1,5 @@
 import type { ProviderId } from '../types.js'
-import { getOpenCodeApiKey } from '../../../utils/auth.js'
-import { getOpenAIApiKey } from '../../../utils/auth.js'
-import { getNvidiaApiKey } from '../../../utils/auth.js'
-import { getOpenRouterApiKey } from '../../../utils/auth.js'
 import {
-  createBearerStrategy,
   noneStrategy,
   type AuthStrategy,
   type Credential,
@@ -14,28 +9,8 @@ import type { LLMRoute } from '../types.js'
 
 export type { Credential } from './strategies.js'
 
-const bearerOpenAI = createBearerStrategy(getOpenAIApiKey)
-const bearerOpenCode = createBearerStrategy(getOpenCodeApiKey, { fallbackToken: 'public' })
-const bearerNvidia = createBearerStrategy(getNvidiaApiKey)
-const bearerOpenRouter = createBearerStrategy(getOpenRouterApiKey)
-
-/**
- * Provider → AuthStrategy mapping.
- * Bearer strategy is reused (same `id: 'bearer'`) across openai/opencode/nvidia,
- * proving Provider ≠ Auth strategy; firstParty/bedrock/vertex/foundry/local share none.
- */
-const strategyByProvider: Partial<Record<ProviderId, AuthStrategy>> = {
-  openai: bearerOpenAI,
-  opencode: bearerOpenCode,
-  nvidia: bearerNvidia,
-  openrouter: bearerOpenRouter,
-  firstParty: noneStrategy,
-  bedrock: noneStrategy,
-  vertex: noneStrategy,
-  foundry: noneStrategy,
-  local: noneStrategy,
-  anthropic: noneStrategy,
-}
+/** All model inference is sent to 9router, which owns upstream credentials. */
+const strategyByProvider: Partial<Record<ProviderId, AuthStrategy>> = {}
 
 export function getAuthStrategy(provider: ProviderId): AuthStrategy {
   return strategyByProvider[provider] ?? noneStrategy

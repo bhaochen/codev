@@ -11,7 +11,6 @@ import { getTotalAPIDuration, getTotalCost, getTotalDuration, getTotalInputToken
 import { useMainLoopModel } from '../hooks/useMainLoopModel.js';
 import { type ReadonlySettings, useSettings } from '../hooks/useSettings.js';
 import { Ansi, Box, Text } from '../ink.js';
-import { getRawUtilization } from '../services/claudeAiLimits.js';
 import type { Message } from '../types/message.js';
 import type { StatusLineCommandInput } from '../types/statusLine.js';
 import type { VimMode } from '../types/textInputTypes.js';
@@ -51,21 +50,6 @@ function buildStatusLineCommandInput(permissionMode: PermissionMode, exceeds200k
   const contextUsage = getSessionContextUsage(messages, runtimeModel);
   const sessionId = getSessionId();
   const sessionName = getCurrentSessionTitle(sessionId);
-  const rawUtil = getRawUtilization();
-  const rateLimits: StatusLineCommandInput['rate_limits'] = {
-    ...(rawUtil.five_hour && {
-      five_hour: {
-        used_percentage: rawUtil.five_hour.utilization * 100,
-        resets_at: rawUtil.five_hour.resets_at
-      }
-    }),
-    ...(rawUtil.seven_day && {
-      seven_day: {
-        used_percentage: rawUtil.seven_day.utilization * 100,
-        resets_at: rawUtil.seven_day.resets_at
-      }
-    })
-  };
   return {
     ...createBaseHookInput(),
     ...(sessionName && {
@@ -100,9 +84,6 @@ function buildStatusLineCommandInput(permissionMode: PermissionMode, exceeds200k
       remaining_percentage: contextUsage.remainingPercentage
     },
     exceeds_200k_tokens: exceeds200kTokens,
-    ...((rateLimits.five_hour || rateLimits.seven_day) && {
-      rate_limits: rateLimits
-    }),
     ...(isVimModeEnabled() && {
       vim: {
         mode: vimMode ?? 'INSERT'

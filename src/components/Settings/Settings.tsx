@@ -12,7 +12,6 @@ import { Pane } from '../design-system/Pane.js'
 import { Tabs, Tab } from '../design-system/Tabs.js'
 import { Status, buildDiagnostics } from './Status.js'
 import { Config } from './Config.js'
-import { Usage } from './Usage.js'
 import type {
   LocalJSXCommandContext,
   CommandResultDisplay,
@@ -24,7 +23,7 @@ type Props = {
     options?: { display?: CommandResultDisplay },
   ) => void
   context: LocalJSXCommandContext
-  defaultTab: 'Status' | 'Config' | 'Usage' | 'Gates'
+  defaultTab: 'Status' | 'Config' | 'Gates'
 }
 
 export function Settings({
@@ -105,9 +104,6 @@ export function Settings({
           contentHeight={contentHeight}
         />
       </Suspense>
-    </Tab>,
-    <Tab key="usage" title="Usage">
-      <Usage />
     </Tab>,
     ...(("external" as string) === 'ant'
       ? [

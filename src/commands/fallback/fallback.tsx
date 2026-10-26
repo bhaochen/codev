@@ -108,7 +108,7 @@ function getDirectActionResult(args: string): string | undefined {
       ...(hasEffort ? { effort: effort as FallbackTarget['effort'] } : {}),
     }
     const error = saveChain([...chain, target], true)
-    return error ? `Failed to save fallback chain: ${error}` : `Added fallback target ${target.provider}/${target.model}.`
+    return error ? `Failed to save fallback chain: ${error}` : `Added fallback model ${target.model}.`
   }
   return undefined
 }
@@ -352,7 +352,7 @@ function FallbackPanel({
                 disabled: chain.length >= 3,
               },
               ...chain.map((target, index) => ({
-                label: `${index + 1}. ${target.provider}/${target.model}`,
+                label: `${index + 1}. ${target.model}`,
                 value: { type: 'selectTarget', index } as PanelAction,
               })),
               { label: 'Back', value: { type: 'back' } as PanelAction },
@@ -387,7 +387,7 @@ function FallbackPanel({
     return (
       <Pane color="permission">
         <Box flexDirection="column" gap={1}>
-          <Text bold>{selectedTarget + 1}. {target.provider}/{target.model}</Text>
+          <Text bold>{selectedTarget + 1}. {target.model}</Text>
           <Text dimColor>
             Current effort: {target.effort ?? 'Auto'} · fallback order determines which target is tried first.
           </Text>
@@ -436,7 +436,7 @@ function FallbackPanel({
     return (
       <Pane color="permission">
         <Box flexDirection="column" gap={1}>
-          <Text bold>Effort · {target.provider}/{target.model}</Text>
+          <Text bold>Effort · {target.model}</Text>
           <Text dimColor>
             Options follow /effort model support and provider catalog data. Auto uses the session default.
           </Text>
@@ -573,7 +573,7 @@ function FallbackPanel({
           <Box flexDirection="column">
             {chain.map((target, index) => (
               <Text key={`${target.provider}/${target.model}`}>
-                {index + 1}. {target.provider}/{target.model}
+                {index + 1}. {target.model}
                 {target.effort ? ` · ${target.effort} effort` : ''}
               </Text>
             ))}

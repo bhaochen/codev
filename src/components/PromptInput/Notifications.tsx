@@ -12,11 +12,10 @@ import type { IDESelection } from '../../hooks/useIdeSelection.js';
 import { useMainLoopModel } from '../../hooks/useMainLoopModel.js';
 import { useVoiceEnabled } from '../../hooks/useVoiceEnabled.js';
 import { Box, Text } from '../../ink.js';
-import { useClaudeAiLimits } from '../../services/claudeAiLimitsHook.js';
 import { calculateTokenWarningState } from '../../services/compact/autoCompact.js';
 import type { MCPServerConnection } from '../../services/mcp/types.js';
 import type { Message } from '../../types/message.js';
-import { getApiKeyHelperElapsedMs, getConfiguredApiKeyHelper, getSubscriptionType } from '../../utils/auth.js';
+import { getApiKeyHelperElapsedMs, getConfiguredApiKeyHelper } from '../../utils/auth.js';
 import type { AutoUpdaterResult } from '../../utils/autoUpdater.js';
 import { getExternalEditor } from '../../utils/editor.js';
 import { isEnvTruthy } from '../../utils/envUtils.js';
@@ -99,7 +98,6 @@ export function Notifications(t0) {
     addNotification,
     removeNotification
   } = useNotifications();
-  const claudeAiLimits = useClaudeAiLimits();
   let t5;
   let t6;
   if ($[5] !== addNotification) {
@@ -126,16 +124,8 @@ export function Notifications(t0) {
   useEffect(t5, t6);
   const shouldShowIdeSelection = ideStatus === "connected" && (ideSelection?.filePath || ideSelection?.text && ideSelection.lineCount > 0);
   const shouldShowAutoUpdater = !shouldShowIdeSelection || isAutoUpdating || autoUpdaterResult?.status !== "success";
-  const isInOverageMode = claudeAiLimits.isUsingOverage;
-  let t7;
-  if ($[8] === Symbol.for("react.memo_cache_sentinel")) {
-    t7 = getSubscriptionType();
-    $[8] = t7;
-  } else {
-    t7 = $[8];
-  }
-  const subscriptionType = t7;
-  const isTeamOrEnterprise = subscriptionType === "team" || subscriptionType === "enterprise";
+  const isInOverageMode = false;
+  const isTeamOrEnterprise = false;
   let t8;
   if ($[9] === Symbol.for("react.memo_cache_sentinel")) {
     t8 = getExternalEditor();
@@ -305,7 +295,7 @@ function NotificationContent({
         </Box>}
       {(apiKeyStatus === 'invalid' || apiKeyStatus === 'missing') && <Box>
           <Text color="error" wrap="truncate">
-            {isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) ? 'Authentication error · Try again' : 'Not logged in · Run /login'}
+            {isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) ? 'Model gateway error · Try again' : '9router unavailable · Check that it is running'}
           </Text>
         </Box>}
       {debug && <Box>

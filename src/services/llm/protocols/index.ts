@@ -5,11 +5,7 @@
 import type { ProtocolId, LLMRoute } from '../types.js'
 import type { LLMRequest, LLMStreamEvent } from '../runtime/types.js'
 import type { AssistantMessage, SystemAPIErrorMessage } from '../../../types/message.js'
-import { queryOpenAIChat } from '../clients/openaiChat.js'
-import { queryAnthropicMessages } from '../clients/anthropicMessages.js'
-import { queryOpenAIResponses } from './openaiResponses.js'
 import { queryOpenAICompatibleChat } from './openaiCompatibleChat.js'
-import { queryAWSEventStream } from './awsEventStream/index.js'
 
 export type ProtocolHandler = (
   route: LLMRoute,
@@ -23,44 +19,12 @@ export interface ProtocolDef {
   handler?: ProtocolHandler
 }
 
-export const ProtocolRegistry: Record<ProtocolId, ProtocolDef> = {
-  'anthropic-messages': {
-    id: 'anthropic-messages',
-    displayName: 'Anthropic Messages',
-    endpointPath: '/v1/messages',
-    handler: queryAnthropicMessages,
-  },
-  'openai-chat': {
-    id: 'openai-chat',
-    displayName: 'OpenAI Chat Completions',
-    endpointPath: '/chat/completions',
-    handler: queryOpenAIChat,
-  },
-  'openai-responses': {
-    id: 'openai-responses',
-    displayName: 'OpenAI Responses',
-    endpointPath: '/responses',
-    handler: queryOpenAIResponses,
-  },
+export const ProtocolRegistry: Partial<Record<ProtocolId, ProtocolDef>> = {
   'openai-compatible-chat': {
     id: 'openai-compatible-chat',
-    displayName: 'OpenAI Compatible Chat',
+    displayName: '9router Chat Completions',
     endpointPath: '/chat/completions',
     handler: queryOpenAICompatibleChat,
-  },
-  'aws-eventstream': {
-    id: 'aws-eventstream',
-    displayName: 'AWS EventStream (Kiro)',
-    endpointPath: '/',
-    handler: queryAWSEventStream,
-  },
-  gemini: {
-    id: 'gemini',
-    displayName: 'Gemini GenerateContent',
-  },
-  'bedrock-converse': {
-    id: 'bedrock-converse',
-    displayName: 'Bedrock Converse',
   },
 }
 

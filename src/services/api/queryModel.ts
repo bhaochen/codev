@@ -188,10 +188,8 @@ export {
   cleanupStream,
   updateUsage,
   accumulateUsage,
-  executeNonStreamingRequest,
   adjustParamsForNonStreaming,
   getMaxOutputTokensForModel,
   MAX_NON_STREAMING_TOKENS,
   configureTaskBudgetParams,
 } from '../llm/clients/anthropicMessages.js'
-export { verifyApiKey } from '../llm/clients/anthropicMessages.js'

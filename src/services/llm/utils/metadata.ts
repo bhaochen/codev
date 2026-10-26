@@ -13,7 +13,6 @@ export {
   assistantMessageToMessageParam,
   stripExcessMediaItems,
   cleanupStream,
-  executeNonStreamingRequest,
   adjustParamsForNonStreaming,
   getMaxOutputTokensForModel,
   MAX_NON_STREAMING_TOKENS,

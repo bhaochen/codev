@@ -530,7 +530,6 @@ import { usePluginAutoupdateNotification } from 'src/hooks/notifs/usePluginAutou
 import { performStartupChecks } from 'src/utils/plugins/performStartupChecks.js'
 import { UserTextMessage } from 'src/components/messages/UserTextMessage.js'
 import { AwsAuthStatusBox } from '../components/AwsAuthStatusBox.js'
-import { useRateLimitWarningNotification } from 'src/hooks/notifs/useRateLimitWarningNotification.js'
 import { useDeprecationWarningNotification } from 'src/hooks/notifs/useDeprecationWarningNotification.js'
 import { useNpmDeprecationNotification } from 'src/hooks/notifs/useNpmDeprecationNotification.js'
 import { useIDEStatusIndicator } from 'src/hooks/notifs/useIDEStatusIndicator.js'
@@ -1152,7 +1151,6 @@ export function REPL({
   usePluginInstallationStatus()
   usePluginAutoupdateNotification()
   useSettingsErrors()
-  useRateLimitWarningNotification(mainLoopModel)
   useFastModeNotification()
   useDeprecationWarningNotification(mainLoopModel)
   useNpmDeprecationNotification()
@@ -4990,21 +4988,6 @@ export function REPL({
     })
   }, [onSubmit])
 
-  // onSubmit is unstable (deps include `messages` which changes every turn).
-  // `handleOpenRateLimitOptions` is prop-drilled to every MessageRow, and each
-  // MessageRow fiber pins the closure (and transitively the entire REPL render
-  // scope, ~1.8KB) at mount time. Using a ref keeps this callback stable so
-  // old REPL scopes can be GC'd — saves ~35MB over a 1000-turn session.
-  const onSubmitRef = useRef(onSubmit)
-  onSubmitRef.current = onSubmit
-  const handleOpenRateLimitOptions = useCallback(() => {
-    void onSubmitRef.current('/rate-limit-options', {
-      setCursorOffset: () => {},
-      clearBuffer: () => {},
-      resetHistory: () => {},
-    })
-  }, [])
-
   const handleExit = useCallback(async () => {
     setIsExiting(true)
     // In bg sessions, always detach instead of kill — even when a worktree is
@@ -5980,7 +5963,6 @@ export function REPL({
         agentDefinitions={agentDefinitions}
         streamingToolUses={transcriptStreamingToolUses}
         showAllInTranscript={showAllInTranscript}
-        onOpenRateLimitOptions={handleOpenRateLimitOptions}
         isLoading={isLoading}
         hidePastThinking={true}
         streamingThinking={streamingThinking}
@@ -6338,7 +6320,6 @@ export function REPL({
                 streamingToolUses={streamingToolUses}
                 showAllInTranscript={showAllInTranscript}
                 agentDefinitions={agentDefinitions}
-                onOpenRateLimitOptions={handleOpenRateLimitOptions}
                 isLoading={isLoading}
                 streamingText={
                   isLoading && !viewedAgentTask ? visibleStreamingText : null

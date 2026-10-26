@@ -23,7 +23,6 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../analytics/index.js'
-import { currentLimits } from '../claudeAiLimits.js'
 import { isSpeculationEnabled, startSpeculation } from './speculation.js'
 
 let currentAbortController: AbortController | null = null
@@ -110,11 +109,6 @@ export function getSuggestionSuppressReason(appState: AppState): string | null {
     return 'pending_permission'
   if (appState.elicitation.queue.length > 0) return 'elicitation_active'
   if (appState.toolPermissionContext.mode === 'plan') return 'plan_mode'
-  if (
-    process.env.USER_TYPE === 'external' &&
-    currentLimits.status !== 'allowed'
-  )
-    return 'rate_limit'
   return null
 }
 

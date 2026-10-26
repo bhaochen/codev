@@ -25,8 +25,6 @@ import ide from './commands/ide/index.js'
 import init from './commands/init.js'
 import initVerifiers from './commands/init-verifiers.js'
 import keybindings from './commands/keybindings/index.js'
-import login from './commands/login/index.js'
-import logout from './commands/logout/index.js'
 import installGitHubApp from './commands/install-github-app/index.js'
 import installSlackApp from './commands/install-slack-app/index.js'
 import breakCache from './commands/break-cache/index.js'
@@ -55,7 +53,6 @@ const agentsPlatform =
 import securityReview from './commands/security-review.js'
 import bughunter from './commands/bughunter/index.js'
 import terminalSetup from './commands/terminalSetup/index.js'
-import usage from './commands/usage/index.js'
 import theme from './commands/theme/index.js'
 import vim from './commands/vim/index.js'
 import { feature } from 'bun:bundle'
@@ -172,8 +169,6 @@ import {
   clearPluginSkillsCache,
 } from './utils/plugins/loadPluginCommands.js'
 import memoize from 'lodash-es/memoize.js'
-import { isUsing3PServices, isClaudeAISubscriber } from './utils/auth.js'
-import { isFirstPartyAnthropicBaseUrl } from './utils/model/providers.js'
 import env from './commands/env/index.js'
 import exit from './commands/exit/index.js'
 import exportCommand from './commands/export/index.js'
@@ -182,12 +177,6 @@ import tag from './commands/tag/index.js'
 import outputStyle from './commands/output-style/index.js'
 import remoteEnv from './commands/remote-env/index.js'
 import remote from './commands/remote/index.js'
-import upgrade from './commands/upgrade/index.js'
-import {
-  extraUsage,
-  extraUsageNonInteractive,
-} from './commands/extra-usage/index.js'
-import rateLimitOptions from './commands/rate-limit-options/index.js'
 import statusline from './commands/statusline.js'
 import effort from './commands/effort/index.js'
 import fallback from './commands/fallback/index.js'
@@ -322,11 +311,6 @@ const COMMANDS = memoize((): Command[] => [
   report,
   securityReview,
   terminalSetup,
-  upgrade,
-  extraUsage,
-  extraUsageNonInteractive,
-  rateLimitOptions,
-  usage,
   usageReport,
   vim,
   benchmark,
@@ -348,7 +332,6 @@ const COMMANDS = memoize((): Command[] => [
   hooks,
   exportCommand,
   sandboxToggle,
-  ...(!isUsing3PServices() ? [logout, login()] : []),
   passes,
   ...(peersCmd ? [peersCmd] : []),
   tasks,
@@ -421,43 +404,6 @@ const getWorkflowCommands = feature('WORKFLOW_SCRIPTS')
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 /**
- * Filters commands by their declared `availability` (auth/provider requirement).
- * Commands without `availability` are treated as universal.
- * This runs before `isEnabled()` so that provider-gated commands are hidden
- * regardless of feature-flag state.
- *
- * Not memoized — auth state can change mid-session (e.g. after /login),
- * so this must be re-evaluated on every getCommands() call.
- */
-export function meetsAvailabilityRequirement(cmd: Command): boolean {
-  if (!cmd.availability) return true
-  for (const a of cmd.availability) {
-    switch (a) {
-      case 'claude-ai':
-        if (isClaudeAISubscriber()) return true
-        break
-      case 'console':
-        // Console API key user = direct 1P API customer (not 3P, not claude.ai).
-        // Excludes 3P (Bedrock/Vertex/Foundry) who don't set ANTHROPIC_BASE_URL
-        // and gateway users who proxy through a custom base URL.
-        if (
-          !isClaudeAISubscriber() &&
-          !isUsing3PServices() &&
-          isFirstPartyAnthropicBaseUrl()
-        )
-          return true
-        break
-      default: {
-        const _exhaustive: never = a
-        void _exhaustive
-        break
-      }
-    }
-  }
-  return false
-}
-
-/**
  * Loads all command sources (skills, plugins, workflows). Memoized by cwd
  * because loading is expensive (disk I/O, dynamic imports).
  */
@@ -485,8 +431,7 @@ const loadAllCommands = memoize(async (cwd: string): Promise<Command[]> => {
 
 /**
  * Returns commands available to the current user. The expensive loading is
- * memoized, but availability and isEnabled checks run fresh every call so
- * auth changes (e.g. /login) take effect immediately.
+ * memoized, while isEnabled checks run fresh every call.
  */
 export async function getCommands(cwd: string): Promise<Command[]> {
   const allCommands = await loadAllCommands(cwd)
@@ -495,9 +440,7 @@ export async function getCommands(cwd: string): Promise<Command[]> {
   const dynamicSkills = getDynamicSkills()
 
   // Build base commands without dynamic skills
-  const baseCommands = allCommands.filter(
-    _ => meetsAvailabilityRequirement(_) && isCommandEnabled(_),
-  )
+  const baseCommands = allCommands.filter(isCommandEnabled)
 
   if (dynamicSkills.length === 0) {
     return baseCommands
@@ -507,9 +450,7 @@ export async function getCommands(cwd: string): Promise<Command[]> {
   const baseCommandNames = new Set(baseCommands.map(c => c.name))
   const uniqueDynamicSkills = dynamicSkills.filter(
     s =>
-      !baseCommandNames.has(s.name) &&
-      meetsAvailabilityRequirement(s) &&
-      isCommandEnabled(s),
+      !baseCommandNames.has(s.name) && isCommandEnabled(s),
   )
 
   if (uniqueDynamicSkills.length === 0) {
@@ -640,7 +581,6 @@ export const REMOTE_SAFE_COMMANDS: Set<Command> = new Set([
   color, // Change agent color
   vim, // Toggle vim mode
   cost, // Show session cost (local cost tracking)
-  usage, // Show usage info
   copy, // Copy last message
   btw, // Quick note
   feedback, // Send feedback

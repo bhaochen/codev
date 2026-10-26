@@ -8,9 +8,7 @@
  * runtime context a client uses (`LLMRuntimeContext`), and carry NO provider
  * SDK types.
  *
- * Provider wire formats belong to the protocol clients:
- *   - Anthropic MessageParam / Options → clients/anthropicMessages.ts
- *   - OpenAI wire types               → clients/openaiChat.ts, protocols/*
+ * The active wire format belongs to the 9router-compatible protocol client.
  *
  * The protocol clients adapt `LLMRequest` to their own wire boundary. Agents
  * must not reach past this layer into provider SDK types.

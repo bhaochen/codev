@@ -33,9 +33,4 @@ export type LLMRoute = {
   endpoint?: string
 }
 
-export type ProviderContext = {
-  provider: ProviderId
-  source: 'env' | 'sdk-flag' | 'config' | 'default'
-}
-
 export type ClientId = ProtocolId

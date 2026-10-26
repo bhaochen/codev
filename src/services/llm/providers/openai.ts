@@ -4,7 +4,7 @@ import { resolveOpenAIModel } from '../utils/modelMapping.js'
 
 export const openai = {
   id: 'openai' as ProviderId,
-  defaultProtocol: 'openai-chat' as ProtocolId,
+  defaultProtocol: 'openai-compatible-chat' as ProtocolId,
   get defaultEndpoint(): string { return getOpenAIBaseUrl() + '/chat/completions' },
   get protocol(): ProtocolId { return this.defaultProtocol },
   get endpoint(): string { return this.defaultEndpoint },

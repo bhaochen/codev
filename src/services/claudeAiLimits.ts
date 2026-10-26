@@ -1,17 +1,13 @@
 import { APIError } from '@anthropic-ai/sdk'
 import type { MessageParam } from '@anthropic-ai/sdk/resources/index.mjs'
 import isEqual from 'lodash-es/isEqual.js'
-import { getIsNonInteractiveSession } from '../bootstrap/state.js'
 import { isClaudeAISubscriber } from '../utils/auth.js'
 import { getModelBetas } from '../utils/betas.js'
 import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js'
 import { logError } from '../utils/log.js'
-import { getSmallFastModel } from '../utils/model/model.js'
-import { isEssentialTrafficOnly } from '../utils/privacyLevel.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from './analytics/index.js'
 import { logEvent } from './analytics/index.js'
 import { getAPIMetadata } from './llm/utils/metadata.js'
-import { nativeAnthropicPost } from './llm/transport/anthropicHttp.js'
 import {
   processRateLimitHeaders,
   shouldProcessRateLimits,
@@ -194,58 +190,6 @@ export function emitStatusChange(limits: ClaudeAILimits) {
     unifiedRateLimitFallbackAvailable: limits.unifiedRateLimitFallbackAvailable,
     hoursTillReset,
   })
-}
-
-export async function makeTestQuery() {
-  const model = getSmallFastModel()
-  const messages: MessageParam[] = [{ role: 'user', content: 'quota' }]
-  const betas = getModelBetas(model)
-  // Native first-party request; raw response headers carry the quota state.
-  const { headers } = await nativeAnthropicPost({
-    path: '/v1/messages',
-    body: {
-      model,
-      max_tokens: 1,
-      messages,
-      metadata: getAPIMetadata(),
-      ...(betas.length > 0 ? { betas } : {}),
-    },
-    // SDK default timeout (10 minutes) — the legacy path passed no timeout.
-    timeoutMs: 600_000,
-    source: 'quota_check',
-  })
-  return { headers }
-}
-
-export async function checkQuotaStatus(): Promise<void> {
-  // Skip network requests if nonessential traffic is disabled
-  if (isEssentialTrafficOnly()) {
-    return
-  }
-
-  // Check if we should process rate limits (real subscriber or mock testing)
-  if (!shouldProcessRateLimits(isClaudeAISubscriber())) {
-    return
-  }
-
-  // In non-interactive mode (-p), the real query follows immediately and
-  // extractQuotaStatusFromHeaders() will update limits from its response
-  // headers (claude.ts), so skip this pre-check API call.
-  if (getIsNonInteractiveSession()) {
-    return
-  }
-
-  try {
-    // Make a minimal request to check quota
-    const raw = await makeTestQuery()
-
-    // Update limits based on the response
-    extractQuotaStatusFromHeaders(raw.headers)
-  } catch (error) {
-    if (error instanceof APIError) {
-      extractQuotaStatusFromError(error)
-    }
-  }
 }
 
 /**

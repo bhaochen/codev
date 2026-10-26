@@ -398,26 +398,10 @@ export async function setup(
     await getRecentActivity()
   }
 
-  // Start background fetch of dynamic provider model lists if configured.
-  // This is non-blocking and warms the /model picker before the user opens it.
-  const { getConfiguredAuthProvider } = await import('./utils/auth.js')
-  const configuredAuthProvider = getConfiguredAuthProvider()
-  if (configuredAuthProvider === 'openrouter') {
-    const { startOpenRouterModelsFetch } = await import('./utils/model/openRouterModels.js')
-    startOpenRouterModelsFetch()
-  } else if (configuredAuthProvider === 'opencode') {
-    const { fetchOpencodeModels } = await import('./utils/model/opencodeModels.js')
-    void fetchOpencodeModels()
-  } else if (configuredAuthProvider === 'nvidia') {
-    const { fetchNvidiaModels } = await import('./utils/model/nvidiaModels.js')
-    void fetchNvidiaModels()
-  } else if (configuredAuthProvider === 'local') {
-    const { fetchLocalModels } = await import('./services/api/localClient.js')
-    void fetchLocalModels()
-  } else if (configuredAuthProvider === 'kiro') {
-    const { fetchKiroModels } = await import('./utils/model/kiroModels.js')
-    void fetchKiroModels()
-  }
+  // Warm the shared 9router model catalog for /model and /fallback.
+  void import('./utils/model/nineRouterModels.js').then(({ fetchNineRouterModels }) => {
+    void fetchNineRouterModels()
+  })
 
   // If permission mode is set to bypass, verify we're in a safe environment
   if (

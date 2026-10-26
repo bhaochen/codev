@@ -95,7 +95,6 @@ import { SHOW_CURSOR } from './ink/termio/dec.js';
 import { exitWithError, exitWithMessage, getRenderContext, renderAndRun, showSetupScreens } from './interactiveHelpers.js';
 import { initBuiltinPlugins } from './plugins/bundled/index.js';
 /* eslint-enable @typescript-eslint/no-require-imports */
-import { checkQuotaStatus } from './services/claudeAiLimits.js';
 import { getMcpToolsCommandsAndResources, prefetchAllMcpResources } from './services/mcp/client.js';
 import { VALID_INSTALLABLE_SCOPES, VALID_UPDATE_SCOPES } from './services/plugins/pluginCliCommands.js';
 import { initBundledSkills } from './skills/bundled/index.js';
@@ -2414,18 +2413,13 @@ async function run(): Promise<CommanderCommand> {
         agentDef.pendingSnapshotUpdate = undefined;
       }
 
-      // Skip executing /login if we just completed onboarding for it
-      if (onboardingShown && prompt?.trim().toLowerCase() === '/login') {
-        prompt = '';
-      }
       if (onboardingShown) {
-        // Refresh auth-dependent services now that the user has logged in during onboarding.
-        // Keep in sync with the post-login logic in src/commands/login.tsx
+        // Refresh account and policy services after first-run setup.
         void refreshRemoteManagedSettings();
         void refreshPolicyLimits();
-        // Clear user data cache BEFORE GrowthBook refresh so it picks up fresh credentials
+        // Clear user data cache BEFORE GrowthBook refresh so it picks up current credentials.
         resetUserCache();
-        // Refresh GrowthBook after login to get updated feature flags (e.g., for claude.ai MCPs)
+        // Refresh feature flags for the current account.
         refreshGrowthBookAfterAuthChange();
         // Clear any stale trusted device token then enroll for Remote Control.
         // Both self-gate on tengu_sessions_elevated_auth_enforcement internally
@@ -2489,7 +2483,6 @@ async function run(): Promise<CommanderCommand> {
     if (!skipStartupPrefetches) {
       const lastPrefetchedInfo = lastPrefetched > 0 ? ` last ran ${Math.round((Date.now() - lastPrefetched) / 1000)}s ago` : '';
       logForDebugging(`Starting background startup prefetches${lastPrefetchedInfo}`);
-      checkQuotaStatus().catch(error => logError(error));
 
       // Fetch bootstrap data from the server and update all cache values.
       void fetchBootstrapData();
@@ -4236,46 +4229,6 @@ async function run(): Promise<CommanderCommand> {
       await runConnectHeadless(connectConfig, prompt, opts.outputFormat, interactive);
     });
   }
-
-  // claude auth
-
-  const auth = program.command('auth').description('Manage authentication').configureHelp(createSortedHelpConfig());
-  auth.command('login').description('Sign in to your Anthropic account').option('--email <email>', 'Pre-populate email address on the login page').option('--sso', 'Force SSO login flow').option('--console', 'Use Anthropic Console (API usage billing) instead of Claude subscription').option('--claudeai', 'Use Claude subscription (default)').action(async ({
-    email,
-    sso,
-    console: useConsole,
-    claudeai
-  }: {
-    email?: string;
-    sso?: boolean;
-    console?: boolean;
-    claudeai?: boolean;
-  }) => {
-    const {
-      authLogin
-    } = await import('./cli/handlers/auth.js');
-    await authLogin({
-      email,
-      sso,
-      console: useConsole,
-      claudeai
-    });
-  });
-  auth.command('status').description('Show authentication status').option('--json', 'Output as JSON (default)').option('--text', 'Output as human-readable text').action(async (opts: {
-    json?: boolean;
-    text?: boolean;
-  }) => {
-    const {
-      authStatus
-    } = await import('./cli/handlers/auth.js');
-    await authStatus(opts);
-  });
-  auth.command('logout').description('Log out from your Anthropic account').action(async () => {
-    const {
-      authLogout
-    } = await import('./cli/handlers/auth.js');
-    await authLogout();
-  });
 
   /**
    * Helper function to handle marketplace command errors consistently.

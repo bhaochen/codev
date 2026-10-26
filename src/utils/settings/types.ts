@@ -399,7 +399,7 @@ export const SettingsSchema = lazySchema(() =>
         .max(3)
         .optional()
         .describe(
-          'Ordered provider/model targets used for interactive recovery from authentication, quota, rate-limit, and server errors.',
+          'Ordered 9router model IDs used for interactive recovery from quota, rate-limit, and server errors.',
         ),
       // Enterprise allowlist of models
       availableModels: z
