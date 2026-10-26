@@ -216,8 +216,8 @@ export function SearchableModelPicker({
           const MAX_RETRIES = 5
 
           async function tryFetch(): Promise<void> {
-            const { fetchOpenAIModels } = await import('../utils/model/openaiModels.js')
-            await fetchOpenAIModels()
+            const { fetchNineRouterModels } = await import('../utils/model/nineRouterModels.js')
+            await fetchNineRouterModels()
           }
           void tryFetch()
 
@@ -227,8 +227,8 @@ export function SearchableModelPicker({
               return
             }
             try {
-              const { hasOpenAIModelsCache } = await import('../utils/model/openaiModels.js')
-              if (hasOpenAIModelsCache()) {
+              const { getCachedNineRouterModels } = await import('../utils/model/nineRouterModels.js')
+              if (getCachedNineRouterModels().length > 0) {
                 if (mounted) {
                   setAppState(prev => ({ ...prev, authVersion: prev.authVersion + 1 }))
                 }

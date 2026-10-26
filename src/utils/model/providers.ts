@@ -1,8 +1,6 @@
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../services/analytics/index.js'
-import { isEnvTruthy } from '../envUtils.js'
 import { getForcedProvider } from '../forcedProvider.js'
 import { getGlobalClaudeFile } from '../env.js'
-import { getGlobalConfig } from '../config.js'
 
 export type APIProvider =
   | 'firstParty'
@@ -16,7 +14,7 @@ export type APIProvider =
   | 'foundry'
   | 'kiro'
 
-/** Every provider a pinned agent may name, in `/login` order. */
+/** Legacy provider IDs retained for compatibility with pinned agents. */
 export const API_PROVIDERS: readonly APIProvider[] = [
   'firstParty',
   'openrouter',
@@ -266,44 +264,14 @@ export function getOpenRouterBaseUrl(): string {
 }
 
 export function getOpenAIBaseUrl(): string {
-  const config = getGlobalConfig()
-  return config.openAiBaseUrl ?? process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1'
+  return process.env.NINE_ROUTER_BASE_URL ?? 'http://localhost:20128/v1'
 }
 
 export function getAPIProvider(): APIProvider | null {
-  // Agent-scoped pinning wins for the duration of that agent's async context
-  // (see utils/forcedProvider.ts); everything else keeps the session provider.
-  const forced = getForcedProvider()
-  if (forced) {
-    return forced
-  }
-
-  const explicitProvider = getExplicitProviderOverride()
-  if (explicitProvider) {
-    return explicitProvider
-  }
-
-  return isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK)
-    ? 'bedrock'
-    : isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX)
-      ? 'vertex'
-      : isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY)
-        ? 'foundry'
-        : isLocalConfigured()
-          ? 'local'
-          : isOpencodeConfigured()
-            ? 'opencode'
-            : isNvidiaConfigured()
-              ? 'nvidia'
-              : isOpenAIConfigured()
-                ? 'openai'
-                : isOpenRouterConfigured()
-                  ? 'openrouter'
-                  : isKiroConfigured()
-                    ? 'kiro'
-                    // This fork defaults to the OpenCode free gateway when no provider is
-                    // configured (fresh machine / empty ~/.claude.json), not null -> firstParty Anthropic.
-                : getStoredProviderPreference() ?? 'opencode'
+  // Legacy /login credentials and provider environment settings are not used
+  // to choose a backend: 9router owns upstream provider selection by model ID.
+  // Agent-scoped pins are retained for callers that explicitly use them.
+  return getForcedProvider() ?? 'openai'
 }
 
 export function getAPIProviderForStatsig(): AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS {

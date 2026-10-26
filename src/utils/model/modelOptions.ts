@@ -499,17 +499,14 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
     return payg1POptions
   }
 
-  // OpenAI API: Default + GPT model list fetched from models.dev (mirrors the
-  // codex CLI). No static fallback — the picker stays empty until the fetch
-  // succeeds, so a stale list can't masquerade as fresh models.dev data.
+  // 9router exposes every upstream provider through its OpenAI-compatible model catalog.
   if (getAPIProvider() === 'openai') {
-    // Trigger background fetch of OpenAI models (non-blocking)
-    void import('./openaiModels.js').then(({ startOpenAIModelsFetch }) => {
-      startOpenAIModelsFetch()
+    void import('./nineRouterModels.js').then(({ fetchNineRouterModels }) => {
+      void fetchNineRouterModels()
     })
 
-    const { getCachedOpenAIModels } = require('./openaiModels.js')
-    const models = getCachedOpenAIModels()
+    const { getCachedNineRouterModels } = require('./nineRouterModels.js')
+    const models = getCachedNineRouterModels()
 
     if (models && models.length > 0) {
       return [getDefaultOptionForUser(fastMode), ...models]
