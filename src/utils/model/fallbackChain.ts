@@ -15,7 +15,9 @@ export type FallbackTarget = {
 
 export function getConfiguredFallbackChain(): FallbackTarget[] {
   const settings = getSettingsForSource('userSettings')
-  return settings?.fallbackEnabled === false ? [] : (settings?.fallbackChain ?? [])
+  return settings?.fallbackEnabled === false
+    ? []
+    : (settings?.fallbackChain ?? []).map(target => ({ ...target, provider: 'openai' as const }))
 }
 
 export function isFallbackEligibleError(error: unknown, content?: unknown): boolean {

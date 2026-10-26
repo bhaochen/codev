@@ -11,42 +11,13 @@ import {
   getModelSupportedEfforts,
   type EffortLevel,
 } from '../../utils/effort.js'
-import type { APIProvider } from '../../utils/model/providers.js'
 import {
   getSettingsForSource,
   updateSettingsForSource,
 } from '../../utils/settings/settings.js'
 import type {
-  FallbackProvider,
   FallbackTarget,
 } from '../../utils/model/fallbackChain.js'
-
-const PROVIDERS: Array<{
-  value: FallbackProvider
-  label: string
-  description: string
-}> = [
-  {
-    value: 'firstParty',
-    label: 'Anthropic',
-    description: 'Claude models using Anthropic credentials',
-  },
-  {
-    value: 'openai',
-    label: 'OpenAI',
-    description: 'GPT models using OpenAI credentials',
-  },
-  {
-    value: 'opencode',
-    label: 'OpenCode Zen',
-    description: 'OpenCode models, including free models',
-  },
-  {
-    value: 'nvidia',
-    label: 'NVIDIA',
-    description: 'Models available from your NVIDIA endpoint',
-  },
-]
 
 type PanelAction =
   | { type: 'add' }
@@ -65,7 +36,10 @@ type PanelAction =
   | { type: 'done' }
 
 function getChain(): FallbackTarget[] {
-  return getSettingsForSource('userSettings')?.fallbackChain ?? []
+  return (getSettingsForSource('userSettings')?.fallbackChain ?? []).map(target => ({
+    ...target,
+    provider: 'openai' as const,
+  }))
 }
 
 function getEnabled(): boolean {
@@ -83,58 +57,9 @@ function saveChain(
   return error?.message
 }
 
-async function getModels(provider: FallbackProvider): Promise<ModelOption[]> {
-  if (provider === 'firstParty' || provider === 'anthropic') {
-    return [
-      { value: 'claude-opus-4-6', label: 'Claude Opus 4.6', description: 'Most capable for complex tasks' },
-      { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', description: 'Balanced speed and capability' },
-      { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', description: 'Fast and efficient' },
-    ]
-  }
-
-  if (provider === 'openai') {
-    const { fetchOpenAIModels } = await import('../../utils/model/openaiModels.js')
-    const models = await fetchOpenAIModels()
-    if (models.length > 0) return models
-    return [
-      { value: 'gpt-5.4', label: 'GPT-5.4', description: 'OpenAI general-purpose model' },
-      { value: 'gpt-5.4-mini', label: 'GPT-5.4 mini', description: 'Faster, lighter OpenAI model' },
-    ]
-  }
-
-  if (provider === 'opencode') {
-    const { fetchOpencodeModels, getCachedOpencodeModels } =
-      await import('../../utils/model/opencodeModels.js')
-    await fetchOpencodeModels()
-    const models = getCachedOpencodeModels().map(model => ({
-      value: model.id,
-      label: model.name ?? model.id,
-      description: model.isFree ? 'Free model' : model.id,
-    }))
-    if (models.length > 0) return models
-    return [
-      { value: 'big-pickle', label: 'Big Pickle', description: 'OpenCode Zen default model' },
-      { value: 'gpt-5-nano', label: 'GPT-5 Nano', description: 'Fast OpenCode Zen model' },
-    ]
-  }
-
-  const { fetchNvidiaModels, getCachedNvidiaModels } =
-    await import('../../utils/model/nvidiaModels.js')
-  await fetchNvidiaModels()
-  const models = getCachedNvidiaModels().map(model => ({
-    value: model.id,
-    label: model.id,
-    description: 'Available on your NVIDIA endpoint',
-  }))
-  return models.length > 0
-    ? models
-    : [
-        {
-          value: 'nvidia/llama-3.1-nemotron-70b-instruct',
-          label: 'NVIDIA Nemotron 70B',
-          description: 'NVIDIA default model',
-        },
-      ]
+async function getModels(): Promise<ModelOption[]> {
+  const { fetchNineRouterModels } = await import('../../utils/model/nineRouterModels.js')
+  return fetchNineRouterModels()
 }
 
 function getDirectActionResult(args: string): string | undefined {
@@ -164,25 +89,23 @@ function getDirectActionResult(args: string): string | undefined {
     return error ? `Failed to save fallback chain: ${error}` : `Removed fallback target ${index}.`
   }
   if (action === 'add') {
-    const [provider, model, effort] = values
-    const normalizedProvider = provider?.toLowerCase() === 'anthropic'
-      ? 'firstparty'
-      : provider?.toLowerCase()
-    const supportedProvider = PROVIDERS.find(
-      item => item.value.toLowerCase() === normalizedProvider,
-    )
+    const effort = values.at(-1)
+    const hasEffort = effort && ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(effort)
+    const modelParts = hasEffort ? values.slice(0, -1) : values
+    const legacyProvider = ['firstparty', 'anthropic', 'openai', 'opencode', 'nvidia'].includes((modelParts[0] ?? '').toLowerCase())
+    const model = (legacyProvider ? modelParts.slice(1) : modelParts).join(' ')
     const chain = getChain()
-    if (!supportedProvider || !model) {
-      return `Usage: /fallback add <${PROVIDERS.map(p => p.value).join('|')}> <model> [effort]`
+    if (!model) {
+      return 'Usage: /fallback add <model> [effort]'
     }
     if (chain.length >= 3) return 'The fallback chain supports at most 3 targets.'
     if (effort && !['minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(effort)) {
       return 'Invalid effort. Choose minimal, low, medium, high, xhigh, or max.'
     }
     const target: FallbackTarget = {
-      provider: supportedProvider.value,
+      provider: 'openai',
       model,
-      ...(effort ? { effort: effort as FallbackTarget['effort'] } : {}),
+      ...(hasEffort ? { effort: effort as FallbackTarget['effort'] } : {}),
     }
     const error = saveChain([...chain, target], true)
     return error ? `Failed to save fallback chain: ${error}` : `Added fallback target ${target.provider}/${target.model}.`
@@ -200,10 +123,9 @@ function FallbackPanel({
   const [chain, setChain] = useState(getChain)
   const [enabled, setEnabled] = useState(getEnabled)
   const [stage, setStage] = useState<
-    'menu' | 'provider' | 'models' | 'manage' | 'target' | 'effort' | 'confirmClear'
+    'menu' | 'models' | 'manage' | 'target' | 'effort' | 'confirmClear'
   >('menu')
   const [selectedTarget, setSelectedTarget] = useState<number>(0)
-  const [provider, setProvider] = useState<FallbackProvider>('firstParty')
   const [models, setModels] = useState<ModelOption[]>([])
   const [modelError, setModelError] = useState<string | undefined>()
   const [search, setSearch] = useState('')
@@ -227,7 +149,7 @@ function FallbackPanel({
     if (stage !== 'models') return
     let cancelled = false
     setModelError(undefined)
-    void getModels(provider).then(
+    void getModels().then(
       result => {
         if (!cancelled) setModels(result)
       },
@@ -241,7 +163,7 @@ function FallbackPanel({
     return () => {
       cancelled = true
     }
-  }, [provider, stage])
+  }, [stage])
 
   useEffect(() => {
     if (stage !== 'effort') return
@@ -257,17 +179,7 @@ function FallbackPanel({
     setEffortError(undefined)
 
     void (async () => {
-      if (target.provider === 'opencode') {
-        const { fetchOpencodeModels } = await import('../../utils/model/opencodeModels.js')
-        await fetchOpencodeModels()
-      } else if (target.provider === 'nvidia') {
-        const { fetchNvidiaModels } = await import('../../utils/model/nvidiaModels.js')
-        await fetchNvidiaModels()
-      }
-
-      const apiProvider: APIProvider =
-        target.provider === 'anthropic' ? 'firstParty' : target.provider
-      const supported = getModelSupportedEfforts(target.model, apiProvider)
+      const supported = getModelSupportedEfforts(target.model, 'openai')
       if (!cancelled) setEffortOptions(supported)
     })().catch(cause => {
       if (!cancelled) {
@@ -302,7 +214,8 @@ function FallbackPanel({
         setError('The fallback chain supports at most 3 targets.')
         return
       }
-      setStage('provider')
+      setModels([])
+      setStage('models')
       return
     }
     if (action.type === 'manage') {
@@ -411,7 +324,7 @@ function FallbackPanel({
   }
 
   function addModel(model: ModelOption): void {
-    const target: FallbackTarget = { provider, model: String(model.value) }
+    const target: FallbackTarget = { provider: 'openai', model: String(model.value) }
     const next = [...chain, target]
     const message = saveChain(next, true)
     if (message) {
@@ -424,38 +337,6 @@ function FallbackPanel({
     setSearch('')
   }
 
-  if (stage === 'provider') {
-    return (
-      <Pane color="permission">
-        <Box flexDirection="column" gap={1}>
-          <Text bold>Add a fallback provider</Text>
-          <Text dimColor>Choose a provider, then pick one of its available models.</Text>
-          <Select
-            options={[
-              ...PROVIDERS.map(item => ({
-                label: item.label,
-                value: item.value,
-                description: item.description,
-              })),
-              { label: 'Back', value: 'back' as const },
-            ]}
-            onChange={value => {
-              if (value === 'back') {
-                setStage('menu')
-              } else {
-                setProvider(value)
-                setSearch('')
-                setStage('models')
-              }
-            }}
-            onCancel={() => setStage('menu')}
-            visibleOptionCount={5}
-          />
-        </Box>
-      </Pane>
-    )
-  }
-
   if (stage === 'manage') {
     return (
       <Pane color="permission">
@@ -465,9 +346,9 @@ function FallbackPanel({
           <Select
             options={[
               {
-                label: 'Add provider and model…',
+                label: 'Add model…',
                 value: { type: 'add' } as PanelAction,
-                description: chain.length < 3 ? 'Choose a provider and model' : 'Maximum of 3 targets reached',
+                description: chain.length < 3 ? 'Choose a 9router model' : 'Maximum of 3 targets reached',
                 disabled: chain.length >= 3,
               },
               ...chain.map((target, index) => ({
@@ -626,7 +507,7 @@ function FallbackPanel({
   if (stage === 'models') {
     return (
       <FuzzyPicker
-        title={`Choose a ${PROVIDERS.find(item => item.value === provider)?.label} model`}
+        title="Choose a 9router model"
         placeholder="Search models…"
         items={filteredModels}
         getKey={model => String(model.value)}
@@ -638,7 +519,7 @@ function FallbackPanel({
         )}
         onQueryChange={setSearch}
         onSelect={addModel}
-        onCancel={() => setStage('provider')}
+        onCancel={() => setStage('menu')}
         emptyMessage={
           modelError
             ? `Could not load models: ${modelError}`
@@ -670,9 +551,9 @@ function FallbackPanel({
         ]
       : [
           {
-            label: 'Add provider and model…',
+            label: 'Add model…',
             value: { type: 'add' } as PanelAction,
-            description: 'Choose a provider and model to add',
+            description: 'Choose a 9router model to add',
           },
         ]),
     {

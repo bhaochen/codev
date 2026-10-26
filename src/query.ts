@@ -787,10 +787,7 @@ async function* queryLoop(
               const currentProvider = activeFallbackProvider ?? getAPIProvider()
               while (fallbackTargetIndex < fallbackChain.length) {
                 const candidate = fallbackChain[fallbackTargetIndex++]!
-                const candidateProvider =
-                  candidate.provider === 'anthropic'
-                    ? 'firstParty'
-                    : candidate.provider
+                const candidateProvider = 'openai'
                 if (candidateProvider === currentProvider && candidate.model === currentModel) {
                   continue
                 }
