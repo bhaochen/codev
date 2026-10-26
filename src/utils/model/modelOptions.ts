@@ -143,7 +143,7 @@ export function getDefaultOptionForUser(fastMode = false): ModelOption {
     value: null,
     label: 'Default (recommended)',
     description: isOpenAI
-      ? `Use the default OpenAI model (currently ${renderDefaultModelSetting(getDefaultMainLoopModelSetting())})`
+      ? 'Use the default model selected by 9router'
       : `Use the default model (currently ${renderDefaultModelSetting(getDefaultMainLoopModelSetting())})${is3P ? '' : ` · ${formatModelPricing(COST_TIER_3_15)}`}`,
   }
 }
@@ -222,11 +222,10 @@ export function getSonnet46_1MOption(): ModelOption {
   const is3P = provider !== 'firstParty'
   if (provider === 'openai') {
     return {
-      value: getModelStrings().sonnet46,
-      label: 'GPT-5.4',
-      description: 'GPT-5.4 for long-running OpenAI sessions',
-      descriptionForModel:
-        'GPT-5.4 for long-running OpenAI sessions and large codebases',
+      value: 'default',
+      label: 'Default (1M context)',
+      description: 'Gateway default for long sessions',
+      descriptionForModel: 'Gateway default model with extended context',
     }
   }
   return {
@@ -243,11 +242,10 @@ export function getOpus46_1MOption(fastMode = false): ModelOption {
   const is3P = provider !== 'firstParty'
   if (provider === 'openai') {
     return {
-      value: getModelStrings().opus46,
-      label: 'GPT-5.4',
-      description: 'GPT-5.4 for long-running OpenAI sessions',
-      descriptionForModel:
-        'GPT-5.4 for long-running OpenAI sessions and large codebases',
+      value: 'default',
+      label: 'Default (1M context)',
+      description: 'Gateway default for long sessions',
+      descriptionForModel: 'Gateway default model with extended context',
     }
   }
   return {

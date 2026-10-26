@@ -103,6 +103,20 @@ export function getMainLoopModel(): ModelName {
 }
 
 export function getBestModel(): ModelName {
+  if (getAPIProvider() === 'openai') {
+    // 9router owns model selection; the catalog head is the best option.
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const nineRouterModelsModule = require('./nineRouterModels.js') as {
+        getCachedNineRouterModels: () => Array<{ value: string }>
+      }
+      const models = nineRouterModelsModule.getCachedNineRouterModels()
+      if (models.length > 0) return models[0].value as ModelName
+    } catch {
+      // Catalog not loaded yet.
+    }
+    return 'default'
+  }
   return getDefaultOpusModel()
 }
 
@@ -180,6 +194,22 @@ export function getRuntimeMainLoopModel(params: {
  * @returns The default model setting to use
  */
 export function getDefaultMainLoopModelSetting(): ModelName | ModelAlias {
+  // 9router owns upstream provider and model selection. The default model
+  // comes from its live catalog (first entry); no family is hard-coded.
+  if (getAPIProvider() === 'openai') {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const nineRouterModelsModule = require('./nineRouterModels.js') as {
+        getCachedNineRouterModels: () => Array<{ value: string }>
+      }
+      const models = nineRouterModelsModule.getCachedNineRouterModels()
+      if (models.length > 0) return models[0].value as ModelName
+    } catch {
+      // Catalog not loaded yet, fall through to the gateway default.
+    }
+    return 'default'
+  }
+
   // Check if using OpenRouter provider
   const apiProvider = getAPIProvider()
   let isOpenRouterProvider = apiProvider === 'openrouter'

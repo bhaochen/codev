@@ -33,10 +33,14 @@ function getBuiltinModelStrings(provider: APIProvider): ModelStrings {
     provider = 'firstParty'
   }
   if (provider === 'openai') {
+    // 9router owns model selection; family aliases all point at the gateway
+    // default and are resolved by 9router at request time.
     const out = getBuiltinModelStrings('firstParty') as Record<string, string>
-    out.haiku45 = process.env.OPENAI_HAIKU_MODEL || 'gpt-5.4-mini'
-    out.sonnet46 = process.env.OPENAI_SONNET_MODEL || 'gpt-5.4'
-    out.opus46 = process.env.OPENAI_OPUS_MODEL || 'gpt-5.4'
+    const gatewayModel =
+      process.env.OPENAI_SONNET_MODEL || 'default'
+    out.haiku45 = process.env.OPENAI_HAIKU_MODEL || gatewayModel
+    out.sonnet46 = gatewayModel
+    out.opus46 = process.env.OPENAI_OPUS_MODEL || gatewayModel
     return out as ModelStrings
   }
 
