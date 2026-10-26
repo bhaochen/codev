@@ -3,7 +3,6 @@ import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 import * as path from 'path'
 import { randomBytes } from 'node:crypto'
 import { normalizeLegacyDeepSeekManagedEnv } from '../../utils/providerManagedEnvCompat.js'
-import { isOpenAIOfficialProviderId } from './openaiOfficialProvider.js'
 
 export const CURRENT_PROVIDER_INDEX_SCHEMA_VERSION = 1
 
@@ -137,10 +136,7 @@ function migrateProvidersIndex(value: unknown): JsonObject {
       : typeof _legacyActiveProviderId === 'string'
         ? _legacyActiveProviderId
         : null
-  const activeId = rawActiveId && (
-    providers.some((provider) => provider.id === rawActiveId) ||
-    isOpenAIOfficialProviderId(rawActiveId)
-  )
+  const activeId = rawActiveId && providers.some((provider) => provider.id === rawActiveId)
     ? rawActiveId
     : null
 

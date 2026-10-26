@@ -10,9 +10,6 @@
 
 import { SettingsService } from '../services/settingsService.js'
 import { ApiError, errorResponse } from '../middleware/errorHandler.js'
-import { hasOpenAIAuthLogin } from '../../utils/auth.js'
-import { resolveGlobalConfigFilePath } from '../../utils/globalConfigPath.js'
-import { OPENAI_CODEX_MODEL_CATALOG } from '../../services/openaiAuth/models.js'
 
 const EFFORT_LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
 const DEFAULT_EFFORT = 'medium'
@@ -26,297 +23,20 @@ type ApiModelInfo = {
   context: string
 }
 
-function addUniqueModel(
-  models: ApiModelInfo[],
-  model: ApiModelInfo | null,
-): void {
-  if (!model || !model.id.trim()) {
-    return
-  }
-
-  if (models.some(existing => existing.id === model.id)) {
-    return
-  }
-
-  models.push(model)
-}
-
-function buildProviderModelList(models: {
-  main: string
-  haiku: string
-  sonnet: string
-  opus: string
-}): ApiModelInfo[] {
-  const modelList: ApiModelInfo[] = []
-
-  addUniqueModel(modelList, {
-    id: models.main,
-    name: models.main,
-    description: 'Main model',
-    context: '',
-  })
-  addUniqueModel(modelList, models.haiku
-    ? {
-        id: models.haiku,
-        name: models.haiku,
-        description: 'Haiku model',
-        context: '',
-      }
-    : null)
-  addUniqueModel(modelList, models.sonnet
-    ? {
-        id: models.sonnet,
-        name: models.sonnet,
-        description: 'Sonnet model',
-        context: '',
-      }
-    : null)
-  addUniqueModel(modelList, models.opus
-    ? {
-        id: models.opus,
-        name: models.opus,
-        description: 'Opus model',
-        context: '',
-      }
-    : null)
-
-  return modelList
-}
-
-function buildOpenAIModelList(): ApiModelInfo[] {
-  return OPENAI_CODEX_MODEL_CATALOG.map(model => ({
-    id: model.value,
-    name: model.label,
-    description: model.description,
-    context: '',
-  }))
-}
-
-function getEnvConfiguredAnthropicModels(): ApiModelInfo[] {
-  return buildProviderModelList({
-    main: process.env.ANTHROPIC_MODEL?.trim() || '',
-    haiku: process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL?.trim() || '',
-    sonnet: process.env.ANTHROPIC_DEFAULT_SONNET_MODEL?.trim() || '',
-    opus: process.env.ANTHROPIC_DEFAULT_OPUS_MODEL?.trim() || '',
-  })
-}
-
-function getOpenAIAuthModels(): ApiModelInfo[] {
-  if (!hasOpenAIAuthLogin()) {
-    return []
-  }
-
-  return buildOpenAIModelList()
-}
-
-function getStandaloneModelList(): ApiModelInfo[] {
-  const models = [...getEnvConfiguredAnthropicModels()]
-
-  for (const model of getOpenAIAuthModels()) {
-    addUniqueModel(models, model)
-  }
-
-  return models
-}
-
-function normalizeEffortLevel(value: unknown): (typeof EFFORT_LEVELS)[number] {
-  return typeof value === 'string' && EFFORT_LEVELS.includes(value as (typeof EFFORT_LEVELS)[number])
-    ? value as (typeof EFFORT_LEVELS)[number]
-    : DEFAULT_EFFORT
-}
-
-// ─── CLI provider model cache (fetched from external APIs) ─────
-
-let cliProviderModelCache: ApiModelInfo[] | null = null
-let cliProviderModelCacheTime = 0
-const CLI_PROVIDER_CACHE_TTL = 5 * 60 * 1000 // 5 minutes
-
-export function invalidateCliProviderModelCache(): void {
-  cliProviderModelCache = null
-  cliProviderModelCacheTime = 0
-}
-
-async function fetchCliProviderModels(): Promise<ApiModelInfo[]> {
-  if (cliProviderModelCache && Date.now() - cliProviderModelCacheTime < CLI_PROVIDER_CACHE_TTL) {
-    return cliProviderModelCache
-  }
-
-  try {
-    // Read the CLI's global config — the exact file the CLI writes.
-    const { readFileSync } = await import('node:fs')
-    let config: Record<string, unknown> = {}
-    try {
-      const raw = readFileSync(resolveGlobalConfigFilePath(), 'utf8')
-      config = JSON.parse(raw)
-    } catch {
-      return []
-    }
-    const authProvider = config.authProvider as string | undefined
-
-    // ── OpenCode ──────────────────────────────────────────────
-    if (authProvider === 'opencode' && config.openCodeApiKey) {
-      try {
-        const res = await fetch('https://models.dev/api.json')
-        if (res.ok) {
-          const data = await res.json() as any
-          const opencodeModels = data?.opencode?.models || {}
-          const models: ApiModelInfo[] = []
-
-          for (const [modelId, modelCfg] of Object.entries(opencodeModels) as [string, any][]) {
-            if (modelCfg.status === 'deprecated') continue
-            const isFree = modelCfg.cost?.input === 0 && modelCfg.cost?.output === 0
-            models.push({
-              id: modelId,
-              name: modelCfg.name || modelId,
-              description: isFree ? 'Free model' : 'Paid model',
-              context: '',
-            })
-          }
-
-          if (models.length > 0) {
-            cliProviderModelCache = models
-            cliProviderModelCacheTime = Date.now()
-            return models
-          }
-        }
-      } catch {
-        // fall through
-      }
-    }
-
-    // ── OpenRouter ────────────────────────────────────────────
-    if (authProvider === 'openrouter' && config.openRouterApiKey) {
-      try {
-        const res = await fetch('https://openrouter.ai/api/v1/models', {
-          headers: { Authorization: `Bearer ${config.openRouterApiKey}` },
-        })
-        if (res.ok) {
-          const data = await res.json() as any
-          const models: ApiModelInfo[] = (data.data || []).map((m: any) => ({
-            id: m.id,
-            name: m.name || m.id,
-            description: m.description || '',
-            context: String(m.context_length || ''),
-          }))
-
-          if (models.length > 0) {
-            cliProviderModelCache = models
-            cliProviderModelCacheTime = Date.now()
-            return models
-          }
-        }
-      } catch {
-        // fall through
-      }
-    }
-
-    // ── NVIDIA NIM ────────────────────────────────────────────
-    if (authProvider === 'nvidia' && config.nvidiaApiKey) {
-      try {
-        const res = await fetch('https://integrate.api.nvidia.com/v1/models', {
-          headers: { Authorization: `Bearer ${config.nvidiaApiKey}` },
-        })
-        if (res.ok) {
-          const data = await res.json() as any
-          const models: ApiModelInfo[] = (data.data || []).map((m: any) => ({
-            id: m.id,
-            name: m.id,
-            description: m.owned_by || '',
-            context: '',
-          }))
-
-          if (models.length > 0) {
-            cliProviderModelCache = models
-            cliProviderModelCacheTime = Date.now()
-            return models
-          }
-        }
-      } catch {
-        // fall through
-      }
-    }
-  } catch {
-    // fall through
-  }
-
-  return []
-}
-
-// ─── Router ───────────────────────────────────────────────────────────────────
-
-export async function handleModelsApi(
-  req: Request,
-  url: URL,
-  segments: string[],
-): Promise<Response> {
-  try {
-    const resource = segments[1] // 'models' | 'effort'
-    const sub = segments[2] // 'current' | undefined
-
-    // ── /api/effort ───────────────────────────────────────────────────
-    if (resource === 'effort') {
-      return await handleEffort(req)
-    }
-
-    // ── /api/models/* ─────────────────────────────────────────────────
-    switch (sub) {
-      case undefined:
-        // GET /api/models — Tier1 TUI provider model listing
-        if (req.method !== 'GET') throw methodNotAllowed(req.method)
-        return await handleModelsList()
-
-      case 'current':
-        return await handleCurrentModel(req)
-
-      default:
-        throw ApiError.notFound(`Unknown models endpoint: ${sub}`)
-    }
-  } catch (error) {
-    return errorResponse(error)
-  }
-}
-
-// ─── Handlers ─────────────────────────────────────────────────────────────────
-
-export async function readCliAuthProvider(): Promise<{
-  authProvider?: 'anthropic' | 'openai' | 'openrouter' | 'local' | 'opencode' | 'nvidia'
-} | null> {
-  try {
-    const { readFileSync } = await import('node:fs')
-    const raw = readFileSync(resolveGlobalConfigFilePath(), 'utf8')
-    return JSON.parse(raw)
-  } catch {
-    return null
-  }
-}
-
-const CLI_PROVIDER_NAMES: Record<string, string> = {
-  opencode: 'OpenCode Zen',
-  nvidia: 'NVIDIA',
-  openrouter: 'OpenRouter',
-  local: 'Local',
-  anthropic: 'Anthropic',
-  openai: 'OpenAI',
-}
-
 async function handleModelsList(): Promise<Response> {
-  const cliConfig = await readCliAuthProvider()
-  const cliAuthProvider = cliConfig?.authProvider
-
-  if (cliAuthProvider && cliAuthProvider !== 'anthropic' && cliAuthProvider !== 'openai') {
-    const cliModels = await fetchCliProviderModels()
-    if (cliModels.length > 0) {
-      return Response.json({
-        models: cliModels,
-        provider: {
-          id: `cli-${cliAuthProvider}`,
-          name: CLI_PROVIDER_NAMES[cliAuthProvider] || cliAuthProvider,
-        },
-      })
-    }
-  }
-
-  return Response.json({ models: getStandaloneModelList(), provider: null })
+  const { fetchNineRouterModels } = await import(
+    '../../utils/model/nineRouterModels.js'
+  )
+  const models = await fetchNineRouterModels()
+  return Response.json({
+    models: models.map(model => ({
+      id: model.value,
+      name: model.label,
+      description: model.description,
+      context: '',
+    })),
+    provider: { id: '9router', name: '9router' },
+  })
 }
 
 async function handleCurrentModel(req: Request): Promise<Response> {
@@ -331,11 +51,15 @@ async function handleCurrentModel(req: Request): Promise<Response> {
 
     const lookupId = contextTier ? `${currentModelId}:${contextTier}` : currentModelId
 
-    // Build available models for name lookup
-    const cliModelsFallback = await fetchCliProviderModels()
-    const availableModels = cliModelsFallback.length > 0
-      ? cliModelsFallback
-      : getStandaloneModelList()
+    const { fetchNineRouterModels } = await import(
+      '../../utils/model/nineRouterModels.js'
+    )
+    const availableModels = (await fetchNineRouterModels()).map(model => ({
+      id: model.value,
+      name: model.label,
+      description: model.description,
+      context: '',
+    }))
 
     const modelEntry = availableModels.find((m) => m.id === lookupId)
       || availableModels.find((m) => m.id === currentModelId)

@@ -534,7 +534,6 @@ import { useDeprecationWarningNotification } from 'src/hooks/notifs/useDeprecati
 import { useNpmDeprecationNotification } from 'src/hooks/notifs/useNpmDeprecationNotification.js'
 import { useIDEStatusIndicator } from 'src/hooks/notifs/useIDEStatusIndicator.js'
 import { useModelMigrationNotifications } from 'src/hooks/notifs/useModelMigrationNotifications.js'
-import { useCanSwitchToExistingSubscription } from 'src/hooks/notifs/useCanSwitchToExistingSubscription.js'
 import { useTeammateLifecycleNotification } from 'src/hooks/notifs/useTeammateShutdownNotification.js'
 import { useFastModeNotification } from 'src/hooks/notifs/useFastModeNotification.js'
 import {
@@ -1144,7 +1143,6 @@ export function REPL({
   )
   // notifications
   useModelMigrationNotifications()
-  useCanSwitchToExistingSubscription()
   useIDEStatusIndicator({ ideSelection, mcpClients, ideInstallationStatus })
   useMcpConnectivityStatus({ mcpClients })
   useAutoModeUnavailableNotification()

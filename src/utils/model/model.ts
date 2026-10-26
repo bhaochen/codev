@@ -15,7 +15,6 @@ import {
   isTeamPremiumSubscriber,
   getOpenCodeModelName,
 } from '../auth.js'
-import { getOpenAIModelDisplayName } from '../../services/openaiAuth/models.js'
 import {
   has1mContext,
   is1mContextDisabled,
@@ -494,16 +493,6 @@ function getKnownModelDisplayName(model: ModelName): string | null {
 
 // @[MODEL LAUNCH]: 新模型的显示名由 MODEL_KEY_DISPLAY_NAMES 从 configs.ts 自动推导，无需在此添加 case。
 export function getPublicModelDisplayName(model: ModelName): string | null {
-  // OpenAI provider maps the Claude model strings (haiku45/sonnet46/opus46) to GPT
-  // IDs (e.g. gpt-5.4-mini). Those IDs would otherwise match the Claude switch arms
-  // below and render as "Haiku 4.5" / "Sonnet 4.6" — show the GPT marketing name instead.
-  if (getAPIProvider() === 'openai') {
-    const openAiName = getOpenAIModelDisplayName(model)
-    if (openAiName) {
-      return openAiName
-    }
-  }
-
   // OpenCode Zen 模型显示名完全由目录驱动；
   // 目录命中即返回，未命中（缓存为空 / fetch 未完成）直接返回原始 ID，
   // 不再穿透到下面的 Claude 硬编码 switch —— 避免 big-pickle 撞 opus46 显示名
