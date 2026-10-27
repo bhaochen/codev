@@ -21,7 +21,6 @@ import {
   __setShadowStoreForTests,
   __resetShadowWriterForTests,
 } from './shadowWriter.js'
-import { __resetExportDeferralForTests } from './exportDeferral.js'
 import type { Entry } from '../../types/logs.js'
 
 const S1 = '00000000-0000-4000-8000-0000000000c1'
@@ -80,13 +79,11 @@ describe('batch analytics DB-first (item 3)', () => {
     store = getSessionStore()
     __setShadowStoreForTests(store)
     __resetShadowWriterForTests()
-    __resetExportDeferralForTests()
   })
 
   afterEach(() => {
     __setShadowStoreForTests(null)
     __resetShadowWriterForTests()
-    __resetExportDeferralForTests()
     __resetSessionStoreForTests()
     delete process.env.CODEV_DB_PRIMARY
     delete process.env.TEST_ENABLE_SHADOW_WRITER

@@ -368,17 +368,8 @@ export class SessionService {
 
   private async appendJsonlEntry(filePath: string, entry: Record<string, unknown>): Promise<void> {
     const line = JSON.stringify(entry) + '\n'
-    const { isExportDeferred, markExportDirty } = await import(
-      '../../services/db/exportDeferral.js'
-    )
-    if (isExportDeferred()) {
-      // D4: rows are the record; the export file is materialized on demand.
-      shadowAppendBatch(filePath, [entry as unknown as Entry], Buffer.byteLength(line))
-      markExportDirty(filePath)
-      return
-    }
     await fs.appendFile(filePath, line, 'utf-8')
-    // Phase A: mirror the successful append into the SQLite shadow.
+    // Mirror the successful append into the SQLite shadow.
     shadowAppendBatch(filePath, [entry as unknown as Entry], Buffer.byteLength(line))
   }
 

@@ -50,9 +50,6 @@ import { count, uniq } from './utils/array.js';
 import { installAsciicastRecorder } from './utils/asciicast.js';
 import { getSubscriptionType, isClaudeAISubscriber, prefetchAwsCredentialsAndBedRockInfoIfSafe, prefetchGcpCredentialsIfSafe } from './utils/auth.js';
 import { checkHasTrustDialogAccepted, getGlobalConfig, isAutoUpdaterDisabled, saveGlobalConfig } from './utils/config.js'
-import { migrateAllSessions } from './services/db/migrateSessions.js'
-import { findSessionFiles, getProjectDirs } from './services/db/migrateSessions.js'
-import { SessionStore } from './services/db/SessionStore.js'
 import { seedEarlyInput, stopCapturingEarlyInput } from './utils/earlyInput.js';
 import { getInitialEffortSetting, parseEffortValue } from './utils/effort.js';
 import { getInitialFastModeSetting, isFastModeEnabled, prefetchFastModeStatus, resolveFastModeStatusFromCache } from './utils/fastMode.js';
@@ -173,17 +170,6 @@ import { type ChannelEntry, getInitialMainLoopModel, getIsNonInteractiveSession,
 const autoModeStateModule = feature('TRANSCRIPT_CLASSIFIER') ? require('./utils/permissions/autoModeState.js') as typeof import('./utils/permissions/autoModeState.js') : null;
 
 // TeleportRepoMismatchDialog, TeleportResumeWrapper dynamically imported at call sites
-import { migrateAutoUpdatesToSettings } from './migrations/migrateAutoUpdatesToSettings.js';
-import { migrateBypassPermissionsAcceptedToSettings } from './migrations/migrateBypassPermissionsAcceptedToSettings.js';
-import { migrateEnableAllProjectMcpServersToSettings } from './migrations/migrateEnableAllProjectMcpServersToSettings.js';
-import { migrateFennecToOpus } from './migrations/migrateFennecToOpus.js';
-import { migrateLegacyOpusToCurrent } from './migrations/migrateLegacyOpusToCurrent.js';
-import { migrateOpusToOpus1m } from './migrations/migrateOpusToOpus1m.js';
-import { migrateReplBridgeEnabledToRemoteControlAtStartup } from './migrations/migrateReplBridgeEnabledToRemoteControlAtStartup.js';
-import { migrateSonnet1mToSonnet45 } from './migrations/migrateSonnet1mToSonnet45.js';
-import { migrateSonnet45ToSonnet46 } from './migrations/migrateSonnet45ToSonnet46.js';
-import { resetAutoModeOptInForDefaultOffer } from './migrations/resetAutoModeOptInForDefaultOffer.js';
-import { resetProToOpusDefault } from './migrations/resetProToOpusDefault.js';
 import { createRemoteSessionConfig } from './remote/RemoteSessionManager.js';
 /* eslint-enable @typescript-eslint/no-require-imports */
 // teleportWithProgress dynamically imported at call site
@@ -326,148 +312,12 @@ async function logStartupTelemetry(): Promise<void> {
 // Bump this when adding a new sync migration so existing users re-run the set.
 const CURRENT_MIGRATION_VERSION = 11
 
-// Session migration version — bump when the JSONL → SQLite migration logic
-// changes in a way that requires re-migration (e.g., schema changes).
-// Currently requires migration 003 (role column + synced_path).
-// v4: repair pass (re-sync stale rows, prune orphans from old bug keys).
-// v5: subagent transcripts mirrored (composite ids, kind='subagent').
-const CURRENT_SESSION_MIGRATION_VERSION = 5
-
-// Session migration with progress indicator.
-// Runs JSONL → SQLite migration for all historical sessions in the BACKGROUND.
-// Shows a live spinner "Migrating sessions X/Y" so startup isn't blocked.
-// Uses a single SessionStore connection, handles Ctrl+C cleanup, and captures
-// config at start to avoid config races.
-async function runSessionMigration(): Promise<void> {
-  // Capture config at start to avoid race with async migration
-  const configAtStart = getGlobalConfig()
-  if (configAtStart.sessionMigrationVersion === CURRENT_SESSION_MIGRATION_VERSION) {
-    return // already migrated
-  }
-
-  const store = SessionStore.open()
-  let spinnerHandle: ReturnType<typeof setTimeout> | null = null
-  let done = false
-
-  const cleanup = () => {
-    if (spinnerHandle) clearTimeout(spinnerHandle)
-    if (!done) {
-      process.stderr.write('\r' + ' '.repeat(80) + '\r')
-    }
-    store.close()
-  }
-
-  // Handle Ctrl+C / SIGTERM during migration: clear the spinner line and
-  // close the store. Do NOT process.exit here — main.tsx's own SIGINT handler
-  // (and the default SIGTERM behavior) owns process lifecycle; migration
-  // state is transactional and safely resumes next startup either way.
-  const handleSignal = () => {
-    cleanup()
-  }
-  process.on('SIGINT', handleSignal)
-  process.on('SIGTERM', handleSignal)
-
-  // Fire-and-forget background migration with live spinner
-  void (async () => {
-    const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
-    let frame = 0
-    let current = 0
-    let total = 0
-
-    const spin = () => {
-      if (done) return
-      const msg = total > 0
-        ? `Migrating sessions ${current}/${total} ${spinnerFrames[frame % spinnerFrames.length]}`
-        : `Discovering sessions... ${spinnerFrames[frame % spinnerFrames.length]}`
-      process.stderr.write(`\r${chalk.cyan(msg)}`)
-      frame++
-      spinnerHandle = setTimeout(spin, 80)
-    }
-    spin()
-
-    try {
-      // Single pass: discover, repair, migrate, prune using shared store
-      const result = await migrateAllSessions({
-        verbose: false,
-        vacuum: true,
-        _store: store, // reuse single connection
-        onProgress: (
-          _status: 'migrated' | 'repaired' | 'skipped' | 'failed',
-          _sessionId: string,
-        ) => {
-          current++
-        },
-      })
-
-      done = true
-      process.stderr.write('\r' + ' '.repeat(80) + '\r')
-
-      console.log(chalk.green('Session migration complete:'))
-      console.log(chalk.green(`  Total sessions: ${result.total}`))
-      console.log(chalk.green(`  Migrated: ${result.migrated}`))
-      console.log(chalk.green(`  Repaired: ${result.repaired}`))
-      console.log(chalk.green(`  Skipped (already fresh): ${result.skipped}`))
-      console.log(chalk.green(`  Pruned orphans: ${result.pruned}`))
-      if (result.failed > 0) {
-        console.log(chalk.yellow(`  Failed: ${result.failed}`))
-        for (const err of result.errors) {
-          console.log(chalk.yellow(`    ${err.session}: ${err.error}`))
-        }
-      }
-
-      // Use config at start for version check, then update
-      if (getGlobalConfig().sessionMigrationVersion !== CURRENT_SESSION_MIGRATION_VERSION) {
-        saveGlobalConfig(prev => ({
-          ...prev,
-          sessionMigrationVersion: CURRENT_SESSION_MIGRATION_VERSION
-        }))
-      }
-
-      logForDebugging(`Session migration finished: ${result.migrated} migrated, ${result.repaired} repaired, ${result.pruned} pruned, ${result.skipped} skipped, ${result.failed} failed`)
-    } catch (err) {
-      done = true
-      process.stderr.write('\r' + ' '.repeat(80) + '\r')
-      console.log(chalk.yellow(`Session migration failed: ${String(err)}`))
-      logForDebugging(`Session migration error: ${String(err)}`)
-    } finally {
-      // Remove signal handlers to avoid leaks
-      process.off('SIGINT', handleSignal)
-      process.off('SIGTERM', handleSignal)
-      cleanup()
-    }
-  })()
-
-  // Return immediately — migration continues in background
-  console.log(chalk.cyan('Migrating sessions to SQLite in background...'))
-  console.log(chalk.dim('  (You can continue working; migration resumes on next startup if interrupted)'))
-}
-
 async function runMigrations(): Promise<void> {
   if (getGlobalConfig().migrationVersion !== CURRENT_MIGRATION_VERSION) {
-    migrateAutoUpdatesToSettings()
-    migrateBypassPermissionsAcceptedToSettings()
-    migrateEnableAllProjectMcpServersToSettings()
-    resetProToOpusDefault()
-    migrateSonnet1mToSonnet45()
-    migrateLegacyOpusToCurrent()
-    migrateSonnet45ToSonnet46()
-    migrateOpusToOpus1m()
-    migrateReplBridgeEnabledToRemoteControlAtStartup()
-    if (feature('TRANSCRIPT_CLASSIFIER')) {
-      resetAutoModeOptInForDefaultOffer()
-    }
-    if (('external' as string) === 'ant') {
-      migrateFennecToOpus()
-    }
     saveGlobalConfig(prev => prev.migrationVersion === CURRENT_MIGRATION_VERSION ? prev : {
       ...prev,
       migrationVersion: CURRENT_MIGRATION_VERSION
     })
-  }
-
-  // Session migration (JSONL → SQLite) — runs once per version bump
-  if (getGlobalConfig().sessionMigrationVersion !== CURRENT_SESSION_MIGRATION_VERSION) {
-    await runSessionMigration()
   }
 
   // Async migration - fire and forget since it's non-blocking

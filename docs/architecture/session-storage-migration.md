@@ -1,8 +1,14 @@
 # Session Storage Migration: JSONL → SQLite
 
+> Status: complete. The JSONL files and the one-time JSONL→SQLite import tool
+> were removed; `codev.db` session rows are the sole durable store. This
+> document is kept for schema reference only.
+
 ## Overview
 
-Codev migrated session transcript storage from append-only JSONL files to a SQLite database (`~/.claude/sessions/sessions.db`). This document describes the schema, migration process, performance characteristics, and trade-offs.
+Codev migrated session transcript storage from append-only JSONL files to a
+SQLite database. Historical JSONL files under `~/.local/share/codev/projects/`
+are not read, written, or rebuilt by codev; they may be deleted.
 
 ---
 
