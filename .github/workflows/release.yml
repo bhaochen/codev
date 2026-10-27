@@ -22,13 +22,7 @@ jobs:
         include:
           - os: ubuntu-latest
             target: linux-x64
-            artifact: codev-linux-x64
-          - os: macos-latest
-            target: macos-x64
-            artifact: codev-macos-x64
-          - os: macos-latest
-            target: macos-arm64
-            artifact: codev-macos-arm64
+            artifact: codev
 
     steps:
       - name: Checkout code
@@ -50,7 +44,9 @@ jobs:
 
       - name: Rename binary
         run: |
-          mv dist/codev dist/${{ matrix.artifact }}
+          if [ "${{ matrix.artifact }}" != "codev" ]; then
+            mv dist/codev dist/${{ matrix.artifact }}
+          fi
           chmod +x dist/${{ matrix.artifact }}
 
       - name: Upload artifact
@@ -94,9 +90,7 @@ jobs:
             ## Codev ${{ steps.version.outputs.version }}
 
             ### Downloads
-            - **Linux x64**: `codev-linux-x64`
-            - **macOS x64**: `codev-macos-x64`
-            - **macOS ARM64**: `codev-macos-arm64`
+            - **Linux x64**: `codev`
 
             ### Install
             ```bash
@@ -107,7 +101,7 @@ jobs:
             Or download directly:
             ```bash
             # Linux
-            curl -Lo ~/.local/bin/codev https://github.com/chenbhao/Codev/releases/download/v${{ steps.version.outputs.version }}/codev-linux-x64
+            curl -Lo ~/.local/bin/codev https://github.com/chenbhao/Codev/releases/download/v${{ steps.version.outputs.version }}/codev
             chmod +x ~/.local/bin/codev
             ```
           files: |

@@ -127,7 +127,7 @@ get_latest_version() {
 
 download_binary() {
   local version="$1"
-  local binary_name="codev-${PLATFORM}"
+  local binary_name="codev"
   local download_url="https://github.com/${REPO}/releases/download/v${version}/${binary_name}"
   local link_dir="$HOME/.local/bin"
   local target="$link_dir/codev"
