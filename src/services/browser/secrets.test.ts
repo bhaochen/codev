@@ -34,7 +34,7 @@ const CAUGHT: Array<[text: string, shape: string]> = [
   ["sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz012345", "anthropic-key"],
   ["ghp_AbCdEf0123456789AbCdEf0123456789abcd", "github-token"],
   ["AKIAIOSFODNN7EXAMPLE", "aws-access-key"],
-  ["AIzaSyA1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q", "google-key"],
+  ["AIzaSyFakeGoogleApiKeyForTesting123456789", "google-key"],
   ["sk_live_AbCdEf0123456789xyz", "stripe-key"],
   ["eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dQw4w9WgXcQabcdef", "jwt"],
   ["password: hunter2Nowaythis", "labelled-password"],
