@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { getClaudeConfigHomeDir } from '../envUtils.js'
 import type { APIProvider } from './providers.js'
 
-type CatalogProvider = 'openrouter' | 'opencode' | 'nvidia' | 'kiro'
+type CatalogProvider = 'openrouter' | 'opencode' | 'nvidia' | 'kiro' | 'openai'
 type ContextWindowEntry = {
   contextWindow: number
   promptLimit?: number
@@ -85,7 +85,12 @@ export function getStoredProviderContextWindow(
   model: string,
 ): number | undefined {
   if (!provider || provider === 'local') return undefined
-  if (provider !== 'openrouter' && provider !== 'opencode' && provider !== 'nvidia') {
+  if (
+    provider !== 'openrouter' &&
+    provider !== 'opencode' &&
+    provider !== 'nvidia' &&
+    provider !== 'openai'
+  ) {
     return undefined
   }
   const windows = loadStore().providers[provider]

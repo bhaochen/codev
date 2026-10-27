@@ -83,19 +83,19 @@ export async function handleModelsApi(
 }
 
 async function handleModelsList(): Promise<Response> {
-  const { fetchNineRouterModels } = await import(
-    '../../utils/model/nineRouterModels.js'
-  )
-  const models = await fetchNineRouterModels()
-  return Response.json({
-    models: models.map(model => ({
-      id: model.value,
-      name: model.label,
-      description: model.description,
-      context: '',
-    })),
-    provider: { id: '9router', name: '9router' },
-  })
+    const { fetchNineRouterModels, getNineRouterModelContextWindow } = await import(
+      '../../utils/model/nineRouterModels.js'
+    )
+    const models = await fetchNineRouterModels()
+    return Response.json({
+      models: models.map(model => ({
+        id: model.value,
+        name: model.label,
+        description: model.description,
+        context: String(getNineRouterModelContextWindow(model.value) ?? ''),
+      })),
+      provider: { id: '9router', name: '9router' },
+    })
 }
 
 async function handleCurrentModel(req: Request): Promise<Response> {
@@ -110,14 +110,14 @@ async function handleCurrentModel(req: Request): Promise<Response> {
 
     const lookupId = contextTier ? `${currentModelId}:${contextTier}` : currentModelId
 
-    const { fetchNineRouterModels } = await import(
+    const { fetchNineRouterModels, getNineRouterModelContextWindow } = await import(
       '../../utils/model/nineRouterModels.js'
     )
     const availableModels = (await fetchNineRouterModels()).map(model => ({
       id: model.value,
       name: model.label,
       description: model.description,
-      context: '',
+      context: String(getNineRouterModelContextWindow(model.value) ?? ''),
     }))
 
     const modelEntry = availableModels.find((m) => m.id === lookupId)

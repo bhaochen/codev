@@ -399,9 +399,13 @@ export async function setup(
   }
 
   // Warm the shared 9router model catalog for /model and /fallback.
-  void import('./utils/model/nineRouterModels.js').then(({ fetchNineRouterModels }) => {
-    void fetchNineRouterModels()
-  })
+  // Awaited so model context windows are resolved before the main loop starts.
+  try {
+    const { fetchNineRouterModels } = await import('./utils/model/nineRouterModels.js')
+    await fetchNineRouterModels()
+  } catch {
+    // Ignore catalog fetch failures; callers fall back to defaults.
+  }
 
   // If permission mode is set to bypass, verify we're in a safe environment
   if (
