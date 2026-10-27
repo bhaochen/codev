@@ -1270,7 +1270,7 @@ function readEditableMcpServers(file: string): Record<string, McpServerConfig> |
 }
 
 function readGlobalConfigFromDatabase(file: string): string | null {
-  if (file !== getGlobalClaudeFile() || process.env.NODE_ENV === 'test') {
+  if (file !== getGlobalClaudeFile() || process.env.NODE_ENV === 'test' || !process.env.CODEV_DATA_DIR) {
     return null
   }
   try {

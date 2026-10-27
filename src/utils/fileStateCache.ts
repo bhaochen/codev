@@ -1,6 +1,10 @@
 import { LRUCache } from 'lru-cache'
-import type { SeenRange } from './rangeDedup.js'
 import { normalize } from 'path'
+
+export type SeenRange = {
+  start: number
+  end: number
+}
 
 export type FileState = {
   content: string

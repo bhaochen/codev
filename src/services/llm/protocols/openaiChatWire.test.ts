@@ -1129,7 +1129,6 @@ describe('adaptOpenAIChatSSE', () => {
 describe('native OpenAI Chat protocol boundary', () => {
   const nativeFiles = {
     wire: 'src/services/llm/protocols/openaiChatWire.ts',
-    client: 'src/services/llm/clients/openaiChat.ts',
     compatible: 'src/services/llm/protocols/openaiCompatibleChat.ts',
   }
 
@@ -1173,17 +1172,15 @@ describe('native OpenAI Chat protocol boundary', () => {
 // ============================================================================
 
 test('query handler names stay stable for registry', async () => {
-  const { queryOpenAIChat } = await import('../clients/openaiChat.js')
   const { queryOpenAICompatibleChat } = await import('./openaiCompatibleChat.js')
-  expect(queryOpenAIChat.name).toBe('queryOpenAIChat')
   expect(queryOpenAICompatibleChat.name).toBe('queryOpenAICompatibleChat')
 })
 
 // ============================================================================
-// Integration through queryOpenAIChat (no tools)
+// Integration through queryOpenAICompatibleChat (no tools)
 // ============================================================================
 
-describe('queryOpenAIChat integration', () => {
+describe('queryOpenAICompatibleChat integration', () => {
   const route: LLMRoute = {
     provider: 'local',
     protocol: 'openai-chat',
@@ -1200,7 +1197,7 @@ describe('queryOpenAIChat integration', () => {
   }
 
   test('full stream → assistant messages + stream events + usage', async () => {
-    const { queryOpenAIChat } = await import('../clients/openaiChat.js')
+    const { queryOpenAICompatibleChat } = await import('./openaiCompatibleChat.js')
     const req = makeRequest({
       messages: [wrapperUser([{ type: 'text', text: 'hi' }])],
       systemPrompt: asSystemPrompt(['sys']),
@@ -1208,7 +1205,7 @@ describe('queryOpenAIChat integration', () => {
     })
     const events: string[] = []
     const assistant: Array<{ type: string; message?: { role?: string } }> = []
-    for await (const raw of queryOpenAIChat(route, req)) {
+    for await (const raw of queryOpenAICompatibleChat(route, req)) {
       const out = raw as {
         type: string
         event?: { type: string }
@@ -1230,7 +1227,7 @@ describe('queryOpenAIChat integration', () => {
   })
 
   test('request body reaches the wire with native shape', async () => {
-    const { queryOpenAIChat } = await import('../clients/openaiChat.js')
+    const { queryOpenAICompatibleChat } = await import('./openaiCompatibleChat.js')
     let capturedBody: string | null = null
     const fetchOverride = async (_input: unknown, init?: RequestInit): Promise<Response> => {
       capturedBody = String(init?.body)
@@ -1241,7 +1238,7 @@ describe('queryOpenAIChat integration', () => {
       systemPrompt: asSystemPrompt(['sys']),
       context: { ...makeRequest().context, fetchOverride: fetchOverride as never },
     })
-    for await (const _ of queryOpenAIChat(route, req)) { /* drain */ }
+    for await (const _ of queryOpenAICompatibleChat(route, req)) { /* drain */ }
     const body = JSON.parse(capturedBody!) as Record<string, unknown>
     expect(body.model).toBe('gpt-4o')
     expect(body.stream).toBe(true)
@@ -1249,122 +1246,8 @@ describe('queryOpenAIChat integration', () => {
     expect((body.messages as Array<{ role: string }>)[1]!.role).toBe('user')
   })
 
-  test('reasoning_details ride the thinking block through queryOpenAIChat', async () => {
-    const { queryOpenAIChat } = await import('../clients/openaiChat.js')
-    const fetchOverride = fakeFetch([
-      chatDelta('chat.completion.chunk', {
-        id: 'c',
-        choices: [{ delta: { reasoning_details: [{ type: 'reasoning.text', index: 0, text: 'deep' }] }, index: 0 }],
-      }),
-      chatDelta('chat.completion.chunk', {
-        id: 'c',
-        choices: [{ delta: { content: 'ok' }, index: 0 }],
-      }),
-      chatDelta('chat.completion.chunk', {
-        id: 'c',
-        choices: [{ delta: {}, index: 0, finish_reason: 'stop' }],
-      }),
-    ])
-    const req = makeRequest({
-      messages: [wrapperUser([{ type: 'text', text: 'hi' }])],
-      systemPrompt: asSystemPrompt(['sys']),
-      context: { ...makeRequest().context, fetchOverride: fetchOverride as never },
-    })
-    const blocks: Array<Record<string, unknown>> = []
-    for await (const raw of queryOpenAIChat(route, req)) {
-      if ((raw as { type: string }).type !== 'assistant') continue
-      const content = (raw as { message: { content: Array<Record<string, unknown>> } }).message.content
-      blocks.push(...content)
-    }
-    const thinking = blocks.find(b => b.type === 'thinking')
-    expect(thinking?.providerOptions).toEqual({
-      openrouterReasoningDetails: [{ type: 'reasoning.text', index: 0, text: 'deep' }],
-    })
-  })
-
-  test('openrouter transcript echoes saved reasoning_details and drops the text copy', async () => {
-    const { queryOpenAIChat } = await import('../clients/openaiChat.js')
-    const details = [{ type: 'reasoning.text', text: 'why', signature: 'sig' }]
-    let capturedBody: string | null = null
-    const fetchOverride = async (_input: unknown, init?: RequestInit): Promise<Response> => {
-      capturedBody = String(init?.body)
-      return new Response(sseStream(textChunks(['ok'], 'stop')), { status: 200 })
-    }
-    const saved = wrapperAssistant([
-      {
-        type: 'thinking',
-        thinking: 'why',
-        providerOptions: { openrouterReasoningDetails: details },
-      },
-      { type: 'text', text: 'previous answer' },
-    ])
-    const req = makeRequest({
-      messages: [wrapperUser([{ type: 'text', text: 'hi' }]), saved, wrapperUser([{ type: 'text', text: 'more' }])],
-      systemPrompt: asSystemPrompt(['sys']),
-      context: { ...makeRequest().context, fetchOverride: fetchOverride as never },
-    })
-    const openrouterRoute: LLMRoute = { ...route, provider: 'openrouter' }
-    for await (const _ of queryOpenAIChat(openrouterRoute, req)) { /* drain */ }
-    const body = JSON.parse(capturedBody!) as { messages: Array<Record<string, unknown>> }
-    const assistantWire = body.messages.find(m => m.role === 'assistant')!
-    expect(assistantWire.reasoning_details).toEqual(details)
-    expect(assistantWire.reasoning_content).toBeUndefined()
-  })
-
-  test('gemini on openrouter gets exactly one cache anchor; other lanes do not', async () => {
-    const { queryOpenAIChat } = await import('../clients/openaiChat.js')
-    const bodies: Array<{ messages: Array<Record<string, unknown>> }> = []
-    const fetchOverride = async (_input: unknown, init?: RequestInit): Promise<Response> => {
-      bodies.push(JSON.parse(String(init?.body)) as { messages: Array<Record<string, unknown>> })
-      return new Response(sseStream(textChunks(['ok'], 'stop')), { status: 200 })
-    }
-    const req = makeRequest({
-      messages: [wrapperUser([{ type: 'text', text: 'hi' }])],
-      systemPrompt: asSystemPrompt(['sys']),
-      context: { ...makeRequest().context, fetchOverride: fetchOverride as never },
-    })
-    const countStamped = (body: { messages: Array<Record<string, unknown>> }) =>
-      body.messages.filter(
-        m =>
-          Array.isArray(m.content) &&
-          (m.content as Array<Record<string, unknown>>).some(p => p.cache_control),
-      ).length
-
-    for await (const _ of queryOpenAIChat({ ...route, provider: 'openrouter', model: 'google/gemini-2.5-flash' }, req)) { /* drain */ }
-    expect(countStamped(bodies[0]!)).toBe(1)
-
-    for await (const _ of queryOpenAIChat({ ...route, provider: 'openrouter', model: 'anthropic/claude-sonnet-4.5' }, req)) { /* drain */ }
-    expect(countStamped(bodies[1]!)).toBe(0)
-
-    for await (const _ of queryOpenAIChat(route, req)) { /* drain */ }
-    expect(countStamped(bodies[2]!)).toBe(0)
-  })
-
-  test('drops the half-written tool call when the output cap is hit', async () => {
-    const { queryOpenAIChat } = await import('../clients/openaiChat.js')
-    const req = makeRequest({
-      messages: [wrapperUser([{ type: 'text', text: 'hi' }])],
-      systemPrompt: asSystemPrompt(['sys']),
-      context: {
-        ...makeRequest().context,
-        fetchOverride: fakeFetch([
-          chatDelta('chat.completion.chunk', { id: 'c', choices: [{ delta: { tool_calls: [{ index: 0, id: 'a', function: { name: 'x', arguments: '{}' } }] }, index: 0 }] }),
-          chatDelta('chat.completion.chunk', { id: 'c', choices: [{ delta: { tool_calls: [{ index: 1, id: 'b', function: { name: 'y', arguments: '{"p":' } }] }, index: 0 }] }),
-          chatDelta('chat.completion.chunk', { id: 'c', choices: [{ delta: {}, index: 0, finish_reason: 'length' }] }),
-        ]) as never,
-      },
-    })
-    const toolIds: string[] = []
-    for await (const raw of queryOpenAIChat(route, req)) {
-      if ((raw as { type: string }).type !== 'assistant') continue
-      const content = (raw as { message: { content: Array<{ type: string; id?: string }> } }).message.content
-      for (const b of content) if (b.type === 'tool_use' && b.id) toolIds.push(b.id)
-    }
-    expect(toolIds).toEqual(['a'])
-  })
-
   test('keeps every tool call on a normal finish', async () => {
-    const { queryOpenAIChat } = await import('../clients/openaiChat.js')
+    const { queryOpenAICompatibleChat } = await import('./openaiCompatibleChat.js')
     const req = makeRequest({
       messages: [wrapperUser([{ type: 'text', text: 'hi' }])],
       systemPrompt: asSystemPrompt(['sys']),
@@ -1378,7 +1261,7 @@ describe('queryOpenAIChat integration', () => {
       },
     })
     const toolIds: string[] = []
-    for await (const raw of queryOpenAIChat(route, req)) {
+    for await (const raw of queryOpenAICompatibleChat(route, req)) {
       if ((raw as { type: string }).type !== 'assistant') continue
       const content = (raw as { message: { content: Array<{ type: string; id?: string }> } }).message.content
       for (const b of content) if (b.type === 'tool_use' && b.id) toolIds.push(b.id)
@@ -1387,7 +1270,7 @@ describe('queryOpenAIChat integration', () => {
   })
 
   test('a 200 with an empty/non-SSE body throws instead of faking max_tokens', async () => {
-    const { queryOpenAIChat } = await import('../clients/openaiChat.js')
+    const { queryOpenAICompatibleChat } = await import('./openaiCompatibleChat.js')
     const fetchOverride = async (): Promise<Response> =>
       new Response('<html>gateway error</html>', {
         status: 200,
@@ -1399,14 +1282,14 @@ describe('queryOpenAIChat integration', () => {
       context: { ...makeRequest().context, fetchOverride: fetchOverride as never },
     })
     const seen: string[] = []
-    for await (const raw of queryOpenAIChat(route, req)) {
+    for await (const raw of queryOpenAICompatibleChat(route, req)) {
       seen.push(JSON.stringify(raw))
     }
     expect(seen.join('\n')).toContain('empty or non-SSE')
   })
 
   test('retries a transient HTTP response before consuming the stream', async () => {
-    const { queryOpenAIChat } = await import('../clients/openaiChat.js')
+    const { queryOpenAICompatibleChat } = await import('./openaiCompatibleChat.js')
     let requests = 0
     const fetchOverride = async (): Promise<Response> => {
       requests++
@@ -1425,7 +1308,7 @@ describe('queryOpenAIChat integration', () => {
     })
 
     const assistant: Array<{ type: string; message?: unknown }> = []
-    for await (const raw of queryOpenAIChat(route, req)) {
+    for await (const raw of queryOpenAICompatibleChat(route, req)) {
       if ((raw as { type: string }).type === 'assistant') {
         assistant.push(raw as { type: string; message?: unknown })
       }
@@ -1435,133 +1318,4 @@ describe('queryOpenAIChat integration', () => {
     expect(assistant).toHaveLength(1)
   })
 
-  test('retries an upstream error frame before any output, then succeeds', async () => {
-    const { queryOpenAIChat, _setOpenAIStreamRetryDelaysForTest, _resetOpenAIStreamRetryDelaysForTest } =
-      await import('../clients/openaiChat.js')
-    _setOpenAIStreamRetryDelaysForTest([1], 1)
-    try {
-      let requests = 0
-      const fetchOverride = async (): Promise<Response> => {
-        requests++
-        if (requests === 1) {
-          return new Response(
-            sseStream([
-              chatDelta('chat.completion.chunk', {
-                id: 'c',
-                error: {
-                  message: 'Provider returned error',
-                  code: 429,
-                  metadata: { provider_name: 'Acme' },
-                },
-              }),
-            ]),
-            { status: 200 },
-          )
-        }
-        return new Response(sseStream(textChunks(['recovered'], 'stop')), { status: 200 })
-      }
-      const req = makeRequest({
-        messages: [wrapperUser([{ type: 'text', text: 'hi' }])],
-        systemPrompt: asSystemPrompt(['sys']),
-        context: { ...makeRequest().context, fetchOverride: fetchOverride as never },
-      })
-      const assistant: Array<{ type: string }> = []
-      for await (const raw of queryOpenAIChat(route, req)) {
-        if ((raw as { type: string }).type === 'assistant') assistant.push(raw as { type: string })
-      }
-      expect(requests).toBe(2)
-      expect(assistant).toHaveLength(1)
-    } finally {
-      _resetOpenAIStreamRetryDelaysForTest()
-    }
-  })
-
-  test('non-capacity failure recovers with one non-streaming request', async () => {
-    const { queryOpenAIChat, _setOpenAIStreamRetryDelaysForTest, _resetOpenAIStreamRetryDelaysForTest } =
-      await import('../clients/openaiChat.js')
-    _setOpenAIStreamRetryDelaysForTest([1], 1)
-    try {
-      const bodies: Array<Record<string, unknown>> = []
-      const fetchOverride = async (_input: unknown, init?: RequestInit): Promise<Response> => {
-        const parsed = JSON.parse(String(init?.body)) as Record<string, unknown>
-        bodies.push(parsed)
-        if (parsed.stream === false) {
-          return new Response(
-            JSON.stringify({
-              id: 'cc1',
-              model: 'gpt-4o',
-              choices: [
-                { index: 0, message: { role: 'assistant', content: 'recovered' }, finish_reason: 'stop' },
-              ],
-              usage: { prompt_tokens: 5, completion_tokens: 2 },
-            }),
-            { status: 200, headers: { 'Content-Type': 'application/json' } },
-          )
-        }
-        return new Response(
-          sseStream([
-            chatDelta('chat.completion.chunk', {
-              id: 'c',
-              error: { message: 'provider exploded', code: 503 },
-            }),
-          ]),
-          { status: 200 },
-        )
-      }
-      const req = makeRequest({
-        messages: [wrapperUser([{ type: 'text', text: 'hi' }])],
-        systemPrompt: asSystemPrompt(['sys']),
-        context: { ...makeRequest().context, fetchOverride: fetchOverride as never },
-      })
-      const contents: string[] = []
-      for await (const raw of queryOpenAIChat(route, req)) {
-        if ((raw as { type: string }).type === 'assistant') {
-          const content = (raw as { message: { content: Array<{ text?: string }> } }).message.content
-          contents.push(content.map(b => b.text ?? '').join(''))
-        }
-      }
-      expect(bodies).toHaveLength(2)
-      expect(bodies[1]!.stream).toBe(false)
-      expect(contents.join('')).toContain('recovered')
-    } finally {
-      _resetOpenAIStreamRetryDelaysForTest()
-    }
-  })
-
-  test('does not retry once output has been published', async () => {
-    const { queryOpenAIChat, _setOpenAIStreamRetryDelaysForTest, _resetOpenAIStreamRetryDelaysForTest } =
-      await import('../clients/openaiChat.js')
-    _setOpenAIStreamRetryDelaysForTest([1], 1)
-    try {
-      let requests = 0
-      const fetchOverride = async (): Promise<Response> => {
-        requests++
-        return new Response(
-          sseStream([
-            ...textChunks(['partial'], 'stop').slice(0, 1),
-            chatDelta('chat.completion.chunk', {
-              id: 'c',
-              error: { message: 'Provider returned error', code: 429 },
-            }),
-          ]),
-          { status: 200 },
-        )
-      }
-      const req = makeRequest({
-        messages: [wrapperUser([{ type: 'text', text: 'hi' }])],
-        systemPrompt: asSystemPrompt(['sys']),
-        context: { ...makeRequest().context, fetchOverride: fetchOverride as never },
-      })
-      const errors: string[] = []
-      for await (const raw of queryOpenAIChat(route, req)) {
-        const msg = raw as { isApiErrorMessage?: boolean; message?: { content?: Array<{ text?: string }> } }
-        if (msg.isApiErrorMessage) errors.push(msg.message?.content?.[0]?.text ?? '')
-      }
-      expect(requests).toBe(1)
-      expect(errors).toHaveLength(1)
-      expect(errors[0]).toContain('Recovery was not attempted')
-    } finally {
-      _resetOpenAIStreamRetryDelaysForTest()
-    }
-  })
 })

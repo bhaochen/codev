@@ -108,8 +108,8 @@ export async function handleCliAuthApi(
 
     if (sub === 'invalidate') {
       if (req.method !== 'POST') throw methodNotAllowed(req.method)
-      const { invalidateCliProviderModelCache } = await import('./models.js')
-      invalidateCliProviderModelCache()
+      // Model listings come from the 9router gateway and are read live;
+      // there is no per-provider model cache to invalidate.
       return Response.json({ ok: true })
     }
 
@@ -122,8 +122,6 @@ export async function handleCliAuthApi(
       if (req.method === 'PUT') {
         const body = await parseJsonBody(req)
         writeCliAuthConfig(body as Partial<CliAuthConfig>)
-        const { invalidateCliProviderModelCache } = await import('./models.js')
-        invalidateCliProviderModelCache()
         return Response.json({ ok: true })
       }
 

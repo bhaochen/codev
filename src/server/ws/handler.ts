@@ -1743,7 +1743,7 @@ function resolveDesktopThinkingMode(
  * and needs to reflect changes made by CLI's /login command.
  */
 function readCliGlobalConfig(): {
-  authProvider?: 'anthropic' | 'openai' | 'openrouter' | 'local' | 'opencode' | 'nvidia'
+  authProvider?: string
   openCodeApiKey?: string
   openCodeModelName?: string
   nvidiaApiKey?: string
@@ -1751,7 +1751,7 @@ function readCliGlobalConfig(): {
   localBaseUrl?: string
   localModelName?: string
 } | null {
-  return getGlobalConfigSnapshot()
+  return getGlobalConfigSnapshot() as ReturnType<typeof readCliGlobalConfig>
 }
 
 async function buildSessionStartupDiagnosticMessage(

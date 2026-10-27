@@ -861,7 +861,7 @@ export class ConversationService {
   }
 
   private readCliGlobalConfig(): {
-    authProvider?: 'anthropic' | 'openai' | 'openrouter' | 'local' | 'opencode' | 'nvidia'
+    authProvider?: string
     openCodeApiKey?: string
     openCodeModelName?: string
     nvidiaApiKey?: string
@@ -869,7 +869,9 @@ export class ConversationService {
     localBaseUrl?: string
     localModelName?: string
   } | null {
-    return getGlobalConfigSnapshot()
+    return getGlobalConfigSnapshot() as ReturnType<
+      typeof this.readCliGlobalConfig
+    >
   }
 
   private buildCliProviderEnv(

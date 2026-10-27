@@ -23,6 +23,65 @@ type ApiModelInfo = {
   context: string
 }
 
+function normalizeEffortLevel(value: unknown): (typeof EFFORT_LEVELS)[number] {
+  return typeof value === 'string' && EFFORT_LEVELS.includes(value as (typeof EFFORT_LEVELS)[number])
+    ? value as (typeof EFFORT_LEVELS)[number]
+    : DEFAULT_EFFORT
+}
+
+/**
+ * Read the CLI auth provider document from codev.db (global config).
+ * Returns the parsed config or null when unavailable.
+ */
+export async function readCliAuthProvider(): Promise<{
+  authProvider?: string
+  [key: string]: unknown
+} | null> {
+  try {
+    const { getGlobalConfigSnapshot } = await import(
+      '../../utils/config.js'
+    )
+    return getGlobalConfigSnapshot() as unknown as {
+      authProvider?: string
+      [key: string]: unknown
+    }
+  } catch {
+    return null
+  }
+}
+
+export async function handleModelsApi(
+  req: Request,
+  url: URL,
+  segments: string[],
+): Promise<Response> {
+  try {
+    const resource = segments[1] // 'models' | 'effort'
+    const sub = segments[2] // 'current' | undefined
+
+    // ── /api/effort ───────────────────────────────────────────────────
+    if (resource === 'effort') {
+      return await handleEffort(req)
+    }
+
+    // ── /api/models/* ─────────────────────────────────────────────────
+    switch (sub) {
+      case undefined:
+        // GET /api/models — provider model listing
+        if (req.method !== 'GET') throw methodNotAllowed(req.method)
+        return await handleModelsList()
+
+      case 'current':
+        return await handleCurrentModel(req)
+
+      default:
+        throw new ApiError(404, `Unknown models endpoint: ${sub}`, 'NOT_FOUND')
+    }
+  } catch (error) {
+    return errorResponse(error)
+  }
+}
+
 async function handleModelsList(): Promise<Response> {
   const { fetchNineRouterModels } = await import(
     '../../utils/model/nineRouterModels.js'

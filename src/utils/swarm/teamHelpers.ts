@@ -191,7 +191,8 @@ export async function mutateTeamFileAsync(
       throw new Error(`Team "${teamName}" does not exist`)
     }
 
-    next = mutator(current) ?? current
+    const mutated = mutator(current)
+    next = mutated ? mutated : current
     return jsonStringify(next)
   })
   if (!next) throw new Error(`Team "${teamName}" does not exist`)

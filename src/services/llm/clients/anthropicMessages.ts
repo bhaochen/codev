@@ -824,6 +824,28 @@ export function stripExcessMediaItems(
 
 
 /**
+ * Type guards for Anthropic content blocks used by stripExcessMediaItems.
+ */
+function isMedia(block: unknown): boolean {
+  return (
+    typeof block === 'object' &&
+    block !== null &&
+    ((block as { type?: string }).type === 'image' ||
+      (block as { source?: { type?: string } }).source?.type?.startsWith(
+        'base64',
+      ))
+  )
+}
+
+function isToolResult(block: unknown): boolean {
+  return (
+    typeof block === 'object' &&
+    block !== null &&
+    (block as { type?: string }).type === 'tool_result'
+  )
+}
+
+/**
  * Adapt the provider-neutral LLMRequest to this Anthropic-boundary Options.
  * This is the only place the Anthropic protocol implementation reads the
  * neutral service types; every value crosses by reference so runtime behavior

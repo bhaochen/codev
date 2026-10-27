@@ -18,7 +18,7 @@ import type { LLMRoute } from '../types.js'
 import type { LLMRequest } from '../runtime/types.js'
 import type { Credential } from '../auth/strategies.js'
 import { getOpenCodeApiKey } from '../../../utils/auth.js'
-import { getOpencodeModelMaxTokens, getCachedOpencodeModels } from '../../../utils/model/opencodeModels.js'
+import { getOpencodeModelMaxTokens, getOpencodeModelReasoningOptions, getCachedOpencodeModels } from '../../../utils/model/opencodeModels.js'
 import {
   getInferenceBaseUrl,
   getSessionIdForRequest,
@@ -108,9 +108,7 @@ export class OpenCodeAdapter implements ProviderAdapter {
 
   isReasoningModel(model: string): boolean {
     try {
-      const models = getCachedOpencodeModels()
-      const hit = models.find(m => m.id === model)
-      return hit?.reasoning === true
+      return (getOpencodeModelReasoningOptions(model) ?? []).length > 0
     } catch {
       // No hardcoded fallback - if catalog not available, assume not a reasoning model
       return false
@@ -232,7 +230,6 @@ export class OpenCodeAdapter implements ProviderAdapter {
   isFreeModel(model: string): boolean {
     if (model.includes('free') || model.includes('contributor')) return true
     try {
-      const { getCachedOpencodeModels } = require('../../../utils/model/opencodeModels.js') as typeof import('../../../utils/model/opencodeModels.js')
       const list = getCachedOpencodeModels()
       const hit = list.find(m => m.id === model || model.includes(m.id) || m.id.includes(model))
       return hit?.isFree ?? false

@@ -1845,39 +1845,12 @@ export function getAccountInformation() {
   }
   const { source: authTokenSource } = getAuthTokenSource()
   const accountInfo: UserAccountInfo = {}
-  if (
-    authTokenSource === 'CLAUDE_CODE_OAUTH_TOKEN' ||
-    authTokenSource === 'CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR'
-  ) {
-    accountInfo.tokenSource = authTokenSource
-  } else if (isClaudeAISubscriber()) {
-    accountInfo.subscription = getSubscriptionName()
-  } else {
+  if (authTokenSource !== 'none') {
     accountInfo.tokenSource = authTokenSource
   }
   const { key: apiKey, source: apiKeySource } = getAnthropicApiKeyWithSource()
   if (apiKey) {
     accountInfo.apiKeySource = apiKeySource
-  }
-
-  // We don't know the organization if we're relying on an external API key or auth token
-  if (
-    authTokenSource === 'claude.ai' ||
-    apiKeySource === '/login managed key'
-  ) {
-    // Get organization name from OAuth account info
-    const orgName = getOauthAccountInfo()?.organizationName
-    if (orgName) {
-      accountInfo.organization = orgName
-    }
-  }
-  const email = getOauthAccountInfo()?.emailAddress
-  if (
-    (authTokenSource === 'claude.ai' ||
-      apiKeySource === '/login managed key') &&
-    email
-  ) {
-    accountInfo.email = email
   }
   return accountInfo
 }

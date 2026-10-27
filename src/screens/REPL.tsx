@@ -6695,7 +6695,7 @@ export function REPL({
                         bashToolsProcessedIdx.current = 0
                       }
                       skipIdleCheckRef.current = true
-                      void onSubmitRef.current(pending.input, {
+                      void onSubmit(pending.input, {
                         setCursorOffset: () => {},
                         clearBuffer: () => {},
                         resetHistory: () => {},

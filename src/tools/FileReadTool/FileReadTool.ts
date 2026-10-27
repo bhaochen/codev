@@ -85,7 +85,6 @@ import {
   isAutoSkeletonEnabled,
   isSkeletonSupportedExt,
 } from './skeleton.js'
-import { findUnchangedSeenRange, withSeenRange } from './rangeDedup.js'
 import {
   DESCRIPTION,
   FILE_READ_TOOL_NAME,
