@@ -12,6 +12,7 @@ export type APIProvider =
   | 'vertex'
   | 'foundry'
   | 'kiro'
+  | 'custom'
 
 /** Legacy provider IDs retained for compatibility with pinned agents. */
 export const API_PROVIDERS: readonly APIProvider[] = [
@@ -25,6 +26,7 @@ export const API_PROVIDERS: readonly APIProvider[] = [
   'vertex',
   'foundry',
   'kiro',
+  'custom',
 ]
 
 export function isAPIProvider(value: string): value is APIProvider {
@@ -237,11 +239,106 @@ export function getOpenRouterBaseUrl(): string {
 }
 
 export function getOpenAIBaseUrl(): string {
+  // Custom OpenAI-compatible endpoint takes precedence over 9router.
+  const custom = getCustomBaseUrl()
+  if (custom) return custom
   return process.env.NINE_ROUTER_BASE_URL ?? 'http://localhost:20128/v1'
 }
 
+/**
+ * Env overrides for the custom (OpenAI-compatible) endpoint.
+ *
+ * These let a headless runner point codev at an arbitrary gateway without
+ * touching the on-disk config: e.g. an RL-training harness exporting
+ * ``CODEV_BASE_URL``/``CODEV_API_KEY``/``CODEV_MODEL`` into the sandbox.
+ *
+ * Priority: ``CODEV_*`` (explicit per-run override) > stored config >
+ * ``OPENAI_*`` (generic fallback).
+ */
+const CUSTOM_BASE_URL_ENV_VARS = ['CODEV_BASE_URL', 'OPENAI_BASE_URL'] as const
+const CUSTOM_API_KEY_ENV_VARS = ['CODEV_API_KEY', 'OPENAI_API_KEY'] as const
+const CUSTOM_MODEL_ENV_VARS = ['CODEV_MODEL', 'OPENAI_MODEL'] as const
+
+function firstEnv(names: readonly string[]): string | undefined {
+  for (const name of names) {
+    const value = process.env[name]?.trim()
+    if (value) return value
+  }
+  return undefined
+}
+
+export function getEnvCustomBaseUrl(): string | undefined {
+  return firstEnv(CUSTOM_BASE_URL_ENV_VARS)
+}
+
+export function getEnvCustomApiKey(): string | undefined {
+  return firstEnv(CUSTOM_API_KEY_ENV_VARS)
+}
+
+export function getEnvCustomModel(): string | undefined {
+  return firstEnv(CUSTOM_MODEL_ENV_VARS)
+}
+
+/** ``CODEV_*`` only — the explicit per-run override. */
+export function getCodevEnvBaseUrl(): string | undefined {
+  return process.env.CODEV_BASE_URL?.trim() || undefined
+}
+
+export function getCodevEnvApiKey(): string | undefined {
+  return process.env.CODEV_API_KEY?.trim() || undefined
+}
+
+export function getCodevEnvModel(): string | undefined {
+  return process.env.CODEV_MODEL?.trim() || undefined
+}
+
+export function getCustomBaseUrl(): string | undefined {
+  const override = getCodevEnvBaseUrl()
+  if (override) return override
+  try {
+    const config = getGlobalConfigSnapshot()
+    if (config.authProvider === 'custom' && config.customBaseUrl) {
+      return config.customBaseUrl
+    }
+  } catch {
+    // Ignore
+  }
+  return getEnvCustomBaseUrl()
+}
+
+export function isCustomConfigured(): boolean {
+  if (getCodevEnvBaseUrl()) return true
+  try {
+    const config = getGlobalConfigSnapshot()
+    if (config.authProvider === 'custom' && Boolean(config.customBaseUrl)) {
+      return true
+    }
+  } catch {
+    // Ignore
+  }
+  return Boolean(getEnvCustomBaseUrl())
+}
+
+/**
+ * Model name configured for the custom endpoint.
+ *
+ * Priority: ``CODEV_MODEL`` > stored ``customModelName`` > ``OPENAI_MODEL``.
+ */
+export function getCustomModelName(): string | undefined {
+  const override = getCodevEnvModel()
+  if (override) return override
+  try {
+    const config = getGlobalConfigSnapshot()
+    if (config.customModelName) return config.customModelName
+  } catch {
+    // Ignore
+  }
+  return getEnvCustomModel()
+}
+
 export function getAPIProvider(): APIProvider | null {
-  // 9router owns upstream provider selection by model ID.
+  // 9router is the default gateway; custom endpoint overrides it.
+  if (isCustomConfigured()) return 'custom'
   return 'openai'
 }
 
@@ -252,7 +349,7 @@ export function getAPIProviderForStatsig(): AnalyticsMetadata_I_VERIFIED_THIS_IS
 export function isAnthropicCompatibleProvider(
   provider: APIProvider = getAPIProvider(),
 ): boolean {
-  return provider !== 'openai' && provider !== 'opencode' && provider !== 'nvidia' && provider !== 'kiro'
+  return provider !== 'openai' && provider !== 'opencode' && provider !== 'nvidia' && provider !== 'kiro' && provider !== 'custom'
 }
 
 /**

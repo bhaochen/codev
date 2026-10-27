@@ -7,14 +7,14 @@ import type { LLMRoute } from '../types.js'
 import { getProviderDef } from '../providers/index.js'
 import { resolveModel } from './resolveModel.js'
 import { buildRoute, normalizeRouteInput, type RouteInput } from '../route/Route.js'
+import { getAPIProvider } from '../../../utils/model/providers.js'
 
 export type ResolveRouteInput = RouteInput
 
 export function resolveRoute(input: ResolveRouteInput): LLMRoute {
   const { rawModel } = normalizeRouteInput(input)
-  // All model inference goes through the local 9router gateway. Upstream
-  // providers and protocols are selected by 9router from this model ID.
-  const provider = 'openai'
+  // Provider selection: custom endpoint takes precedence over 9router.
+  const provider = getAPIProvider() ?? 'openai'
   const model = resolveModel(provider, rawModel)
   const def = getProviderDef(provider) as {
     defaultProtocol?: LLMRoute['protocol']

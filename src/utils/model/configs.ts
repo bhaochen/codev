@@ -7,7 +7,7 @@ import type { APIProvider } from './providers.js'
 export type ModelConfig = Record<
   Exclude<
     APIProvider,
-    'openai' | 'opencode' | 'openrouter' | 'nvidia' | 'local' | 'kiro'
+    'openai' | 'opencode' | 'openrouter' | 'nvidia' | 'local' | 'kiro' | 'custom'
   >,
   ModelName
 >

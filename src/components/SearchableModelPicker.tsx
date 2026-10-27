@@ -249,6 +249,48 @@ export function SearchableModelPicker({
             }
           }, 60000)
         }
+
+        if (provider === 'custom' && modelOptions.length <= 1) {
+          let retryCount = 0
+          const MAX_RETRIES = 5
+
+          async function tryFetch(): Promise<void> {
+            const { getCustomBaseUrl } = await import('../utils/model/providers.js')
+            const { getCustomApiConfig } = await import('../utils/auth.js')
+            const baseUrl = getCustomBaseUrl()
+            const apiKey = getCustomApiConfig().apiKey
+            if (!baseUrl) return
+            const modelsUrl = baseUrl.replace(/\/$/, '') + '/v1/models'
+            const headers: Record<string, string> = {}
+            if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
+            const res = await fetch(modelsUrl, { headers, signal: AbortSignal.timeout(10_000) })
+            if (res.ok) {
+              const json = (await res.json()) as { data?: Array<{ id: string }> }
+              const ids = (json.data ?? []).map(m => m.id)
+              if (ids.length > 0 && mounted) {
+                setAppState(prev => ({ ...prev, authVersion: prev.authVersion + 1 }))
+              }
+            }
+          }
+          void tryFetch()
+
+          pollTimer = setInterval(async () => {
+            if (!mounted) {
+              if (pollTimer) clearInterval(pollTimer)
+              return
+            }
+            if (retryCount < MAX_RETRIES) {
+              retryCount++
+              void tryFetch()
+            }
+          }, 5000)
+          setTimeout(() => {
+            if (pollTimer && mounted) {
+              clearInterval(pollTimer)
+              pollTimer = null
+            }
+          }, 60000)
+        }
       } catch (error) {
         console.error('Error checking API provider:', error)
       }

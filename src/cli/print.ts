@@ -337,6 +337,7 @@ async function runHeadlessTurns(
       canUseTool: async tool => {
         if (
           options.allowedTools &&
+          !options.allowedTools.includes('*') &&
           !options.allowedTools.includes(tool.name)
         ) {
           return {

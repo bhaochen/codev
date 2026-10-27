@@ -14,6 +14,7 @@ export type ProviderId =
   | 'foundry'
   | 'local'
   | 'kiro'
+  | 'custom'
   // legacy alias
   | 'anthropic'
 

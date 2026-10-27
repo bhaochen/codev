@@ -186,7 +186,7 @@ export type GlobalConfig = {
   apiKeyHelper?: string
   
   // Authentication provider configuration
-  authProvider?: 'anthropic' | 'openai' | 'openrouter' | 'local' | 'opencode' | 'nvidia' | 'kiro'
+  authProvider?: 'anthropic' | 'openai' | 'openrouter' | 'local' | 'opencode' | 'nvidia' | 'kiro' | 'custom'
   
   // OpenRouter API key
   openRouterApiKey?: string
@@ -203,7 +203,12 @@ export type GlobalConfig = {
   localBaseUrl?: string
   localModelName?: string
   localModelContextWindow?: number
-  
+
+  // Custom OpenAI-compatible API configuration
+  customBaseUrl?: string
+  customApiKey?: string
+  customModelName?: string
+
   // OpenCode Zen configuration
   openCodeApiKey?: string
   openCodeModelName?: string
@@ -685,6 +690,9 @@ export const GLOBAL_CONFIG_KEYS = [
   'localBaseUrl',
   'localModelName',
   'localModelContextWindow',
+  'customBaseUrl',
+  'customApiKey',
+  'customModelName',
   'nvidiaApiKey',
   'kiroAccessToken',
   'kiroRefreshToken',

@@ -61,7 +61,8 @@ export function isNonCustomOpusModel(model: ModelName): boolean {
  * 1. Model override during session (from /model command) - highest priority
  * 2. Model override at startup (from --model flag)
  * 3. ANTHROPIC_MODEL environment variable
- * 4. Settings (from user's saved settings)
+ * 4. CODEV_MODEL environment variable (headless/sandbox runners)
+ * 5. Settings (from user's saved settings)
  */
 export function getUserSpecifiedModelSetting(): ModelSetting | undefined {
   let specifiedModel: ModelSetting | undefined
@@ -71,7 +72,11 @@ export function getUserSpecifiedModelSetting(): ModelSetting | undefined {
     specifiedModel = modelOverride
   } else {
     const settings = getSettings_DEPRECATED() || {}
-    specifiedModel = process.env.ANTHROPIC_MODEL || settings.model || undefined
+    specifiedModel =
+      process.env.ANTHROPIC_MODEL ||
+      process.env.CODEV_MODEL ||
+      settings.model ||
+      undefined
   }
 
   // Ignore the user-specified model if it's not in the availableModels allowlist.

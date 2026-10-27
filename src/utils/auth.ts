@@ -10,7 +10,15 @@ import {
   logEvent,
 } from 'src/services/analytics/index.js'
 import { getModelStrings } from 'src/utils/model/modelStrings.js'
-import { getAPIProvider } from 'src/utils/model/providers.js'
+import {
+  getAPIProvider,
+  getCodevEnvApiKey,
+  getCodevEnvBaseUrl,
+  getCodevEnvModel,
+  getEnvCustomApiKey,
+  getEnvCustomBaseUrl,
+  getEnvCustomModel,
+} from 'src/utils/model/providers.js'
 import {
   getIsNonInteractiveSession,
   preferThirdPartyAuthentication,
@@ -151,7 +159,7 @@ export function getOpenRouterApiKeyWithSource(): {
 }
 
 // Read authProvider from SQLite directly during early startup.
-export function getConfiguredAuthProviderFromFile(): 'anthropic' | 'openrouter' | 'openai' | 'local' | 'opencode' | 'nvidia' | 'kiro' | null {
+export function getConfiguredAuthProviderFromFile(): 'anthropic' | 'openrouter' | 'openai' | 'local' | 'opencode' | 'nvidia' | 'kiro' | 'custom' | null {
   try {
     const config = getGlobalConfigSnapshot()
 
@@ -271,14 +279,14 @@ export async function saveLocalModelConfig(baseUrl: string, modelName: string, c
   if (!baseUrl.trim()) {
     throw new Error('Base URL cannot be empty')
   }
-  
+
   try {
     // 验证 URL 格式
     new URL(baseUrl)
   } catch {
     throw new Error('Invalid URL format')
   }
-  
+
   saveGlobalConfig(current => {
     const newConfig: any = {
       ...current,
@@ -291,10 +299,55 @@ export async function saveLocalModelConfig(baseUrl: string, modelName: string, c
     }
     return newConfig
   })
-  
+
   // Clear provider cache so it will be re-read on next access
   const { clearStoredProviderCache } = await import('./model/providers.js')
   clearStoredProviderCache()
+}
+
+export async function saveCustomApiConfig(baseUrl: string, modelName: string, apiKey?: string): Promise<void> {
+  if (!baseUrl.trim()) {
+    throw new Error('Base URL cannot be empty')
+  }
+
+  try {
+    new URL(baseUrl)
+  } catch {
+    throw new Error('Invalid URL format')
+  }
+
+  saveGlobalConfig(current => ({
+    ...current,
+    authProvider: 'custom',
+    customBaseUrl: baseUrl,
+    customModelName: modelName,
+    customApiKey: apiKey ?? undefined,
+  }))
+
+  const { clearStoredProviderCache } = await import('./model/providers.js')
+  clearStoredProviderCache()
+}
+
+export function getCustomApiConfig(): { baseUrl: string | null; modelName: string | null; apiKey: string | null } {
+  // Priority: CODEV_* env (explicit per-run override) > stored config
+  // (the user's persistent /login choice) > generic OPENAI_* env.
+  const envBaseUrl = getEnvCustomBaseUrl() ?? null
+  const envModelName = getEnvCustomModel() ?? null
+  const envApiKey = getEnvCustomApiKey() ?? null
+  try {
+    const config = getGlobalConfigSnapshot()
+    return {
+      baseUrl: getCodevEnvBaseUrl() ?? config.customBaseUrl ?? envBaseUrl,
+      modelName: getCodevEnvModel() ?? config.customModelName ?? envModelName,
+      apiKey: getCodevEnvApiKey() ?? config.customApiKey ?? envApiKey,
+    }
+  } catch {
+    return {
+      baseUrl: getCodevEnvBaseUrl() ?? envBaseUrl,
+      modelName: getCodevEnvModel() ?? envModelName,
+      apiKey: getCodevEnvApiKey() ?? envApiKey,
+    }
+  }
 }
 
 export function getLocalModelName(): string | null {

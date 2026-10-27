@@ -6,7 +6,9 @@
  */
 import type { ProviderId } from '../types.js'
 import { getOpenCodeModelName } from '../../../utils/auth.js'
+import { getCustomApiConfig } from '../../../utils/auth.js'
 import { resolveOpenAIModel } from '../utils/modelMapping.js'
+import { getUserSpecifiedModelSetting } from '../../../utils/model/model.js'
 
 export interface ModelResolver {
   id: string
@@ -42,9 +44,40 @@ const passthroughResolver: ModelResolver = {
   },
 }
 
+/**
+ * Resolve the model for the custom (OpenAI-compatible) endpoint.
+ *
+ * An explicit user choice — ``--model``, ``/model``, or a model env var —
+ * wins. Otherwise the model stored for that endpoint (``customModelName``
+ * from ``/login``, or ``CODEV_MODEL``/``OPENAI_MODEL``) is used, and only
+ * then the caller-provided default.
+ */
+export function resolveCustomModel(fallback: string): string {
+  try {
+    if (getUserSpecifiedModelSetting() !== undefined) return fallback
+  } catch {
+    // Fall through to the stored model.
+  }
+  try {
+    const config = getCustomApiConfig()
+    if (config.modelName) return config.modelName
+  } catch {
+    // Fall through to the fallback.
+  }
+  return fallback
+}
+
+const customResolver: ModelResolver = {
+  id: 'custom',
+  resolve(_provider, model) {
+    return resolveCustomModel(model)
+  },
+}
+
 const resolverByProvider: Partial<Record<ProviderId, ModelResolver>> = {
   openai: openAIResolver,
   opencode: openCodeResolver,
+  custom: customResolver,
 }
 
 export function getModelResolver(provider: ProviderId): ModelResolver {

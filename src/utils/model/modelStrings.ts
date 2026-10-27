@@ -12,7 +12,7 @@ import {
   type CanonicalModelId,
   type ModelKey,
 } from './configs.js'
-import { type APIProvider, getAPIProvider } from './providers.js'
+import { type APIProvider, getAPIProvider, getCustomModelName } from './providers.js'
 
 /**
  * Maps each model version to its provider-specific model ID string.
@@ -74,6 +74,18 @@ function getBuiltinModelStrings(provider: APIProvider): ModelStrings {
 
   if (provider === 'local') {
     return getBuiltinModelStrings('firstParty') as ModelStrings
+  }
+
+  if (provider === 'custom') {
+    // The custom endpoint owns its model names — every family alias points
+    // at the configured model (CODEV_MODEL / customModelName).
+    const out = getBuiltinModelStrings('firstParty') as Record<string, string>
+    const customModel = getCustomModelName() ?? 'default'
+    out.haiku45 = customModel
+    out.sonnet45 = customModel
+    out.sonnet46 = customModel
+    out.opus46 = customModel
+    return out as ModelStrings
   }
 
   if (provider === 'kiro') {

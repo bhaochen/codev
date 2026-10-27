@@ -22,7 +22,7 @@ export interface ProtocolDef {
 export const ProtocolRegistry: Partial<Record<ProtocolId, ProtocolDef>> = {
   'openai-compatible-chat': {
     id: 'openai-compatible-chat',
-    displayName: '9router Chat Completions',
+    displayName: 'OpenAI-compatible Chat',
     endpointPath: '/chat/completions',
     handler: queryOpenAICompatibleChat,
   },
