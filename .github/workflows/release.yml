@@ -1,0 +1,115 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 3.0.1)'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x64
+            artifact: codev-linux-x64
+          - os: macos-latest
+            target: macos-x64
+            artifact: codev-macos-x64
+          - os: macos-latest
+            target: macos-arm64
+            artifact: codev-macos-arm64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.11
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build binary
+        run: bun run build
+        env:
+          # Enable all experimental features for release builds
+          BUN_FEATURE_FLAGS: all
+
+      - name: Rename binary
+        run: |
+          mv dist/codev dist/${{ matrix.artifact }}
+          chmod +x dist/${{ matrix.artifact }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          else
+            echo "version=$(grep '"version"' package.json | cut -d'"' -f4)" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure of downloaded files
+        run: ls -laR artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: Codev v${{ steps.version.outputs.version }}
+          body: |
+            ## Codev ${{ steps.version.outputs.version }}
+
+            ### Downloads
+            - **Linux x64**: `codev-linux-x64`
+            - **macOS x64**: `codev-macos-x64`
+            - **macOS ARM64**: `codev-macos-arm64`
+
+            ### Install
+            ```bash
+            # Download and install
+            curl -fsSL https://raw.githubusercontent.com/chenbhao/Codev/main/install.sh | bash
+            ```
+
+            Or download directly:
+            ```bash
+            # Linux
+            curl -Lo ~/.local/bin/codev https://github.com/chenbhao/Codev/releases/download/v${{ steps.version.outputs.version }}/codev-linux-x64
+            chmod +x ~/.local/bin/codev
+            ```
+          files: |
+            artifacts/**/*
+          draft: false
+          prerelease: false
