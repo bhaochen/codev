@@ -1412,76 +1412,6 @@ function saveConfigWithLock<A extends object>(
     )
     const serialized = jsonStringify(filteredConfig, null, 2)
 
-    // Create timestamped backup of existing config before writing
-    // We keep multiple backups to prevent data loss if a reset/corrupted config
-    // overwrites a good backup. Backups are stored in ~/.local/share/codev/backups/ to
-    // keep the home directory clean.
-    try {
-      const fileBase = basename(file)
-      const backupDir = getConfigBackupDir()
-
-      // Ensure backup directory exists
-      try {
-        fs.mkdirSync(backupDir)
-      } catch (mkdirErr) {
-        const mkdirCode = getErrnoCode(mkdirErr)
-        if (mkdirCode !== 'EEXIST') {
-          throw mkdirErr
-        }
-      }
-
-      // Check existing backups first -- skip creating a new one if a recent
-      // backup already exists. During startup, many saveGlobalConfig calls fire
-      // within milliseconds of each other; without this check, each call
-      // creates a new backup file that accumulates on disk.
-      const MIN_BACKUP_INTERVAL_MS = 60_000
-      const existingBackups = fs
-        .readdirStringSync(backupDir)
-        .filter(f => f.startsWith(`${fileBase}.backup.`))
-        .sort()
-        .reverse() // Most recent first (timestamps sort lexicographically)
-
-      const mostRecentBackup = existingBackups[0]
-      const mostRecentTimestamp = mostRecentBackup
-        ? Number(mostRecentBackup.split('.backup.').pop())
-        : 0
-      const shouldCreateBackup =
-        Number.isNaN(mostRecentTimestamp) ||
-        Date.now() - mostRecentTimestamp >= MIN_BACKUP_INTERVAL_MS
-
-      if (shouldCreateBackup) {
-        const backupPath = join(backupDir, `${fileBase}.backup.${Date.now()}`)
-        fs.copyFileSync(file, backupPath)
-      }
-
-      // Clean up old backups, keeping only the 5 most recent
-      const MAX_BACKUPS = 5
-      // Re-read if we just created one; otherwise reuse the list
-      const backupsForCleanup = shouldCreateBackup
-        ? fs
-            .readdirStringSync(backupDir)
-            .filter(f => f.startsWith(`${fileBase}.backup.`))
-            .sort()
-            .reverse()
-        : existingBackups
-
-      for (const oldBackup of backupsForCleanup.slice(MAX_BACKUPS)) {
-        try {
-          fs.unlinkSync(join(backupDir, oldBackup))
-        } catch {
-          // Ignore cleanup errors
-        }
-      }
-    } catch (e) {
-      const code = getErrnoCode(e)
-      if (code !== 'ENOENT') {
-        logForDebugging(`Failed to backup config: ${e}`, {
-          level: 'error',
-        })
-      }
-      // No file to backup or backup failed, continue with write
-    }
-
     if (file === getGlobalClaudeFile()) {
       persistGlobalConfigDocument(file, serialized)
       globalConfigWriteCount++
@@ -1534,69 +1464,6 @@ export function enableConfigs(): void {
   })
 }
 
-/**
- * Returns the directory where config backup files are stored.
- * Uses ~/.local/share/codev/backups/ to keep the home directory clean.
- */
-function getConfigBackupDir(): string {
-  return join(getClaudeConfigHomeDir(), 'backups')
-}
-
-/**
- * Find the most recent backup file for a given config file.
- * Checks ~/.local/share/codev/backups/ first, then falls back to the legacy location
- * (next to the config file) for backwards compatibility.
- * Returns the full path to the most recent backup, or null if none exist.
- */
-function findMostRecentBackup(file: string): string | null {
-  const fs = getFsImplementation()
-  const fileBase = basename(file)
-  const backupDir = getConfigBackupDir()
-
-  // Check the new backup directory first
-  try {
-    const backups = fs
-      .readdirStringSync(backupDir)
-      .filter(f => f.startsWith(`${fileBase}.backup.`))
-      .sort()
-
-    const mostRecent = backups.at(-1) // Timestamps sort lexicographically
-    if (mostRecent) {
-      return join(backupDir, mostRecent)
-    }
-  } catch {
-    // Backup dir doesn't exist yet
-  }
-
-  // Fall back to legacy location (next to the config file)
-  const fileDir = dirname(file)
-
-  try {
-    const backups = fs
-      .readdirStringSync(fileDir)
-      .filter(f => f.startsWith(`${fileBase}.backup.`))
-      .sort()
-
-    const mostRecent = backups.at(-1) // Timestamps sort lexicographically
-    if (mostRecent) {
-      return join(fileDir, mostRecent)
-    }
-
-    // Check for legacy backup file (no timestamp)
-    const legacyBackup = `${file}.backup`
-    try {
-      fs.statSync(legacyBackup)
-      return legacyBackup
-    } catch {
-      // Legacy backup doesn't exist
-    }
-  } catch {
-    // Ignore errors reading directory
-  }
-
-  return null
-}
-
 function getConfig<A>(
   file: string,
   createDefault: () => A,
@@ -1645,7 +1512,6 @@ function getConfig<A>(
       throw new ConfigParseError(errorMessage, file, createDefault())
     }
   } catch (error) {
-    // Handle file not found - check for backup and return default
     const errCode = getErrnoCode(error)
     if (errCode === 'ENOENT') {
       const databaseConfig = readGlobalConfigFromDatabase(file)
@@ -1659,14 +1525,6 @@ function getConfig<A>(
             { level: 'error' },
           )
         }
-      }
-      const backupPath = findMostRecentBackup(file)
-      if (backupPath) {
-        process.stderr.write(
-          `\nClaude configuration file not found at: ${file}\n` +
-            `A backup file exists at: ${backupPath}\n` +
-            `You can manually restore it by running: cp "${backupPath}" "${file}"\n\n`,
-        )
       }
       return createDefault()
     }
@@ -1692,18 +1550,7 @@ function getConfig<A>(
         try {
           // Log the error for monitoring
           logError(error)
-
-          // Log analytics event for config corruption
-          let hasBackup = false
-          try {
-            fs.statSync(`${file}.backup`)
-            hasBackup = true
-          } catch {
-            // No backup
-          }
-          logEvent('tengu_config_parse_error', {
-            has_backup: hasBackup,
-          })
+          logEvent('tengu_config_parse_error', {})
         } finally {
           insideGetConfig = false
         }
@@ -1712,81 +1559,6 @@ function getConfig<A>(
       process.stderr.write(
         `\nClaude configuration file at ${file} is corrupted: ${error.message}\n`,
       )
-
-      // Try to backup the corrupted config file (only if not already backed up)
-      const fileBase = basename(file)
-      const corruptedBackupDir = getConfigBackupDir()
-
-      // Ensure backup directory exists
-      try {
-        fs.mkdirSync(corruptedBackupDir)
-      } catch (mkdirErr) {
-        const mkdirCode = getErrnoCode(mkdirErr)
-        if (mkdirCode !== 'EEXIST') {
-          throw mkdirErr
-        }
-      }
-
-      const existingCorruptedBackups = fs
-        .readdirStringSync(corruptedBackupDir)
-        .filter(f => f.startsWith(`${fileBase}.corrupted.`))
-
-      let corruptedBackupPath: string | undefined
-      let alreadyBackedUp = false
-
-      // Check if current corrupted content matches any existing backup
-      const currentContent = fs.readFileSync(file, { encoding: 'utf-8' })
-      for (const backup of existingCorruptedBackups) {
-        try {
-          const backupContent = fs.readFileSync(
-            join(corruptedBackupDir, backup),
-            { encoding: 'utf-8' },
-          )
-          if (currentContent === backupContent) {
-            alreadyBackedUp = true
-            break
-          }
-        } catch {
-          // Ignore read errors on backups
-        }
-      }
-
-      if (!alreadyBackedUp) {
-        corruptedBackupPath = join(
-          corruptedBackupDir,
-          `${fileBase}.corrupted.${Date.now()}`,
-        )
-        try {
-          fs.copyFileSync(file, corruptedBackupPath)
-          logForDebugging(
-            `Corrupted config backed up to: ${corruptedBackupPath}`,
-            {
-              level: 'error',
-            },
-          )
-        } catch {
-          // Ignore backup errors
-        }
-      }
-
-      // Notify user about corrupted config and available backup
-      const backupPath = findMostRecentBackup(file)
-      if (corruptedBackupPath) {
-        process.stderr.write(
-          `The corrupted file has been backed up to: ${corruptedBackupPath}\n`,
-        )
-      } else if (alreadyBackedUp) {
-        process.stderr.write(`The corrupted file has already been backed up.\n`)
-      }
-
-      if (backupPath) {
-        process.stderr.write(
-          `A backup file exists at: ${backupPath}\n` +
-            `You can manually restore it by running: cp "${backupPath}" "${file}"\n\n`,
-        )
-      } else {
-        process.stderr.write(`\n`)
-      }
     }
 
     return createDefault()
