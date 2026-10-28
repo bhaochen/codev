@@ -1,11 +1,11 @@
 import * as React from 'react'
-import { Box, Text } from '../../ink.js'
+import { Box, Text, useInput } from '../../ink.js'
 import { Pane } from '../../components/design-system/Pane.js'
 import { useKeybinding } from '../../keybindings/useKeybinding.js'
+import TextInput from '../../components/TextInput.js'
+import { useTerminalSize } from '../../hooks/useTerminalSize.js'
 import type { LocalJSXCommandCall } from '../../types/command.js'
-import {
-  getCustomEndpoints,
-} from '../../utils/model/providers.js'
+import { getCustomEndpoints } from '../../utils/model/providers.js'
 import {
   saveCustomApiConfig,
   removeCustomEndpoint,
@@ -15,33 +15,10 @@ import { clearStoredProviderCache } from '../../utils/model/providers.js'
 
 type FieldKey = 'baseUrl' | 'apiKey' | 'modelName'
 
-type FieldDef = {
-  key: FieldKey
-  label: string
-  placeholder: string
-  mask?: string
-  optional?: boolean
-}
-
-const FIELDS: FieldDef[] = [
-  {
-    key: 'baseUrl',
-    label: 'API Base URL',
-    placeholder: 'http://localhost:8080/v1',
-  },
-  {
-    key: 'apiKey',
-    label: 'API Key (optional)',
-    placeholder: 'press Enter to skip',
-    mask: '*',
-    optional: true,
-  },
-  {
-    key: 'modelName',
-    label: 'Model (optional)',
-    placeholder: 'press Enter to skip',
-    optional: true,
-  },
+const FIELDS: Array<{ key: FieldKey; label: string; placeholder: string; mask?: string }> = [
+  { key: 'baseUrl', label: 'API Base URL', placeholder: 'http://localhost:8080/v1' },
+  { key: 'apiKey', label: 'API Key (optional)', placeholder: 'press Enter to skip', mask: '*' },
+  { key: 'modelName', label: 'Model (optional)', placeholder: 'press Enter to skip' },
 ]
 
 async function verifyEndpoint(baseUrl: string, apiKey: string): Promise<void> {
@@ -52,13 +29,14 @@ async function verifyEndpoint(baseUrl: string, apiKey: string): Promise<void> {
     headers,
     signal: AbortSignal.timeout(10000),
   })
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status}: ${res.statusText}`)
-  }
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`)
 }
 
 type EndpointItem = { id: string; baseUrl: string; apiKey: string | null; modelName: string | null; active: boolean }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Endpoint list screen
+// ─────────────────────────────────────────────────────────────────────────────
 function EndpointListScreen({
   endpoints,
   onSelect,
@@ -75,21 +53,23 @@ function EndpointListScreen({
   const [cursor, setCursor] = React.useState(0)
   const activeIdx = endpoints.findIndex(e => e.active)
 
+  // Sync cursor to active endpoint on mount
   React.useEffect(() => {
     if (activeIdx >= 0 && cursor !== activeIdx) setCursor(activeIdx)
-  }, [endpoints, activeIdx, cursor])
+  }, []) // only on mount
 
-  // ESC to close
-  useKeybinding('confirm:no', onCancel, { context: 'Confirmation' })
-  // Arrow keys and select
-  React.useEffect(() => {
-    const { useInput } = require('../../ink.js') as typeof import('../../ink.js')
-    useInput((_input: string, key: { upArrow: boolean; downArrow: boolean; return: boolean }) => {
+  // Top-level useInput — must NOT be inside useEffect
+  useInput(
+    (_input: string, key: { upArrow: boolean; downArrow: boolean; return: boolean }) => {
       if (key.upArrow && cursor > 0) setCursor(c => c - 1)
       else if (key.downArrow && cursor < endpoints.length - 1) setCursor(c => c + 1)
       else if (key.return) onSelect(endpoints[cursor]?.id)
-    }, { isActive: true })
-  }, [cursor, endpoints, onSelect])
+    },
+    { isActive: true },
+  )
+
+  // Top-level useKeybinding for ESC
+  useKeybinding('confirm:no', onCancel, { context: 'Confirmation' })
 
   return (
     <Pane>
@@ -126,6 +106,9 @@ function EndpointListScreen({
   )
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Add endpoint form
+// ─────────────────────────────────────────────────────────────────────────────
 function LoginForm({
   onDone,
   onCancel,
@@ -133,8 +116,12 @@ function LoginForm({
   onDone: (message: string) => void
   onCancel: () => void
 }): React.ReactNode {
+  const { columns } = useTerminalSize()
   const [index, setIndex] = React.useState(0)
-  const [values, setValues] = React.useState<Partial<Record<FieldKey, string>>>({})
+  const [values, setValues] = React.useState<Record<FieldKey, string>>({
+    baseUrl: '', apiKey: '', modelName: '',
+  })
+  const [cursorOffset, setCursorOffset] = React.useState(0)
   const [status, setStatus] = React.useState<'editing' | 'saving' | 'error'>('editing')
   const [notice, setNotice] = React.useState('')
   const [error, setError] = React.useState('')
@@ -142,10 +129,10 @@ function LoginForm({
   const field = FIELDS[index]
 
   const submit = React.useCallback(
-    async (vals: Partial<Record<FieldKey, string>>) => {
-      const baseUrl = (vals.baseUrl ?? '').trim()
-      const apiKey = (vals.apiKey ?? '').trim()
-      const modelName = (vals.modelName ?? '').trim()
+    async (vals: Record<FieldKey, string>) => {
+      const baseUrl = vals.baseUrl.trim()
+      const apiKey = vals.apiKey.trim()
+      const modelName = vals.modelName.trim()
 
       if (!baseUrl) {
         setStatus('error')
@@ -161,10 +148,8 @@ function LoginForm({
       let noticeText = ''
       try {
         await verifyEndpoint(baseUrl, apiKey)
-      } catch (verifyError) {
-        noticeText = `Saved without verification (${
-          verifyError instanceof Error ? verifyError.message : 'unknown error'
-        })`
+      } catch (err) {
+        noticeText = `Saved without verification (${err instanceof Error ? err.message : 'unknown'})`
       }
 
       try {
@@ -188,10 +173,14 @@ function LoginForm({
     setValues(next)
     if (index < FIELDS.length - 1) {
       setIndex(index + 1)
+      setCursorOffset(0)
     } else {
       void submit(next)
     }
   }
+
+  // ESC to cancel
+  useKeybinding('confirm:no', onCancel, { context: 'Confirmation' })
 
   return (
     <Pane>
@@ -204,20 +193,23 @@ function LoginForm({
           <Box key={item.key} flexDirection="column">
             <Text dimColor={itemIndex !== index}>{item.label}</Text>
             {itemIndex === index && status === 'editing' ? (
-              <Text>
-                <TextInput
-                  value={values[item.key] ?? ''}
-                  onChange={(v: string) => setValues(prev => ({ ...prev, [item.key]: v }))}
-                  onSubmit={handleFieldSubmit}
-                  onExit={onCancel}
-                  placeholder={item.placeholder}
-                  mask={item.mask}
-                />
-              </Text>
+              <TextInput
+                value={values[item.key]}
+                onChange={v => setValues(prev => ({ ...prev, [item.key]: v }))}
+                onChangeCursorOffset={setCursorOffset}
+                onSubmit={handleFieldSubmit}
+                onExit={onCancel}
+                placeholder={item.placeholder}
+                mask={item.mask}
+                columns={columns}
+                cursorOffset={cursorOffset}
+                showCursor
+                focus
+              />
             ) : (
               <Text>
                 {item.mask && values[item.key]
-                  ? item.mask.repeat((values[item.key] ?? '').length)
+                  ? item.mask.repeat(values[item.key].length)
                   : values[item.key] || '(not set)'}
               </Text>
             )}
@@ -238,38 +230,9 @@ function LoginForm({
   )
 }
 
-// Simple text input component for the form
-function TextInput({
-  value,
-  onChange,
-  onSubmit,
-  onExit,
-  placeholder,
-  mask,
-}: {
-  value: string
-  onChange: (v: string) => void
-  onSubmit: (v: string) => void
-  onExit: () => void
-  placeholder?: string
-  mask?: string
-}) {
-  const [cursorPos, setCursorPos] = React.useState(value.length)
-  const inputRef = React.useRef<HTMLInputElement>(null)
-
-  React.useEffect(() => {
-    inputRef.current?.focus()
-  }, [])
-
-  return (
-    <Box flexDirection="row" gap={1}>
-      <Text>{mask ? value.split('').map(() => mask).join('') : value}</Text>
-      {(!value || value.length === 0) && <Text dimColor>{placeholder}</Text>}
-      {value && <Text color="blue">|</Text>}
-    </Box>
-  )
-}
-
+// ─────────────────────────────────────────────────────────────────────────────
+// Command entry point
+// ─────────────────────────────────────────────────────────────────────────────
 export const call: LocalJSXCommandCall = async (onDone, context) => {
   const [phase, setPhase] = React.useState<'list' | 'add'>('list')
   const [endpoints, setEndpoints] = React.useState<EndpointItem[]>([])
