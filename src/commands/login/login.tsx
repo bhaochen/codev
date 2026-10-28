@@ -1,8 +1,7 @@
 import * as React from 'react'
-import { Box, Text, useInput } from '../../ink.js'
-import { Dialog } from '../../components/design-system/Dialog.js'
-import TextInput from '../../components/TextInput.js'
-import { useTerminalSize } from '../../hooks/useTerminalSize.js'
+import { Box, Text } from '../../ink.js'
+import { Pane } from '../../components/design-system/Pane.js'
+import { useKeybinding } from '../../keybindings/useKeybinding.js'
 import type { LocalJSXCommandCall } from '../../types/command.js'
 import {
   getCustomEndpoints,
@@ -45,11 +44,6 @@ const FIELDS: FieldDef[] = [
   },
 ]
 
-/**
- * Probe an OpenAI-compatible endpoint's ``/v1/models`` so obviously wrong
- * URLs/keys fail fast. Best-effort: a failure is reported but never blocks
- * saving, since many endpoints don't expose ``/v1/models``.
- */
 async function verifyEndpoint(baseUrl: string, apiKey: string): Promise<void> {
   const url = new URL(baseUrl)
   const headers: Record<string, string> = {}
@@ -78,7 +72,6 @@ function EndpointListScreen({
   onDelete: (id: string) => void
   onCancel: () => void
 }): React.ReactNode {
-  const { columns } = useTerminalSize()
   const [cursor, setCursor] = React.useState(0)
   const activeIdx = endpoints.findIndex(e => e.active)
 
@@ -86,18 +79,20 @@ function EndpointListScreen({
     if (activeIdx >= 0 && cursor !== activeIdx) setCursor(activeIdx)
   }, [endpoints, activeIdx, cursor])
 
-  useInput(
-    (_input, key) => {
-      if (key.escape) onCancel()
-      else if (key.upArrow && cursor > 0) setCursor(c => c - 1)
+  // ESC to close
+  useKeybinding('confirm:no', onCancel, { context: 'Confirmation' })
+  // Arrow keys and select
+  React.useEffect(() => {
+    const { useInput } = require('../../ink.js') as typeof import('../../ink.js')
+    useInput((_input: string, key: { upArrow: boolean; downArrow: boolean; return: boolean }) => {
+      if (key.upArrow && cursor > 0) setCursor(c => c - 1)
       else if (key.downArrow && cursor < endpoints.length - 1) setCursor(c => c + 1)
       else if (key.return) onSelect(endpoints[cursor]?.id)
-    },
-    { isActive: true },
-  )
+    }, { isActive: true })
+  }, [cursor, endpoints, onSelect])
 
   return (
-    <Dialog title="Configure Custom Endpoints" onCancel={onCancel} isCancelActive>
+    <Pane>
       <Box flexDirection="column" gap={1}>
         <Text bold dimColor>OpenAI-compatible endpoints</Text>
         {endpoints.length === 0 ? (
@@ -127,25 +122,19 @@ function EndpointListScreen({
           <Text dimColor>done</Text>
         </Box>
       </Box>
-    </Dialog>
+    </Pane>
   )
 }
 
 function LoginForm({
-  existing,
   onDone,
   onCancel,
 }: {
-  existing: Partial<Record<FieldKey, string>>
   onDone: (message: string) => void
   onCancel: () => void
 }): React.ReactNode {
-  const { columns } = useTerminalSize()
   const [index, setIndex] = React.useState(0)
-  const [values, setValues] = React.useState<Partial<Record<FieldKey, string>>>(
-    { baseUrl: existing.baseUrl ?? '', apiKey: existing.apiKey ?? '', modelName: existing.modelName ?? '' },
-  )
-  const [cursorOffset, setCursorOffset] = React.useState(0)
+  const [values, setValues] = React.useState<Partial<Record<FieldKey, string>>>({})
   const [status, setStatus] = React.useState<'editing' | 'saving' | 'error'>('editing')
   const [notice, setNotice] = React.useState('')
   const [error, setError] = React.useState('')
@@ -199,21 +188,13 @@ function LoginForm({
     setValues(next)
     if (index < FIELDS.length - 1) {
       setIndex(index + 1)
-      setCursorOffset(0)
     } else {
       void submit(next)
     }
   }
 
-  useInput(
-    (_input, key) => {
-      if (key.escape) onCancel()
-    },
-    { isActive: status !== 'editing' },
-  )
-
   return (
-    <Dialog title="Add Endpoint" onCancel={onCancel}>
+    <Pane>
       <Box flexDirection="column" gap={1}>
         <Text bold>OpenAI-compatible endpoint</Text>
         <Text dimColor>
@@ -223,24 +204,21 @@ function LoginForm({
           <Box key={item.key} flexDirection="column">
             <Text dimColor={itemIndex !== index}>{item.label}</Text>
             {itemIndex === index && status === 'editing' ? (
-              <TextInput
-                value={values[item.key] ?? ''}
-                onChange={value => setValues(prev => ({ ...prev, [item.key]: value }))}
-                onChangeCursorOffset={setCursorOffset}
-                onSubmit={handleFieldSubmit}
-                onExit={onCancel}
-                placeholder={item.placeholder}
-                mask={item.mask}
-                columns={columns}
-                cursorOffset={cursorOffset}
-                showCursor
-                focus
-              />
+              <Text>
+                <TextInput
+                  value={values[item.key] ?? ''}
+                  onChange={(v: string) => setValues(prev => ({ ...prev, [item.key]: v }))}
+                  onSubmit={handleFieldSubmit}
+                  onExit={onCancel}
+                  placeholder={item.placeholder}
+                  mask={item.mask}
+                />
+              </Text>
             ) : (
               <Text>
                 {item.mask && values[item.key]
                   ? item.mask.repeat((values[item.key] ?? '').length)
-                  : values[item.key] || <Text dimColor>(not set)</Text>}
+                  : values[item.key] || '(not set)'}
               </Text>
             )}
           </Box>
@@ -256,7 +234,39 @@ function LoginForm({
               : 'Esc to cancel'}
         </Text>
       </Box>
-    </Dialog>
+    </Pane>
+  )
+}
+
+// Simple text input component for the form
+function TextInput({
+  value,
+  onChange,
+  onSubmit,
+  onExit,
+  placeholder,
+  mask,
+}: {
+  value: string
+  onChange: (v: string) => void
+  onSubmit: (v: string) => void
+  onExit: () => void
+  placeholder?: string
+  mask?: string
+}) {
+  const [cursorPos, setCursorPos] = React.useState(value.length)
+  const inputRef = React.useRef<HTMLInputElement>(null)
+
+  React.useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
+
+  return (
+    <Box flexDirection="row" gap={1}>
+      <Text>{mask ? value.split('').map(() => mask).join('') : value}</Text>
+      {(!value || value.length === 0) && <Text dimColor>{placeholder}</Text>}
+      {value && <Text color="blue">|</Text>}
+    </Box>
   )
 }
 
@@ -317,7 +327,6 @@ export const call: LocalJSXCommandCall = async (onDone, context) => {
     />
   ) : (
     <LoginForm
-      existing={{}}
       onDone={handleAddDone}
       onCancel={() => setPhase('list')}
     />
