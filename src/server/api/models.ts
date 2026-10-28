@@ -32,16 +32,23 @@ function normalizeEffortLevel(value: unknown): (typeof EFFORT_LEVELS)[number] {
 /**
  * Read the CLI auth provider document from codev.db (global config).
  * Returns the parsed config or null when unavailable.
+ *
+ * Reads directly from the SessionStore (SQLite) so it works regardless of
+ * whether getGlobalConfigSnapshot() returns the test-mode in-memory object
+ * (which lacks authProvider) or a freshly-parsed database document.
  */
 export async function readCliAuthProvider(): Promise<{
   authProvider?: string
   [key: string]: unknown
 } | null> {
   try {
-    const { getGlobalConfigSnapshot } = await import(
-      '../../utils/config.js'
+    const { getSessionStore } = await import(
+      '../../services/db/SessionStore.js'
     )
-    return getGlobalConfigSnapshot() as unknown as {
+    const raw = getSessionStore().getAppDocument('config', 'global')
+    if (!raw) return { authProvider: null }
+    const config = JSON.parse(raw) as Record<string, unknown>
+    return config as {
       authProvider?: string
       [key: string]: unknown
     }

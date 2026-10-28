@@ -379,6 +379,9 @@ export function getCustomModelName(): string | undefined {
 }
 
 export function getAPIProvider(): APIProvider | null {
+  // Explicit env override takes highest priority (used by tests and headless runners)
+  const explicitOverride = getExplicitProviderOverride()
+  if (explicitOverride) return explicitOverride
   // 9router is the default gateway; custom endpoint overrides it.
   if (isCustomConfigured()) return 'custom'
   return 'openai'
