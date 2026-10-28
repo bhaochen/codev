@@ -584,9 +584,9 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
     return [defaultOpt]
   }
 
-  // Custom OpenAI-compatible endpoint: fetch models from configured base URL
+  // Custom OpenAI-compatible endpoint: fetch models from all configured endpoints
   if (getAPIProvider() === 'custom') {
-    void import('./customModels.js').then(({ fetchCustomModels }) => {
+    void import('./customModels.js').then(async ({ fetchCustomModels }) => {
       void fetchCustomModels()
     })
 

@@ -204,10 +204,17 @@ export type GlobalConfig = {
   localModelName?: string
   localModelContextWindow?: number
 
-  // Custom OpenAI-compatible API configuration
-  customBaseUrl?: string
-  customApiKey?: string
-  customModelName?: string
+  // Custom OpenAI-compatible API configuration (multi-endpoint)
+  customBaseUrl?: string         // kept for legacy migration
+  customApiKey?: string          // kept for legacy migration
+  customModelName?: string       // kept for legacy migration
+  customEndpoints?: Array<{     // new multi-endpoint store
+    id: string                  // UUID or timestamp-suffix
+    baseUrl: string
+    apiKey?: string
+    modelName?: string
+  }>
+  currentCustomEndpointIndex?: number
 
   // OpenCode Zen configuration
   openCodeApiKey?: string
@@ -693,6 +700,8 @@ export const GLOBAL_CONFIG_KEYS = [
   'customBaseUrl',
   'customApiKey',
   'customModelName',
+  'customEndpoints',
+  'currentCustomEndpointIndex',
   'nvidiaApiKey',
   'kiroAccessToken',
   'kiroRefreshToken',
@@ -988,10 +997,30 @@ registerCleanup(async () => {
  * Migrates old autoUpdaterStatus to new installMethod and autoUpdates fields
  * @internal
  */
+/**
+ * Migrate legacy single custom-endpoint fields to the new multi-endpoint store.
+ * Preserves the existing value as the sole entry when customEndpoints is absent.
+ */
+function migrateCustomEndpoints(config: GlobalConfig): GlobalConfig {
+  if (config.customEndpoints && config.customEndpoints.length > 0) return config
+  const { customBaseUrl, customApiKey, customModelName } = config
+  if (!customBaseUrl) return config
+  return {
+    ...config,
+    customEndpoints: [{
+      id: randomBytes(4).toString('hex'),
+      baseUrl: customBaseUrl,
+      apiKey: customApiKey,
+      modelName: customModelName,
+    }],
+    currentCustomEndpointIndex: 0,
+  }
+}
+
 function migrateConfigFields(config: GlobalConfig): GlobalConfig {
   // Already migrated
   if (config.installMethod !== undefined) {
-    return config
+    return migrateCustomEndpoints(config)
   }
 
   // autoUpdaterStatus is removed from the type but may exist in old configs

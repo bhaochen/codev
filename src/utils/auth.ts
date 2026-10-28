@@ -309,21 +309,49 @@ export async function saveCustomApiConfig(baseUrl: string, modelName: string, ap
   if (!baseUrl.trim()) {
     throw new Error('Base URL cannot be empty')
   }
-
   try {
     new URL(baseUrl)
   } catch {
     throw new Error('Invalid URL format')
   }
+  saveGlobalConfig(current => {
+    const endpoints = current.customEndpoints ?? []
+    const idx = endpoints.findIndex(e => e.baseUrl === baseUrl)
+    if (idx >= 0) {
+      // Update existing endpoint in-place
+      const updated = [...endpoints]
+      updated[idx] = { ...updated[idx], modelName, apiKey: apiKey ?? undefined }
+      return { ...current, customEndpoints: updated, currentCustomEndpointIndex: idx }
+    }
+    // Add new endpoint and select it
+    const newEp = { id: `${Date.now()}`, baseUrl, modelName, apiKey: apiKey ?? undefined }
+    return { ...current, customEndpoints: [...endpoints, newEp], currentCustomEndpointIndex: endpoints.length }
+  })
+  const { clearStoredProviderCache } = await import('./model/providers.js')
+  clearStoredProviderCache()
+}
 
-  saveGlobalConfig(current => ({
-    ...current,
-    authProvider: 'custom',
-    customBaseUrl: baseUrl,
-    customModelName: modelName,
-    customApiKey: apiKey ?? undefined,
-  }))
+/** Remove an endpoint by its ID and adjust the active index. */
+export async function removeCustomEndpoint(id: string): Promise<void> {
+  saveGlobalConfig(current => {
+    const endpoints = current.customEndpoints ?? []
+    const idx = endpoints.findIndex(e => e.id === id)
+    if (idx < 0) return current
+    const remaining = endpoints.filter(e => e.id !== id)
+    const activeIdx = Math.min(current.currentCustomEndpointIndex ?? 0, remaining.length - 1)
+    return { ...current, customEndpoints: remaining, currentCustomEndpointIndex: activeIdx >= 0 ? activeIdx : undefined }
+  })
+  const { clearStoredProviderCache } = await import('./model/providers.js')
+  clearStoredProviderCache()
+}
 
+/** Switch the currently active custom endpoint by index. */
+export async function setActiveCustomEndpointIndex(idx: number): Promise<void> {
+  saveGlobalConfig(current => {
+    const endpoints = current.customEndpoints ?? []
+    const validIdx = idx >= 0 && idx < endpoints.length ? idx : 0
+    return { ...current, currentCustomEndpointIndex: validIdx }
+  })
   const { clearStoredProviderCache } = await import('./model/providers.js')
   clearStoredProviderCache()
 }
@@ -336,10 +364,13 @@ export function getCustomApiConfig(): { baseUrl: string | null; modelName: strin
   const envApiKey = getEnvCustomApiKey() ?? null
   try {
     const config = getGlobalConfigSnapshot()
+    const endpoints = config.customEndpoints ?? []
+    const activeIdx = config.currentCustomEndpointIndex ?? 0
+    const activeEp = endpoints[activeIdx]
     return {
-      baseUrl: getCodevEnvBaseUrl() ?? config.customBaseUrl ?? envBaseUrl,
-      modelName: getCodevEnvModel() ?? config.customModelName ?? envModelName,
-      apiKey: getCodevEnvApiKey() ?? config.customApiKey ?? envApiKey,
+      baseUrl: getCodevEnvBaseUrl() ?? activeEp?.baseUrl ?? envBaseUrl,
+      modelName: getCodevEnvModel() ?? activeEp?.modelName ?? config.customModelName ?? envModelName,
+      apiKey: getCodevEnvApiKey() ?? activeEp?.apiKey ?? envApiKey,
     }
   } catch {
     return {

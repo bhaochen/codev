@@ -292,47 +292,87 @@ export function getCodevEnvModel(): string | undefined {
   return process.env.CODEV_MODEL?.trim() || undefined
 }
 
-export function getCustomBaseUrl(): string | undefined {
-  const override = getCodevEnvBaseUrl()
-  if (override) return override
+export interface CustomEndpoint {
+  id: string
+  baseUrl: string
+  apiKey?: string
+  modelName?: string
+}
+
+export function getCustomEndpoints(): CustomEndpoint[] {
   try {
     const config = getGlobalConfigSnapshot()
-    if (config.authProvider === 'custom' && config.customBaseUrl) {
-      return config.customBaseUrl
+    if (config.customEndpoints?.length) return config.customEndpoints
+  } catch {
+    // Ignore
+  }
+  // Legacy single-endpoint fallback: treat it as a single-entry list
+  try {
+    const config = getGlobalConfigSnapshot()
+    if (config.customBaseUrl) {
+      return [{
+        id: 'legacy',
+        baseUrl: config.customBaseUrl,
+        apiKey: config.customApiKey,
+        modelName: config.customModelName,
+      }]
     }
   } catch {
     // Ignore
   }
+  return []
+}
+
+export function getCustomBaseUrl(): string | undefined {
+  const override = getCodevEnvBaseUrl()
+  if (override) return override
+  const endpoints = getCustomEndpoints()
+  const idx = (getGlobalConfigSnapshot().currentCustomEndpointIndex ?? 0)
+  if (endpoints[idx]?.baseUrl) return endpoints[idx].baseUrl
   return getEnvCustomBaseUrl()
 }
 
 export function isCustomConfigured(): boolean {
   if (getCodevEnvBaseUrl()) return true
+  return getCustomEndpoints().length > 0
+}
+
+export function getCustomApiConfig(): { baseUrl: string | null; modelName: string | null; apiKey: string | null } {
+  const override = getCodevEnvBaseUrl()
+  if (override) {
+    return {
+      baseUrl: override,
+      modelName: getCodevEnvModel() ?? null,
+      apiKey: getCodevEnvApiKey() ?? null,
+    }
+  }
   try {
     const config = getGlobalConfigSnapshot()
-    if (config.authProvider === 'custom' && Boolean(config.customBaseUrl)) {
-      return true
+    const endpoints = config.customEndpoints ?? []
+    const idx = config.currentCustomEndpointIndex ?? 0
+    const ep = endpoints[idx]
+    if (ep?.baseUrl) {
+      return { baseUrl: ep.baseUrl, modelName: ep.modelName ?? null, apiKey: ep.apiKey ?? null }
     }
   } catch {
     // Ignore
   }
-  return Boolean(getEnvCustomBaseUrl())
+  return { baseUrl: null, modelName: null, apiKey: null }
 }
 
 /**
- * Model name configured for the custom endpoint.
+ * Model name for the currently active custom endpoint.
  *
- * Priority: ``CODEV_MODEL`` > stored ``customModelName`` > ``OPENAI_MODEL``.
+ * Priority: ``CODEV_MODEL`` > active endpoint's ``modelName`` > legacy ``customModelName`` > ``OPENAI_MODEL``.
  */
 export function getCustomModelName(): string | undefined {
   const override = getCodevEnvModel()
   if (override) return override
-  try {
-    const config = getGlobalConfigSnapshot()
-    if (config.customModelName) return config.customModelName
-  } catch {
-    // Ignore
-  }
+  const config = getGlobalConfigSnapshot()
+  const endpoints = config.customEndpoints ?? []
+  const idx = config.currentCustomEndpointIndex ?? 0
+  if (endpoints[idx]?.modelName) return endpoints[idx].modelName
+  if (config.customModelName) return config.customModelName
   return getEnvCustomModel()
 }
 
