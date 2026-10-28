@@ -32,6 +32,14 @@ export function getNineRouterModelMaxOutput(modelId: string): number | undefined
   return maxOutputs.get(normalizeModelId(modelId))
 }
 
+/** Reset module-level caches for test isolation. */
+export function resetNineRouterModelsForTests(): void {
+  cache = []
+  contextWindows.clear()
+  maxOutputs.clear()
+  fetching = undefined
+}
+
 export async function fetchNineRouterModels(): Promise<ModelOption[]> {
   if (fetching) return fetching
   fetching = (async () => {

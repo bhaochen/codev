@@ -1181,6 +1181,9 @@ export function getGlobalConfig(): GlobalConfig {
 
 /** Read the persisted global config during early startup, before config gates open. */
 export function getGlobalConfigSnapshot(): GlobalConfig {
+  // In test mode, always return the in-memory test config so tests are
+  // isolated from the on-disk database state that other tests may mutate.
+  if (process.env.NODE_ENV === 'test') return TEST_GLOBAL_CONFIG_FOR_TESTING
   try {
     const content = readGlobalConfigFromDatabase(getGlobalClaudeFile())
     if (content) {

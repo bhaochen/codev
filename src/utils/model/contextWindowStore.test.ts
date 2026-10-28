@@ -8,6 +8,7 @@ import {
   recordProviderContextWindows,
   resetContextWindowStoreForTests,
 } from './contextWindowStore.js'
+import { resetNineRouterModelsForTests } from './nineRouterModels.js'
 import { getContextWindowForModel } from '../context.js'
 import { resetSettingsCache } from '../settings/settingsCache.js'
 
@@ -19,6 +20,7 @@ describe('provider context window store', () => {
 
   afterEach(async () => {
     resetContextWindowStoreForTests()
+    resetNineRouterModelsForTests()
     if (previousConfigDir === undefined) {
       delete process.env.CLAUDE_CONFIG_DIR
     } else {

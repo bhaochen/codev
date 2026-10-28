@@ -334,7 +334,9 @@ export function getCustomBaseUrl(): string | undefined {
 
 export function isCustomConfigured(): boolean {
   if (getCodevEnvBaseUrl()) return true
-  return getCustomEndpoints().length > 0
+  if (getCustomEndpoints().length > 0) return true
+  // Fallback to generic OPENAI_* env vars
+  return Boolean(getEnvCustomBaseUrl())
 }
 
 export function getCustomApiConfig(): { baseUrl: string | null; modelName: string | null; apiKey: string | null } {

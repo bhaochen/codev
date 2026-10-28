@@ -6,6 +6,7 @@ import {
   getCustomModelName,
   getEnvCustomBaseUrl,
   isCustomConfigured,
+  clearStoredProviderCache,
 } from './providers.js'
 import { getCustomApiConfig } from '../auth.js'
 
@@ -20,6 +21,8 @@ const ENV_KEYS = [
 
 afterEach(() => {
   for (const key of ENV_KEYS) delete process.env[key]
+  // Clear provider cache to avoid cross-test pollution
+  clearStoredProviderCache()
 })
 
 describe('custom provider env overrides', () => {
