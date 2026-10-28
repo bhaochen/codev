@@ -49,6 +49,7 @@ export async function fetchCustomModels(): Promise<ModelOption[]> {
           context_length?: number
           max_completion_tokens?: number
           capabilities?: { contextWindow?: number; maxOutput?: number }
+          meta?: { n_ctx?: number }
         }>
       }
       const entries: Array<{ id: string; contextWindow: number }> = []
