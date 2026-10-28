@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { Box, Text, useInput } from '../../ink.js'
-import { Dialog } from '../../components/design-system/Dialog.js'
+import { Pane } from '../../components/design-system/Pane.js'
+import { useKeybinding } from '../../keybindings/useKeybinding.js'
 import TextInput from '../../components/TextInput.js'
 import { useTerminalSize } from '../../hooks/useTerminalSize.js'
 import type { LocalJSXCommandCall } from '../../types/command.js'
@@ -90,14 +91,26 @@ function LoginScreen({
     if (activeIdx >= 0 && cursor !== activeIdx) setCursor(activeIdx)
   }, [endpoints])
 
-  // List: ↑↓ navigate, Enter edit/add, a add, d delete
+  // ── LIST SCREEN ─────────────────────────────────────────────────────────
+  // Use Pane (no built-in confirm:yes) so Enter reaches our useInput handler
+  useKeybinding('confirm:no', () => onDone('Login cancelled'), { context: 'Confirmation' })
   useInput(
-    (input: string, key: { upArrow: boolean; downArrow: boolean }) => {
+    (input: string, key: { upArrow: boolean; downArrow: boolean; return: boolean }) => {
       if (phase !== 'list') return
       if (key.upArrow && cursor > 0) setCursor(c => c - 1)
       else if (key.downArrow && cursor < endpoints.length - 1) setCursor(c => c + 1)
-      else if (input === 'a') {
-        // Start adding new endpoint
+      else if (key.return) {
+        // Enter: edit selected or add if empty
+        if (endpoints[cursor]) {
+          startEdit(endpoints[cursor])
+        } else {
+          // No endpoints — go straight to add form
+          setFormValues({ baseUrl: '', apiKey: '', modelName: '' })
+          setFormIndex(0)
+          setFormStatus('editing')
+          setPhase('edit-new')
+        }
+      } else if (input === 'a') {
         setFormValues({ baseUrl: '', apiKey: '', modelName: '' })
         setFormIndex(0)
         setFormStatus('editing')
@@ -153,7 +166,6 @@ function LoginScreen({
     try {
       await saveCustomApiConfig(baseUrl, modelName, apiKey || undefined)
       clearStoredProviderCache()
-      // After saving, return to list — the new endpoint becomes active
       refreshEndpoints()
       setPhase('list')
       setFormStatus('editing')
@@ -167,12 +179,14 @@ function LoginScreen({
 
   const isEditing = phase.startsWith('edit-')
   const editingId = isEditing ? phase.slice(5) : null
+  const editingEp = endpoints.find(e => e.id === editingId)
 
-  // ── LIST screen ──────────────────────────────────────────────────────────
+  // ── LIST VIEW (Pane — no built-in confirm:yes to avoid Enter interception) ──
   if (phase === 'list') {
     return (
-      <Dialog title="Custom Endpoints" onCancel={() => onDone('Login cancelled')}>
+      <Pane color="permission">
         <Box flexDirection="column" gap={1}>
+          <Text bold dimColor>Custom Endpoints</Text>
           {endpoints.length === 0 ? (
             <Text dimColor>No endpoints configured. Press a to add one.</Text>
           ) : (
@@ -200,23 +214,18 @@ function LoginScreen({
             <Text dimColor>done</Text>
           </Box>
         </Box>
-      </Dialog>
+      </Pane>
     )
   }
 
-  // ── EDIT form ────────────────────────────────────────────────────────────
+  // ── EDIT FORM (Dialog with isCancelActive=false so Enter reaches TextInput) ──
   const isAdding = phase === 'edit-new'
-  const editingEp = endpoints.find(e => e.id === editingId)
 
   return (
-    <Dialog
-      title={isAdding ? 'Add Endpoint' : 'Edit Endpoint'}
-      onCancel={() => { setPhase('list'); setFormStatus('editing') }}
-      isCancelActive={formStatus === 'editing'}
-    >
+    <Pane color="permission">
       <Box flexDirection="column" gap={1}>
-        <Text bold>
-          {isAdding ? 'New endpoint' : `Editing: ${editingEp?.baseUrl ?? ''}`}
+        <Text bold dimColor>
+          {isAdding ? 'Add Endpoint' : `Edit: ${editingEp?.baseUrl ?? ''}`}
         </Text>
         {FIELDS.map((item, itemIndex) => (
           <Box key={item.key} flexDirection="column">
@@ -255,7 +264,7 @@ function LoginScreen({
               : 'Esc to cancel'}
         </Text>
       </Box>
-    </Dialog>
+    </Pane>
   )
 }
 
