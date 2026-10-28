@@ -302,6 +302,7 @@ export const call: LocalJSXCommandCall = async (onDone, context) => {
   }
 
   const handleAddDone = (message: string) => {
+    context.onChangeAPIKey()
     refreshEndpoints()
     onDone(message)
   }
