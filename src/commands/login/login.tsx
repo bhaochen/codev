@@ -1,17 +1,18 @@
 import * as React from 'react'
 import { Box, Text, useInput } from '../../ink.js'
-import { Pane } from '../../components/design-system/Pane.js'
-import { useKeybinding } from '../../keybindings/useKeybinding.js'
+import { Dialog } from '../../components/design-system/Dialog.js'
 import TextInput from '../../components/TextInput.js'
 import { useTerminalSize } from '../../hooks/useTerminalSize.js'
 import type { LocalJSXCommandCall } from '../../types/command.js'
-import { getCustomEndpoints } from '../../utils/model/providers.js'
+import {
+  getCustomEndpoints,
+  clearStoredProviderCache,
+} from '../../utils/model/providers.js'
 import {
   saveCustomApiConfig,
   removeCustomEndpoint,
   setActiveCustomEndpointIndex,
 } from '../../utils/auth.js'
-import { clearStoredProviderCache } from '../../utils/model/providers.js'
 
 type FieldKey = 'baseUrl' | 'apiKey' | 'modelName'
 
@@ -34,209 +35,32 @@ async function verifyEndpoint(baseUrl: string, apiKey: string): Promise<void> {
 
 type EndpointItem = { id: string; baseUrl: string; apiKey: string | null; modelName: string | null; active: boolean }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Endpoint list screen
-// ─────────────────────────────────────────────────────────────────────────────
-function EndpointListScreen({
-  endpoints,
-  onSelect,
-  onAdd,
-  onDelete,
-  onCancel,
-}: {
-  endpoints: EndpointItem[]
-  onSelect: (id: string) => void
-  onAdd: () => void
-  onDelete: (id: string) => void
-  onCancel: () => void
-}): React.ReactNode {
-  const [cursor, setCursor] = React.useState(0)
-  const activeIdx = endpoints.findIndex(e => e.active)
-
-  // Sync cursor to active endpoint on mount
-  React.useEffect(() => {
-    if (activeIdx >= 0 && cursor !== activeIdx) setCursor(activeIdx)
-  }, []) // only on mount
-
-  // Top-level useInput — must NOT be inside useEffect
-  useInput(
-    (_input: string, key: { upArrow: boolean; downArrow: boolean; return: boolean }) => {
-      if (key.upArrow && cursor > 0) setCursor(c => c - 1)
-      else if (key.downArrow && cursor < endpoints.length - 1) setCursor(c => c + 1)
-      else if (key.return) onSelect(endpoints[cursor]?.id)
-    },
-    { isActive: true },
-  )
-
-  // Top-level useKeybinding for ESC
-  useKeybinding('confirm:no', onCancel, { context: 'Confirmation' })
-
-  return (
-    <Pane>
-      <Box flexDirection="column" gap={1}>
-        <Text bold dimColor>OpenAI-compatible endpoints</Text>
-        {endpoints.length === 0 ? (
-          <Text dimColor>No endpoints configured.</Text>
-        ) : (
-          endpoints.map((ep, i) => (
-            <Box key={ep.id} flexDirection="column">
-              <Text color={ep.active ? 'green' : i === cursor ? 'white' : 'gray'}>
-                {ep.active ? '▶ ' : i === cursor ? '► ' : '  '}
-                {i + 1}. {ep.baseUrl}
-                {ep.modelName ? `  model: ${ep.modelName}` : ''}
-              </Text>
-              {ep.apiKey && <Text dimColor indent={2}>key: {'*'.repeat(ep.apiKey.length)}</Text>}
-            </Box>
-          ))
-        )}
-        <Box flexDirection="row" gap={1}>
-          <Text color="cyan">↑↓</Text>
-          <Text dimColor>select  </Text>
-          <Text color="cyan">Enter</Text>
-          <Text dimColor>activate  </Text>
-          <Text color="cyan">a</Text>
-          <Text dimColor>add  </Text>
-          <Text color="red">d</Text>
-          <Text dimColor>delete  </Text>
-          <Text color="cyan">Esc</Text>
-          <Text dimColor>done</Text>
-        </Box>
-      </Box>
-    </Pane>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Add endpoint form
-// ─────────────────────────────────────────────────────────────────────────────
-function LoginForm({
+/**
+ * Single component that manages both the endpoint list and the add-form.
+ * Uses Dialog (which handles its own confirm:no / Esc keybinding) with
+ * isCancelActive toggled when the form is active, so the form's TextInput
+ * gets focus while the list screen keeps its own useInput for arrows/Enter.
+ */
+function LoginScreen({
   onDone,
-  onCancel,
 }: {
   onDone: (message: string) => void
-  onCancel: () => void
 }): React.ReactNode {
   const { columns } = useTerminalSize()
-  const [index, setIndex] = React.useState(0)
-  const [values, setValues] = React.useState<Record<FieldKey, string>>({
+  const [endpoints, setEndpoints] = React.useState<EndpointItem[]>([])
+  const [phase, setPhase] = React.useState<'list' | 'add'>('list')
+  const [formIndex, setFormIndex] = React.useState(0)
+  const [formValues, setFormValues] = React.useState<Record<FieldKey, string>>({
     baseUrl: '', apiKey: '', modelName: '',
   })
-  const [cursorOffset, setCursorOffset] = React.useState(0)
-  const [status, setStatus] = React.useState<'editing' | 'saving' | 'error'>('editing')
-  const [notice, setNotice] = React.useState('')
-  const [error, setError] = React.useState('')
+  const [formCursorOffset, setFormCursorOffset] = React.useState(0)
+  const [formStatus, setFormStatus] = React.useState<'editing' | 'saving' | 'error'>('editing')
+  const [formNotice, setFormNotice] = React.useState('')
+  const [formError, setFormError] = React.useState('')
+  // Cursor position in the list (for ↑↓ navigation)
+  const [cursor, setCursor] = React.useState(0)
 
-  const field = FIELDS[index]
-
-  const submit = React.useCallback(
-    async (vals: Record<FieldKey, string>) => {
-      const baseUrl = vals.baseUrl.trim()
-      const apiKey = vals.apiKey.trim()
-      const modelName = vals.modelName.trim()
-
-      if (!baseUrl) {
-        setStatus('error')
-        setError('API Base URL is required')
-        setIndex(0)
-        return
-      }
-
-      setStatus('saving')
-      setError('')
-      setNotice('')
-
-      let noticeText = ''
-      try {
-        await verifyEndpoint(baseUrl, apiKey)
-      } catch (err) {
-        noticeText = `Saved without verification (${err instanceof Error ? err.message : 'unknown'})`
-      }
-
-      try {
-        await saveCustomApiConfig(baseUrl, modelName, apiKey || undefined)
-        clearStoredProviderCache()
-        onDone(
-          `Configured: ${baseUrl}${modelName ? ` (model: ${modelName})` : ''}${
-            noticeText ? ` · ${noticeText}` : ''
-          }`,
-        )
-      } catch (saveError) {
-        setStatus('error')
-        setError(saveError instanceof Error ? saveError.message : String(saveError))
-      }
-    },
-    [onDone],
-  )
-
-  const handleFieldSubmit = (value: string) => {
-    const next = { ...values, [field.key]: value }
-    setValues(next)
-    if (index < FIELDS.length - 1) {
-      setIndex(index + 1)
-      setCursorOffset(0)
-    } else {
-      void submit(next)
-    }
-  }
-
-  // ESC to cancel
-  useKeybinding('confirm:no', onCancel, { context: 'Confirmation' })
-
-  return (
-    <Pane>
-      <Box flexDirection="column" gap={1}>
-        <Text bold>OpenAI-compatible endpoint</Text>
-        <Text dimColor>
-          Any OpenAI Chat Completions API (vLLM, llama.cpp, 9router, OpenRouter, …).
-        </Text>
-        {FIELDS.map((item, itemIndex) => (
-          <Box key={item.key} flexDirection="column">
-            <Text dimColor={itemIndex !== index}>{item.label}</Text>
-            {itemIndex === index && status === 'editing' ? (
-              <TextInput
-                value={values[item.key]}
-                onChange={v => setValues(prev => ({ ...prev, [item.key]: v }))}
-                onChangeCursorOffset={setCursorOffset}
-                onSubmit={handleFieldSubmit}
-                onExit={onCancel}
-                placeholder={item.placeholder}
-                mask={item.mask}
-                columns={columns}
-                cursorOffset={cursorOffset}
-                showCursor
-                focus
-              />
-            ) : (
-              <Text>
-                {item.mask && values[item.key]
-                  ? item.mask.repeat(values[item.key].length)
-                  : values[item.key] || '(not set)'}
-              </Text>
-            )}
-          </Box>
-        ))}
-        {status === 'saving' && <Text color="warning">Verifying connection...</Text>}
-        {error && <Text color="error">{error}</Text>}
-        {notice && <Text dimColor>{notice}</Text>}
-        <Text dimColor>
-          {status === 'editing'
-            ? 'Enter to confirm · Esc to cancel'
-            : status === 'saving'
-              ? 'Please wait...'
-              : 'Esc to cancel'}
-        </Text>
-      </Box>
-    </Pane>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Command entry point
-// ─────────────────────────────────────────────────────────────────────────────
-export const call: LocalJSXCommandCall = async (onDone, context) => {
-  const [phase, setPhase] = React.useState<'list' | 'add'>('list')
-  const [endpoints, setEndpoints] = React.useState<EndpointItem[]>([])
-
+  // Load endpoints from config
   const refreshEndpoints = React.useCallback(() => {
     try {
       const eps = getCustomEndpoints()
@@ -261,37 +85,182 @@ export const call: LocalJSXCommandCall = async (onDone, context) => {
     refreshEndpoints()
   }, [])
 
-  const handleSelect = async (id: string) => {
-    const idx = endpoints.findIndex(e => e.id === id)
-    if (idx >= 0) {
-      await setActiveCustomEndpointIndex(idx)
-      refreshEndpoints()
+  // Sync cursor to active endpoint on mount / when endpoints change
+  React.useEffect(() => {
+    const activeIdx = endpoints.findIndex(e => e.active)
+    if (activeIdx >= 0 && cursor !== activeIdx) setCursor(activeIdx)
+  }, [endpoints])
+
+  // List screen key bindings (↑↓ Enter)
+  useInput(
+    (_input: string, key: { upArrow: boolean; downArrow: boolean; return: boolean }) => {
+      if (phase !== 'list') return
+      if (key.upArrow && cursor > 0) setCursor(c => c - 1)
+      else if (key.downArrow && cursor < endpoints.length - 1) setCursor(c => c + 1)
+      else if (key.return && endpoints[cursor]) {
+        const id = endpoints[cursor].id
+        const idx = endpoints.findIndex(e => e.id === id)
+        if (idx >= 0) {
+          void setActiveCustomEndpointIndex(idx).then(refreshEndpoints)
+        }
+      }
+    },
+    { isActive: phase === 'list' },
+  )
+
+  const handleSubmit = async (vals: Record<FieldKey, string>) => {
+    const baseUrl = vals.baseUrl.trim()
+    const apiKey = vals.apiKey.trim()
+    const modelName = vals.modelName.trim()
+
+    if (!baseUrl) {
+      setFormStatus('error')
+      setFormError('API Base URL is required')
+      setFormIndex(0)
+      return
+    }
+
+    setFormStatus('saving')
+    setFormError('')
+    setFormNotice('')
+
+    let noticeText = ''
+    try {
+      await verifyEndpoint(baseUrl, apiKey)
+    } catch (err) {
+      noticeText = `Saved without verification (${err instanceof Error ? err.message : 'unknown'})`
+    }
+
+    try {
+      await saveCustomApiConfig(baseUrl, modelName, apiKey || undefined)
+      clearStoredProviderCache()
+      onDone(
+        `Configured: ${baseUrl}${modelName ? ` (model: ${modelName})` : ''}${
+          noticeText ? ` · ${noticeText}` : ''
+        }`,
+      )
+    } catch (saveError) {
+      setFormStatus('error')
+      setFormError(saveError instanceof Error ? saveError.message : String(saveError))
     }
   }
 
+  const handleFieldSubmit = (value: string) => {
+    const next = { ...formValues, [FIELDS[formIndex].key]: value }
+    setFormValues(next)
+    if (formIndex < FIELDS.length - 1) {
+      setFormIndex(formIndex + 1)
+      setFormCursorOffset(0)
+    } else {
+      void handleSubmit(next)
+    }
+  }
+
+  const handleAdd = () => setPhase('add')
+  const handleBack = () => setPhase('list')
   const handleDelete = async (id: string) => {
     await removeCustomEndpoint(id)
     refreshEndpoints()
   }
 
-  const handleAddDone = (message: string) => {
-    context.onChangeAPIKey()
-    refreshEndpoints()
-    onDone(message)
+  if (phase === 'list') {
+    return (
+      <Dialog title="Configure Custom Endpoints" onCancel={() => onDone('Login cancelled')}>
+        <Box flexDirection="column" gap={1}>
+          <Text bold dimColor>OpenAI-compatible endpoints</Text>
+          {endpoints.length === 0 ? (
+            <Text dimColor>No endpoints configured.</Text>
+          ) : (
+            endpoints.map((ep, i) => (
+              <Box key={ep.id} flexDirection="column">
+                <Text color={ep.active ? 'green' : i === cursor ? 'white' : 'gray'}>
+                  {ep.active ? '▶ ' : i === cursor ? '► ' : '  '}
+                  {i + 1}. {ep.baseUrl}
+                  {ep.modelName ? `  model: ${ep.modelName}` : ''}
+                </Text>
+                {ep.apiKey && <Text dimColor indent={2}>key: {'*'.repeat(ep.apiKey.length)}</Text>}
+              </Box>
+            ))
+          )}
+          <Box flexDirection="row" gap={1}>
+            <Text color="cyan">↑↓</Text>
+            <Text dimColor>select  </Text>
+            <Text color="cyan">Enter</Text>
+            <Text dimColor>activate  </Text>
+            <Text color="cyan">a</Text>
+            <Text dimColor>add  </Text>
+            <Text color="red">d</Text>
+            <Text dimColor>delete  </Text>
+            <Text color="cyan">Esc</Text>
+            <Text dimColor>done</Text>
+          </Box>
+        </Box>
+      </Dialog>
+    )
   }
 
-  return phase === 'list' ? (
-    <EndpointListScreen
-      endpoints={endpoints}
-      onSelect={handleSelect}
-      onAdd={() => setPhase('add')}
-      onDelete={handleDelete}
-      onCancel={() => onDone('Login cancelled')}
-    />
-  ) : (
-    <LoginForm
-      onDone={handleAddDone}
-      onCancel={() => setPhase('list')}
+  // ── Add endpoint form ────────────────────────────────────────────────────
+  const field = FIELDS[formIndex]
+
+  return (
+    <Dialog
+      title="Add Endpoint"
+      onCancel={handleBack}
+      isCancelActive={formStatus === 'editing'}
+    >
+      <Box flexDirection="column" gap={1}>
+        <Text bold>OpenAI-compatible endpoint</Text>
+        <Text dimColor>
+          Any OpenAI Chat Completions API (vLLM, llama.cpp, 9router, OpenRouter, …).
+        </Text>
+        {FIELDS.map((item, itemIndex) => (
+          <Box key={item.key} flexDirection="column">
+            <Text dimColor={itemIndex !== formIndex}>{item.label}</Text>
+            {itemIndex === formIndex && formStatus === 'editing' ? (
+              <TextInput
+                value={formValues[item.key]}
+                onChange={v => setFormValues(prev => ({ ...prev, [item.key]: v }))}
+                onChangeCursorOffset={setFormCursorOffset}
+                onSubmit={handleFieldSubmit}
+                onExit={handleBack}
+                placeholder={item.placeholder}
+                mask={item.mask}
+                columns={columns}
+                cursorOffset={formCursorOffset}
+                showCursor
+                focus
+              />
+            ) : (
+              <Text>
+                {item.mask && formValues[item.key]
+                  ? item.mask.repeat(formValues[item.key].length)
+                  : formValues[item.key] || '(not set)'}
+              </Text>
+            )}
+          </Box>
+        ))}
+        {formStatus === 'saving' && <Text color="warning">Verifying connection...</Text>}
+        {formError && <Text color="error">{formError}</Text>}
+        {formNotice && <Text dimColor>{formNotice}</Text>}
+        <Text dimColor>
+          {formStatus === 'editing'
+            ? 'Enter to confirm · Esc to cancel'
+            : formStatus === 'saving'
+              ? 'Please wait...'
+              : 'Esc to cancel'}
+        </Text>
+      </Box>
+    </Dialog>
+  )
+}
+
+export const call: LocalJSXCommandCall = async (onDone, context) => {
+  return (
+    <LoginScreen
+      onDone={message => {
+        context.onChangeAPIKey()
+        onDone(message)
+      }}
     />
   )
 }
