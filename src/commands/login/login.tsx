@@ -1,109 +1,201 @@
-import { c as _c } from "react/compiler-runtime";
-import * as React from 'react';
-import type { CommandResultDisplay } from '../../types/command.js';
-import { Box, Text } from '../../ink.js';
-import type { LocalJSXCommandCall } from '../../types/command.js';
-import { saveCustomApiConfig, getCustomApiConfig } from '../../utils/auth.js';
-import { getCustomBaseUrl, isCustomConfigured } from '../../utils/model/providers.js';
-import { clearStoredProviderCache } from '../../utils/model/providers.js';
+import * as React from 'react'
+import { Box, Text, useInput } from '../../ink.js'
+import { Dialog } from '../../components/design-system/Dialog.js'
+import TextInput from '../../components/TextInput.js'
+import { useTerminalSize } from '../../hooks/useTerminalSize.js'
+import type { LocalJSXCommandCall } from '../../types/command.js'
+import { getCustomApiConfig, saveCustomApiConfig } from '../../utils/auth.js'
+import { clearStoredProviderCache } from '../../utils/model/providers.js'
 
-type Step = 'select' | 'custom-config';
+type FieldKey = 'baseUrl' | 'apiKey' | 'modelName'
 
-function ProviderSelectScreen({ onDone }: { onDone: (result?: string, options?: { display?: CommandResultDisplay }) => void }) {
-  const $ = _c(8);
-  const providers = [
-    { id: 'openai', label: '9router (default)', description: 'Local gateway at localhost:20128' },
-    { id: 'openrouter', label: 'OpenRouter', description: 'OpenRouter.ai API' },
-    { id: 'local', label: 'Local (OpenAI-compatible)', description: 'Custom local endpoint' },
-    { id: 'custom', label: 'Custom OpenAI-compatible', description: 'Any OpenAI-compatible API (llama.cpp, vLLM, etc.)' },
-  ];
-
-  return React.createElement(Box, { flexDirection: 'column', paddingX: 2 },
-    React.createElement(Text, { bold: true }, 'Select API Provider'),
-    React.createElement(Box, { marginTop: 1 },
-      providers.map((p, i) =>
-        React.createElement(Box, { key: p.id, flexDirection: 'column', marginBottom: 1 },
-          React.createElement(Text, { color: 'cyan' }, `${i + 1}. ${p.label}`),
-          React.createElement(Text, { dimColor: true }, p.description)
-        )
-      )
-    )
-  );
+type FieldDef = {
+  key: FieldKey
+  label: string
+  placeholder: string
+  mask?: string
+  optional?: boolean
 }
 
-function CustomConfigScreen({ onDone }: { onDone: (result?: string, options?: { display?: CommandResultDisplay }) => void }) {
-  const $ = _c(16);
-  const [baseUrl, setBaseUrl] = React.useState('');
-  const [modelName, setModelName] = React.useState('');
-  const [apiKey, setApiKey] = React.useState('');
-  const [status, setStatus] = React.useState<'idle' | 'verifying' | 'success' | 'error'>('idle');
-  const [errorMsg, setErrorMsg] = React.useState('');
-  const [, forceUpdate] = React.useState(0);
+const FIELDS: FieldDef[] = [
+  {
+    key: 'baseUrl',
+    label: 'API Base URL',
+    placeholder: 'http://localhost:8080/v1',
+  },
+  {
+    key: 'apiKey',
+    label: 'API Key',
+    placeholder: 'press Enter to skip',
+    mask: '*',
+    optional: true,
+  },
+  {
+    key: 'modelName',
+    label: 'Model (optional)',
+    placeholder: 'press Enter to skip',
+    optional: true,
+  },
+]
 
-  async function verifyAndSave() {
-    if (!baseUrl.trim() || !modelName.trim()) return;
-    setStatus('verifying');
-    setErrorMsg('');
+/**
+ * Probe an OpenAI-compatible endpoint's ``/v1/models`` so obviously wrong
+ * URLs/keys fail fast. Best-effort: a failure is reported but never blocks
+ * saving, since many endpoints don't expose ``/v1/models``.
+ */
+async function verifyEndpoint(baseUrl: string, apiKey: string): Promise<void> {
+  const url = new URL(baseUrl)
+  const headers: Record<string, string> = {}
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`
+  const res = await fetch(`${url.origin}/v1/models`, {
+    headers,
+    signal: AbortSignal.timeout(10000),
+  })
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}: ${res.statusText}`)
+  }
+}
 
-    try {
-      const url = new URL(baseUrl);
-      const modelsUrl = url.origin + '/v1/models';
-      const headers: Record<string, string> = {};
-      if (apiKey.trim()) headers['Authorization'] = `Bearer ${apiKey.trim()}`;
+function LoginForm({
+  onDone,
+  onCancel,
+}: {
+  onDone: (message: string) => void
+  onCancel: () => void
+}): React.ReactNode {
+  const { columns } = useTerminalSize()
+  const existing = React.useMemo(() => getCustomApiConfig(), [])
+  const [index, setIndex] = React.useState(0)
+  const [values, setValues] = React.useState<Partial<Record<FieldKey, string>>>({
+    baseUrl: existing.baseUrl ?? '',
+    apiKey: existing.apiKey ?? '',
+    modelName: existing.modelName ?? '',
+  })
+  const [cursorOffset, setCursorOffset] = React.useState(0)
+  const [status, setStatus] = React.useState<'editing' | 'saving' | 'error'>('editing')
+  const [notice, setNotice] = React.useState('')
+  const [error, setError] = React.useState('')
 
-      const res = await fetch(modelsUrl, { headers, signal: AbortSignal.timeout(10000) });
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+  const field = FIELDS[index]
 
-      const json = (await res.json()) as { data?: Array<{ id: string }> };
-      const ids = (json.data ?? []).map(m => m.id);
-      if (ids.length === 0) throw new Error('No models returned from API');
+  const submit = React.useCallback(
+    async (vals: Partial<Record<FieldKey, string>>) => {
+      const baseUrl = (vals.baseUrl ?? '').trim()
+      const apiKey = (vals.apiKey ?? '').trim()
+      const modelName = (vals.modelName ?? '').trim()
 
-      await saveCustomApiConfig(baseUrl, modelName, apiKey || undefined);
-      clearStoredProviderCache();
-      setStatus('success');
-      setTimeout(() => onDone(`Custom API configured: ${modelName} @ ${baseUrl}`), 1000);
-    } catch (e) {
-      setStatus('error');
-      setErrorMsg(e instanceof Error ? e.message : 'Verification failed');
+      if (!baseUrl) {
+        setStatus('error')
+        setError('API Base URL is required')
+        setIndex(0)
+        return
+      }
+
+      setStatus('saving')
+      setError('')
+      setNotice('')
+
+      let noticeText = ''
+      try {
+        await verifyEndpoint(baseUrl, apiKey)
+      } catch (verifyError) {
+        noticeText = `Saved without verification (${
+          verifyError instanceof Error ? verifyError.message : 'unknown error'
+        })`
+      }
+
+      try {
+        await saveCustomApiConfig(baseUrl, modelName, apiKey || undefined)
+        clearStoredProviderCache()
+        onDone(
+          `Configured OpenAI-compatible endpoint: ${baseUrl}${modelName ? ` (model: ${modelName})` : ''}${
+            noticeText ? ` · ${noticeText}` : ''
+          }`,
+        )
+      } catch (saveError) {
+        setStatus('error')
+        setError(saveError instanceof Error ? saveError.message : String(saveError))
+      }
+    },
+    [onDone],
+  )
+
+  const handleFieldSubmit = (value: string) => {
+    const next = { ...values, [field.key]: value }
+    setValues(next)
+    if (index < FIELDS.length - 1) {
+      setIndex(index + 1)
+      setCursorOffset(0)
+    } else {
+      void submit(next)
     }
   }
 
-  return React.createElement(Box, { flexDirection: 'column', paddingX: 2 },
-    React.createElement(Text, { bold: true }, 'Configure Custom OpenAI-compatible API'),
-    React.createElement(Box, { marginTop: 1, flexDirection: 'column' },
-      React.createElement(Text, null, 'API Base URL (e.g. http://localhost:8080/v1):'),
-      React.createElement(Box, { marginTop: 1 },
-        React.createElement(Text, null, '> ' + baseUrl)
-      ),
-      React.createElement(Text, { marginTop: 1, dimColor: true }, 'Paste URL and press Enter to confirm')
-    ),
-    React.createElement(Box, { marginTop: 1, flexDirection: 'column' },
-      React.createElement(Text, null, 'Model Name:'),
-      React.createElement(Box, { marginTop: 1 },
-        React.createElement(Text, null, '> ' + modelName)
-      ),
-      React.createElement(Text, { marginTop: 1, dimColor: true }, 'Enter model ID (e.g. llama-3-8b)')
-    ),
-    React.createElement(Box, { marginTop: 1, flexDirection: 'column' },
-      React.createElement(Text, null, 'API Key (optional):'),
-      React.createElement(Box, { marginTop: 1 },
-        React.createElement(Text, null, '> ' + (apiKey ? '***' : '(none)'))
-      ),
-      React.createElement(Text, { marginTop: 1, dimColor: true }, 'Press Enter to skip')
-    ),
-    status === 'verifying' && React.createElement(Text, { marginTop: 1, color: 'yellow' }, 'Verifying connection...'),
-    status === 'success' && React.createElement(Text, { marginTop: 1, color: 'green' }, 'Connected! Saved.'),
-    status === 'error' && React.createElement(Text, { marginTop: 1, color: 'red' }, `Error: ${errorMsg}`),
-    React.createElement(Box, { marginTop: 1 },
-      React.createElement(Text, { dimColor: true }, 'Enter: verify | Esc: cancel')
-    )
-  );
+  useInput(
+    (_input, key) => {
+      if (key.escape) {
+        onCancel()
+      }
+    },
+    { isActive: status !== 'editing' },
+  )
+
+  return (
+    <Dialog title="Login" onCancel={onCancel} isCancelActive={false}>
+      <Box flexDirection="column" gap={1}>
+        <Text bold>OpenAI-compatible endpoint</Text>
+        <Text dimColor>
+          Any OpenAI Chat Completions API (9router, OpenRouter, vLLM, llama.cpp, …).
+        </Text>
+        {FIELDS.map((item, itemIndex) => (
+          <Box key={item.key} flexDirection="column">
+            <Text dimColor={itemIndex !== index}>{item.label}</Text>
+            {itemIndex === index && status === 'editing' ? (
+              <TextInput
+                value={values[item.key] ?? ''}
+                onChange={value => setValues(prev => ({ ...prev, [item.key]: value }))}
+                onChangeCursorOffset={setCursorOffset}
+                onSubmit={handleFieldSubmit}
+                onExit={onCancel}
+                placeholder={item.placeholder}
+                mask={item.mask}
+                columns={columns}
+                cursorOffset={cursorOffset}
+                showCursor
+                focus
+              />
+            ) : (
+              <Text>
+                {item.mask && values[item.key]
+                  ? item.mask.repeat((values[item.key] ?? '').length)
+                  : values[item.key] || <Text dimColor>(not set)</Text>}
+              </Text>
+            )}
+          </Box>
+        ))}
+        {status === 'saving' && <Text color="warning">Verifying connection...</Text>}
+        {error && <Text color="error">{error}</Text>}
+        {notice && <Text dimColor>{notice}</Text>}
+        <Text dimColor>
+          {status === 'editing'
+            ? 'Enter to confirm · Esc to cancel'
+            : status === 'saving'
+              ? 'Please wait...'
+              : 'Esc to cancel'}
+        </Text>
+      </Box>
+    </Dialog>
+  )
 }
 
-export const call: LocalJSXCommandCall = async (onDone, _context, args) => {
-  const [screen] = args;
-  if (screen === 'custom') {
-    return React.createElement(CustomConfigScreen, { onDone });
-  }
-  return React.createElement(ProviderSelectScreen, { onDone });
-};
+export const call: LocalJSXCommandCall = async (onDone, context) => {
+  return (
+    <LoginForm
+      onDone={message => {
+        context.onChangeAPIKey()
+        onDone(message)
+      }}
+      onCancel={() => onDone('Login cancelled')}
+    />
+  )
+}

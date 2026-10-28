@@ -26,6 +26,7 @@ import init from './commands/init.js'
 import initVerifiers from './commands/init-verifiers.js'
 import keybindings from './commands/keybindings/index.js'
 import installSlackApp from './commands/install-slack-app/index.js'
+import login from './commands/login/index.js'
 import breakCache from './commands/break-cache/index.js'
 import mcp from './commands/mcp/index.js'
 import mobile from './commands/mobile/index.js'
@@ -263,6 +264,7 @@ const COMMANDS = memoize((): Command[] => [
   init,
   keybindings,
   installSlackApp,
+  login,
   mcp,
   memory,
   mobile,

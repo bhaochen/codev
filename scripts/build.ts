@@ -55,6 +55,13 @@ const features = [...featureSet]
 
 const outfile = join(projectRoot, 'dist', 'codev')
 
+// Bun target for the compiled binary. ``bun`` compiles for the host, which
+// links against the host's glibc — a binary built on a new distro then
+// refuses to start on older images (e.g. debian bookworm in a Docker
+// sandbox). ``bun-linux-x64-baseline`` targets an older glibc so the
+// binary stays portable; override with CODEV_BUILD_TARGET.
+const buildTarget = process.env.CODEV_BUILD_TARGET ?? 'bun'
+
 // ──────────────────────────────────────────────────────────────────────────
 
 const buildTime = new Date().toISOString()
@@ -102,7 +109,7 @@ const cmd = [
   './src/entrypoints/cli.tsx',
   '--compile',
   '--target',
-  'bun',
+  buildTarget,
   '--format',
   'esm',
   '--outfile',

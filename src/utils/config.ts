@@ -1278,7 +1278,15 @@ function readEditableMcpServers(file: string): Record<string, McpServerConfig> |
 }
 
 function readGlobalConfigFromDatabase(file: string): string | null {
-  if (file !== getGlobalClaudeFile() || process.env.NODE_ENV === 'test' || !process.env.CODEV_DATA_DIR) {
+  // Require: correct logical path + not test + running inside the data directory
+  // that belongs to this global config file.
+  // Deriving the data-dir expectation from the file path avoids the need for
+  // a runtime CODEV_DATA_DIR env-var to be set — the binary writes directly
+  // into ~/.local/share/codev/ (or wherever the data dir lives) without one.
+  const expectedDataDir = dirname(getGlobalClaudeFile())
+  const actualDataDir = dirname(file)
+  const inDataDirContext = actualDataDir === expectedDataDir
+  if (file !== getGlobalClaudeFile() || process.env.NODE_ENV === 'test' || !inDataDirContext) {
     return null
   }
   try {

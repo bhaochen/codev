@@ -1,10 +1,9 @@
 import type { Command } from '../../commands.js'
-import { saveCustomApiConfig, getCustomApiConfig } from '../../utils/auth.js'
-import { getCustomBaseUrl, isCustomConfigured } from '../../utils/model/providers.js'
 
 export default {
   type: 'local-jsx',
   name: 'login',
-  description: 'Configure API provider (9router, OpenRouter, Local, Custom OpenAI-compatible, etc.)',
+  description:
+    'Configure an OpenAI-compatible API endpoint (base URL + optional API key)',
   load: () => import('./login.js'),
 } satisfies Command
