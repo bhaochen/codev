@@ -91,19 +91,13 @@ function LoginScreen({
     if (activeIdx >= 0 && cursor !== activeIdx) setCursor(activeIdx)
   }, [endpoints])
 
-  // List screen key bindings (↑↓ Enter a d)
+  // List screen key bindings (↑↓ a d) — Enter is handled by Dialog's built-in confirm:yes
   useInput(
-    (input: string, key: { upArrow: boolean; downArrow: boolean; return: boolean }) => {
+    (input: string, key: { upArrow: boolean; downArrow: boolean }) => {
       if (phase !== 'list') return
       if (key.upArrow && cursor > 0) setCursor(c => c - 1)
       else if (key.downArrow && cursor < endpoints.length - 1) setCursor(c => c + 1)
-      else if (key.return && endpoints[cursor]) {
-        const id = endpoints[cursor].id
-        const idx = endpoints.findIndex(e => e.id === id)
-        if (idx >= 0) {
-          void setActiveCustomEndpointIndex(idx).then(refreshEndpoints)
-        }
-      } else if (input === 'a') {
+      else if (input === 'a') {
         setPhase('add')
       } else if (input === 'd' && endpoints[cursor]) {
         void removeCustomEndpoint(endpoints[cursor].id).then(refreshEndpoints)
