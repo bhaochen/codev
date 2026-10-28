@@ -59,9 +59,12 @@ export async function fetchCustomModels(): Promise<ModelOption[]> {
         if (typeof model.id !== 'string' || model.id.length === 0) continue
         const id = model.id
         const contextWindow =
-          model.capabilities?.contextWindow ?? model.context_length
+          model.capabilities?.contextWindow
+          ?? model.context_length
+          ?? model.meta?.n_ctx
         const maxOutput =
-          model.capabilities?.maxOutput ?? model.max_completion_tokens
+          model.capabilities?.maxOutput
+          ?? model.max_completion_tokens
         if (typeof contextWindow === 'number' && contextWindow > 0) {
           nextWindows.set(normalizeModelId(id), Math.floor(contextWindow))
           entries.push({ id, contextWindow: Math.floor(contextWindow) })
