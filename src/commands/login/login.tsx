@@ -91,9 +91,9 @@ function LoginScreen({
     if (activeIdx >= 0 && cursor !== activeIdx) setCursor(activeIdx)
   }, [endpoints])
 
-  // List screen key bindings (↑↓ Enter)
+  // List screen key bindings (↑↓ Enter a d)
   useInput(
-    (_input: string, key: { upArrow: boolean; downArrow: boolean; return: boolean }) => {
+    (input: string, key: { upArrow: boolean; downArrow: boolean; return: boolean }) => {
       if (phase !== 'list') return
       if (key.upArrow && cursor > 0) setCursor(c => c - 1)
       else if (key.downArrow && cursor < endpoints.length - 1) setCursor(c => c + 1)
@@ -103,6 +103,10 @@ function LoginScreen({
         if (idx >= 0) {
           void setActiveCustomEndpointIndex(idx).then(refreshEndpoints)
         }
+      } else if (input === 'a') {
+        setPhase('add')
+      } else if (input === 'd' && endpoints[cursor]) {
+        void removeCustomEndpoint(endpoints[cursor].id).then(refreshEndpoints)
       }
     },
     { isActive: phase === 'list' },
