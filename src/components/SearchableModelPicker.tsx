@@ -255,22 +255,8 @@ export function SearchableModelPicker({
           const MAX_RETRIES = 5
 
           async function tryFetch(): Promise<void> {
-            const { getCustomBaseUrl } = await import('../utils/model/providers.js')
-            const { getCustomApiConfig } = await import('../utils/auth.js')
-            const baseUrl = getCustomBaseUrl()
-            const apiKey = getCustomApiConfig().apiKey
-            if (!baseUrl) return
-            const modelsUrl = baseUrl.replace(/\/$/, '') + '/v1/models'
-            const headers: Record<string, string> = {}
-            if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
-            const res = await fetch(modelsUrl, { headers, signal: AbortSignal.timeout(10_000) })
-            if (res.ok) {
-              const json = (await res.json()) as { data?: Array<{ id: string }> }
-              const ids = (json.data ?? []).map(m => m.id)
-              if (ids.length > 0 && mounted) {
-                setAppState(prev => ({ ...prev, authVersion: prev.authVersion + 1 }))
-              }
-            }
+            const { fetchCustomModels } = await import('../utils/model/customModels.js')
+            await fetchCustomModels()
           }
           void tryFetch()
 
@@ -279,11 +265,22 @@ export function SearchableModelPicker({
               if (pollTimer) clearInterval(pollTimer)
               return
             }
-            if (retryCount < MAX_RETRIES) {
-              retryCount++
-              void tryFetch()
+            try {
+              const { getCachedCustomModels } = await import('../utils/model/customModels.js')
+              if (getCachedCustomModels().length > 0) {
+                if (mounted) {
+                  setAppState(prev => ({ ...prev, authVersion: prev.authVersion + 1 }))
+                }
+                if (pollTimer) clearInterval(pollTimer)
+              } else if (retryCount < MAX_RETRIES) {
+                retryCount++
+                void tryFetch()
+              }
+            } catch (error) {
+              console.error('Error checking custom models cache:', error)
+              if (pollTimer) clearInterval(pollTimer)
             }
-          }, 5000)
+          }, 2000)
           setTimeout(() => {
             if (pollTimer && mounted) {
               clearInterval(pollTimer)

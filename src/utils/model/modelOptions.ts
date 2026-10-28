@@ -584,6 +584,22 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
     return [defaultOpt]
   }
 
+  // Custom OpenAI-compatible endpoint: fetch models from configured base URL
+  if (getAPIProvider() === 'custom') {
+    void import('./customModels.js').then(({ fetchCustomModels }) => {
+      void fetchCustomModels()
+    })
+
+    const { getCachedCustomModels } = require('./customModels.js')
+    const models = getCachedCustomModels()
+
+    if (models && models.length > 0) {
+      return [getDefaultOptionForUser(fastMode), ...models]
+    }
+
+    return [getDefaultOptionForUser(fastMode)]
+  }
+
   // OpenRouter API: Show all available models from OpenRouter
   if (getAPIProvider() === 'openrouter') {
     // Trigger background fetch of OpenRouter models (non-blocking)
