@@ -36,10 +36,10 @@ async function verifyEndpoint(baseUrl: string, apiKey: string): Promise<void> {
 type EndpointItem = { id: string; baseUrl: string; apiKey: string | null; modelName: string | null; active: boolean }
 
 /**
- * Single component that manages both the endpoint list and the add-form.
- * Uses Dialog (which handles its own confirm:no / Esc keybinding) with
- * isCancelActive toggled when the form is active, so the form's TextInput
- * gets focus while the list screen keeps its own useInput for arrows/Enter.
+ * Two-phase flow:
+ *   LIST  — show endpoints, ↑↓ navigate, Enter edits, a adds, d deletes
+ *   EDIT  — fill baseUrl → apiKey → modelName, each Enter advances,
+ *           final Enter saves and returns to LIST with new active
  */
 function LoginScreen({
   onDone,
@@ -48,7 +48,9 @@ function LoginScreen({
 }): React.ReactNode {
   const { columns } = useTerminalSize()
   const [endpoints, setEndpoints] = React.useState<EndpointItem[]>([])
-  const [phase, setPhase] = React.useState<'list' | 'add'>('list')
+  // 'list' or 'edit-{id}'
+  const [phase, setPhase] = React.useState<'list' | string>('list')
+  const [cursor, setCursor] = React.useState(0)
   const [formIndex, setFormIndex] = React.useState(0)
   const [formValues, setFormValues] = React.useState<Record<FieldKey, string>>({
     baseUrl: '', apiKey: '', modelName: '',
@@ -57,10 +59,7 @@ function LoginScreen({
   const [formStatus, setFormStatus] = React.useState<'editing' | 'saving' | 'error'>('editing')
   const [formNotice, setFormNotice] = React.useState('')
   const [formError, setFormError] = React.useState('')
-  // Cursor position in the list (for ↑↓ navigation)
-  const [cursor, setCursor] = React.useState(0)
 
-  // Load endpoints from config
   const refreshEndpoints = React.useCallback(() => {
     try {
       const eps = getCustomEndpoints()
@@ -85,26 +84,48 @@ function LoginScreen({
     refreshEndpoints()
   }, [])
 
-  // Sync cursor to active endpoint on mount / when endpoints change
+  // Sync cursor to active endpoint on mount
   React.useEffect(() => {
     const activeIdx = endpoints.findIndex(e => e.active)
     if (activeIdx >= 0 && cursor !== activeIdx) setCursor(activeIdx)
   }, [endpoints])
 
-  // List screen key bindings (↑↓ a d) — Enter is handled by Dialog's built-in confirm:yes
+  // List: ↑↓ navigate, Enter edit/add, a add, d delete
   useInput(
     (input: string, key: { upArrow: boolean; downArrow: boolean }) => {
       if (phase !== 'list') return
       if (key.upArrow && cursor > 0) setCursor(c => c - 1)
       else if (key.downArrow && cursor < endpoints.length - 1) setCursor(c => c + 1)
       else if (input === 'a') {
-        setPhase('add')
+        // Start adding new endpoint
+        setFormValues({ baseUrl: '', apiKey: '', modelName: '' })
+        setFormIndex(0)
+        setFormStatus('editing')
+        setPhase('edit-new')
       } else if (input === 'd' && endpoints[cursor]) {
         void removeCustomEndpoint(endpoints[cursor].id).then(refreshEndpoints)
       }
     },
     { isActive: phase === 'list' },
   )
+
+  const startEdit = (ep: EndpointItem) => {
+    setFormValues({ baseUrl: ep.baseUrl, apiKey: ep.apiKey ?? '', modelName: ep.modelName ?? '' })
+    setFormIndex(0)
+    setFormStatus('editing')
+    setPhase(`edit-${ep.id}`)
+  }
+
+  const handleFieldSubmit = (value: string) => {
+    const next = { ...formValues, [FIELDS[formIndex].key]: value }
+    setFormValues(next)
+    if (formIndex < FIELDS.length - 1) {
+      setFormIndex(formIndex + 1)
+      setFormCursorOffset(0)
+    } else {
+      void handleSubmit(next)
+    }
+  }
 
   const handleSubmit = async (vals: Record<FieldKey, string>) => {
     const baseUrl = vals.baseUrl.trim()
@@ -132,48 +153,34 @@ function LoginScreen({
     try {
       await saveCustomApiConfig(baseUrl, modelName, apiKey || undefined)
       clearStoredProviderCache()
-      onDone(
-        `Configured: ${baseUrl}${modelName ? ` (model: ${modelName})` : ''}${
-          noticeText ? ` · ${noticeText}` : ''
-        }`,
-      )
+      // After saving, return to list — the new endpoint becomes active
+      refreshEndpoints()
+      setPhase('list')
+      setFormStatus('editing')
+      setFormValues({ baseUrl: '', apiKey: '', modelName: '' })
+      setFormIndex(0)
     } catch (saveError) {
       setFormStatus('error')
       setFormError(saveError instanceof Error ? saveError.message : String(saveError))
     }
   }
 
-  const handleFieldSubmit = (value: string) => {
-    const next = { ...formValues, [FIELDS[formIndex].key]: value }
-    setFormValues(next)
-    if (formIndex < FIELDS.length - 1) {
-      setFormIndex(formIndex + 1)
-      setFormCursorOffset(0)
-    } else {
-      void handleSubmit(next)
-    }
-  }
+  const isEditing = phase.startsWith('edit-')
+  const editingId = isEditing ? phase.slice(5) : null
 
-  const handleAdd = () => setPhase('add')
-  const handleBack = () => setPhase('list')
-  const handleDelete = async (id: string) => {
-    await removeCustomEndpoint(id)
-    refreshEndpoints()
-  }
-
+  // ── LIST screen ──────────────────────────────────────────────────────────
   if (phase === 'list') {
     return (
-      <Dialog title="Configure Custom Endpoints" onCancel={() => onDone('Login cancelled')}>
+      <Dialog title="Custom Endpoints" onCancel={() => onDone('Login cancelled')}>
         <Box flexDirection="column" gap={1}>
-          <Text bold dimColor>OpenAI-compatible endpoints</Text>
           {endpoints.length === 0 ? (
-            <Text dimColor>No endpoints configured.</Text>
+            <Text dimColor>No endpoints configured. Press a to add one.</Text>
           ) : (
             endpoints.map((ep, i) => (
               <Box key={ep.id} flexDirection="column">
                 <Text color={ep.active ? 'green' : i === cursor ? 'white' : 'gray'}>
-                  {ep.active ? '▶ ' : i === cursor ? '► ' : '  '}
-                  {i + 1}. {ep.baseUrl}
+                  {ep.active ? '● ' : i === cursor ? '» ' : '  '}
+                  {ep.baseUrl}
                   {ep.modelName ? `  model: ${ep.modelName}` : ''}
                 </Text>
                 {ep.apiKey && <Text dimColor indent={2}>key: {'*'.repeat(ep.apiKey.length)}</Text>}
@@ -182,9 +189,9 @@ function LoginScreen({
           )}
           <Box flexDirection="row" gap={1}>
             <Text color="cyan">↑↓</Text>
-            <Text dimColor>select  </Text>
+            <Text dimColor>nav  </Text>
             <Text color="cyan">Enter</Text>
-            <Text dimColor>activate  </Text>
+            <Text dimColor>edit  </Text>
             <Text color="cyan">a</Text>
             <Text dimColor>add  </Text>
             <Text color="red">d</Text>
@@ -197,19 +204,19 @@ function LoginScreen({
     )
   }
 
-  // ── Add endpoint form ────────────────────────────────────────────────────
-  const field = FIELDS[formIndex]
+  // ── EDIT form ────────────────────────────────────────────────────────────
+  const isAdding = phase === 'edit-new'
+  const editingEp = endpoints.find(e => e.id === editingId)
 
   return (
     <Dialog
-      title="Add Endpoint"
-      onCancel={handleBack}
+      title={isAdding ? 'Add Endpoint' : 'Edit Endpoint'}
+      onCancel={() => { setPhase('list'); setFormStatus('editing') }}
       isCancelActive={formStatus === 'editing'}
     >
       <Box flexDirection="column" gap={1}>
-        <Text bold>OpenAI-compatible endpoint</Text>
-        <Text dimColor>
-          Any OpenAI Chat Completions API (vLLM, llama.cpp, 9router, OpenRouter, …).
+        <Text bold>
+          {isAdding ? 'New endpoint' : `Editing: ${editingEp?.baseUrl ?? ''}`}
         </Text>
         {FIELDS.map((item, itemIndex) => (
           <Box key={item.key} flexDirection="column">
@@ -220,7 +227,7 @@ function LoginScreen({
                 onChange={v => setFormValues(prev => ({ ...prev, [item.key]: v }))}
                 onChangeCursorOffset={setFormCursorOffset}
                 onSubmit={handleFieldSubmit}
-                onExit={handleBack}
+                onExit={() => { setPhase('list'); setFormStatus('editing') }}
                 placeholder={item.placeholder}
                 mask={item.mask}
                 columns={columns}
