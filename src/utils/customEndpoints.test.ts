@@ -2,9 +2,14 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import {
   getCustomApiConfig,
   saveCustomApiConfig,
+  toggleCustomEndpointEnabled,
 } from './auth.js'
 import { getGlobalConfigSnapshot, normalizeCustomEndpoints } from './config.js'
-import { getCustomEndpoints } from './model/providers.js'
+import {
+  getActiveCustomEndpoints,
+  getChatCompletionsUrl,
+  getCustomEndpoints,
+} from './model/providers.js'
 
 // customEndpoints persisted by an older writer as a JSON string instead of
 // an array — this is the shape that made /login crash with
@@ -124,5 +129,45 @@ describe('reading a config whose customEndpoints is a string', () => {
     const stored = getGlobalConfigSnapshot().customEndpoints
     expect(stored).toHaveLength(2)
     expect(stored?.[1].baseUrl).toBe('http://127.0.0.1:20128/v1')
+  })
+})
+
+describe('per-endpoint activation', () => {
+  const originalEndpoints = getGlobalConfigSnapshot().customEndpoints
+
+  afterEach(() => {
+    setStoredEndpoints(originalEndpoints)
+  })
+
+  test('endpoints without an enabled flag count as active', () => {
+    setStoredEndpoints([
+      { id: 'a', baseUrl: 'http://a/v1' },
+      { id: 'b', baseUrl: 'http://b/v1', enabled: false },
+    ])
+    expect(getActiveCustomEndpoints().map(e => e.id)).toEqual(['a'])
+    expect(getCustomEndpoints()).toHaveLength(2)
+  })
+
+  test('toggleCustomEndpointEnabled flips the flag and back', async () => {
+    setStoredEndpoints([
+      { id: 'a', baseUrl: 'http://a/v1' },
+      { id: 'b', baseUrl: 'http://b/v1' },
+    ])
+    expect(await toggleCustomEndpointEnabled('a')).toBe(false)
+    expect(getActiveCustomEndpoints().map(e => e.id)).toEqual(['b'])
+    expect(await toggleCustomEndpointEnabled('a')).toBe(true)
+    expect(getActiveCustomEndpoints().map(e => e.id)).toEqual(['a', 'b'])
+  })
+
+  test('getChatCompletionsUrl follows the /v1 convention', () => {
+    expect(getChatCompletionsUrl('http://a:8080/v1')).toBe(
+      'http://a:8080/v1/chat/completions',
+    )
+    expect(getChatCompletionsUrl('http://a:8080')).toBe(
+      'http://a:8080/v1/chat/completions',
+    )
+    expect(getChatCompletionsUrl('https://host/api/v1/')).toBe(
+      'https://host/api/v1/chat/completions',
+    )
   })
 })

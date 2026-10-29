@@ -78,6 +78,8 @@ export type CustomEndpoint = {
   baseUrl: string
   apiKey?: string
   modelName?: string
+  /** Endpoints default to enabled; `enabled: false` hides it from /model. */
+  enabled?: boolean
 }
 
 function isCanonicalCustomEndpoint(entry: unknown): boolean {
@@ -89,7 +91,8 @@ function isCanonicalCustomEndpoint(entry: unknown): boolean {
     typeof ep.baseUrl === 'string' &&
     ep.baseUrl !== '' &&
     (ep.apiKey === undefined || typeof ep.apiKey === 'string') &&
-    (ep.modelName === undefined || typeof ep.modelName === 'string')
+    (ep.modelName === undefined || typeof ep.modelName === 'string') &&
+    (ep.enabled === undefined || typeof ep.enabled === 'boolean')
   )
 }
 
@@ -129,6 +132,7 @@ export function normalizeCustomEndpoints(value: unknown): CustomEndpoint[] {
       baseUrl: ep.baseUrl,
       apiKey: typeof ep.apiKey === 'string' ? ep.apiKey : undefined,
       modelName: typeof ep.modelName === 'string' ? ep.modelName : undefined,
+      enabled: typeof ep.enabled === 'boolean' ? ep.enabled : undefined,
     })
   }
   return result

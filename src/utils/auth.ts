@@ -326,8 +326,8 @@ export async function saveCustomApiConfig(baseUrl: string, modelName: string, ap
       updated[idx] = { ...updated[idx], modelName, apiKey: apiKey ?? undefined }
       return { ...current, customEndpoints: updated, currentCustomEndpointIndex: idx }
     }
-    // Add new endpoint and select it
-    const newEp = { id: `${Date.now()}`, baseUrl, modelName, apiKey: apiKey ?? undefined }
+    // Add new endpoint (enabled by default) and select it as primary
+    const newEp = { id: `${Date.now()}`, baseUrl, modelName, apiKey: apiKey ?? undefined, enabled: true }
     return { ...current, customEndpoints: [...endpoints, newEp], currentCustomEndpointIndex: endpoints.length }
   })
   const { clearStoredProviderCache } = await import('./model/providers.js')
@@ -357,6 +357,27 @@ export async function setActiveCustomEndpointIndex(idx: number): Promise<void> {
   })
   const { clearStoredProviderCache } = await import('./model/providers.js')
   clearStoredProviderCache()
+}
+
+/**
+ * Toggle an endpoint's enabled flag (its "activated" state in /login).
+ * Multiple endpoints may be enabled at once; disabled ones are excluded
+ * from /model and from request routing.
+ */
+export async function toggleCustomEndpointEnabled(id: string): Promise<boolean> {
+  let nowEnabled = false
+  saveGlobalConfig(current => {
+    const endpoints = normalizeCustomEndpoints(current.customEndpoints)
+    const idx = endpoints.findIndex(e => e.id === id)
+    if (idx < 0) return current
+    nowEnabled = endpoints[idx].enabled === false
+    const updated = [...endpoints]
+    updated[idx] = { ...updated[idx], enabled: nowEnabled }
+    return { ...current, customEndpoints: updated }
+  })
+  const { clearStoredProviderCache } = await import('./model/providers.js')
+  clearStoredProviderCache()
+  return nowEnabled
 }
 
 export function getCustomApiConfig(): { baseUrl: string | null; modelName: string | null; apiKey: string | null } {

@@ -13,9 +13,8 @@ import {
 import {
   saveCustomApiConfig,
   removeCustomEndpoint,
-  setActiveCustomEndpointIndex,
+  toggleCustomEndpointEnabled,
 } from '../../utils/auth.js'
-import { getGlobalConfigSnapshot } from '../../utils/config.js'
 
 type FieldKey = 'baseUrl' | 'apiKey' | 'modelName'
 
@@ -39,9 +38,10 @@ type EndpointItem = { id: string; baseUrl: string; apiKey: string | null; modelN
 
 /**
  * Two-phase flow:
- *   LIST  — show endpoints, ↑↓ navigate, Enter edits, a adds, d deletes
+ *   LIST  — show endpoints, ↑↓ navigate, Enter toggles activation, e edits,
+ *           a adds, d deletes. Several endpoints may be active at once.
  *   EDIT  — fill baseUrl → apiKey → modelName, each Enter advances,
- *           final Enter saves and returns to LIST with new active
+ *           final Enter saves and returns to LIST with the endpoint active.
  */
 function LoginScreen({
   onDone,
@@ -64,14 +64,14 @@ function LoginScreen({
 
   const refreshEndpoints = React.useCallback(() => {
     try {
-      const eps = getCustomEndpoints()
-      const activeIdx = getGlobalConfigSnapshot().currentCustomEndpointIndex ?? 0
-      setEndpoints(eps.map((e, i) => ({
+      // `enabled` defaults to true (undefined = enabled): an endpoint is
+      // active unless the user toggled it off with Enter in the list.
+      setEndpoints(getCustomEndpoints().map(e => ({
         id: e.id,
         baseUrl: e.baseUrl,
         apiKey: e.apiKey ?? null,
         modelName: e.modelName ?? null,
-        active: i === activeIdx,
+        active: e.enabled !== false,
       })))
     } catch {}
   }, [])
@@ -95,16 +95,18 @@ function LoginScreen({
       if (key.upArrow && cursor > 0) setCursor(c => c - 1)
       else if (key.downArrow && cursor < endpoints.length - 1) setCursor(c => c + 1)
       else if (key.return) {
-        // Enter: edit selected or add if empty
+        // Enter: toggle activation of the selected endpoint (Enter again
+        // deactivates). With no endpoints, go straight to the add form.
         if (endpoints[cursor]) {
-          startEdit(endpoints[cursor])
+          void toggleCustomEndpointEnabled(endpoints[cursor].id).then(refreshEndpoints)
         } else {
-          // No endpoints — go straight to add form
           setFormValues({ baseUrl: '', apiKey: '', modelName: '' })
           setFormIndex(0)
           setFormStatus('editing')
           setPhase('edit-new')
         }
+      } else if (input === 'e' && endpoints[cursor]) {
+        startEdit(endpoints[cursor])
       } else if (input === 'a') {
         setFormValues({ baseUrl: '', apiKey: '', modelName: '' })
         setFormIndex(0)
@@ -200,6 +202,8 @@ function LoginScreen({
             <Text color="suggestion">↑↓</Text>
             <Text dimColor>nav  </Text>
             <Text color="suggestion">Enter</Text>
+            <Text dimColor>on/off  </Text>
+            <Text color="suggestion">e</Text>
             <Text dimColor>edit  </Text>
             <Text color="suggestion">a</Text>
             <Text dimColor>add  </Text>

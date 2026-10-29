@@ -1,6 +1,6 @@
 import type { ModelOption } from './modelOptions.js'
 import { recordProviderContextWindows } from './contextWindowStore.js'
-import { getCustomEndpoints, getModelsUrl } from './providers.js'
+import { getActiveCustomEndpoints, getModelsUrl } from './providers.js'
 
 export interface CustomEndpointModel {
   id: string
@@ -24,7 +24,7 @@ export function resetCustomModelsForTests(): void {
 }
 
 export async function fetchCustomModels(
-  endpoints: Array<{ id: string; baseUrl: string; apiKey?: string }> = getCustomEndpoints(),
+  endpoints: Array<{ id: string; baseUrl: string; apiKey?: string }> = getActiveCustomEndpoints(),
 ): Promise<CustomEndpointModel[]> {
   if (fetching) return fetching
   fetching = (async () => {

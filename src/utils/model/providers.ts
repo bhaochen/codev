@@ -137,6 +137,26 @@ export function getModelsUrl(baseUrl: string): string {
   return base.endsWith('/v1') ? `${base}/models` : `${base}/v1/models`
 }
 
+/**
+ * Build the OpenAI-compatible `/chat/completions` URL for a base URL,
+ * using the same trailing-`/v1` convention as {@link getModelsUrl}.
+ */
+export function getChatCompletionsUrl(baseUrl: string): string {
+  const base = baseUrl.replace(/\/+$/, '')
+  return base.endsWith('/v1')
+    ? `${base}/chat/completions`
+    : `${base}/v1/chat/completions`
+}
+
+/**
+ * Endpoints whose enabled flag is not explicitly false. Existing configs
+ * (and newly saved endpoints) are enabled by default; /login's Enter key
+ * toggles this flag per endpoint and several may be enabled at once.
+ */
+export function getActiveCustomEndpoints(): CustomEndpoint[] {
+  return getCustomEndpoints().filter(e => e.enabled !== false)
+}
+
 export function isOpenRouterBaseUrl(baseUrl?: string | null): boolean {
   if (!baseUrl) {
     return false
@@ -318,8 +338,7 @@ export function getCustomEndpoints(): CustomEndpoint[] {
     if (endpoints.length > 0) return endpoints
   } catch {
     // Ignore
-  }
-  // Legacy single-endpoint fallback: treat it as a single-entry list
+  }  // Legacy single-endpoint fallback: treat it as a single-entry list
   try {
     const config = getGlobalConfigSnapshot()
     if (config.customBaseUrl) {
@@ -341,7 +360,13 @@ export function getCustomBaseUrl(): string | undefined {
   if (override) return override
   const endpoints = getCustomEndpoints()
   const idx = (getGlobalConfigSnapshot().currentCustomEndpointIndex ?? 0)
-  if (endpoints[idx]?.baseUrl) return endpoints[idx].baseUrl
+  // Primary endpoint, unless it was toggled off — then fall back to any
+  // enabled endpoint so requests never target a deactivated URL.
+  if (endpoints[idx]?.enabled !== false && endpoints[idx]?.baseUrl) {
+    return endpoints[idx].baseUrl
+  }
+  const enabled = endpoints.find(e => e.enabled !== false)
+  if (enabled?.baseUrl) return enabled.baseUrl
   return getEnvCustomBaseUrl()
 }
 
