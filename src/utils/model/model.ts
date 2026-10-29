@@ -495,7 +495,10 @@ function getKnownModelDisplayName(model: ModelName): string | null {
   const base = has1m ? model.slice(0, -4) : model
   const strings = getModelStrings()
   for (const [key, value] of Object.entries(strings) as [ModelKey, string][]) {
-    if (value === base) {
+    // 'default' is the "let the gateway pick" placeholder (9router/custom
+    // providers map every family to it). Mapping it through a family display
+    // name produced a fake model name like "Haiku 4.5" — leave it as-is.
+    if (value === base && value !== 'default') {
       const name = MODEL_KEY_DISPLAY_NAMES.get(key)
       if (!name) return null
       return has1m ? `${name} (1M context)` : name
@@ -711,7 +714,10 @@ export function modelDisplayString(model: ModelSetting): string {
     } else if (isClaudeAISubscriber()) {
       return `Default (${getClaudeAiUserDefaultModelDescription()})`
     }
-    return `Default (${getDefaultMainLoopModel()})`
+    // When the default is the gateway-decided 'default' placeholder there is
+    // no concrete model name to show — don't render "Default (default)".
+    const defaultModel = getDefaultMainLoopModel()
+    return defaultModel === 'default' ? 'Default' : `Default (${defaultModel})`
   }
   const resolvedModel = parseUserSpecifiedModel(model)
   return model === resolvedModel ? resolvedModel : `${model} (${resolvedModel})`
