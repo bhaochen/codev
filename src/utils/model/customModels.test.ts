@@ -3,6 +3,7 @@ import { getGlobalConfigSnapshot } from '../config.js'
 import {
   fetchCustomModels,
   getCachedCustomModels,
+  resetCustomModelsForTests,
 } from './customModels.js'
 import { getModelOptions } from './modelOptions.js'
 import { getModelsUrl } from './providers.js'
@@ -107,5 +108,15 @@ describe('custom endpoint models', () => {
     expect(custom?.label).toBe('Spark-X2.6-4B-Q4_K_M.gguf')
     expect(custom?.description).toContain(baseUrl)
     expect(options.some(o => o.value === 'no-metadata-model')).toBe(true)
+  })
+
+  test('/model shows no hard-coded default when nothing is available', () => {
+    setStoredEndpoints([
+      { id: 'ep-empty', baseUrl: 'http://127.0.0.1:1/v1' },
+    ])
+    resetCustomModelsForTests()
+    // No models cached yet: the picker must not fall back to a hard-coded
+    // "Default (recommended)" (value: null) entry.
+    expect(getModelOptions(false).some(o => o.value === null)).toBe(false)
   })
 })

@@ -368,9 +368,9 @@ function getOpusPlanOption(): ModelOption {
 function getModelOptionsBase(fastMode = false): ModelOption[] {
   const provider = getAPIProvider()
   
-  // If no provider is configured, only return Default option
+  // Nothing configured — show no models rather than a hard-coded default.
   if (!provider) {
-    return [getDefaultOptionForUser(fastMode)]
+    return []
   }
 
   // Local API (Llama.cpp): Fetch models dynamically from the server
@@ -403,7 +403,7 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
       ]
     }
 
-    return [getDefaultOptionForUser(fastMode)]
+    return []
   }
 
   if (process.env.USER_TYPE === 'ant') {
@@ -494,7 +494,7 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
       return [getDefaultOptionForUser(fastMode), ...models]
     }
 
-    return [getDefaultOptionForUser(fastMode)]
+    return []
   }
 
   // NVIDIA API: Show dynamically fetched models from the NVIDIA API catalog
@@ -519,7 +519,7 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
       ]
     }
 
-    return [getDefaultOptionForUser(fastMode)]
+    return []
   }
 
   // OpenCode Zen: Fetch models dynamically from API
@@ -555,7 +555,7 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
       // Ignore errors
     }
     
-    return [defaultOpt]
+    return []
   }
 
   // Kiro: Show dynamically fetched models from CodeWhisperer
@@ -581,7 +581,7 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
       // Ignore errors
     }
 
-    return [defaultOpt]
+    return []
   }
 
   // Custom OpenAI-compatible endpoint: fetch models from all configured endpoints
@@ -600,17 +600,16 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
     const models = getCachedCustomModels()
 
     if (models && models.length > 0) {
-      return [
-        getDefaultOptionForUser(fastMode),
-        ...models.map(m => ({
-          value: m.id,
-          label: m.name || m.id,
-          description: `Custom endpoint · ${m.baseUrl}`,
-        })),
-      ]
+      // A custom endpoint has no meaningful "default model"; only list what
+      // the endpoint actually serves.
+      return models.map(m => ({
+        value: m.id,
+        label: m.name || m.id,
+        description: `Custom endpoint · ${m.baseUrl}`,
+      }))
     }
 
-    return [getDefaultOptionForUser(fastMode)]
+    return []
   }
 
   // OpenRouter API: Show all available models from OpenRouter

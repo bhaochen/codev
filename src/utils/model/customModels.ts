@@ -17,6 +17,12 @@ export function getCachedCustomModels(): CustomEndpointModel[] {
   return cache
 }
 
+/** Reset the module-level cache for test isolation. */
+export function resetCustomModelsForTests(): void {
+  cache = []
+  fetching = undefined
+}
+
 export async function fetchCustomModels(
   endpoints: Array<{ id: string; baseUrl: string; apiKey?: string }> = getCustomEndpoints(),
 ): Promise<CustomEndpointModel[]> {
