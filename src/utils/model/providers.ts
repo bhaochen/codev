@@ -1,5 +1,11 @@
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../services/analytics/index.js'
-import { getGlobalConfigSnapshot } from '../config.js'
+import {
+  type CustomEndpoint,
+  getGlobalConfigSnapshot,
+  normalizeCustomEndpoints,
+} from '../config.js'
+
+export type { CustomEndpoint }
 
 export type APIProvider =
   | 'firstParty'
@@ -116,6 +122,19 @@ function getExplicitProviderOverride(): APIProvider | null {
     default:
       return null
   }
+}
+
+/**
+ * Build the OpenAI-compatible `/models` URL for a base URL.
+ *
+ * Accepts bases with or without a trailing `/v1` (and with path prefixes):
+ *   http://host:8080/v1  → http://host:8080/v1/models
+ *   http://host:8080     → http://host:8080/v1/models
+ *   https://host/api/v1/ → https://host/api/v1/models
+ */
+export function getModelsUrl(baseUrl: string): string {
+  const base = baseUrl.replace(/\/+$/, '')
+  return base.endsWith('/v1') ? `${base}/models` : `${base}/v1/models`
 }
 
 export function isOpenRouterBaseUrl(baseUrl?: string | null): boolean {
@@ -292,17 +311,11 @@ export function getCodevEnvModel(): string | undefined {
   return process.env.CODEV_MODEL?.trim() || undefined
 }
 
-export interface CustomEndpoint {
-  id: string
-  baseUrl: string
-  apiKey?: string
-  modelName?: string
-}
-
 export function getCustomEndpoints(): CustomEndpoint[] {
   try {
     const config = getGlobalConfigSnapshot()
-    if (config.customEndpoints?.length) return config.customEndpoints
+    const endpoints = normalizeCustomEndpoints(config.customEndpoints)
+    if (endpoints.length > 0) return endpoints
   } catch {
     // Ignore
   }
@@ -350,7 +363,7 @@ export function getCustomApiConfig(): { baseUrl: string | null; modelName: strin
   }
   try {
     const config = getGlobalConfigSnapshot()
-    const endpoints = config.customEndpoints ?? []
+    const endpoints = normalizeCustomEndpoints(config.customEndpoints)
     const idx = config.currentCustomEndpointIndex ?? 0
     const ep = endpoints[idx]
     if (ep?.baseUrl) {
@@ -371,7 +384,7 @@ export function getCustomModelName(): string | undefined {
   const override = getCodevEnvModel()
   if (override) return override
   const config = getGlobalConfigSnapshot()
-  const endpoints = config.customEndpoints ?? []
+  const endpoints = normalizeCustomEndpoints(config.customEndpoints)
   const idx = config.currentCustomEndpointIndex ?? 0
   if (endpoints[idx]?.modelName) return endpoints[idx].modelName
   if (config.customModelName) return config.customModelName

@@ -47,6 +47,7 @@ import {
   checkHasTrustDialogAccepted,
   getGlobalConfig,
   getGlobalConfigSnapshot,
+  normalizeCustomEndpoints,
   saveGlobalConfig,
 } from './config.js'
 import { logAntError, logForDebugging } from './debug.js'
@@ -315,7 +316,9 @@ export async function saveCustomApiConfig(baseUrl: string, modelName: string, ap
     throw new Error('Invalid URL format')
   }
   saveGlobalConfig(current => {
-    const endpoints = current.customEndpoints ?? []
+    // `current` comes straight from the store — it is not run through
+    // migrateConfigFields, so normalize corrupt (e.g. string) values here.
+    const endpoints = normalizeCustomEndpoints(current.customEndpoints)
     const idx = endpoints.findIndex(e => e.baseUrl === baseUrl)
     if (idx >= 0) {
       // Update existing endpoint in-place
@@ -334,7 +337,7 @@ export async function saveCustomApiConfig(baseUrl: string, modelName: string, ap
 /** Remove an endpoint by its ID and adjust the active index. */
 export async function removeCustomEndpoint(id: string): Promise<void> {
   saveGlobalConfig(current => {
-    const endpoints = current.customEndpoints ?? []
+    const endpoints = normalizeCustomEndpoints(current.customEndpoints)
     const idx = endpoints.findIndex(e => e.id === id)
     if (idx < 0) return current
     const remaining = endpoints.filter(e => e.id !== id)
@@ -348,7 +351,7 @@ export async function removeCustomEndpoint(id: string): Promise<void> {
 /** Switch the currently active custom endpoint by index. */
 export async function setActiveCustomEndpointIndex(idx: number): Promise<void> {
   saveGlobalConfig(current => {
-    const endpoints = current.customEndpoints ?? []
+    const endpoints = normalizeCustomEndpoints(current.customEndpoints)
     const validIdx = idx >= 0 && idx < endpoints.length ? idx : 0
     return { ...current, currentCustomEndpointIndex: validIdx }
   })
@@ -364,7 +367,7 @@ export function getCustomApiConfig(): { baseUrl: string | null; modelName: strin
   const envApiKey = getEnvCustomApiKey() ?? null
   try {
     const config = getGlobalConfigSnapshot()
-    const endpoints = config.customEndpoints ?? []
+    const endpoints = normalizeCustomEndpoints(config.customEndpoints)
     const activeIdx = config.currentCustomEndpointIndex ?? 0
     const activeEp = endpoints[activeIdx]
     return {

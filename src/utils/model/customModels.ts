@@ -1,6 +1,6 @@
 import type { ModelOption } from './modelOptions.js'
 import { recordProviderContextWindows } from './contextWindowStore.js'
-import { getCustomEndpoints } from './providers.js'
+import { getCustomEndpoints, getModelsUrl } from './providers.js'
 
 export interface CustomEndpointModel {
   id: string
@@ -26,7 +26,7 @@ export async function fetchCustomModels(
       const results: CustomEndpointModel[] = []
       const fetches = endpoints.map(async ep => {
         try {
-          const modelsUrl = ep.baseUrl.replace(/\/+$/, '') + '/v1/models'
+          const modelsUrl = getModelsUrl(ep.baseUrl)
           const headers: Record<string, string> = {}
           if (ep.apiKey) headers['Authorization'] = `Bearer ${ep.apiKey}`
           const response = await fetch(modelsUrl, {
@@ -53,12 +53,16 @@ export async function fetchCustomModels(
             const maxOutput =
               model.capabilities?.maxOutput
               ?? model.max_completion_tokens
-            if (typeof contextWindow !== 'number' || contextWindow <= 0) continue
+            // Keep models even when the server omits context metadata — the
+            // picker only needs id/name, and hiding them makes valid models
+            // disappear from /model.
+            const hasContextWindow =
+              typeof contextWindow === 'number' && contextWindow > 0
             results.push({
               id: model.id,
               baseUrl: ep.baseUrl,
               name: model.name,
-              contextWindow: Math.floor(contextWindow),
+              contextWindow: hasContextWindow ? Math.floor(contextWindow) : undefined,
               maxOutput: typeof maxOutput === 'number' ? Math.floor(maxOutput) : undefined,
             })
           }
@@ -70,7 +74,14 @@ export async function fetchCustomModels(
       results.sort((a, b) => a.baseUrl.localeCompare(b.baseUrl) || a.id.localeCompare(b.id))
       cache = results
       try {
-        recordProviderContextWindows('custom', results.map(r => ({ id: r.id, contextWindow: r.contextWindow! })))
+        recordProviderContextWindows(
+          'custom',
+          results.flatMap(r =>
+            r.contextWindow !== undefined
+              ? [{ id: r.id, contextWindow: r.contextWindow }]
+              : [],
+          ),
+        )
       } catch {
         // ignore
       }

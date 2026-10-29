@@ -7,6 +7,7 @@ import { useTerminalSize } from '../../hooks/useTerminalSize.js'
 import type { LocalJSXCommandCall } from '../../types/command.js'
 import {
   getCustomEndpoints,
+  getModelsUrl,
   clearStoredProviderCache,
 } from '../../utils/model/providers.js'
 import {
@@ -14,6 +15,7 @@ import {
   removeCustomEndpoint,
   setActiveCustomEndpointIndex,
 } from '../../utils/auth.js'
+import { getGlobalConfigSnapshot } from '../../utils/config.js'
 
 type FieldKey = 'baseUrl' | 'apiKey' | 'modelName'
 
@@ -24,10 +26,9 @@ const FIELDS: Array<{ key: FieldKey; label: string; placeholder: string; mask?: 
 ]
 
 async function verifyEndpoint(baseUrl: string, apiKey: string): Promise<void> {
-  const url = new URL(baseUrl)
   const headers: Record<string, string> = {}
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`
-  const res = await fetch(`${url.origin}/v1/models`, {
+  const res = await fetch(getModelsUrl(baseUrl), {
     headers,
     signal: AbortSignal.timeout(10000),
   })
@@ -64,13 +65,7 @@ function LoginScreen({
   const refreshEndpoints = React.useCallback(() => {
     try {
       const eps = getCustomEndpoints()
-      const cfg = (() => {
-        try {
-          const { getGlobalConfigSnapshot } = require('../../utils/config.js')
-          return getGlobalConfigSnapshot()
-        } catch { return {} }
-      })()
-      const activeIdx = cfg.currentCustomEndpointIndex ?? 0
+      const activeIdx = getGlobalConfigSnapshot().currentCustomEndpointIndex ?? 0
       setEndpoints(eps.map((e, i) => ({
         id: e.id,
         baseUrl: e.baseUrl,
@@ -192,7 +187,7 @@ function LoginScreen({
           ) : (
             endpoints.map((ep, i) => (
               <Box key={ep.id} flexDirection="column">
-                <Text color={ep.active ? 'green' : i === cursor ? 'white' : 'gray'}>
+                <Text color={ep.active ? 'success' : i === cursor ? 'suggestion' : 'inactive'}>
                   {ep.active ? '● ' : i === cursor ? '» ' : '  '}
                   {ep.baseUrl}
                   {ep.modelName ? `  model: ${ep.modelName}` : ''}
@@ -202,15 +197,15 @@ function LoginScreen({
             ))
           )}
           <Box flexDirection="row" gap={1}>
-            <Text color="cyan">↑↓</Text>
+            <Text color="suggestion">↑↓</Text>
             <Text dimColor>nav  </Text>
-            <Text color="cyan">Enter</Text>
+            <Text color="suggestion">Enter</Text>
             <Text dimColor>edit  </Text>
-            <Text color="cyan">a</Text>
+            <Text color="suggestion">a</Text>
             <Text dimColor>add  </Text>
-            <Text color="red">d</Text>
+            <Text color="error">d</Text>
             <Text dimColor>delete  </Text>
-            <Text color="cyan">Esc</Text>
+            <Text color="suggestion">Esc</Text>
             <Text dimColor>done</Text>
           </Box>
         </Box>

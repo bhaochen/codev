@@ -72,6 +72,68 @@ export interface HistoryEntry {
 
 export type ReleaseChannel = 'stable' | 'latest'
 
+/** One OpenAI-compatible endpoint in the multi-endpoint custom provider store. */
+export type CustomEndpoint = {
+  id: string
+  baseUrl: string
+  apiKey?: string
+  modelName?: string
+}
+
+function isCanonicalCustomEndpoint(entry: unknown): boolean {
+  const ep = entry as Partial<CustomEndpoint> | null
+  return (
+    typeof ep === 'object' &&
+    ep !== null &&
+    typeof ep.id === 'string' &&
+    typeof ep.baseUrl === 'string' &&
+    ep.baseUrl !== '' &&
+    (ep.apiKey === undefined || typeof ep.apiKey === 'string') &&
+    (ep.modelName === undefined || typeof ep.modelName === 'string')
+  )
+}
+
+/**
+ * Coerce a persisted customEndpoints value into a well-formed array.
+ *
+ * The field has been persisted in codev.db as a JSON string instead of an
+ * array by an older writer. `?? []` only guards null/undefined, so the raw
+ * string reached array methods (`.findIndex`, `.map`) and crashed with
+ * "… is not a function". Parse strings, drop malformed entries, and
+ * synthesize missing ids; arrays already in the canonical shape are
+ * returned as-is so this stays allocation-free on every config read.
+ */
+export function normalizeCustomEndpoints(value: unknown): CustomEndpoint[] {
+  let parsed: unknown = value
+  if (typeof value === 'string') {
+    try {
+      parsed = jsonParse(value)
+    } catch {
+      return []
+    }
+  }
+  if (!Array.isArray(parsed)) return []
+  if (parsed === value && parsed.every(isCanonicalCustomEndpoint)) {
+    return parsed
+  }
+  const result: CustomEndpoint[] = []
+  for (const entry of parsed) {
+    if (typeof entry !== 'object' || entry === null) continue
+    const ep = entry as Record<string, unknown>
+    if (typeof ep.baseUrl !== 'string' || ep.baseUrl === '') continue
+    result.push({
+      id:
+        typeof ep.id === 'string' && ep.id !== ''
+          ? ep.id
+          : `ep-${result.length}-${randomBytes(4).toString('hex')}`,
+      baseUrl: ep.baseUrl,
+      apiKey: typeof ep.apiKey === 'string' ? ep.apiKey : undefined,
+      modelName: typeof ep.modelName === 'string' ? ep.modelName : undefined,
+    })
+  }
+  return result
+}
+
 export type ProjectConfig = {
   allowedTools: string[]
   mcpContextUris: string[]
@@ -208,12 +270,7 @@ export type GlobalConfig = {
   customBaseUrl?: string         // kept for legacy migration
   customApiKey?: string          // kept for legacy migration
   customModelName?: string       // kept for legacy migration
-  customEndpoints?: Array<{     // new multi-endpoint store
-    id: string                  // UUID or timestamp-suffix
-    baseUrl: string
-    apiKey?: string
-    modelName?: string
-  }>
+  customEndpoints?: CustomEndpoint[]  // multi-endpoint store
   currentCustomEndpointIndex?: number
 
   // OpenCode Zen configuration
@@ -999,10 +1056,17 @@ registerCleanup(async () => {
  */
 /**
  * Migrate legacy single custom-endpoint fields to the new multi-endpoint store.
- * Preserves the existing value as the sole entry when customEndpoints is absent.
+ * Repairs customEndpoints values persisted in a non-array shape (e.g. a JSON
+ * string) and falls back to the legacy single-endpoint fields when the store
+ * is absent or empty.
  */
 function migrateCustomEndpoints(config: GlobalConfig): GlobalConfig {
-  if (config.customEndpoints && config.customEndpoints.length > 0) return config
+  const endpoints = normalizeCustomEndpoints(config.customEndpoints)
+  if (endpoints.length > 0) {
+    // Skip the rewrite when the stored value was already a valid array
+    if (endpoints === config.customEndpoints) return config
+    return { ...config, customEndpoints: endpoints }
+  }
   const { customBaseUrl, customApiKey, customModelName } = config
   if (!customBaseUrl) return config
   return {

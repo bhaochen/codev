@@ -590,11 +590,24 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
       void fetchCustomModels()
     })
 
-    const { getCachedCustomModels } = require('./customModels.js')
+    const { getCachedCustomModels } = require('./customModels.js') as {
+      getCachedCustomModels: () => Array<{
+        id: string
+        baseUrl: string
+        name?: string
+      }>
+    }
     const models = getCachedCustomModels()
 
     if (models && models.length > 0) {
-      return [getDefaultOptionForUser(fastMode), ...models]
+      return [
+        getDefaultOptionForUser(fastMode),
+        ...models.map(m => ({
+          value: m.id,
+          label: m.name || m.id,
+          description: `Custom endpoint · ${m.baseUrl}`,
+        })),
+      ]
     }
 
     return [getDefaultOptionForUser(fastMode)]
