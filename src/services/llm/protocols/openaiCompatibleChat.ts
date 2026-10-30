@@ -31,7 +31,7 @@ import { calculateUSDCost } from '../../../utils/modelCost.js'
 import { addToTotalSessionCost } from '../../../cost-tracker.js'
 import { isAbortError } from '../../../utils/errors.js'
 import { resolveOpenAIMaxTokens } from '../utils/requestBody.js'
-import { formatOpenAIPromptCacheKey, updateOpenAIUsage } from '../utils/openaiShared.js'
+import { getOfficialOpenAIPromptCacheKey, updateOpenAIUsage } from '../utils/openaiShared.js'
 import { resolveAuth } from '../auth/resolveAuth.js'
 import { createOpencodeId, getOpencodeProjectId, getOpencodeUserAgent } from '../../api/opencodeUserAgent.js'
 import {
@@ -48,6 +48,23 @@ import {
 } from './openaiChatWire.js'
 
 export { chatCompletionsUrlFromBase as compatibleChatCompletionsUrl } from './openaiChatWire.js'
+
+/**
+ * Clamp max output tokens to the custom endpoint's advertised per-model cap
+ * (max_completion_tokens from its /models catalog), when known.
+ */
+function clampToCustomMaxOutput(model: string, maxTokens: number): number {
+  try {
+    const { getCachedCustomModels } = require('../../../utils/model/customModels.js') as {
+      getCachedCustomModels: () => Array<{ id: string; maxOutput?: number }>
+    }
+    const hit = getCachedCustomModels().find(m => m.id === model)
+    if (hit?.maxOutput && hit.maxOutput > 0) return Math.min(maxTokens, hit.maxOutput)
+  } catch {
+    // Catalog unavailable — use the unclamped value.
+  }
+  return maxTokens
+}
 
 type OpenAIChatStartMessage = Extract<OpenAIChatStreamEvent, { type: 'message_start' }>['message']
 
@@ -103,7 +120,10 @@ export async function* queryOpenAICompatibleChat(
 
     const { upperLimit } = getModelMaxOutputTokens(model)
     maxTokens = resolveOpenAIMaxTokens(upperLimit, config.maxOutputTokens)
-    const promptCacheKey = formatOpenAIPromptCacheKey(getSessionId())
+    // Custom endpoints publish per-model output ceilings (max_completion_tokens);
+    // requesting more than the model allows is a hard 400 on strict providers.
+    maxTokens = clampToCustomMaxOutput(model, maxTokens)
+    const promptCacheKey = getOfficialOpenAIPromptCacheKey(endpoint, getSessionId())
     // reasoning 由 LLMRequestConfig 直构：config.thinking / context.effortValue /
     // 模型与 env 检测都归口到 native thinking 配置，见 resolveOpenAIChatThinking。
     const { enableThinking, reasoning_effort: reasoningEffort } = resolveOpenAIChatThinking(model, config, context)

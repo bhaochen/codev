@@ -46,12 +46,21 @@ export async function fetchCustomModels(
               name?: string
               context_length?: number
               max_completion_tokens?: number
+              output_modalities?: string[]
               capabilities?: { contextWindow?: number; maxOutput?: number }
               meta?: { n_ctx?: number }
             }>
           }
           for (const model of payload.data ?? []) {
             if (typeof model.id !== 'string' || model.id.length === 0) continue
+            // Skip non-text models (audio transcription, speech synthesis,
+            // guard classifiers, …) — they can't serve chat completions.
+            if (
+              model.output_modalities !== undefined &&
+              !model.output_modalities.includes('text')
+            ) {
+              continue
+            }
             const contextWindow =
               model.capabilities?.contextWindow
               ?? model.context_length

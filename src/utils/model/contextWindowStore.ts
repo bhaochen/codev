@@ -89,7 +89,8 @@ export function getStoredProviderContextWindow(
     provider !== 'openrouter' &&
     provider !== 'opencode' &&
     provider !== 'nvidia' &&
-    provider !== 'openai'
+    provider !== 'openai' &&
+    provider !== 'custom'
   ) {
     return undefined
   }

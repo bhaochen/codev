@@ -93,9 +93,28 @@ function getProviderCatalogContextWindow(
   let live: number | undefined
   if (provider === 'openai') {
     live = getNineRouterModelContextWindow(model)
+  } else if (provider === 'custom') {
+    live = getCustomModelContextWindow(model)
   }
   if (live) return live
   return getStoredProviderContextWindow(provider, model)
+}
+
+/**
+ * Context window for a custom OpenAI-compatible endpoint model, read from the
+ * in-memory /models fetch cache (e.g. Groq's context_window). Falls back to
+ * undefined when the model isn't cached yet.
+ */
+function getCustomModelContextWindow(model: string): number | undefined {
+  try {
+    const { getCachedCustomModels } = require('./model/customModels.js') as {
+      getCachedCustomModels: () => Array<{ id: string; contextWindow?: number }>
+    }
+    const hit = getCachedCustomModels().find(m => m.id === model)
+    return hit?.contextWindow
+  } catch {
+    return undefined
+  }
 }
 
 export function getContextWindowForModel(
@@ -312,63 +331,43 @@ export function getModelMaxOutputTokens(model: string): {
   default: number
   upperLimit: number
 } {
-  let defaultTokens: number
-  let upperLimit: number
+  // Dynamic catalogs first — per-model output ceilings published by the
+  // endpoint's own /models (custom endpoints, 9router).
+  const dynamicMax = getDynamicModelMaxOutput(model)
+  if (dynamicMax) {
+    return { default: Math.min(MAX_OUTPUT_TOKENS_DEFAULT, dynamicMax), upperLimit: dynamicMax }
+  }
 
-  if (process.env.USER_TYPE === 'ant') {
-    const antModel = resolveAntModel(model.toLowerCase())
-    if (antModel) {
-      defaultTokens = antModel.defaultMaxTokens ?? MAX_OUTPUT_TOKENS_DEFAULT
-      upperLimit = antModel.upperMaxTokensLimit ?? MAX_OUTPUT_TOKENS_UPPER_LIMIT
-      return { default: defaultTokens, upperLimit }
+  return {
+    default: MAX_OUTPUT_TOKENS_DEFAULT,
+    upperLimit: MAX_OUTPUT_TOKENS_UPPER_LIMIT,
+  }
+}
+
+/**
+ * Per-model max output tokens from the live OpenAI-compatible catalogs
+ * (custom endpoint /models and 9router), when the model is present.
+ */
+function getDynamicModelMaxOutput(model: string): number | undefined {
+  try {
+    const { getCachedCustomModels } = require('./model/customModels.js') as {
+      getCachedCustomModels: () => Array<{ id: string; maxOutput?: number }>
     }
+    const custom = getCachedCustomModels().find(m => m.id === model)?.maxOutput
+    if (custom && custom > 0) return custom
+  } catch {
+    // Catalog unavailable — fall through.
   }
-
-  const m = getCanonicalName(model)
-
-  if (m.includes('opus-4-6')) {
-    defaultTokens = 64_000
-    upperLimit = 128_000
-  } else if (m.includes('sonnet-4-6')) {
-    defaultTokens = 32_000
-    upperLimit = 128_000
-  } else if (
-    m.includes('opus-4-5') ||
-    m.includes('sonnet-4') ||
-    m.includes('haiku-4')
-  ) {
-    defaultTokens = 32_000
-    upperLimit = 64_000
-  } else if (m.includes('opus-4-1') || m.includes('opus-4')) {
-    defaultTokens = 32_000
-    upperLimit = 32_000
-  } else if (m.includes('claude-3-opus')) {
-    defaultTokens = 4_096
-    upperLimit = 4_096
-  } else if (m.includes('claude-3-sonnet')) {
-    defaultTokens = 8_192
-    upperLimit = 8_192
-  } else if (m.includes('claude-3-haiku')) {
-    defaultTokens = 4_096
-    upperLimit = 4_096
-  } else if (m.includes('3-5-sonnet') || m.includes('3-5-haiku')) {
-    defaultTokens = 8_192
-    upperLimit = 8_192
-  } else if (m.includes('3-7-sonnet')) {
-    defaultTokens = 32_000
-    upperLimit = 64_000
-  } else {
-    defaultTokens = MAX_OUTPUT_TOKENS_DEFAULT
-    upperLimit = MAX_OUTPUT_TOKENS_UPPER_LIMIT
+  try {
+    const { getNineRouterModelMaxOutput } = require('./model/nineRouterModels.js') as {
+      getNineRouterModelMaxOutput: (id: string) => number | undefined
+    }
+    const nineRouter = getNineRouterModelMaxOutput(model)
+    if (nineRouter && nineRouter > 0) return nineRouter
+  } catch {
+    // Catalog unavailable — fall through.
   }
-
-  const cap = getModelCapability(model)
-  if (cap?.max_tokens && cap.max_tokens >= 4_096) {
-    upperLimit = cap.max_tokens
-    defaultTokens = Math.min(defaultTokens, upperLimit)
-  }
-
-  return { default: defaultTokens, upperLimit }
+  return undefined
 }
 
 /**

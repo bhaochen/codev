@@ -46,7 +46,6 @@ import { BASH_TOOL_NAME } from '../BashTool/toolName.js';
 import { BackgroundHint } from '../BashTool/UI.js';
 import { FILE_READ_TOOL_NAME } from '../FileReadTool/prompt.js';
 import { spawnTeammate } from '../shared/spawnMultiAgent.js';
-import { runWithAgentProvider, runWithForcedProvider } from '../../utils/forcedProvider.js';
 import { isAPIProvider, type APIProvider } from '../../utils/model/providers.js';
 import type { ModelAlias } from '../../utils/model/aliases.js';
 import { setAgentColor } from './agentColorManager.js';
@@ -449,20 +448,14 @@ export const AgentTool = buildTool({
     }
 
     // Resolve agent params for logging (these are already resolved in runAgent).
-    // Scoped to the provider this spawn will actually use: an explicit caller
-    // override wins, otherwise the agent definition's own pin. Resolving under
-    // the session provider's policy would hand a pinned agent a model its own
-    // provider does not serve.
-    const resolveModel = () =>
-      getAgentModel(
-        selectedAgent.model,
-        toolUseContext.options.mainLoopModel,
-        isForkPath ? undefined : (model as ModelAlias | undefined),
-        permissionMode,
-      );
-    const resolvedAgentModel = providerParam
-      ? runWithForcedProvider({ provider: providerParam }, resolveModel)
-      : runWithAgentProvider(selectedAgent.provider, resolveModel);
+    // No provider pinning — models resolve uniformly through the unified
+    // OpenAI-compatible catalog.
+    const resolvedAgentModel = getAgentModel(
+      selectedAgent.model,
+      toolUseContext.options.mainLoopModel,
+      isForkPath ? undefined : (model as ModelAlias | undefined),
+      permissionMode,
+    );
     // Record what actually resolved for the tool-use tag (agentModelManager).
     const effectiveProvider = providerParam ?? selectedAgent.provider;
     setAgentResolvedModel(selectedAgent.agentType, {

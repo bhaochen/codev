@@ -28,11 +28,6 @@ import type {
 } from '../../services/mcp/types.js'
 import type { Tool, Tools, ToolUseContext } from '../../Tool.js'
 import {
-  canApplyAgentProvider,
-  runWithForcedProvider,
-} from '../../utils/forcedProvider.js'
-import type { APIProvider } from '../../utils/model/providers.js'
-import {
   refuseToolsOutsideRunPolicy,
   rememberAgentConversation,
 } from './resumeParity.js'
@@ -1057,45 +1052,11 @@ function resolveSkillName(
 }
 
 /**
- * Run a custom agent on its configured provider without changing the session's
- * global provider.
- *
- * A provider we could not resolve is fatal, not something to shrug off. The
- * agent's `model:` was chosen for that provider, so falling through to the
- * session provider sends a foreign model id down the wrong lane and the user
- * sees an unrelated error from whatever provider happens to be active.
+ * Run a custom agent. Models are resolved uniformly through the unified
+ * OpenAI-compatible /model catalog, so no per-agent provider pinning applies.
  */
 export async function* runAgent(
   options: Parameters<typeof runAgentWithoutProviderOverride>[0],
 ): AsyncGenerator<Message, void> {
-  const configError = options.agentDefinition.providerConfigError
-  if (configError !== undefined) {
-    throw new Error(
-      `${configError}\nFix the agent's frontmatter, then spawn it again.`,
-    )
-  }
-
-  const explicitProvider = options.providerOverride
-  const provider = explicitProvider ?? options.agentDefinition.provider
-  if (explicitProvider === undefined && !canApplyAgentProvider(provider)) {
-    yield* runAgentWithoutProviderOverride(options)
-    return
-  }
-
-  // Caller override: no `source`, so nothing nested may replace it.
-  const context =
-    explicitProvider !== undefined
-      ? { provider: explicitProvider }
-      : { provider: provider as APIProvider, source: 'agent' as const }
-  const iterator = runAgentWithoutProviderOverride(options)
-
-  try {
-    while (true) {
-      const next = await runWithForcedProvider(context, () => iterator.next())
-      if (next.done) return
-      yield next.value as Message
-    }
-  } finally {
-    await runWithForcedProvider(context, () => iterator.return(undefined))
-  }
+  yield* runAgentWithoutProviderOverride(options)
 }

@@ -1,5 +1,5 @@
 import { beginAgentFileScope } from '../../utils/agentFileClaims.js'
-import { runWithAgentProvider } from '../../utils/forcedProvider.js'
+import { getAgentModel } from '../../utils/model/agent.js'
 import type { ModelAlias } from '../../utils/model/aliases.js'
 import { promises as fsp } from 'fs'
 import { getSdkAgentProgressSummariesEnabled } from '../../bootstrap/state.js'
@@ -19,7 +19,6 @@ import {
   filterUnresolvedToolUses,
   filterWhitespaceOnlyAssistantMessages,
 } from '../../utils/messages.js'
-import { getAgentModel } from '../../utils/model/agent.js'
 import { getQuerySourceForAgent } from '../../utils/promptCategory.js'
 import {
   getAgentTranscript,
@@ -166,15 +165,13 @@ export async function resumeAgentBackground({
   // the main-loop model (a different model is a different prompt cache).
   const spawnModel = meta?.model as ModelAlias | undefined
   // Resolve model for analytics metadata (runAgent resolves its own
-  // internally). Scoped to the agent's provider so a pinned agent is not
-  // resolved under the session provider's policy.
-  const resolvedAgentModel = runWithAgentProvider(selectedAgent.provider, () =>
-    getAgentModel(
-      selectedAgent.model,
-      toolUseContext.options.mainLoopModel,
-      spawnModel,
-      permissionMode,
-    ),
+  // internally). No provider pinning — models resolve uniformly through the
+  // unified OpenAI-compatible catalog.
+  const resolvedAgentModel = getAgentModel(
+    selectedAgent.model,
+    toolUseContext.options.mainLoopModel,
+    spawnModel,
+    permissionMode,
   )
 
   // Resuming re-renders the agent's tool use, so the tag needs the resolved

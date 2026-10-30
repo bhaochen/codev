@@ -11,8 +11,6 @@
 
 import { feature } from 'bun:bundle'
 import type { ToolUseConfirm } from '../../components/permissions/PermissionRequest.js'
-import { runWithForcedProvider } from '../forcedProvider.js'
-import type { APIProvider } from '../model/providers.js'
 import type { AgentContentBlock } from '../../types/agentMessage.js'
 import { getSystemPrompt } from '../../constants/prompts.js'
 import { TEAMMATE_MESSAGE_TAG } from '../../constants/xml.js'
@@ -1555,13 +1553,10 @@ export function startInProcessTeammate(config: InProcessRunnerConfig): void {
   // the full config object (including toolUseContext) while the promise is
   // pending - which can be hours for a long-running teammate.
   const agentId = config.identity.agentId
-  const provider = config.provider
   const run = () => runInProcessTeammate(config)
-  // The run loop's awaits stay inside the AsyncLocalStorage scope, so every
-  // request it issues sees the pinned provider.
-  const started = provider
-    ? runWithForcedProvider({ provider, source: 'agent' }, run)
-    : run()
+  // No provider pinning — models resolve uniformly through the unified
+  // OpenAI-compatible catalog.
+  const started = run()
   void started.catch(error => {
     logForDebugging(`[inProcessRunner] Unhandled error in ${agentId}: ${error}`)
   })
