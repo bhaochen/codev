@@ -36,12 +36,12 @@ describe('AuthStrategy', () => {
     expect(noneStrategy.resolve('firstParty' as never)).toEqual({ type: 'none' })
   })
 
-  test('different providers can share same strategy id (bearer reuse)', () => {
-    expect(authStrategyId('openai' as never)).toBe('bearer')
-    expect(authStrategyId('opencode' as never)).toBe('bearer')
-    expect(authStrategyId('nvidia' as never)).toBe('bearer')
-    // same id, different token sources but same strategy type
-    expect(getAuthStrategy('openai' as never).id).toBe(getAuthStrategy('opencode' as never).id)
+  test('custom provider uses the bearer strategy; others fall back to none', () => {
+    // Unified runtime: only the custom endpoint carries its own API key.
+    // The 9router gateway (openai) is handled upstream — requests use the
+    // public fallback token, so its strategy resolves to none here.
+    expect(authStrategyId('custom' as never)).toBe('bearer')
+    expect(authStrategyId('openai' as never)).toBe('none')
   })
 
   test('firstParty/bedrock share none strategy', () => {
@@ -50,8 +50,8 @@ describe('AuthStrategy', () => {
     expect(getAuthStrategy('firstParty' as never)).toBe(getAuthStrategy('bedrock' as never))
   })
 
-  test('openrouter uses the bearer strategy like the other key-based providers', () => {
-    expect(getAuthStrategy('openrouter' as never).id).toBe('bearer')
+  test('openrouter (legacy pin) resolves to none — no per-provider credentials', () => {
+    expect(getAuthStrategy('openrouter' as never).id).toBe('none')
   })
 
   test('resolveAuth delegates to strategy', () => {

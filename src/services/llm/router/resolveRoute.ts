@@ -35,16 +35,25 @@ function resolveCustomEndpointForModel(model: string): string | undefined {
 }
 
 export function resolveRoute(input: ResolveRouteInput): LLMRoute {
-  const { rawModel } = normalizeRouteInput(input)
-  // Provider selection: custom endpoint takes precedence over 9router.
-  const provider = getAPIProvider() ?? 'openai'
-  const model = resolveModel(provider, rawModel)
+  const { rawModel, overrideProvider, overrideProtocol, overrideEndpoint } = normalizeRouteInput(input)
+  // Provider selection: an explicit route-level override wins; otherwise
+  // custom endpoint beats the 9router gateway.
+  const provider = overrideProvider ?? (getAPIProvider() ?? 'openai')
   const def = getProviderDef(provider) as {
     defaultProtocol?: LLMRoute['protocol']
     protocol?: LLMRoute['protocol']
     defaultEndpoint?: string
     endpoint?: string
+  } | undefined
+  if (!def) {
+    // Legacy provider pin (nvidia/anthropic/bedrock/…): the runtime is now
+    // unified on OpenAI-compatible endpoints, so there is no per-provider
+    // definition. Fail loudly instead of crashing with a TypeError.
+    throw new Error(
+      `Provider '${provider}' has no route definition. codev routes through unified OpenAI-compatible endpoints — configure one in /login or use provider 'openai' (gateway) / 'custom' (endpoint).`,
+    )
   }
+  const model = resolveModel(provider, rawModel)
   const defaultProtocol = def.defaultProtocol ?? def.protocol!
   let defaultEndpoint = def.defaultEndpoint ?? def.endpoint
   if (provider === 'custom') {
@@ -55,5 +64,7 @@ export function resolveRoute(input: ResolveRouteInput): LLMRoute {
     model,
     protocol: defaultProtocol,
     endpoint: defaultEndpoint,
+    overrideProtocol,
+    overrideEndpoint,
   })
 }

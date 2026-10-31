@@ -613,14 +613,30 @@ function userMessageContentToOpenAIChat(
   // CRITICAL: tool 消息必须先于 user 消息。OpenAI 要求 tool 消息紧跟带
   // tool_calls 的 assistant 消息，先发 user 消息会 400。
   if (toolResults.length > 0) {
+    // Strict backends (Groq) require tool-message content to be a string and
+    // only accept images inside user messages — move any image parts from the
+    // tool result into the trailing user turn.
+    const deferredImageParts: OpenAIChatMessagePart[] = []
+    for (const tr of toolResults) {
+      if (Array.isArray(tr.content)) {
+        const textParts: string[] = []
+        for (const part of tr.content as OpenAIChatMessagePart[]) {
+          if (part.type === 'image_url') deferredImageParts.push(part)
+          else textParts.push((part as { text?: string }).text ?? '')
+        }
+        tr.content = textParts.join('\n') || '(see attached image)'
+      }
+    }
     toolResults.push({
       role: 'user',
       content:
-        parts.length === 1 && parts[0].type === 'text'
-          ? parts[0].text!
-          : parts.length > 0
-            ? parts
-            : '',
+        parts.length === 0
+          ? deferredImageParts.length > 0
+            ? deferredImageParts
+            : ''
+          : parts.length === 1 && parts[0].type === 'text' && deferredImageParts.length === 0
+            ? parts[0].text!
+            : [...parts, ...deferredImageParts],
     })
     return toolResults
   }

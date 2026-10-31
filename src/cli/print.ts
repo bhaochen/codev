@@ -335,8 +335,10 @@ async function runHeadlessTurns(
       mcpClients,
       agents: activeAgents as any,
       canUseTool: async tool => {
+        // Only enforce when the user actually passed --allowedTools; an empty
+        // array means "no filter", not "allow nothing".
         if (
-          options.allowedTools &&
+          options.allowedTools?.length &&
           !options.allowedTools.includes('*') &&
           !options.allowedTools.includes(tool.name)
         ) {

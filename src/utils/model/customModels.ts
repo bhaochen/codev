@@ -17,6 +17,18 @@ export function getCachedCustomModels(): CustomEndpointModel[] {
   return cache
 }
 
+/**
+ * Look up a model by its exact catalog id, fetching the /models catalog once
+ * when the cache is empty (one-shot --print runs with --bare skip prefetches,
+ * so the background fetch may never have happened).
+ */
+export async function findOrFetchCustomModel(model: string): Promise<CustomEndpointModel | undefined> {
+  if (cache.length === 0) {
+    await fetchCustomModels().catch(() => undefined)
+  }
+  return cache.find(m => m.id === model)
+}
+
 /** Reset the module-level cache for test isolation. */
 export function resetCustomModelsForTests(): void {
   cache = []

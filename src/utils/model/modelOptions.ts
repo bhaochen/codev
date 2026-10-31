@@ -490,11 +490,9 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
     const { getCachedNineRouterModels } = require('./nineRouterModels.js')
     const models = getCachedNineRouterModels()
 
-    if (models && models.length > 0) {
-      return [getDefaultOptionForUser(fastMode), ...models]
-    }
-
-    return []
+    // No "gateway default" placeholder — the catalog is the single source of
+    // model choices; until it loads the picker is simply empty.
+    return models && models.length > 0 ? [...models] : []
   }
 
   // NVIDIA API: Show dynamically fetched models from the NVIDIA API catalog

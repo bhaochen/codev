@@ -51,19 +51,80 @@ export { chatCompletionsUrlFromBase as compatibleChatCompletionsUrl } from './op
 
 /**
  * Clamp max output tokens to the custom endpoint's advertised per-model cap
- * (max_completion_tokens from its /models catalog), when known.
+ * (max_completion_tokens from its /models catalog), when known. Strict
+ * providers reject requests exceeding the model ceiling with a 400.
+ *
+ * In one-shot --print runs (especially --bare, which skips prefetches) the
+ * catalog may not be cached yet — fetch it once before giving up.
  */
-function clampToCustomMaxOutput(model: string, maxTokens: number): number {
+async function clampToCustomMaxOutput(model: string, maxTokens: number): Promise<number> {
   try {
-    const { getCachedCustomModels } = require('../../../utils/model/customModels.js') as {
-      getCachedCustomModels: () => Array<{ id: string; maxOutput?: number }>
+    const { findOrFetchCustomModel } = require('../../../utils/model/customModels.js') as {
+      findOrFetchCustomModel: (model: string) => Promise<{ maxOutput?: number } | undefined>
     }
-    const hit = getCachedCustomModels().find(m => m.id === model)
+    const hit = await findOrFetchCustomModel(model)
     if (hit?.maxOutput && hit.maxOutput > 0) return Math.min(maxTokens, hit.maxOutput)
   } catch {
     // Catalog unavailable — use the unclamped value.
   }
   return maxTokens
+}
+
+// ============================================================================
+// Token rate-limit adaptation (Groq-style strict gateways)
+// ============================================================================
+
+type LearnedTokenLimits = { outputLimit?: number }
+
+/**
+ * Per-endpoint+model limits learned from 429 bodies. Session-scoped: the
+ * first request pays one 429, subsequent requests clamp up front.
+ */
+const learnedTokenLimits = new Map<string, LearnedTokenLimits>()
+
+function routeKey(model: string, endpoint: string): string {
+  return `${endpoint}|${model}`
+}
+
+function clampToLearnedOutputLimit(key: string, maxTokens: number): number {
+  const limit = learnedTokenLimits.get(key)?.outputLimit
+  return limit !== undefined && limit > 0 ? Math.min(maxTokens, limit) : maxTokens
+}
+
+function rememberOutputLimit(key: string, limit: number): void {
+  const entry = learnedTokenLimits.get(key) ?? {}
+  entry.outputLimit = limit
+  learnedTokenLimits.set(key, entry)
+}
+
+/**
+ * Parse a Groq-style token rate-limit body:
+ *   "...output tokens per minute (OTPM): Limit 1000, Requested 1171..."
+ *   "...input tokens per minute (ITPM): Limit 7000, Used 4339, ...
+ *    Please try again in 14.38s..."
+ * Returns undefined for non-token 429s (generic rate limits let the normal
+ * retry layer handle them).
+ */
+export function adaptToTokenRateLimit(
+  body: string,
+  currentMaxTokens: number,
+): { outputLimit?: number; waitMs: number } | undefined {
+  if (!/rate_limit_exceeded|"type"\s*:\s*"tokens"/.test(body)) return undefined
+  const isOTPM = /\(OTPM\)/.test(body)
+  const isITPM = /\(ITPM\)/.test(body)
+  if (!isOTPM && !isITPM) return undefined
+  const limitMatch = body.match(/Limit (\d+)/)
+  const waitMatch = body.match(/try again in ([\d.]+)s/i)
+  const waitMs = waitMatch ? Math.ceil(parseFloat(waitMatch[1]) * 1000) : 0
+  const limit = limitMatch ? parseInt(limitMatch[1], 10) : undefined
+  // OTPM: the budget is pre-charged against max_tokens — clamp and retry now.
+  // ITPM: the request itself is too big for the window's remaining budget —
+  // wait for the quoted reset. Clamping max_tokens also reduces the charged
+  // expectation, which helps when the limit is tight.
+  return {
+    outputLimit: isOTPM && limit ? Math.max(1, limit) : isOTPM ? Math.floor(currentMaxTokens / 2) : undefined,
+    waitMs: isITPM ? waitMs : 0,
+  }
 }
 
 type OpenAIChatStartMessage = Extract<OpenAIChatStreamEvent, { type: 'message_start' }>['message']
@@ -122,7 +183,7 @@ export async function* queryOpenAICompatibleChat(
     maxTokens = resolveOpenAIMaxTokens(upperLimit, config.maxOutputTokens)
     // Custom endpoints publish per-model output ceilings (max_completion_tokens);
     // requesting more than the model allows is a hard 400 on strict providers.
-    maxTokens = clampToCustomMaxOutput(model, maxTokens)
+    maxTokens = await clampToCustomMaxOutput(model, maxTokens)
     const promptCacheKey = getOfficialOpenAIPromptCacheKey(endpoint, getSessionId())
     // reasoning 由 LLMRequestConfig 直构：config.thinking / context.effortValue /
     // 模型与 env 检测都归口到 native thinking 配置，见 resolveOpenAIChatThinking。
@@ -154,14 +215,56 @@ export async function* queryOpenAICompatibleChat(
 
     const fetchOverride = context.fetchOverride as unknown as typeof fetch | undefined
     const url = endpoint.includes('/chat/completions') ? endpoint : chatCompletionsUrlFromBase(endpoint)
-    const response = await requestWithRetry(
-      () =>
-        httpRequest(
-          { url, method: 'POST', headers, body: JSON.stringify(body), signal },
-          fetchOverride,
-        ),
-      signal,
-    )
+
+    // Strict gateways (Groq free tier) enforce per-minute token budgets. On a
+    // token-type 429 the error body names the limit — learn it once and adapt:
+    // OTPM → clamp max_tokens and retry immediately; ITPM → wait out the
+    // quoted window and retry. Learned limits are reused for the session.
+    let effectiveMaxTokens = clampToLearnedOutputLimit(routeKey(model, endpoint), maxTokens)
+    const sendRequest = () =>
+      httpRequest(
+        {
+          url,
+          method: 'POST',
+          headers,
+          body: JSON.stringify(
+            effectiveMaxTokens === maxTokens
+              ? body
+              : buildOpenAIChatBody({
+                  model,
+                  messages: openaiMessages,
+                  tools: openaiTools,
+                  toolChoice: openaiToolChoice,
+                  enableThinking,
+                  reasoningEffort,
+                  maxTokens: effectiveMaxTokens,
+                  temperatureOverride: config.temperature,
+                  promptCacheKey,
+                }),
+          ),
+          signal,
+        },
+        fetchOverride,
+      )
+    let response = await requestWithRetry(sendRequest, signal)
+    if (response.status === 429) {
+      const text = await response.text().catch(() => '')
+      const adapted = adaptToTokenRateLimit(text, effectiveMaxTokens)
+      if (adapted) {
+        if (adapted.outputLimit !== undefined && adapted.outputLimit < effectiveMaxTokens) {
+          effectiveMaxTokens = adapted.outputLimit
+          rememberOutputLimit(routeKey(model, endpoint), adapted.outputLimit)
+        }
+        if (adapted.waitMs > 0) {
+          logForDebugging(`[OpenAICompatibleChat] token rate limit — waiting ${Math.ceil(adapted.waitMs / 1000)}s before retry`)
+          await new Promise<void>(resolve => {
+            const timer = setTimeout(resolve, adapted.waitMs + 500)
+            signal?.addEventListener('abort', () => { clearTimeout(timer); resolve() }, { once: true })
+          })
+        }
+        response = await requestWithRetry(sendRequest, signal)
+      }
+    }
     if (!response.ok) {
       const text = await response.text().catch(() => '')
       throw new Error(`Upstream ${route.provider} failed (${response.status})${text ? `: ${text.slice(0, 800)}` : ''}`)

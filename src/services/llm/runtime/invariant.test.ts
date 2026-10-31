@@ -26,25 +26,15 @@ describe('P6 invariants', () => {
     expect(s).toContain('getClientForRoute')
     expect(s).toContain('resolveRoute')
   })
-  test('Client is Protocol-oriented', () => {
-    const s = readFileSync('src/services/llm/clients/openaiChat.ts', 'utf8')
-    // Client 按 Protocol 执行，Provider 差异仅 via headers/auth (opencode/nvidia 定制头允许)
-    expect(s).toContain('route.endpoint')
-    expect(s).toContain('resolveAuth')
-    // 不应出现按 Provider 分流 tool 逻辑
-    expect(s).not.toMatch(/if\s*\(\s*route\.provider\s*===\s*['"]opencode['"]\s*\)\s*\{[^}]*queryModelOpencode/)
-    // AnthropicMessages 同样不应分支 provider
-    const s2 = readFileSync('src/services/llm/clients/anthropicMessages.ts', 'utf8')
-    expect(s2).toContain('queryAnthropicMessages')
-    expect(s2).toContain('route.model')
-    expect(s2).not.toMatch(/if\s*\(\s*route\.provider\s*===\s*['"]/)
-    expect(s2).not.toMatch(/if\s*\(\s*route\.provider\s*===\s*['"]openai['"]/)
-  })
-  test('anthropic-messages registered via ProtocolRegistry', () => {
+  test('runtime is unified on a single OpenAI-compatible protocol', () => {
     const s = readFileSync('src/services/llm/protocols/index.ts', 'utf8')
-    expect(s).toContain('anthropic-messages')
-    expect(s).toContain('queryAnthropicMessages')
+    expect(s).toContain('openai-compatible-chat')
+    expect(s).toContain('queryOpenAICompatibleChat')
     expect(s).toContain('ProtocolRegistry')
+    // The unified runtime registers exactly one protocol; legacy per-provider
+    // protocols (anthropic-messages, openai-chat, …) are gone.
+    expect(s).not.toContain("'anthropic-messages'")
+    expect(s).not.toContain("'openai-chat'")
     const c = readFileSync('src/services/llm/clients/index.ts', 'utf8')
     expect(c).toContain('getProtocolHandler')
     expect(c).not.toMatch(/不经此注册表/)

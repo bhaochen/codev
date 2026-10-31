@@ -3,68 +3,32 @@ import { ProtocolRegistry, getProtocolHandler, isProtocolSupported, getProtocolD
 import { getClientForRoute } from '../clients/index.js'
 
 describe('ProtocolRegistry runtime', () => {
-  test('openai-chat resolves to queryOpenAIChat', () => {
-    const def = getProtocolDef('openai-chat')
-    expect(def).toBeDefined()
-    expect(def!.handler).toBeDefined()
-    expect(def!.handler!.name).toBe('queryOpenAIChat')
-    expect(getProtocolHandler('openai-chat')).toBe(def!.handler)
-    expect(isProtocolSupported('openai-chat')).toBe(true)
-  })
-
-  test('openai-responses resolves to queryOpenAIResponses', () => {
-    const def = getProtocolDef('openai-responses')
-    expect(def!.handler).toBeDefined()
-    expect(def!.handler!.name).toBe('queryOpenAIResponses')
-    expect(isProtocolSupported('openai-responses')).toBe(true)
-  })
-
   test('openai-compatible-chat resolves to queryOpenAICompatibleChat', () => {
     const def = getProtocolDef('openai-compatible-chat')
+    expect(def).toBeDefined()
     expect(def!.handler).toBeDefined()
     expect(def!.handler!.name).toBe('queryOpenAICompatibleChat')
+    expect(getProtocolHandler('openai-compatible-chat')).toBe(def!.handler)
     expect(isProtocolSupported('openai-compatible-chat')).toBe(true)
   })
 
-  test('anthropic-messages resolves to queryAnthropicMessages', () => {
-    const def = getProtocolDef('anthropic-messages')
-    expect(def!.handler).toBeDefined()
-    expect(def!.handler!.name).toBe('queryAnthropicMessages')
-    expect(isProtocolSupported('anthropic-messages')).toBe(true)
+  test('unified registry carries only the OpenAI-compatible protocol', () => {
+    expect(Object.keys(ProtocolRegistry)).toEqual(['openai-compatible-chat'])
+    expect(ProtocolRegistry['openai-compatible-chat'].endpointPath).toBe('/chat/completions')
   })
 
-  test('aws-eventstream resolves to queryAWSEventStream', () => {
-    const def = getProtocolDef('aws-eventstream')
-    expect(def).toBeDefined()
-    expect(def!.handler).toBeDefined()
-    expect(def!.handler!.name).toBe('queryAWSEventStream')
-    expect(isProtocolSupported('aws-eventstream')).toBe(true)
-    expect(ProtocolRegistry['aws-eventstream'].endpointPath).toBe('/')
-  })
-
-  test('gemini has no handler (unsupported)', () => {
-    const def = getProtocolDef('gemini')
-    expect(def).toBeDefined()
-    expect(def!.handler).toBeUndefined()
-    expect(isProtocolSupported('gemini')).toBe(false)
-    expect(getProtocolHandler('gemini')).toBeUndefined()
-    expect(getClientForRoute({ provider: 'openai' as never, protocol: 'gemini' as never, model: 'x' })).toBeNull()
-  })
-
-  test('bedrock-converse has no handler (unsupported)', () => {
-    const def = getProtocolDef('bedrock-converse')
-    expect(def).toBeDefined()
-    expect(def!.handler).toBeUndefined()
-    expect(isProtocolSupported('bedrock-converse')).toBe(false)
-    expect(getClientForRoute({ provider: 'bedrock' as never, protocol: 'bedrock-converse' as never, model: 'x' })).toBeNull()
+  test('legacy protocols have no handler and resolve to a null client', () => {
+    for (const legacy of ['openai-chat', 'openai-responses', 'anthropic-messages', 'aws-eventstream', 'gemini', 'bedrock-converse'] as const) {
+      expect(getProtocolDef(legacy as never)).toBeUndefined()
+      expect(isProtocolSupported(legacy as never)).toBe(false)
+      expect(getProtocolHandler(legacy as never)).toBeUndefined()
+      expect(getClientForRoute({ provider: 'openai' as never, protocol: legacy as never, model: 'x' })).toBeNull()
+    }
   })
 
   test('ProtocolRegistry is sole source of truth (clients facade)', () => {
-    // clients/index should not have its own map; verify via registry
-    expect(Object.keys(ProtocolRegistry).length).toBe(7)
-    expect(ProtocolRegistry['openai-chat'].endpointPath).toBe('/chat/completions')
-    expect(ProtocolRegistry['openai-responses'].endpointPath).toBe('/responses')
-    expect(ProtocolRegistry['anthropic-messages'].endpointPath).toBe('/v1/messages')
-    expect(ProtocolRegistry['aws-eventstream'].endpointPath).toBe('/')
+    expect(Object.keys(ProtocolRegistry).length).toBe(1)
+    const client = getClientForRoute({ provider: 'openai' as const, protocol: 'openai-compatible-chat' as const, model: 'x', endpoint: 'y' })
+    expect(client).not.toBeNull()
   })
 })

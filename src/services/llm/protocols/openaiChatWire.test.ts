@@ -395,13 +395,16 @@ describe('agentMessagesToOpenAIChatMessages', () => {
       },
     ]
     const withImage = agentMessagesToOpenAIChatMessages([wrapperUser(input)])
+    // Strict backends (Groq) require tool-message content to be a string; the
+    // image is deferred to a trailing user message instead.
     expect(withImage[0]).toEqual({
       role: 'tool',
       tool_call_id: 'call_1',
-      content: [
-        { type: 'text', text: 'out' },
-        { type: 'image_url', image_url: { url: 'data:image/png;base64,BBBB' } },
-      ],
+      content: 'out',
+    })
+    expect(withImage[1]).toEqual({
+      role: 'user',
+      content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,BBBB' } }],
     })
 
     const noImage = agentMessagesToOpenAIChatMessages([wrapperUser(input)], undefined, {

@@ -394,6 +394,11 @@ export function startDeferredPrefetches(): void {
   void refreshModelCapabilities();
   // models.dev cache warm — non-blocking, failure isolated (Phase 12D)
   void import('./services/llm/models/modelsDevCache.js').then(m => m.syncModelsDevCache({ background: true })).catch(() => {})
+  // Unified model catalog warm — /model, route resolution, context windows and
+  // max_tokens clamps all read these caches; warm them before the user opens
+  // the picker or the first request fires.
+  void import('./utils/model/customModels.js').then(m => m.fetchCustomModels()).catch(() => {})
+  void import('./utils/model/nineRouterModels.js').then(m => m.fetchNineRouterModels()).catch(() => {})
 
   // File change detectors deferred from init() to unblock first render
   void settingsChangeDetector.initialize();
